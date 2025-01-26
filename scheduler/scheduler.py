@@ -6,37 +6,17 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import sys
 from typing import Dict, Any
-import logging
-import os
 
 sys.path.append(str(Path(__file__).parent.parent))
 
 from lib.media_auto.media_main_logic import ContentProcessor
 from lib.content_generation.image_content_generator import VisionManagerBuilder
 import lib.media_auto.process as media_process
+from utils.logger import setup_logger, log_execution_time
 
 class MediaScheduler:
     def __init__(self, config_path: str = "scheduler/schedule_config.yaml"):
-        # 設置日誌
-        logs_dir = Path("logs")
-        logs_dir.mkdir(exist_ok=True)  # 確保 logs 資料夾存在
-
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-
-        # 設置日誌檔案名稱
-        today = datetime.now().strftime("%Y-%m-%d")
-        self.log_file_path = logs_dir / f"{today}.log"
-
-        file_handler = logging.FileHandler(self.log_file_path)
-        stream_handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        stream_handler.setFormatter(formatter)
-
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(stream_handler)
-
+        self.logger = setup_logger(__name__)
         self.config_path = config_path
         self.load_config()
         self.ollama_vision_manager = VisionManagerBuilder() \
@@ -44,21 +24,26 @@ class MediaScheduler:
             .with_text_model('ollama', model_name='phi4') \
             .build()
         
+        # 設定執行機率 (2~3次/24小時)
+        self.execution_probability = random.uniform(2/24, 3/24)
+        
+    @log_execution_time(logger=setup_logger(__name__))
     def load_config(self):
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
     
+    @log_execution_time(logger=setup_logger(__name__))
     def generate_prompt(self, prompt_config: Dict[str, Any]) -> str:
         # 檢查是否使用 LLM 生成
         if prompt_config.get('use_llm', True):
             character = prompt_config.get('character', '')
             
             # 使用 VisionContentManager 生成提示詞
-            print(f'Start generating any prompt for character : {character}.')
+            self.logger.info(f'開始為角色生成提示詞: {character}')
             prompt = self.ollama_vision_manager.generate_arbitrary_input(
                 character=character
             )
-            print('Generate arbitrary input: ', prompt)
+            self.logger.info(f'生成的提示詞: {prompt}')
             return prompt
         
         # 使用模板生成
@@ -71,7 +56,20 @@ class MediaScheduler:
             
         return template
     
+    @log_execution_time(logger=setup_logger(__name__))
+    def should_execute(self) -> bool:
+        """決定是否要執行處理"""
+        return random.random() < self.execution_probability
+    
+    @log_execution_time(logger=setup_logger(__name__))
     def process_character(self, character_name: str, prompt_config: dict):
+        self.logger.info(f"觸發角色 {character_name} 的處理")
+        
+        # 根據機率決定是否執行
+        if not self.should_execute():
+            self.logger.info(f"根據機率決定跳過執行角色 {character_name}")
+            return
+            
         self.logger.info(f"開始處理角色 {character_name}")
         try:
             # 獲取角色類別
@@ -90,31 +88,62 @@ class MediaScheduler:
         except Exception as e:
             self.logger.error(f"處理角色 {character_name} 時發生錯誤: {str(e)}", exc_info=True)
     
+    def get_random_minute(self) -> str:
+        """生成隨機分鐘數（0-59）"""
+        return f"{random.randint(0, 59):02d}"
+    
+    @log_execution_time(logger=setup_logger(__name__))
     def setup_schedules(self):
         self.logger.info("開始設置排程...")
+        
+        # 為每個角色設置每小時執行一次
         for char_name, char_config in self.config['schedules'].items():
             try:
-                # 檢查時間格式
-                scheduled_time = datetime.strptime(char_config['time'], '%H:%M').time()
+                # 每小時執行一次，每次執行時重新設置下一個小時的隨機時間
+                def schedule_next_run(char_config):
+                    # 取得當前時間
+                    now = datetime.now()
+                    # 計算下一個小時
+                    next_hour = now + timedelta(hours=1)
+                    next_hour = next_hour.replace(minute=random.randint(0, 59), second=0, microsecond=0)
+                    
+                    # 設置下一次執行
+                    schedule.every().day.at(f"{next_hour.strftime('%H:%M')}").do(
+                        self.process_and_reschedule,
+                        char_config=char_config,
+                        schedule_func=schedule_next_run
+                    ).tag(f"schedule_{char_config['character']}")
+                    
+                    self.logger.info(
+                        f"已為角色 {char_config['character']} 設置下次執行時間: {next_hour.strftime('%H:%M')}, "
+                        f"執行機率: {self.execution_probability:.1%}/次"
+                    )
                 
-                # 計算下次執行時間
-                now = datetime.now()
-                next_run = datetime.combine(now.date(), scheduled_time)
-                if next_run < now:
-                    next_run += timedelta(days=1)
+                # 初始設置
+                schedule_next_run(char_config)
                 
-                schedule.every().day.at(char_config['time']).do(
-                    self.process_character,
-                    character_name=char_config['character'],
-                    prompt_config=char_config['prompts'][0]
-                )
-                
-                self.logger.info(
-                    f"已排程角色 {char_config['character']} 在 {char_config['time']} 執行, "
-                    f"下次執行時間: {next_run}"
-                )
             except Exception as e:
                 self.logger.error(f"設置排程 {char_name} 時發生錯誤: {str(e)}")
+    
+    def process_and_reschedule(self, char_config: dict, schedule_func):
+        """處理角色並重新排程下一次執行"""
+        try:
+            # 清除當前角色的所有排程
+            schedule.clear(f"schedule_{char_config['character']}")
+            
+            # 執行處理
+            self.process_character(
+                character_name=char_config['character'],
+                prompt_config=char_config['prompts'][0]
+            )
+            
+            # 設置下一次執行
+            schedule_func(char_config)
+            
+        except Exception as e:
+            self.logger.error(f"處理和重新排程時發生錯誤: {str(e)}", exc_info=True)
+            # 發生錯誤時也要確保重新排程
+            schedule_func(char_config)
     
     def run(self):
         self.logger.info("啟動排程器...")

@@ -77,3 +77,22 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
         self.register_social_media({
             'instagram': (InstagramPlatform, f'/app/configs/social_media/ig', self.character),
         })
+
+class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
+    character = 'waddledee'
+    output_dir = '/app/output_image'
+    workflow_path = '/app/configs/workflow/nova-anime-xl.json'
+    similarity_threshold = 0.9
+    type = 'text2img'
+    additional_params = {
+        'images_per_description': 3,
+        'is_negative': False
+    }
+    
+    def __init__(self):
+        BaseCharacter.__init__(self)
+        SocialMediaMixin.__init__(self)
+        # Register social media platforms
+        self.register_social_media({
+            'instagram': (InstagramPlatform, f'/app/configs/social_media/ig', self.character),
+        })

@@ -25,7 +25,7 @@ table.add_column("Description", style="bright_black", justify="left")
 for key, desc in info.items():
     table.add_row(key, desc)
 
-console.print(table)
+# console.print(table)
 
 class WorkflowAnalyzer:
     @staticmethod
