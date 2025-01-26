@@ -4,6 +4,9 @@ import discord
 from discord.ext import commands
 from discord.ui import Modal, TextInput, View, Button
 
+import json
+import requests
+
 #[Discord Package](https://github.com/Rapptz/discord.py)
 
 class EditModal(Modal):
@@ -231,3 +234,25 @@ async def run_discord_file_feedback_process(token: str, channel_id: int, text: s
     finally:
         if bot:
             await bot.safe_cleanup()
+
+class DiscordNotify:
+    webhook_url=''
+    
+    def notify(self, msg, file_path=None):
+        if file_path:
+            with open(file_path, 'rb') as file:
+                files = {
+                    'payload_json': (None, json.dumps({"content": msg})),
+                    'image.png': file
+                }
+                response = requests.post(self.webhook_url, files=files)
+        else:
+            data = {"content": msg}
+            response = requests.post(self.webhook_url, data=data)
+        
+        if response.status_code in [200, 201, 202, 203, 204]:
+            print(f"{'File' if file_path else 'Message'} sent successfully.")
+        else:
+            print(f"Failed to send the {'file' if file_path else 'message'}.")
+            print(response.text)
+            

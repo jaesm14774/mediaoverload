@@ -24,8 +24,8 @@ class MediaScheduler:
             .with_text_model('ollama', model_name='phi4') \
             .build()
         
-        # 設定執行機率 (2~3次/24小時)
-        self.execution_probability = random.uniform(2/24, 3/24)
+        # 設定執行機率 (1.75~2.25次/15小時，排除睡眠時間22-7點)
+        self.execution_probability = random.uniform(1.75/15, 2.25/15)
         
     @log_execution_time(logger=setup_logger(__name__))
     def load_config(self):
@@ -59,6 +59,11 @@ class MediaScheduler:
     @log_execution_time(logger=setup_logger(__name__))
     def should_execute(self) -> bool:
         """決定是否要執行處理"""
+        # 檢查當前時間是否在睡眠時段（22:00-07:00）
+        current_hour = datetime.now().hour
+        if current_hour >= 22 or current_hour < 7:
+            self.logger.info("當前時間在睡眠時段（22:00-07:00），跳過執行")
+            return False
         return random.random() < self.execution_probability
     
     @log_execution_time(logger=setup_logger(__name__))
@@ -106,6 +111,12 @@ class MediaScheduler:
                     # 計算下一個小時
                     next_hour = now + timedelta(hours=1)
                     next_hour = next_hour.replace(minute=random.randint(0, 59), second=0, microsecond=0)
+                    
+                    # 如果下一個時間在睡眠時段（22:00-07:00），則調整到早上7點
+                    if next_hour.hour >= 22 or next_hour.hour < 7:
+                        next_hour = next_hour.replace(hour=7, minute=random.randint(0, 59))
+                        if next_hour < now:  # 如果調整後的時間比現在早，就加一天
+                            next_hour += timedelta(days=1)
                     
                     # 設置下一次執行
                     schedule.every().day.at(f"{next_hour.strftime('%H:%M')}").do(

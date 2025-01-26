@@ -6,6 +6,7 @@ media_overload.env
 # 配置文件
 configs/social_media/**/*.json
 configs/social_media/**/*.env
+configs/social_media/discord/**
 
 # 輸出目錄
 output_image/

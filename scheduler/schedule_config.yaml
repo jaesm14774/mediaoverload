@@ -6,14 +6,13 @@ schedules:
         character: "Wobbuffet"
         style: "cute and funny"
         temperature: 1.0
-  
-  kirby:
-    character: "Kirby"
-    prompts:
-      - use_llm: true
-        character: "Kirby"
-        style: "kawaii and energetic"
-        temperature: 1.0 
+  # kirby:
+    # character: "Kirby"
+    # prompts:
+      # - use_llm: true
+        # character: "Kirby"
+        # style: "kawaii and energetic"
+        # temperature: 1.0 
 
   waddledee:
     character: "Waddledee"

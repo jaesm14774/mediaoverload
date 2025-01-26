@@ -8,10 +8,13 @@ from lib.media_auto.strategies.base_strategy import GenerationConfig
 from lib.media_auto.factory.strategy_factory import StrategyFactory
 from utils.logger import setup_logger, log_execution_time
 from lib.social_media import MediaPost
-from lib.discord import run_discord_file_feedback_process
+from lib.discord import run_discord_file_feedback_process, DiscordNotify
 from utils.image import ImageProcessor
+import time
+from datetime import datetime
 
 load_dotenv(f'media_overload.env')
+load_dotenv(f'configs/social_media/discord/Discord.env')
 
 class ContentProcessor:
     """內容處理器主類"""
@@ -19,6 +22,7 @@ class ContentProcessor:
     def __init__(self, character_class: BaseCharacter):
         self.character_class = character_class
         self.logger = setup_logger(__name__)
+        self.start_time = time.time()
         
     @log_execution_time(logger=setup_logger(__name__))
     async def etl_process(self, prompt: str) -> Dict[str, Any]:
@@ -116,6 +120,28 @@ class ContentProcessor:
         if is_successful_upload:
             self.logger.info('社群媒體上傳成功')
             self.logger.info('所有流程完成')
+            
+            # 計算總執行時間
+            end_time = time.time()
+            execution_time = end_time - self.start_time
+            hours = int(execution_time // 3600)
+            minutes = int((execution_time % 3600) // 60)
+            seconds = int(execution_time % 60)
+            
+            # 發送 Discord 完成通知
+            discord_notify = DiscordNotify()
+            discord_notify.webhook_url = os.environ['程式執行狀態']
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            success_message = (
+                f"✨ 任務完成通知 ✨\n"
+                f"🎭 角色: {config_dict['character']}\n"
+                f"⏰ 完成時間: {current_time}\n"
+                f"⌛ 總執行時間: {hours}小時 {minutes}分鐘 {seconds}秒\n"
+                f"📸 成功上傳圖片數量: {len(selected_indices)}張"
+            )
+            
+            discord_notify.notify(success_message)
 
         self.cleanup(config)
 
