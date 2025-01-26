@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from lib.comfyui.analyze import analyze_workflow
 
 class ComfyUICommunicator:
-    def __init__(self, host="127.0.0.1", port=8188, timeout=600):
+    def __init__(self, host="host.docker.internal", port=8188, timeout=600):
         self.host = host
         self.port = port
         self.client_id = str(uuid.uuid4())

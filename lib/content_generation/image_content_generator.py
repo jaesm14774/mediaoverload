@@ -28,6 +28,10 @@ class OllamaModel(AIModelInterface):
     """Ollama 模型實現"""
     def __init__(self, config: ModelConfig):
         self.config = config
+        self.client = ollama.Client(
+            host='http://host.docker.internal:11434'
+        )
+
         
     def chat_completion(self, 
                        messages: List[dict],
@@ -36,7 +40,7 @@ class OllamaModel(AIModelInterface):
         if images:
             messages[-1]['images'] = images
             
-        response = ollama.chat(
+        response = self.client.chat(
             model=self.config.model_name,
             messages=messages,
             options={
@@ -193,7 +197,8 @@ class VisionManagerBuilder:
             'hashtag_system_prompt': seo_hashtag_prompt,
             'image_system_prompt': stable_diffusion_prompt,
             'describe_image_prompt': describe_image_prompt,
-            'text_image_similarity_prompt': text_image_similarity_prompt
+            'text_image_similarity_prompt': text_image_similarity_prompt,
+            'arbitrary_input_system_prompt': arbitrary_input_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):

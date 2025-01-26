@@ -297,7 +297,7 @@ Output only a single number between 0 and 1 with no explanation or text.
 Remember: Quality over quantity. Any image with more than 10 distinct characters/subjects receives a 0 score regardless of quality.
 """.strip()
 
-arbitary_input_system_prompt = """
+arbitrary_input_system_prompt = """
 Objective: For a given Main Character Name provided by the user, generate a single creative English prompt for image generation, story writing, or other generative AI models. The prompt should be imaginative, semantically rich, and different each time.
 
 Input: {Main Character Name} (User-provided character name)

@@ -4,14 +4,8 @@ services:
   media-scheduler:
     build: .
     volumes:
-      # 開發模式：掛載程式碼目錄
-      - ./lib:/app/lib
-      - ./scheduler:/app/scheduler
-      - ./configs:/app/configs
-      - ./output_image:/app/output_image
-      # 排除 __pycache__ 目錄
-      - /app/lib/**/__pycache__
-      - /app/scheduler/**/__pycache__
+      # 開發模式：掛載整個專案目錄
+      - .:/app
     env_file:
       - media_overload.env
     restart: always
@@ -19,4 +13,6 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "3" 
+        max-file: "3"
+    environment:
+      - TZ=Asia/Taipei

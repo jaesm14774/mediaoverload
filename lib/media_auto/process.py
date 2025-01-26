@@ -41,8 +41,8 @@ class BaseCharacter(ABC):
 
 class KirbyProcess(BaseCharacter, SocialMediaMixin):
     character = 'kirby'
-    output_dir = 'C:/Users/jaesm14774/Desktop/self_project/cursor/output_image'
-    workflow_path = 'C:/Users/jaesm14774/Desktop/self_project/cursor/configs/workflow/nova-anime-xl.json'
+    output_dir = '/app/output_image'
+    workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.9
     type = 'text2img'
     additional_params = {
@@ -55,14 +55,14 @@ class KirbyProcess(BaseCharacter, SocialMediaMixin):
         SocialMediaMixin.__init__(self)
         # Register social media platforms
         self.register_social_media({
-            'instagram': (InstagramPlatform, f'C:/Users/jaesm14774/Desktop/self_project/cursor/configs/social_media/ig', self.character),
+            'instagram': (InstagramPlatform, f'/app/configs/social_media/ig', self.character),
         })
 
 
 class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     character = 'wobbuffet'
-    output_dir = 'C:/Users/jaesm14774/Desktop/self_project/cursor/output_image'
-    workflow_path = 'C:/Users/jaesm14774/Desktop/self_project/cursor/configs/workflow/nova-anime-xl.json'
+    output_dir = '/app/output_image'
+    workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.8
     type = 'text2img'
     additional_params = {
@@ -75,5 +75,5 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
         SocialMediaMixin.__init__(self)
         # Register social media platforms
         self.register_social_media({
-            'instagram': (InstagramPlatform, f'C:/Users/jaesm14774/Desktop/self_project/cursor/configs/social_media/ig', self.character),
+            'instagram': (InstagramPlatform, f'/app/configs/social_media/ig', self.character),
         })

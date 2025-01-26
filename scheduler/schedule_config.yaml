@@ -14,7 +14,7 @@ schedules:
           style: ["cute style", "funny style"]
     
   kirby:
-    time: "13:13"  # 每天下午1點05分執行
+    time: "17:24"  # 每天下午1點05分執行
     character: "Kirby"
     prompts:
       - use_llm: true

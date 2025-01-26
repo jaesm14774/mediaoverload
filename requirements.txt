@@ -26,3 +26,7 @@ rich>=13.7.0
 
 # 型別提示
 typing-extensions>=4.9.0 
+
+# Google generative ai
+google
+google-generativeai
