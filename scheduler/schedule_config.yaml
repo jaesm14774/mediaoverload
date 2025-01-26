@@ -1,0 +1,23 @@
+schedules:
+  wobbuffet:
+    time: "12:00"  # 每天中午12點執行
+    character: "Wobbuffet"
+    prompts:
+      - use_llm: true  # 使用 LLM 生成提示詞
+        character: "Wobbuffet"
+        style: "cute and funny"
+        temperature: 1.0
+      - use_llm: false  # 使用模板生成提示詞（備用）
+        template: "{character} doing {action} in {style}"
+        variables:
+          action: ["playing", "sleeping", "eating"]
+          style: ["cute style", "funny style"]
+    
+  kirby:
+    time: "13:13"  # 每天下午1點05分執行
+    character: "Kirby"
+    prompts:
+      - use_llm: true
+        character: "Kirby"
+        style: "kawaii and energetic"
+        temperature: 1.0 

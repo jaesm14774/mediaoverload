@@ -1,0 +1,32 @@
+# 版本控制
+.git
+.gitignore
+
+# 環境變數
+*.env
+.env
+media_overload.env
+
+# 機敏配置文件
+configs/social_media/**/*.json
+configs/social_media/**/*.env
+
+# 輸出和暫存
+output_image/
+__pycache__/
+*.pyc
+tmp/
+temp/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# 文檔
+*.md
+LICENSE 

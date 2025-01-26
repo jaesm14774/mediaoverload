@@ -1,0 +1,28 @@
+# 基本套件
+PyYAML>=6.0.1
+schedule>=1.2.1
+python-dotenv>=1.0.0
+
+# 影像處理
+Pillow>=10.1.0
+piexif>=1.1.3
+numpy>=1.26.3
+
+# Discord 整合
+discord.py>=2.3.2
+
+# 社群媒體
+instagrapi>=2.0.3
+
+# AI 和 LLM
+ollama>=0.1.6
+
+# ComfyUI 整合
+websocket-client>=1.7.0
+urllib3>=2.1.0
+
+# 開發工具
+rich>=13.7.0
+
+# 型別提示
+typing-extensions>=4.9.0 

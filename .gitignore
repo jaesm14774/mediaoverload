@@ -1,0 +1,29 @@
+# 環境變數
+*.env
+.env
+media_overload.env
+
+# 配置文件
+configs/social_media/**/*.json
+configs/social_media/**/*.env
+
+# 輸出目錄
+output_image/
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# 系統文件
+.DS_Store
+Thumbs.db
+
+# 日誌
+*.log
+logs/
+
+# 暫存文件
+tmp/
+temp/ 

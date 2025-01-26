@@ -1,0 +1,374 @@
+{
+  "76:0": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "76:1": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_ilV25MerryChristmas.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "76:2": {
+    "inputs": {
+      "lora_name": "KirbyV2.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8,
+      "model": [
+        "76:1",
+        0
+      ],
+      "clip": [
+        "76:1",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "76:3": {
+    "inputs": {
+      "text": "Determined Kirby, ready Waddle Dee, starting line, minimalist art, solid color background, running race, competitive spirit, simple design.\n\n",
+      "clip": [
+        "76:2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "76:4": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "clip": [
+        "76:2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "76:5": {
+    "inputs": {
+      "seed": 4007,
+      "steps": 30,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "76:2",
+        0
+      ],
+      "positive": [
+        "76:3",
+        0
+      ],
+      "negative": [
+        "76:4",
+        0
+      ],
+      "latent_image": [
+        "76:0",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "76:6": {
+    "inputs": {
+      "samples": [
+        "76:5",
+        0
+      ],
+      "vae": [
+        "76:1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "76:7": {
+    "inputs": {
+      "filename_prefix": "one_image_v25",
+      "images": [
+        "76:6",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "72:0": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "72:1": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_illustriousV20.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "72:2": {
+    "inputs": {
+      "lora_name": "KirbyV2.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8,
+      "model": [
+        "72:1",
+        0
+      ],
+      "clip": [
+        "72:1",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "72:3": {
+    "inputs": {
+      "text": "Determined Kirby, ready Waddle Dee, starting line, minimalist art, solid color background, running race, competitive spirit, simple design.\n\n",
+      "clip": [
+        "72:2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "72:4": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "clip": [
+        "72:2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "72:5": {
+    "inputs": {
+      "seed": 4007,
+      "steps": 30,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "72:2",
+        0
+      ],
+      "positive": [
+        "72:3",
+        0
+      ],
+      "negative": [
+        "72:4",
+        0
+      ],
+      "latent_image": [
+        "72:0",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "72:6": {
+    "inputs": {
+      "samples": [
+        "72:5",
+        0
+      ],
+      "vae": [
+        "72:1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "72:7": {
+    "inputs": {
+      "filename_prefix": "one_image_v2",
+      "images": [
+        "72:6",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "73:0": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "73:1": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_illustriousV10.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "73:2": {
+    "inputs": {
+      "lora_name": "KirbyV2.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8,
+      "model": [
+        "73:1",
+        0
+      ],
+      "clip": [
+        "73:1",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "73:3": {
+    "inputs": {
+      "text": "Determined Kirby, ready Waddle Dee, starting line, minimalist art, solid color background, running race, competitive spirit, simple design.\n\n",
+      "clip": [
+        "73:2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "73:4": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "clip": [
+        "73:2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "73:5": {
+    "inputs": {
+      "seed": 4007,
+      "steps": 30,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "73:2",
+        0
+      ],
+      "positive": [
+        "73:3",
+        0
+      ],
+      "negative": [
+        "73:4",
+        0
+      ],
+      "latent_image": [
+        "73:0",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "73:6": {
+    "inputs": {
+      "samples": [
+        "73:5",
+        0
+      ],
+      "vae": [
+        "73:1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "73:7": {
+    "inputs": {
+      "filename_prefix": "one_image_v1",
+      "images": [
+        "73:6",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
