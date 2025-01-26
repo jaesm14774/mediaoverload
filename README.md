@@ -108,25 +108,25 @@ python scheduler/scheduler.py
 ## 系統流程圖
 
 ```mermaid
-graph TD
-    A[開始] --> B[接收提示詞]
-    B --> C[載入角色配置]
-    C --> D[初始化內容處理器]
-    D --> E[執行 ETL 流程]
+flowchart TD
+    A([開始]) --> B{是否執行}
+    B -->|執行| C[phi4\n自動產生提示詞]
+    B -->|不執行| N([結束])
     
-    subgraph ETL流程
-        E --> F1[使用 Ollama LLM 生成描述文字]
-        F1 --> F2[優化描述文字]
-        F2 --> G1[載入 ComfyUI 工作流]
-        G1 --> G2[更新提示詞和參數]
-        G2 --> G3[生成多張候選圖片]
-        G3 --> H1[使用 Gemini 分析圖片內容]
-        H1 --> H2[計算圖文匹配度]
-        H2 --> H3{匹配度檢查}
-        H3 -->|不通過| G2
-        H3 -->|通過| I1[使用 phi4 生成文章]
-        I1 --> I2[生成 Hashtags]
-    end
+    C --> D[載入角色配置]
+    D --> E[初始化內容處理器]
+    E --> F1[Ollama LLM\n生成描述文字]
+    F1 --> F2[優化描述文字]
+    F2 --> G1[載入 ComfyUI 工作流]
+    G1 --> G2[更新提示詞和參數]
+    G2 --> G3[生成多張候選圖片]
+    G3 --> H1[Gemini 分析圖片內容]
+    H1 --> H2[計算圖文匹配度]
+    H2 --> H3{匹配度篩選}
+    H3 -->|篩選後無圖片| K2[記錄訊息]
+    H3 -->|篩選有效圖片| I1[phi4 生成文章]
+    K2 --> N
+    I1 --> I2[生成 Hashtags]
     
     I2 --> J{Discord 審核}
     J -->|拒絕| M1[清理暫存檔案]
@@ -136,11 +136,15 @@ graph TD
     L1 --> L2[發布到社群媒體]
     L2 --> M1
     M1 --> M2[記錄日誌]
-    M2 --> N[結束]
+    M2 --> N
 
-    style ETL流程 fill:#f9f,stroke:#333,stroke-width:2px
-    style H3 fill:#ff9,stroke:#333,stroke-width:2px
-    style J fill:#ff9,stroke:#333,stroke-width:2px
+    classDef default fill:#f4f4f4,stroke:#666,color:#333;
+    classDef highlight fill:#e6f3ff,stroke:#3498db,color:#2980b9;
+    classDef decision fill:#fff8dc,stroke:#f39c12,color:#d35400;
+
+    class A,N default;
+    class B,H3,J decision;
+    class C,D,E,F1,F2,G1,G2,G3,H1,H2,K2,I1,I2,K1,L1,L2,M1,M2 highlight;
 ```
 
 ## 核心組件說明
