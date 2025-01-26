@@ -103,7 +103,7 @@ python scheduler/scheduler.py
 3. 策略模式 (Strategy Pattern)
 4. 社群媒體整合 (Social Media Integration)
 5. 圖片處理 (Image Processing)
-6. Discord 審核機制
+6. Discord 審核機制與通知
 
 ## 系統流程圖
 
@@ -401,6 +401,8 @@ class NewPlatform(SocialMediaMixin):
 │  │      └─wobbuffet
 │  │              ig.env
 │  │              ig_account.json
+│  │  └─discord
+│  │      Discord.env
 │  │
 │  └─workflow
 │          nova-anime-xl.json
