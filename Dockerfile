@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-# 設定時區為 Asia/Taipei
-ENV TZ=Asia/Taipei
+# 設定時區為 Asia/Bangkok (UTC+7)
+ENV TZ=Asia/Bangkok
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 複製整個專案（除了 .dockerignore 中排除的文件）
