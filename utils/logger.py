@@ -16,9 +16,9 @@ def setup_logger(name):
     
     class DailyRotatingFileHandler(logging.FileHandler):
         def __init__(self, name):
+            super().__init__(self._get_log_filename(), encoding='utf-8')  # 修正初始化順序
             self.name = name
             self.formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            super().__init__(self._get_log_filename(), encoding='utf-8')
             self.setFormatter(self.formatter)
         
         def _get_log_filename(self):
