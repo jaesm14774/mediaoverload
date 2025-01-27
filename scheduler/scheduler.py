@@ -21,23 +21,20 @@ class MediaScheduler:
         self.config_path = config_path
         self.load_config()
         
-        self.last_execution_time = None
+        self.last_execution_times = {}  # 儲存每個角色的上次執行時間
 
         # 基礎設定調整
         self.base_probability = 2.5/15    # 基礎機率（每15小時2.5次）
         self.max_probability = 3.0/15    # 最大機率（每15小時3次）
         self.min_probability = 0.5/15     # 最小機率（每15小時0.5次）
         
-        # 機率調整參數
-        self.recovery_hours = 6.0         # 機率顯著回升時間點
-        self.steep_decline_hours = 2.0    # 急遽下降期
-        self.decline_steepness = 2.0      # 下降曲線的陡峭程度
-        self.recovery_steepness = 0.5     # 回升曲線的陡峭程度
-        
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llama3.2-vision') \
             .with_text_model('ollama', model_name='phi4') \
             .build()
+
+        # 立即執行一次處理
+        self.instant_execution()
 
     @log_execution_time(logger=setup_logger(__name__))
     def load_config(self):
@@ -67,34 +64,34 @@ class MediaScheduler:
             template = template.replace(f"{{{key}}}", random.choice(values))
             
         return template
-
+    
     def calculate_time_factor(self, hours_since_last: float) -> float:
         """
-        計算基於時間的機率調整因子
-        使用組合的 sigmoid 函數實現更精確的機率控制
+        計算基於時間的機率調整因子，確保平滑變化：
+        - 0~2 小時內機率大幅下降 (< 0.5)
+        - 2~6 小時緩步回升 (1.1 ~ 2)
+        - 6 小時後機率大幅提升 (>5)
         """
-        if hours_since_last <= 0:
-            return 0.1  # 最低機率因子
-        
-        # 分段式 sigmoid 函數，實現急遽下降後緩慢回升
-        def steep_decline(x: float) -> float:
-            return 1 / (1 + math.exp(self.decline_steepness * (x - self.steep_decline_hours)))
-            
-        def gradual_recovery(x: float) -> float:
-            return 1 / (1 + math.exp(-self.recovery_steepness * (x - self.recovery_hours)))
-        
-        # 計算下降和回升的綜合因子
-        decline_factor = steep_decline(hours_since_last)
-        recovery_factor = gradual_recovery(hours_since_last)
-        
-        # 組合兩個因子，確保在發文後立即降到低點，然後緩慢回升
-        combined_factor = 0.1 + (0.9 * (1 - decline_factor) * recovery_factor)
-        
-        # 確保因子在合理範圍內
-        return max(0.1, min(combined_factor, 1.0))
 
-    @log_execution_time(logger=setup_logger(__name__))
-    def should_execute(self) -> bool:
+        if hours_since_last <= 0:
+            return 0.1  # 防止異常，最低機率
+
+        # 平滑下降與回升的參數調整
+        steepness1 = 3   # 控制前期下降速度
+        steepness2 = 1.5 # 控制後期回升速度
+        midpoint1 = 1.5  # 第一段下降的拐點（2小時內）
+        midpoint2 = 6    # 第二段上升的拐點（6小時左右）
+
+        # 使用雙 sigmoid 函數平滑控制下降與回升
+        decline = 1 / (1 + math.exp(steepness1 * (hours_since_last - midpoint1)))
+        recovery = 1 / (1 + math.exp(-steepness2 * (hours_since_last - midpoint2)))
+
+        # 組合機率變化，確保在 0.1 到適當範圍內
+        factor = 0.1 + (0.9 * (1 - decline) + 4 * recovery)
+
+        return max(0.1, factor)
+
+    def should_execute(self, character_name: str) -> bool:
         """決定是否要執行處理，使用改進的機率分布"""
         # 檢查睡眠時段 (22:00-07:00)
         current_hour = datetime.now().hour
@@ -103,10 +100,10 @@ class MediaScheduler:
             return False
         
         # 計算距離上次執行的時間
-        if self.last_execution_time:
-            hours_since_last = (datetime.now() - self.last_execution_time).total_seconds() / 3600
+        last_execution_time = self.last_execution_times.get(character_name)
+        if last_execution_time:
+            hours_since_last = (datetime.now() - last_execution_time).total_seconds() / 3600
             time_factor = self.calculate_time_factor(hours_since_last)
-            
             # 計算當前小時的基礎機率
             current_probability = self.base_probability * time_factor
             
@@ -122,16 +119,14 @@ class MediaScheduler:
             current_probability = self.base_probability
             self.logger.info(f"首次執行，使用基礎機率 {current_probability:.3%}/小時")
         
-        # 每分鐘的執行機率
-        minute_probability = current_probability / 60
-        return random.random() < minute_probability
-    
+        return random.random() < current_probability
+
     @log_execution_time(logger=setup_logger(__name__))
     def process_character(self, character_name: str, prompt_config: dict):
         self.logger.info(f"觸發角色 {character_name} 的處理")
         
         # 根據機率決定是否執行
-        if not self.should_execute():
+        if not self.should_execute(character_name):
             self.logger.info(f"根據機率決定跳過執行角色 {character_name}")
             return
             
@@ -150,10 +145,15 @@ class MediaScheduler:
             asyncio.run(processor.etl_process(prompt=prompt))
             
             self.logger.info(f"成功處理角色 {character_name}")
-            self.last_execution_time = datetime.now()  # 更新上次執行時間
+            self.last_execution_times[character_name] = datetime.now()  # 更新該角色的上次執行時間
         except Exception as e:
             self.logger.error(f"處理角色 {character_name} 時發生錯誤: {str(e)}", exc_info=True)
-    
+
+    def instant_execution(self):
+        """立即執行所有角色的處理"""
+        for char_name, char_config in self.config['schedules'].items():
+            self.process_character(character_name=char_config['character'], prompt_config=char_config['prompts'][0])
+
     def get_random_minute(self) -> str:
         """生成隨機分鐘數（0-59）"""
         return f"{random.randint(0, 59):02d}"
