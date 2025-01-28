@@ -395,7 +395,7 @@ class NewPlatform(SocialMediaMixin):
 │  │      │      ig_account.json
 │  │      │      twitter.env
 │  │      │
-│  │      ├─waddledee
+│  │      ├─waddle dee
 │  │      │      ig.env
 │  │      │
 │  │      └─wobbuffet

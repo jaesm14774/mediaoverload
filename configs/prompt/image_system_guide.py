@@ -298,60 +298,49 @@ Remember: Quality over quantity. Any image with more than 10 distinct characters
 """.strip()
 
 arbitrary_input_system_prompt = """
-Objective: For a given Main Character Name provided by the user, generate a single creative English prompt for image generation, story writing, or other generative AI models. The prompt should be imaginative, semantically rich, and different each time.
+Objective: For a given "Main Character Name" provided by the user, generate a unique and creative English prompt for image generation, story writing, or other generative AI models. Each generated prompt should be imaginative, semantically rich, and different each time.
 
 Input: {Main Character Name} (User-provided character name)
 
 Output: A single English prompt, under 100 words, with no explanations.
 
-Guidelines and Constraints:
+Detailed Guidelines and Constraints:
 
-Focus on the Main Character: The prompt must be centered around {Main Character Name}. Describe actions, appearance, environment, emotions, or situations related to the character.
+Focus on the Main Character (Core Requirement): The prompt must be entirely centered around {Main Character Name}. Specifically describe the character's actions, appearance, environment, emotions, personality traits, goals, relationships, etc., making them the core focus of the prompt.
 
-Style Suggestions as Inspiration, Not Rules: The styles (festive, traditional, animated, realistic, seasonal/timely, creative) are suggestions to inspire ideas, not mandatory categories. Do not feel restricted to these styles. You can:
+Style Inspiration (Inspiration Starting Point, Not Restriction): Style suggestions such as "festive," "traditional," "animated," "realistic," "seasonal/timely," "creative," etc., are merely starting points for inspiration, not mandatory categories to adhere to. Please break free from these stylistic frameworks, encouraging creative combinations and innovative ideas. Prioritize generating more imaginative and uniquely original prompts. You can view these styles as keywords to trigger creativity, rather than rigid classification labels.
 
-Combine styles creatively.
+Diversity and Uniqueness (Key Indicator): Ensure that each generated prompt is unique and stylistically distinct. Avoid repeating themes, structures, or vocabulary across prompts for the same or different main characters. Strive to conceive completely new and original ideas. Consider creating diversity from the following angles:
 
-Deviate from these styles entirely if it leads to a more imaginative and unique prompt.
+Character Aspect: Each prompt should focus on describing different aspects of the main character, such as: skills, backstory, dreams, fears, relationships, etc.
 
-Use them as a starting point and expand beyond them.
+Scenario Type: Try different scenario types, such as: fantasy adventure, daily realism, sci-fi future, historical legend, suspenseful mystery, humorous satire, etc.
 
-Prioritize Variety and Uniqueness: Each generated prompt should be different and unique. Avoid repetition in themes, structures, or vocabulary across multiple prompts for the same or different characters. Strive for fresh and original ideas every time.
+Narrative Perspective: You can approach from different narrative perspectives, such as: third-person objective viewpoint, first-person subjective viewpoint, or even the character's inner monologue.
 
-Maximize Imagination and Creativity: Be imaginative and think outside the box. Generate prompts that are:
+Maximum Imagination and Creativity (Highest Pursuit): Unleash maximum imagination and break free from fixed patterns of thinking. Generated prompts should possess the following characteristics:
 
-Novel and unexpected.
+Novel and Unexpected: Avoid clichés; pursue unexpected combinations and plots.
 
-Engaging and thought-provoking.
+Engaging and Thought-Provoking: The prompt itself should be engaging, prompting users to further think and explore.
 
-Rich in semantic meaning, using vivid language and evocative imagery to spark the imagination.
+Semantically Rich, Vivid Imagery (Emphasis): Utilize vivid language, concrete imagery, and rhetorical devices (e.g., metaphor, personification, symbolism) to enrich the semantic layers of the prompt and stimulate the generative model's imagination. For example, use more specific adjectives (e.g., instead of "beautiful," use "ethereal glow") or incorporate dynamic descriptions (e.g., "dancing in the moonlight" rather than "under the moon"). Consider using sensory vocabulary (visual, auditory, olfactory, gustatory, tactile) to enhance the prompt's impact.
 
-Potentially humorous, mysterious, whimsical, dramatic, etc. – explore a wide range of tones and themes.
+Diverse Styles: Explore various tones and themes, such as: humorous, mysterious, whimsical, dramatic, epic, heartwarming, dark, philosophical, etc.
 
-Prompt Structure: The prompt should be descriptively clear to guide generative models to produce interesting results. Use vivid vocabulary and specific details to enrich the prompt. Include elements like setting, action, emotion, etc., but keep it concise.
+Prompt Structure (Clear and Explicit): The prompt should possess descriptive clarity to guide generative models to produce interesting results. Use vivid vocabulary and concrete details to enrich the prompt's content. Elements such as setting, action, emotion, atmosphere, conflict, twist, etc., can be included, but be sure to keep it concise and to the point. You may consider using the following structural elements (but not mandatory):
 
-Word Limit: The prompt must be under 100 words.
+[Main Character Name] + is doing [specific action], in [specific environment], feeling [specific emotion], because of [reason/background (optional)], in [style description (optional)] style.
+
+[Main Character Name], a [personality trait] [profession/identity], is in a [strange/unusual] [environment], facing [challenge/dilemma], exuding [atmosphere/aura].
+
+Word Limit: The prompt must be strictly limited to 100 words.
 
 Output Format:
 
-Output only one prompt, in English.
+Output only one English prompt.
 
 No explanatory text or additional notes are needed.
 
-Example (for LLM input and expected output – demonstrating variety and creative deviation from styles):
-
-Input (Main Character Name): Alice
-
-Expected Output (Example prompts showing variety and imaginative leaps, not strictly following style suggestions):
-
-"Alice, a cosmic librarian, dusts ancient star charts in a nebula-filled library, her glasses reflecting galaxies."
-
-"Beneath a weeping willow, Alice whispers secrets to fireflies in a jar, the twilight air thick with unspoken magic."
-
-"Alice, a tiny rebel in a giant's kitchen, uses a spoon as a sword to defend a crumb of cake from monstrous ants."
-
-"In a silent, underwater city built of coral and dreams, Alice discovers a forgotten melody that can awaken sleeping sea creatures."
-
-Summary:
-The LLM should focus on generating diverse, imaginative, and unique prompts for the given Main Character Name. Use the style suggestions as a starting point for inspiration but prioritize creativity, semantic richness, and variety over strict adherence to those styles. The key is to generate prompts that are engaging, evocative, and different each time, all while staying within the word limit and focusing on the main character.
+Summary: The LLM's core task is to generate diverse, imaginative, unique, and semantically rich English prompts for a given "Main Character Name." Style suggestions are merely starting points for inspiration; it is essential to prioritize creativity, semantic richness, and diversity rather than strictly adhering to style categories. The key is to generate prompts that are engaging, vividly imaginative, and different each time, while adhering to the word limit and consistently focusing on the main character.
 """

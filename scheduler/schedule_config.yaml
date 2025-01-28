@@ -18,5 +18,5 @@ schedules:
     character: "Waddledee"
     prompts:
       - use_llm: true
-        character: "Waddledee"
+        character: "waddle dee"
         temperature: 1.0 

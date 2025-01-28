@@ -28,6 +28,10 @@ class ContentProcessor:
     async def etl_process(self, prompt: str) -> Dict[str, Any]:
         """執行完整的 ETL 處理流程"""
         try:
+            #特例處理
+            if re.sub(string=prompt.lower(), pattern='\s', repl='').find('waddledee') != -1:
+                prompt = re.sub(string=prompt, pattern='waddledee|Waddledee', repl='waddle dee')
+            
             self.logger.info(f"開始處理提示詞: {prompt}")
             
             # 獲取角色特定的生成配置
@@ -89,7 +93,10 @@ class ContentProcessor:
             
             # 解構結果
             result, user, edited_content, selected_indices = result
-            
+            if edited_content is None:
+                edited_content=''
+            if selected_indices is None:
+                selected_indices=[]
             self.logger.info(f"Discord 審核結果: {result}")
             self.logger.info(f"審核用戶: {user}")
             self.logger.info(f"編輯後內容長度: {len(edited_content)}")

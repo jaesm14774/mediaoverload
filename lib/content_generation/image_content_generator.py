@@ -183,7 +183,11 @@ class VisionContentManager:
             {'role': 'assistant', 'content': 'Translation any input into precisely English and only one response without explanation'},
             {'role': 'user', 'content': character}
         ]
-        return self.text_model.chat_completion(messages=messages)    
+        result=self.text_model.chat_completion(messages=messages)    
+        if '</think>' in result: #deepseek r1 will have <think>...</think> format
+            result =result.split('</think>')[-1].strip()
+        
+        return result
         
 
 class VisionManagerBuilder:

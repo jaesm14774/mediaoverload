@@ -24,13 +24,13 @@ class MediaScheduler:
         self.last_execution_times = {}  # 儲存每個角色的上次執行時間
 
         # 基礎設定調整
-        self.base_probability = 2.5/15    # 基礎機率（每15小時2.5次）
-        self.max_probability = 3.0/15    # 最大機率（每15小時3次）
+        self.base_probability = 5/15    # 基礎機率（每15小時3次）
+        self.max_probability = 2/3    # 最大機率（每15小時7.5次）
         self.min_probability = 0.5/15     # 最小機率（每15小時0.5次）
         
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llama3.2-vision') \
-            .with_text_model('ollama', model_name='phi4') \
+            .with_text_model('ollama', model_name='deepseek-r1:7b') \
             .build()
 
         # 立即執行一次處理
@@ -68,26 +68,25 @@ class MediaScheduler:
     def calculate_time_factor(self, hours_since_last: float) -> float:
         """
         計算基於時間的機率調整因子，確保平滑變化：
-        - 0~2 小時內機率大幅下降 (< 0.5)
-        - 2~6 小時緩步回升 (1.1 ~ 2)
-        - 6 小時後機率大幅提升 (>5)
+        - 0~3 小時內機率大幅下降
+        - 3~7 小時緩步回升
+        - 7 小時後機率大幅提升
         """
 
         if hours_since_last <= 0:
             return 0.1  # 防止異常，最低機率
 
         # 平滑下降與回升的參數調整
-        steepness1 = 3   # 控制前期下降速度
-        steepness2 = 1.5 # 控制後期回升速度
-        midpoint1 = 1.5  # 第一段下降的拐點（2小時內）
-        midpoint2 = 6    # 第二段上升的拐點（6小時左右）
+        steepness1 = 4   # 控制前期下降速度
+        steepness2 = 1 # 控制後期回升速度
+        midpoint1 = 3  # 第一段下降的拐點（2小時內）
+        midpoint2 = 7    # 第二段上升的拐點（6小時左右）
 
         # 使用雙 sigmoid 函數平滑控制下降與回升
         decline = 1 / (1 + math.exp(steepness1 * (hours_since_last - midpoint1)))
         recovery = 1 / (1 + math.exp(-steepness2 * (hours_since_last - midpoint2)))
 
-        # 組合機率變化，確保在 0.1 到適當範圍內
-        factor = 0.1 + (0.9 * (1 - decline) + 4 * recovery)
+        factor = 1 - decline + recovery
 
         return max(0.1, factor)
 
