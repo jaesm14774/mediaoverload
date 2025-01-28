@@ -1,8 +1,8 @@
 {
-  "76:0": {
+  "37": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": 768,
+      "height": 768,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -10,255 +10,7 @@
       "title": "Empty Latent Image"
     }
   },
-  "76:1": {
-    "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV25MerryChristmas.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
-  "76:2": {
-    "inputs": {
-      "lora_name": "KirbyV2.safetensors",
-      "strength_model": 0.8,
-      "strength_clip": 0.8,
-      "model": [
-        "76:1",
-        0
-      ],
-      "clip": [
-        "76:1",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "76:3": {
-    "inputs": {
-      "text": "Determined Kirby, ready Waddle Dee, starting line, minimalist art, solid color background, running race, competitive spirit, simple design.\n\n",
-      "clip": [
-        "76:2",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "positive prompt"
-    }
-  },
-  "76:4": {
-    "inputs": {
-      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
-      "clip": [
-        "76:2",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "negative prompt"
-    }
-  },
-  "76:5": {
-    "inputs": {
-      "seed": 4007,
-      "steps": 30,
-      "cfg": 8,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "76:2",
-        0
-      ],
-      "positive": [
-        "76:3",
-        0
-      ],
-      "negative": [
-        "76:4",
-        0
-      ],
-      "latent_image": [
-        "76:0",
-        0
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "76:6": {
-    "inputs": {
-      "samples": [
-        "76:5",
-        0
-      ],
-      "vae": [
-        "76:1",
-        2
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "76:7": {
-    "inputs": {
-      "filename_prefix": "one_image_v25",
-      "images": [
-        "76:6",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
-  "72:0": {
-    "inputs": {
-      "width": 1024,
-      "height": 1024,
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
-  },
-  "72:1": {
-    "inputs": {
-      "ckpt_name": "novaAnimeXL_illustriousV20.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
-  "72:2": {
-    "inputs": {
-      "lora_name": "KirbyV2.safetensors",
-      "strength_model": 0.8,
-      "strength_clip": 0.8,
-      "model": [
-        "72:1",
-        0
-      ],
-      "clip": [
-        "72:1",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "72:3": {
-    "inputs": {
-      "text": "Determined Kirby, ready Waddle Dee, starting line, minimalist art, solid color background, running race, competitive spirit, simple design.\n\n",
-      "clip": [
-        "72:2",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "positive prompt"
-    }
-  },
-  "72:4": {
-    "inputs": {
-      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
-      "clip": [
-        "72:2",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "negative prompt"
-    }
-  },
-  "72:5": {
-    "inputs": {
-      "seed": 4007,
-      "steps": 30,
-      "cfg": 8,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "72:2",
-        0
-      ],
-      "positive": [
-        "72:3",
-        0
-      ],
-      "negative": [
-        "72:4",
-        0
-      ],
-      "latent_image": [
-        "72:0",
-        0
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "72:6": {
-    "inputs": {
-      "samples": [
-        "72:5",
-        0
-      ],
-      "vae": [
-        "72:1",
-        2
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "72:7": {
-    "inputs": {
-      "filename_prefix": "one_image_v2",
-      "images": [
-        "72:6",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
-  "73:0": {
-    "inputs": {
-      "width": 1024,
-      "height": 1024,
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
-  },
-  "73:1": {
+  "38": {
     "inputs": {
       "ckpt_name": "novaAnimeXL_illustriousV10.safetensors"
     },
@@ -267,30 +19,11 @@
       "title": "Load Checkpoint"
     }
   },
-  "73:2": {
+  "40": {
     "inputs": {
-      "lora_name": "KirbyV2.safetensors",
-      "strength_model": 0.8,
-      "strength_clip": 0.8,
-      "model": [
-        "73:1",
-        0
-      ],
+      "text": "In a vibrant meadow under a twilight sky, Waddle dee dances with shadows, her feathers shimmering like embers as she weaves dreams into the fabric of night.",
       "clip": [
-        "73:1",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "73:3": {
-    "inputs": {
-      "text": "Determined Kirby, ready Waddle Dee, starting line, minimalist art, solid color background, running race, competitive spirit, simple design.\n\n",
-      "clip": [
-        "73:2",
+        "38",
         1
       ]
     },
@@ -299,11 +32,11 @@
       "title": "positive prompt"
     }
   },
-  "73:4": {
+  "41": {
     "inputs": {
       "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
       "clip": [
-        "73:2",
+        "38",
         1
       ]
     },
@@ -312,28 +45,28 @@
       "title": "negative prompt"
     }
   },
-  "73:5": {
+  "42": {
     "inputs": {
-      "seed": 4007,
+      "seed": 4196,
       "steps": 30,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "73:2",
+        "38",
         0
       ],
       "positive": [
-        "73:3",
+        "40",
         0
       ],
       "negative": [
-        "73:4",
+        "41",
         0
       ],
       "latent_image": [
-        "73:0",
+        "37",
         0
       ]
     },
@@ -342,14 +75,14 @@
       "title": "KSampler"
     }
   },
-  "73:6": {
+  "43": {
     "inputs": {
       "samples": [
-        "73:5",
+        "42",
         0
       ],
       "vae": [
-        "73:1",
+        "38",
         2
       ]
     },
@@ -358,11 +91,221 @@
       "title": "VAE Decode"
     }
   },
-  "73:7": {
+  "44": {
     "inputs": {
-      "filename_prefix": "one_image_v1",
+      "filename_prefix": "v1",
       "images": [
-        "73:6",
+        "43",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "46:0": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_ilV25MerryChristmas.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "46:1": {
+    "inputs": {
+      "width": 768,
+      "height": 768,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "46:2": {
+    "inputs": {
+      "text": "In a vibrant meadow under a twilight sky, Waddle dee dances with shadows, her feathers shimmering like embers as she weaves dreams into the fabric of night.",
+      "clip": [
+        "46:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "46:3": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "clip": [
+        "46:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "46:4": {
+    "inputs": {
+      "seed": 4196,
+      "steps": 30,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "46:0",
+        0
+      ],
+      "positive": [
+        "46:2",
+        0
+      ],
+      "negative": [
+        "46:3",
+        0
+      ],
+      "latent_image": [
+        "46:1",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "46:5": {
+    "inputs": {
+      "samples": [
+        "46:4",
+        0
+      ],
+      "vae": [
+        "46:0",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "46:6": {
+    "inputs": {
+      "filename_prefix": "v25",
+      "images": [
+        "46:5",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "47:0": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_ilV30HappyNewYear.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "47:1": {
+    "inputs": {
+      "width": 768,
+      "height": 768,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "47:2": {
+    "inputs": {
+      "text": "In a vibrant meadow under a twilight sky, Waddle dee dances with shadows, her feathers shimmering like embers as she weaves dreams into the fabric of night.",
+      "clip": [
+        "47:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "47:3": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "clip": [
+        "47:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "47:4": {
+    "inputs": {
+      "seed": 4196,
+      "steps": 30,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "47:0",
+        0
+      ],
+      "positive": [
+        "47:2",
+        0
+      ],
+      "negative": [
+        "47:3",
+        0
+      ],
+      "latent_image": [
+        "47:1",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "47:5": {
+    "inputs": {
+      "samples": [
+        "47:4",
+        0
+      ],
+      "vae": [
+        "47:0",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "47:6": {
+    "inputs": {
+      "filename_prefix": "v30",
+      "images": [
+        "47:5",
         0
       ]
     },

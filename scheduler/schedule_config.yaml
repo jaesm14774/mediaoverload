@@ -1,4 +1,10 @@
 schedules:
+  waddledee:
+    character: "Waddledee"
+    prompts:
+      - use_llm: true
+        character: "Waddledee"
+        temperature: 1.0 
   wobbuffet:
     character: "Wobbuffet"
     prompts:
@@ -13,10 +19,3 @@ schedules:
         # character: "Kirby"
         # style: "kawaii and energetic"
         # temperature: 1.0 
-
-  waddledee:
-    character: "Waddledee"
-    prompts:
-      - use_llm: true
-        character: "waddle dee"
-        temperature: 1.0 

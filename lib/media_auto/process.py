@@ -79,7 +79,7 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
         })
 
 class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
-    character = 'waddle dee'
+    character = 'waddledee'
     output_dir = '/app/output_image'
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.9
