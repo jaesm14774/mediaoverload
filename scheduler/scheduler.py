@@ -30,7 +30,7 @@ class MediaScheduler:
         
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llama3.2-vision') \
-            .with_text_model('ollama', model_name='deepseek-r1:7b') \
+            .with_text_model('ollama', model_name='deepseek-r1:8b') \
             .build()
 
         # 立即執行一次處理
