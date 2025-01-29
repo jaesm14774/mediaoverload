@@ -12,6 +12,7 @@ class CharacterConfig:
     workflow_path: str
     similarity_threshold: float = 0.9
     type: str = 'text2img'
+    default_hashtags: list[str] = field(default_factory=list)
     additional_params: Optional[Dict[str, Any]] = field(default_factory=dict)
 
 class BaseCharacter(ABC):
@@ -29,6 +30,7 @@ class BaseCharacter(ABC):
             workflow_path=self.workflow_path,
             similarity_threshold=self.similarity_threshold,
             type=self.type,
+            default_hashtags=self.default_hashtags,
             additional_params=self.additional_params,
         )
     
@@ -45,6 +47,7 @@ class KirbyProcess(BaseCharacter, SocialMediaMixin):
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.9
     type = 'text2img'
+    default_hashtags = ['nintendo']
     additional_params = {
         'images_per_description': 3,
         'is_negative': False
@@ -65,6 +68,7 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.8
     type = 'text2img'
+    default_hashtags = ['pokemon']
     additional_params = {
         'images_per_description': 3,
         'is_negative': False
@@ -84,6 +88,7 @@ class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.9
     type = 'text2img'
+    default_hashtags = ['kirby']
     additional_params = {
         'images_per_description': 3,
         'is_negative': False

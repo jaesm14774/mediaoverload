@@ -118,7 +118,7 @@ class Text2ImageStrategy(ContentStrategy):
         return self
 
     def prevent_hashtag_count_too_more(self, hashtag_text):
-        hashtag_candidate_list=[part for part in re.split(pattern='\n|#', string=hashtag_text) if part != '']
+        hashtag_candidate_list=[part.lower() for part in re.split(pattern='\n|#', string=hashtag_text) if part != '']
     
         deduplicate_list = []
         for part in hashtag_candidate_list:
@@ -134,10 +134,23 @@ class Text2ImageStrategy(ContentStrategy):
         start_time = time.time()
         # 需要時可以動態切換模型
         switcher = ModelSwitcher(self.ollama_vision_manager)
-        switcher.switch_text_model('ollama', model_name='phi4')
+        switcher.switch_text_model('ollama', model_name='deepseek-r1:8b')
 
-        self.article_content=self.ollama_vision_manager.generate_seo_hashtags('\n\n'.join([self.config.character] + list(set([row['description'] for row in self.filter_results]))))
-        self.article_content=self.prevent_hashtag_count_too_more(self.article_content)
+        # 整合角色名稱、描述和預設標籤
+        content_parts = [
+            self.config.character,
+            *list(set([row['description'] for row in self.filter_results]))
+        ]
+        
+        # 加入預設標籤
+        if self.config.default_hashtags:
+            content_parts.extend([tag.lstrip('#') for tag in self.config.default_hashtags])
+
+        article_content = self.ollama_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
+        if '</think>' in article_content:  # deepseek r1 will have <think>...</think> format
+            article_content = article_content.split('</think>')[-1].strip()        
+        
+        self.article_content = self.prevent_hashtag_count_too_more(article_content)
         print(f'產生文章內容花費 : {time.time() - start_time}')
         return self
 

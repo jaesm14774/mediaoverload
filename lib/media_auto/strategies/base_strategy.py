@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class GenerationConfig:
@@ -10,6 +10,7 @@ class GenerationConfig:
     prompt: str
     generation_type: str  # 'text2img', 'img2img', 'text2video' etc.
     workflow_path: Optional[str] = None
+    default_hashtags: List[str] = field(default_factory=list)
     additional_params: Dict[str, Any] = None
 
 class ContentStrategy(ABC):

@@ -45,6 +45,7 @@ class ContentProcessor:
                 prompt=config_dict['prompt'],
                 generation_type=config_dict['type'],
                 workflow_path=config_dict['workflow_path'],
+                default_hashtags=config_dict.get('default_hashtags', []),
                 additional_params=config_dict['additional_params']
             )
             self.logger.info(f"配置構建完成，輸出目錄: {config.output_dir}")
