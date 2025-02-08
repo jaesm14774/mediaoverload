@@ -1,8 +1,8 @@
 {
   "37": {
     "inputs": {
-      "width": 768,
-      "height": 768,
+      "width": 1024,
+      "height": 1024,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -115,8 +115,8 @@
   },
   "46:1": {
     "inputs": {
-      "width": 768,
-      "height": 768,
+      "width": 1024,
+      "height": 1024,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -220,8 +220,8 @@
   },
   "47:1": {
     "inputs": {
-      "width": 768,
-      "height": 768,
+      "width": 1024,
+      "height": 1024,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",

@@ -66,7 +66,7 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     character = 'wobbuffet'
     output_dir = '/app/output_image'
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
-    similarity_threshold = 0.8
+    similarity_threshold = 0.7
     type = 'text2img'
     default_hashtags = ['pokemon']
     additional_params = {

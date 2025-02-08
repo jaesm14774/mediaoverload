@@ -162,7 +162,7 @@ class VisionContentManager:
         """根據用戶輸入生成圖片描述提示詞"""
         messages = [
             {'role': 'system', 'content': self.prompts['image_system_prompt']},
-            {'role': 'assistant', 'content': 'Translation any input into precisely English and need 5 description with no any explanation'},
+            {'role': 'assistant', 'content': 'Translation any input into precisely English and need 3 description with no any explanation'},
             {'role': 'user', 'content': user_input}
         ]
         response = self.vision_model.chat_completion(messages=messages, **kwargs)
@@ -176,12 +176,12 @@ class VisionContentManager:
         ]
         return self.text_model.chat_completion(messages=messages, **kwargs)
 
-    def generate_arbitrary_input(self, character) -> str:
+    def generate_arbitrary_input(self, character, extra='') -> str:
         """生成 SEO 優化的 hashtags"""
         messages = [
             {'role': 'system', 'content': self.prompts['arbitrary_input_system_prompt']},
             {'role': 'assistant', 'content': 'Translation any input into precisely English and only one response without explanation'},
-            {'role': 'user', 'content': character}
+            {'role': 'user', 'content': f'main character: {character}\n{extra}'}
         ]
         result=self.text_model.chat_completion(messages=messages)    
         if '</think>' in result: #deepseek r1 will have <think>...</think> format

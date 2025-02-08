@@ -25,13 +25,8 @@ class MediaScheduler:
 
         # 基礎設定調整
         self.base_probability = 5/15    # 基礎機率（每15小時3次）
-        self.max_probability = 2/3    # 最大機率（每15小時7.5次）
+        self.max_probability = 1/2    # 最大機率（每15小時7.5次）
         self.min_probability = 0.5/15     # 最小機率（每15小時0.5次）
-        
-        self.ollama_vision_manager = VisionManagerBuilder() \
-            .with_vision_model('ollama', model_name='llama3.2-vision') \
-            .with_text_model('ollama', model_name='deepseek-r1:8b') \
-            .build()
 
         # 立即執行一次處理
         self.instant_execution()
@@ -46,24 +41,21 @@ class MediaScheduler:
         # 檢查是否使用 LLM 生成
         if prompt_config.get('use_llm', True):
             character = prompt_config.get('character', '')
+            self.ollama_vision_manager = VisionManagerBuilder() \
+                .with_vision_model('ollama', model_name='llama3.2-vision') \
+                .with_text_model('ollama', model_name='llama3.2', temperature = prompt_config.get('temperature', 1)) \
+                .build()
             
             # 使用 VisionContentManager 生成提示詞
             self.logger.info(f'開始為角色生成提示詞: {character}')
             prompt = self.ollama_vision_manager.generate_arbitrary_input(
-                character=character
+                character=character,
+                extra=f"current time : {datetime.now().strftime('%Y-%m-%d')}"
             )
             self.logger.info(f'生成的提示詞: {prompt}')
             return prompt
-        
-        # 使用模板生成
-        template = prompt_config['template']
-        variables = prompt_config.get('variables', {})
-        
-        # 替換變數
-        for key, values in variables.items():
-            template = template.replace(f"{{{key}}}", random.choice(values))
             
-        return template
+        return prompt_config.get('prompt')
     
     def calculate_time_factor(self, hours_since_last: float) -> float:
         """
@@ -79,8 +71,8 @@ class MediaScheduler:
         # 平滑下降與回升的參數調整
         steepness1 = 4   # 控制前期下降速度
         steepness2 = 1 # 控制後期回升速度
-        midpoint1 = 3  # 第一段下降的拐點（2小時內）
-        midpoint2 = 7    # 第二段上升的拐點（6小時左右）
+        midpoint1 = 4  # 第一段下降的拐點（4小時內）
+        midpoint2 = 7    # 第二段上升的拐點（7小時左右）
 
         # 使用雙 sigmoid 函數平滑控制下降與回升
         decline = 1 / (1 + math.exp(steepness1 * (hours_since_last - midpoint1)))
@@ -135,6 +127,8 @@ class MediaScheduler:
             character_class = getattr(media_process, f'{character_name}Process')
             processor = ContentProcessor(character_class())
             
+            prompt_config['character'] = character_name
+
             # 生成提示詞
             prompt = self.generate_prompt(prompt_config)
             self.logger.info(f"生成的提示詞: {prompt}")
