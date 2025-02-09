@@ -14,10 +14,12 @@ class CharacterConfig:
     type: str = 'text2img'
     default_hashtags: list[str] = field(default_factory=list)
     additional_params: Optional[Dict[str, Any]] = field(default_factory=dict)
+    group_name: str = ''
 
 class BaseCharacter(ABC):
     """角色基礎類別"""
     config: CharacterConfig
+    group_name: str = ''
 
     def __init__(self):
         self.config = self.get_default_config()
@@ -32,6 +34,7 @@ class BaseCharacter(ABC):
             type=self.type,
             default_hashtags=self.default_hashtags,
             additional_params=self.additional_params,
+            group_name=self.group_name,
         )
     
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:
@@ -39,7 +42,6 @@ class BaseCharacter(ABC):
         config = {k: v for k, v in self.config.__dict__.items()}
         config.update({'prompt': prompt})
         return config
-
 
 class KirbyProcess(BaseCharacter, SocialMediaMixin):
     character = 'kirby'
@@ -69,6 +71,7 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     similarity_threshold = 0.7
     type = 'text2img'
     default_hashtags = ['pokemon']
+    group_name = 'Pokemon'
     additional_params = {
         'images_per_description': 3,
         'is_negative': False
@@ -86,9 +89,10 @@ class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
     character = 'waddledee'
     output_dir = '/app/output_image'
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
-    similarity_threshold = 0.9
+    similarity_threshold = 0.8
     type = 'text2img'
     default_hashtags = ['kirby']
+    group_name = 'Kirby'
     additional_params = {
         'images_per_description': 3,
         'is_negative': False

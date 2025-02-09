@@ -181,7 +181,7 @@ class VisionContentManager:
         messages = [
             {'role': 'system', 'content': self.prompts['arbitrary_input_system_prompt']},
             {'role': 'assistant', 'content': 'Translation any input into precisely English and only one response without explanation'},
-            {'role': 'user', 'content': f'main character: {character}\n{extra}'}
+            {'role': 'user', 'content': f"""main character: {character}\n{extra}"""}
         ]
         result=self.text_model.chat_completion(messages=messages)    
         if '</think>' in result: #deepseek r1 will have <think>...</think> format

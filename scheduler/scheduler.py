@@ -11,7 +11,6 @@ from typing import Dict, Any
 sys.path.append(str(Path(__file__).parent.parent))
 
 from lib.media_auto.media_main_logic import ContentProcessor
-from lib.content_generation.image_content_generator import VisionManagerBuilder
 import lib.media_auto.process as media_process
 from utils.logger import setup_logger, log_execution_time
 
@@ -24,7 +23,7 @@ class MediaScheduler:
         self.last_execution_times = {}  # 儲存每個角色的上次執行時間
 
         # 基礎設定調整
-        self.base_probability = 5/15    # 基礎機率（每15小時3次）
+        self.base_probability = 4/15    # 基礎機率（每15小時4次）
         self.max_probability = 1/2    # 最大機率（每15小時7.5次）
         self.min_probability = 0.5/15     # 最小機率（每15小時0.5次）
 
@@ -35,27 +34,6 @@ class MediaScheduler:
     def load_config(self):
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
-    
-    @log_execution_time(logger=setup_logger(__name__))
-    def generate_prompt(self, prompt_config: Dict[str, Any]) -> str:
-        # 檢查是否使用 LLM 生成
-        if prompt_config.get('use_llm', True):
-            character = prompt_config.get('character', '')
-            self.ollama_vision_manager = VisionManagerBuilder() \
-                .with_vision_model('ollama', model_name='llama3.2-vision') \
-                .with_text_model('ollama', model_name='llama3.2', temperature = prompt_config.get('temperature', 1)) \
-                .build()
-            
-            # 使用 VisionContentManager 生成提示詞
-            self.logger.info(f'開始為角色生成提示詞: {character}')
-            prompt = self.ollama_vision_manager.generate_arbitrary_input(
-                character=character,
-                extra=f"current time : {datetime.now().strftime('%Y-%m-%d')}"
-            )
-            self.logger.info(f'生成的提示詞: {prompt}')
-            return prompt
-            
-        return prompt_config.get('prompt')
     
     def calculate_time_factor(self, hours_since_last: float) -> float:
         """
@@ -126,16 +104,13 @@ class MediaScheduler:
             # 獲取角色類別
             character_class = getattr(media_process, f'{character_name}Process')
             processor = ContentProcessor(character_class())
-            
             prompt_config['character'] = character_name
-
-            # 生成提示詞
-            prompt = self.generate_prompt(prompt_config)
-            self.logger.info(f"生成的提示詞: {prompt}")
-            
             # 執行處理
             import asyncio
-            asyncio.run(processor.etl_process(prompt=prompt))
+            asyncio.run(processor.etl_process(
+                prompt=prompt_config.get('prompt'),
+                temperature=prompt_config.get('temperature', 1.0)
+            ))
             
             self.logger.info(f"成功處理角色 {character_name}")
             self.last_execution_times[character_name] = datetime.now()  # 更新該角色的上次執行時間

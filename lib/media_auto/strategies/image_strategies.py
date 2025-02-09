@@ -145,7 +145,7 @@ class Text2ImageStrategy(ContentStrategy):
 
         # 加入預設標籤
         if self.config.default_hashtags:
-            article_content+='#'+ ' #'.join([tag.lstrip('#') for tag in self.config.default_hashtags])
+            article_content+=' #'+ ' #'.join([tag.lstrip('#') for tag in self.config.default_hashtags])
 
         if '</think>' in article_content:  # deepseek r1 will have <think>...</think> format
             article_content = article_content.split('</think>')[-1].strip()        

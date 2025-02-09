@@ -1,8 +1,9 @@
 import os
 import re
 import numpy as np
+import random
 from dotenv import load_dotenv
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from lib.media_auto.process import BaseCharacter
 from lib.media_auto.strategies.base_strategy import GenerationConfig
 from lib.media_auto.factory.strategy_factory import StrategyFactory
@@ -12,6 +13,8 @@ from lib.discord import run_discord_file_feedback_process, DiscordNotify
 from utils.image import ImageProcessor
 import time
 from datetime import datetime
+from lib.database import db_pool
+from lib.content_generation.image_content_generator import VisionManagerBuilder
 
 load_dotenv(f'media_overload.env')
 load_dotenv(f'configs/social_media/discord/Discord.env')
@@ -23,11 +26,93 @@ class ContentProcessor:
         self.character_class = character_class
         self.logger = setup_logger(__name__)
         self.start_time = time.time()
+
+        db_pool.initialize('mysql',
+                        host=os.environ['mysql_host'],
+                        port=int(os.environ['mysql_port']),
+                        user=os.environ['mysql_user'],
+                        password=os.environ['mysql_password'],
+                        db_name=os.environ['mysql_db_name'])
+        
+        self.mysql_conn = db_pool.get_connection('mysql')
+
+    def get_random_character_from_group(self) -> str:
+        """從群組中隨機獲取一個角色"""
+        cursor = self.mysql_conn.cursor
+        query = """
+            SELECT role_name_en 
+            FROM anime.anime_roles
+            WHERE group_name = %s AND status = 1 AND workflow_name = %s
+        """.strip()
+        filename = os.path.basename(self.character_class.workflow_path)
+        name_without_ext, _ = os.path.splitext(filename)
+        cursor.execute(query, (self.character_class.group_name, name_without_ext))
+        results = cursor.fetchall()  # 獲取所有結果
+        characters = [row[0] for row in results]  # 提取角色名稱
+        if not characters:
+            return self.character_class.character
+        return random.choice(characters)
         
     @log_execution_time(logger=setup_logger(__name__))
-    async def etl_process(self, prompt: str) -> Dict[str, Any]:
-        """執行完整的 ETL 處理流程"""
+    def generate_prompt(self, character: str, temperature: float = 1.0) -> str:
+        """生成提示詞
+        
+        Args:
+            character (str): 角色名稱
+            temperature (float, optional): LLM 溫度參數. Defaults to 1.0.
+            
+        Returns:
+            str: 生成的提示詞
+        """
+        self.logger.info(f'開始為角色生成提示詞: {character}')
+        
+        # 初始化 VisionManager
+        ollama_vision_manager = VisionManagerBuilder() \
+            .with_vision_model('ollama', model_name='llama3.2-vision') \
+            .with_text_model('ollama', model_name='llama3.2', temperature=temperature) \
+            .build()
+        
+        # 生成第一層提示詞
+        prompt = ollama_vision_manager.generate_arbitrary_input(
+            character=character,
+            extra=f"current time : {datetime.now().strftime('%Y-%m-%d')}"
+        )
+        prompt = prompt.replace("'", '').replace('"', '')
+        # 生成第二層提示詞
+        prompt = ollama_vision_manager.generate_arbitrary_input(
+            character=character,
+            extra=f'imagine the most unconventional and counterintuitive version of "{prompt}".Break all traditional assumptions and create a radically different narrative'
+        )        
+        self.logger.info(f'生成的提示詞: {prompt}')
+        return prompt
+        
+    @log_execution_time(logger=setup_logger(__name__))
+    async def etl_process(self, prompt: Optional[str] = None, temperature: float = 1.0) -> Dict[str, Any]:
+        """執行完整的 ETL 處理流程
+        
+        Args:
+            prompt (Optional[str], optional): 提示詞. Defaults to None.
+            temperature (float, optional): LLM 溫度參數. Defaults to 1.0.
+            
+        Returns:
+            Dict[str, Any]: 處理結果
+        """
         try:
+            # 如果角色有群組設定，從群組中隨機選擇一個角色
+            if self.character_class.group_name:
+                dynamic_character = self.get_random_character_from_group()
+                # 將character 強轉新角色
+                self.character_class.character = dynamic_character
+                self.character_class.config.character = dynamic_character
+                self.logger.info(f"從群組 {self.character_class.group_name} 中選擇角色: {dynamic_character}")
+            
+            # 如果沒有提供 prompt，則生成一個
+            if not prompt:
+                prompt = self.generate_prompt(
+                    character=self.character_class.character,
+                    temperature=temperature
+                )
+            
             #特例處理
             if re.sub(string=prompt.lower(), pattern='\s', repl='').find('waddledee') != -1:
                 prompt = re.sub(string=prompt, pattern='waddledee|Waddledee', repl='waddle dee')
@@ -178,3 +263,5 @@ class ContentProcessor:
             # 使用shutil.rmtree遞迴刪除目錄及其所有內容
             shutil.rmtree(config.output_dir)
             self.logger.info(f"已清理資源目錄: {config.output_dir}")
+        
+        db_pool.close_all()
