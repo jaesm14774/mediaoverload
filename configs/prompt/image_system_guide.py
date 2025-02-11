@@ -231,6 +231,7 @@ Keywords or Message: [User provides keywords or a short message]
 [4-6 Emojis] #[Hashtag1] #[Hashtag2] ... #[Hashtag30]
 """.strip()
 
+
 describe_image_prompt = f"""
 Main Subject
 Describe the primary focus/subject in precise detail

@@ -24,8 +24,8 @@ class Text2ImageStrategy(ContentStrategy):
             .with_text_model('ollama', model_name='llama3.2') \
             .build()
         self.gemini_vision_manager = VisionManagerBuilder() \
-            .with_vision_model('gemini', model_name='gemini-2.0-flash-exp') \
-            .with_text_model('gemini', model_name='gemini-2.0-flash-exp') \
+            .with_vision_model('gemini', model_name='gemini-2.0-flash') \
+            .with_text_model('gemini', model_name='gemini-2.0-flash') \
             .build()
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
@@ -42,6 +42,7 @@ class Text2ImageStrategy(ContentStrategy):
             desc for desc in self.ollama_vision_manager.generate_image_prompts(self.config.prompt)
             if not desc.startswith('Here are')
         ]
+        print(descriptions)
         if self.config.character:
             self.descriptions = [
                 desc for desc in descriptions
@@ -134,7 +135,7 @@ class Text2ImageStrategy(ContentStrategy):
         start_time = time.time()
         # 需要時可以動態切換模型
         switcher = ModelSwitcher(self.ollama_vision_manager)
-        switcher.switch_text_model('ollama', model_name='dolphin3')
+        switcher.switch_text_model('ollama', model_name='gemma:7b')
 
         # 整合角色名稱、描述和預設標籤
         content_parts = [
@@ -151,6 +152,7 @@ class Text2ImageStrategy(ContentStrategy):
             article_content = article_content.split('</think>')[-1].strip()        
         
         self.article_content = self.prevent_hashtag_count_too_more(article_content)
+
         print(f'產生文章內容花費 : {time.time() - start_time}')
         return self
 

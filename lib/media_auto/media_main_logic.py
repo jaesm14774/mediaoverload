@@ -42,7 +42,7 @@ class ContentProcessor:
         query = """
             SELECT role_name_en 
             FROM anime.anime_roles
-            WHERE group_name = %s AND status = 1 AND workflow_name = %s
+            WHERE group_name = %s AND status = 1 AND workflow_name = %s AND weight > 0
         """.strip()
         filename = os.path.basename(self.character_class.workflow_path)
         name_without_ext, _ = os.path.splitext(filename)
@@ -84,7 +84,7 @@ class ContentProcessor:
             extra=f'imagine the most unconventional and counterintuitive version of "{prompt}".Break all traditional assumptions and create a radically different narrative'
         )        
         self.logger.info(f'生成的提示詞: {prompt}')
-        return prompt
+        return prompt.lower()
         
     @log_execution_time(logger=setup_logger(__name__))
     async def etl_process(self, prompt: Optional[str] = None, temperature: float = 1.0) -> Dict[str, Any]:
@@ -145,6 +145,7 @@ class ContentProcessor:
             
             # 生成內容
             self.logger.info("開始生成內容流程")
+
             self.strategy.generate_description()
             self.logger.info("描述生成完成")
             
@@ -153,7 +154,6 @@ class ContentProcessor:
             
             self.strategy.analyze_image_text_match(config_dict.get('similarity_threshold', 0.9))
             self.logger.info("圖文匹配分析完成")
-            
             self.strategy.generate_article_content()
             self.logger.info("文章內容生成完成")
 
