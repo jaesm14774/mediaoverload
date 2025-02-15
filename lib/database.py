@@ -6,6 +6,7 @@ from typing import Dict, Optional, Any
 from contextlib import contextmanager
 import logging
 from threading import Lock
+from urllib.parse import quote_plus
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ class MySQLConnection(DatabaseConnection):
             
             # 建立 SQLAlchemy engine
             self.engine = create_engine(
-                f'mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}?charset=utf8mb4'
+                f'mysql+pymysql://{user}:{quote_plus(password)}@{host}:{port}/{db_name}?charset=utf8mb4'
             )
             logger.info(f"Successfully connected to MySQL database: {db_name}")
         except Exception as e:
@@ -183,7 +184,7 @@ class PostgreSQLConnection(DatabaseConnection):
             
             # 建立 SQLAlchemy engine
             self.engine = create_engine(
-                f'postgresql://{user}:{password}@{host}:{port}/{db_name}'
+                f'postgresql://{user}:{quote_plus(password)}@{host}:{port}/{db_name}'
             )
             logger.info(f"Successfully connected to PostgreSQL database: {db_name}")
         except Exception as e:
@@ -208,7 +209,7 @@ class MSSQLConnection(DatabaseConnection):
             
             # 建立 SQLAlchemy engine
             self.engine = create_engine(
-                f'mssql+pyodbc://{user}:{password}@{host}:{port}/{db_name}?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes'
+                f'mssql+pyodbc://{user}:{quote_plus(password)}@{host}:{port}/{db_name}?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes'
             )
             logger.info(f"Successfully connected to MSSQL database: {db_name}")
         except Exception as e:
