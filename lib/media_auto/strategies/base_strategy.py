@@ -5,13 +5,17 @@ from dataclasses import dataclass, field
 @dataclass
 class GenerationConfig:
     """基礎生成配置類"""
-    output_dir: str
-    character: str
-    prompt: str
-    generation_type: str  # 'text2img', 'img2img', 'text2video' etc.
-    workflow_path: Optional[str] = None
-    default_hashtags: List[str] = field(default_factory=list)
-    additional_params: Dict[str, Any] = None
+    def __init__(self, **kwargs):
+        self._attributes = kwargs  # 儲存所有屬性
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+    
+    def __getattr__(self, name):
+        return None
+    
+    def get_all_attributes(self):
+        """獲取所有設置的屬性"""
+        return self._attributes
 
 class ContentStrategy(ABC):
     """內容生成策略的抽象基類"""

@@ -120,27 +120,20 @@ class ContentProcessor:
             self.logger.info(f"開始處理提示詞: {prompt}")
             
             # 獲取角色特定的生成配置
-            config_dict = self.character_class.get_generation_config(prompt)
-            self.logger.info(f"獲取到生成配置: {config_dict['character']}")
+            config = self.character_class.get_generation_config(prompt)
+            self.logger.info(f"獲取到生成配置: {config['character']}")
             
-            # 構建配置
-            config = GenerationConfig(
-                output_dir=os.path.join(config_dict['output_dir'], config_dict['character']),
-                character=config_dict['character'],
-                prompt=config_dict['prompt'],
-                generation_type=config_dict['type'],
-                workflow_path=config_dict['workflow_path'],
-                default_hashtags=config_dict.get('default_hashtags', []),
-                additional_params=config_dict['additional_params']
-            )
-            self.logger.info(f"配置構建完成，輸出目錄: {config.output_dir}")
+            # 直接使用解包運算符傳入所有配置
+            config['output_dir'] = os.path.join(config['output_dir'], config['character'])
+
+            self.logger.info(f"配置構建完成，輸出目錄: {config['output_dir']}")
             
             # 獲取對應的策略
-            self.strategy = StrategyFactory.get_strategy(config.generation_type)
-            self.logger.info(f"使用策略: {config.generation_type}")
+            self.strategy = StrategyFactory.get_strategy(config['generation_type'])
+            self.logger.info(f"使用策略: {config['generation_type']}")
             
             # 讀取config
-            self.strategy.load_config(config)
+            self.strategy.load_config(GenerationConfig(**config))
             self.logger.info("策略配置載入完成")
             
             # 生成內容
@@ -152,7 +145,7 @@ class ContentProcessor:
             self.strategy.generate_image()
             self.logger.info("圖片生成完成")
             
-            self.strategy.analyze_image_text_match(config_dict.get('similarity_threshold', 0.9))
+            self.strategy.analyze_image_text_match(config.get('similarity_threshold', 0.9))
             self.logger.info("圖文匹配分析完成")
             self.strategy.generate_article_content()
             self.logger.info("文章內容生成完成")
@@ -197,7 +190,7 @@ class ContentProcessor:
             #處理IG 模組 只能上傳jpg format
             selected_image_paths = [self.selected_result[i]['image_path'] for i in selected_indices]
             self.logger.info("開始圖片處理")
-            image_process=ImageProcessor(config.output_dir)
+            image_process=ImageProcessor(config['output_dir'])
             image_process.main_process()
             selected_image_paths = [re.sub(string=image_path, pattern=r'\.png|\.jpeg', repl='.jpg') for image_path in selected_image_paths]
             self.logger.info("圖片處理完成")
@@ -229,7 +222,7 @@ class ContentProcessor:
                 
                 success_message = (
                     f"✨ 任務完成通知 ✨\n"
-                    f"🎭 角色: {config_dict['character']}\n"
+                    f"🎭 角色: {config['character']}\n"
                     f"⏰ 完成時間: {current_time}\n"
                     f"⌛ 總執行時間: {hours}小時 {minutes}分鐘 {seconds}秒\n"
                     f"📸 成功上傳圖片數量: {len(selected_indices)}張"
@@ -248,7 +241,7 @@ class ContentProcessor:
             
             error_message = (
                 f"❌ 錯誤通知 ❌\n"
-                f"🎭 角色: {config_dict['character']}\n"
+                f"🎭 角色: {config['character']}\n"
                 f"⏰ 錯誤時間: {current_time}\n"
                 f"💥 錯誤訊息: {str(e)}\n"
             )
@@ -259,9 +252,9 @@ class ContentProcessor:
     @log_execution_time(logger=setup_logger(__name__))
     def cleanup(self, config):
         import shutil
-        if os.path.exists(config.output_dir):
+        if os.path.exists(config['output_dir']):
             # 使用shutil.rmtree遞迴刪除目錄及其所有內容
-            shutil.rmtree(config.output_dir)
-            self.logger.info(f"已清理資源目錄: {config.output_dir}")
+            shutil.rmtree(config['output_dir'])
+            self.logger.info(f"已清理資源目錄: {config['output_dir']}")
         
         db_pool.close_all()
