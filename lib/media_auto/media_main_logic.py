@@ -1,6 +1,7 @@
 import os
 import re
 import numpy as np
+import pandas as pd
 import random
 from dotenv import load_dotenv
 from typing import Dict, Any, Optional
@@ -26,6 +27,7 @@ class ContentProcessor:
         self.character_class = character_class
         self.logger = setup_logger(__name__)
         self.start_time = time.time()
+        self.now_date = datetime.now().strftime('%Y-%m-%d')
 
         db_pool.initialize('mysql',
                         host=os.environ['mysql_host'],
@@ -52,7 +54,7 @@ class ContentProcessor:
         if not characters:
             return self.character_class.character
         return random.choice(characters)
-        
+
     @log_execution_time(logger=setup_logger(__name__))
     def generate_prompt(self, character: str, temperature: float = 1.0) -> str:
         """生成提示詞
@@ -65,13 +67,24 @@ class ContentProcessor:
             str: 生成的提示詞
         """
         self.logger.info(f'開始為角色生成提示詞: {character}')
-        
         # 初始化 VisionManager
         ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llama3.2-vision') \
             .with_text_model('ollama', model_name='llama3.2', temperature=temperature) \
-            .build()
+            .build()        
         
+        self.logger.info(f'角色生成方式採用: {self.character_class.config.generate_prompt_method}')
+
+        if self.character_class.config.generate_prompt_method == 'default':
+            prompt = self.generate_prompt_by_default(ollama_vision_manager, character)
+        elif self.character_class.config.generate_prompt_method == 'news':
+            prompt = self.generate_prompt_by_news(ollama_vision_manager, character)
+
+        self.logger.info(f'生成的提示詞: {prompt}')
+        return prompt.lower()
+
+    def generate_prompt_by_default(self, ollama_vision_manager, character):
+       
         # 生成第一層提示詞
         prompt = ollama_vision_manager.generate_arbitrary_input(
             character=character,
@@ -81,11 +94,27 @@ class ContentProcessor:
         # 生成第二層提示詞
         prompt = ollama_vision_manager.generate_arbitrary_input(
             character=character,
-            extra=f'imagine the most unconventional and counterintuitive version of "{prompt}".Break all traditional assumptions and create a radically different narrative'
-        )        
-        self.logger.info(f'生成的提示詞: {prompt}')
-        return prompt.lower()
+            extra=f'Given the concept: "{prompt}", randomly retain a MINOR aspect of it. For EVERYTHING else, imagine the MOST unconventional, counterintuitive, and radically different possibilities. Generate a narrative that is built upon a randomly selected, minimal fragment of "{prompt}", while being overwhelmingly divergent in all other aspects.'
+        )
+        return prompt
+
+    def generate_prompt_by_news(self, ollama_vision_manager, character):
+        engine = self.mysql_conn.engine
+        df = pd.read_sql_query(f"select title, keyword, created_at, category from news_ch.news order by id desc limit 10000", engine)
+        df = df[df.keyword.map(str.strip) != '']
+        df = df[~df.category.isin(['政治', '兩岸', '美股雷達', 'A股港股', '財經雲', '股市', '台股新聞'])]
+        df = df[df['created_at'] >= self.now_date].reset_index(drop=True)
+
+        choose_index = random.choice(range(0, len(df)))
+        keyword = df.loc[choose_index, 'keyword']
+        title = df.loc[choose_index, 'title']
+        prompt = f"""
+            main_character : {character}
+            extra_info : {title} ; {keyword}
+        """.strip()
         
+        return prompt
+            
     @log_execution_time(logger=setup_logger(__name__))
     async def etl_process(self, prompt: Optional[str] = None, temperature: float = 1.0) -> Dict[str, Any]:
         """執行完整的 ETL 處理流程

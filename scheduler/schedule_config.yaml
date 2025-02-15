@@ -11,9 +11,3 @@ schedules:
       - use_llm: true
         prompt: ""
         temperature: 1.0
-  # kirby:
-    # character: "Kirby"
-    # prompts:
-      # - use_llm: true
-        # prompt: ""
-        # temperature: 1.0 
