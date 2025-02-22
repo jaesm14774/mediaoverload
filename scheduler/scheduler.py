@@ -22,10 +22,11 @@ class MediaScheduler:
         
         self.last_execution_times = {}  # 儲存每個角色的上次執行時間
 
-        # 基礎設定調整
-        self.base_probability = 4/15    # 基礎機率（每15小時4次）
-        self.max_probability = 1/2    # 最大機率（每15小時7.5次）
-        self.min_probability = 0.5/15     # 最小機率（每15小時0.5次）
+        # 從配置文件讀取或使用默認值
+        probability_settings = self.config.get('probability_settings', {})
+        self.base_probability = float(probability_settings.get('base_probability', 4/15))    # 基礎機率（每15小時4次）
+        self.max_probability = float(probability_settings.get('max_probability', 1/2))    # 最大機率（每15小時7.5次）
+        self.min_probability = float(probability_settings.get('min_probability', 0.5/15))     # 最小機率（每15小時0.5次）
 
         # 立即執行一次處理
         self.instant_execution()
@@ -68,24 +69,32 @@ class MediaScheduler:
             self.logger.info("當前時間在睡眠時段（22:00-07:00），跳過執行")
             return False
         
+        # 獲取角色特定的概率設定或使用全局設定
+        char_config = next((cfg for name, cfg in self.config['schedules'].items() if cfg['character'] == character_name), None)
+        prob_settings = char_config.get('probability_settings', {}) if char_config else {}
+        
+        base_prob = float(prob_settings.get('base_probability', self.base_probability))
+        max_prob = float(prob_settings.get('max_probability', self.max_probability))
+        min_prob = float(prob_settings.get('min_probability', self.min_probability))
+        
         # 計算距離上次執行的時間
         last_execution_time = self.last_execution_times.get(character_name)
         if last_execution_time:
             hours_since_last = (datetime.now() - last_execution_time).total_seconds() / 3600
             time_factor = self.calculate_time_factor(hours_since_last)
             # 計算當前小時的基礎機率
-            current_probability = self.base_probability * time_factor
+            current_probability = base_prob * time_factor
             
             # 確保機率在合理範圍內
-            current_probability = max(self.min_probability, 
-                                   min(current_probability, self.max_probability))
+            current_probability = max(min_prob, 
+                                   min(current_probability, max_prob))
             
             self.logger.info(f"距離上次執行 {hours_since_last:.1f} 小時, "
                            f"時間因子 {time_factor:.2f}, "
                            f"當前執行機率 {current_probability:.3%}/小時")
         else:
-            # 首次執行使用基礎機率
-            current_probability = self.base_probability
+            # 首次執行使用角色特定或全局基礎機率
+            current_probability = base_prob
             self.logger.info(f"首次執行，使用基礎機率 {current_probability:.3%}/小時")
         
         return random.random() < current_probability
@@ -198,4 +207,4 @@ class MediaScheduler:
 
 if __name__ == "__main__":
     scheduler = MediaScheduler()
-    scheduler.run() 
+    scheduler.run()

@@ -52,7 +52,7 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
     similarity_threshold = 0.7
     generation_type = 'text2img'
-    default_hashtags = ['pokemon']
+    default_hashtags = ['pokemon', '寶可夢']
     group_name = 'Pokemon'
     additional_params = {
         'images_per_description': 3,
@@ -81,6 +81,28 @@ class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
         'is_negative': False
     }
     generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.3,0.7])[0]
+    
+    def __init__(self):
+        BaseCharacter.__init__(self)
+        SocialMediaMixin.__init__(self)
+        # Register social media platforms
+        self.register_social_media({
+            'instagram': (InstagramPlatform, f'/app/configs/social_media/ig', self.character),
+        })
+
+class KirbyProcess(BaseCharacter, SocialMediaMixin):
+    character = 'kirby'
+    output_dir = f'/app/output_image'
+    workflow_path = '/app/configs/workflow/nova-anime-xl.json'
+    similarity_threshold = 0.8
+    generation_type = 'text2img'
+    default_hashtags = ['カービィ', '星のカービィ']
+    group_name = 'Kirby'
+    additional_params = {
+        'images_per_description': 3,
+        'is_negative': False
+    }
+    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
     
     def __init__(self):
         BaseCharacter.__init__(self)

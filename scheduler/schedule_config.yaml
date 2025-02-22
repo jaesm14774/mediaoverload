@@ -1,13 +1,28 @@
+probability_settings:
+  base_probability: 0.2  # 基礎機率（每15小時3次）
+  max_probability: 0.5    # 最大機率（每15小時7.5次）
+  min_probability: 0.03334  # 最小機率（每15小時0.5次）
+
 schedules:
   waddledee:
     character: "Waddledee"
     prompts:
       - use_llm: true
         prompt: ""
-        temperature: 1.0 
+        temperature: 1.0
   wobbuffet:
     character: "Wobbuffet"
     prompts:
       - use_llm: true
         prompt: ""
         temperature: 1.0
+  kirby:
+    character: "Kirby"
+    prompts:
+      - use_llm: true
+        prompt: ""
+        temperature: 1.0
+    probability_settings:
+      base_probability: 0.06667  # 基礎機率（每15小時1次）
+      max_probability: 0.2    # 最大機率（每15小時3次）
+      min_probability: 0.03334  # 最小機率（每15小時0.5次）
