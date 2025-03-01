@@ -58,7 +58,7 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
         'images_per_description': 3,
         'is_negative': False
     }
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.3,0.7])[0]
+    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.01,0.99])[0]
     
     def __init__(self):
         BaseCharacter.__init__(self)
@@ -80,7 +80,7 @@ class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
         'images_per_description': 3,
         'is_negative': False
     }
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.3,0.7])[0]
+    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
     
     def __init__(self):
         BaseCharacter.__init__(self)
@@ -102,7 +102,7 @@ class KirbyProcess(BaseCharacter, SocialMediaMixin):
         'images_per_description': 3,
         'is_negative': False
     }
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
+    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.01,0.99])[0]
     
     def __init__(self):
         BaseCharacter.__init__(self)
