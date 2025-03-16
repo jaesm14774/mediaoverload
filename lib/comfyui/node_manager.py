@@ -25,18 +25,60 @@ class NodeManager:
         }
     
     @staticmethod
-    def generate_text_updates(description: str, indices: List[int], **additional_params) -> List[Dict[str, Any]]:
+    def get_node_indices(workflow: Dict[str, Any], node_type: str, **filters) -> List[int]:
+        """
+        獲取指定類型節點的索引列表
+        
+        Args:
+            workflow (Dict): 工作流配置
+            node_type (str): 節點類型
+            filters: 額外的過濾條件，例如 is_negative=False
+            
+        Returns:
+            List[int]: 符合條件的節點索引列表
+        """
+        from lib.comfyui.websockets_api import ComfyUICommunicator
+        
+        # 使用 ComfyUICommunicator 的方法分析節點
+        communicator = ComfyUICommunicator()
+        all_nodes = communicator.identify_all_nodes(workflow)
+        
+        # 獲取指定類型的節點
+        matching_nodes = all_nodes.get(node_type, [])
+
+        # 應用過濾條件
+        if filters:
+            filtered_nodes = []
+            for node in matching_nodes:
+                if all(
+                    node["metadata"].get(key) == value 
+                    for key, value in filters.items()
+                ):
+                    filtered_nodes.append(node)
+            matching_nodes = filtered_nodes
+        
+        # 返回節點索引列表
+        return list(range(len(matching_nodes)))
+    
+    @staticmethod
+    def generate_text_updates(workflow: Dict[str, Any], description: str, **additional_params) -> List[Dict[str, Any]]:
         """
         生成文字編碼節點的更新配置
         
         Args:
+            workflow (Dict): 工作流配置
             description (str): 要編碼的文字描述
-            indices (List[int]): 需要更新的節點索引列表
-            additional_params: 其他額外參數
+            additional_params: 其他額外參數，例如 is_negative=False
         
         Returns:
             List[Dict]: 文字編碼節點的更新配置列表
         """
+        indices = NodeManager.get_node_indices(
+            workflow, 
+            "CLIPTextEncode", 
+            **{'is_negative' : additional_params.get('is_negative', False)}
+        )
+        
         return [
             NodeManager.create_node_update(
                 "CLIPTextEncode", 
@@ -48,17 +90,19 @@ class NodeManager:
         ]
     
     @staticmethod
-    def generate_sampler_updates(seed: int, indices: List[int]) -> List[Dict[str, Any]]:
+    def generate_sampler_updates(workflow: Dict[str, Any], seed: int) -> List[Dict[str, Any]]:
         """
         生成採樣器節點的更新配置
         
         Args:
+            workflow (Dict): 工作流配置
             seed (int): 隨機種子值
-            indices (List[int]): 需要更新的節點索引列表
         
         Returns:
             List[Dict]: 採樣器節點的更新配置列表
         """
+        indices = NodeManager.get_node_indices(workflow, "KSampler")
+        
         return [
             NodeManager.create_node_update(
                 "KSampler", 
@@ -69,11 +113,12 @@ class NodeManager:
         ]
 
     @staticmethod
-    def generate_updates(description: str, seed: int, **additional_params) -> List[Dict[str, Any]]:
+    def generate_updates(workflow: Dict[str, Any], description: str, seed: int, **additional_params) -> List[Dict[str, Any]]:
         """
         生成所有需要的節點更新配置
         
         Args:
+            workflow (Dict): 工作流配置
             description (str): 文字描述
             seed (int): 隨機種子值
             additional_params: 其他額外參數
@@ -83,15 +128,15 @@ class NodeManager:
         """
         # 生成文字編碼節點更新
         text_updates = NodeManager.generate_text_updates(
+            workflow,
             description, 
-            range(3),  # 假設有3個文字編碼節點
             **additional_params
         )
         
         # 生成採樣器節點更新
         sampler_updates = NodeManager.generate_sampler_updates(
-            seed,
-            range(3)  # 假設有3個採樣器節點
+            workflow,
+            seed
         )
         
         # 合併所有更新

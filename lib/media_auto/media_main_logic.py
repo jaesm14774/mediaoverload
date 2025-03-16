@@ -169,6 +169,7 @@ class ContentProcessor:
             self.logger.info("開始生成內容流程")
 
             self.strategy.generate_description()
+            self.logger.info(f"""描述: {self.strategy.descriptions}""".strip())
             self.logger.info("描述生成完成")
             
             self.strategy.generate_image()

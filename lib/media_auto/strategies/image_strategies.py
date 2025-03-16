@@ -65,6 +65,7 @@ class Text2ImageStrategy(ContentStrategy):
             for i in range(images_per_description):
                 print(f'為第{idx}描述，生成第{i}張圖片\n')
                 updates = self.node_manager.generate_updates(
+                    workflow=workflow,
                     description=description,
                     seed=seed_start + i,
                     **self.config.additional_params
