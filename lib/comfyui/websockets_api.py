@@ -182,12 +182,9 @@ class ComfyUICommunicator:
             }
             
             # 為特定類型節點添加額外資訊
-            if class_type == "CLIPTextEncode":
-                current_text = node_data["inputs"].get("text", "")
-                node_info["metadata"]["is_negative"] = any(
-                    neg_word in current_text.lower() 
-                    for neg_word in ["bad", "worst", "negative", "ugly"]
-                )
+            if class_type in ["PrimitiveString", "CLIPTextEncode"]:
+                current_text = node_data.get('_meta', {}).get('title', '').lower()
+                node_info["metadata"]["is_negative"] = 'negative' in current_text
             
             node_types[class_type].append(node_info)
             

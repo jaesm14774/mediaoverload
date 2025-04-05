@@ -24,8 +24,8 @@ class Text2ImageStrategy(ContentStrategy):
             .with_text_model('ollama', model_name='llama3.2') \
             .build()
         self.gemini_vision_manager = VisionManagerBuilder() \
-            .with_vision_model('gemini', model_name='gemini-2.0-flash') \
-            .with_text_model('gemini', model_name='gemini-2.0-flash') \
+            .with_vision_model('gemini', model_name='gemini-2.0-flash-lite') \
+            .with_text_model('gemini', model_name='gemini-2.0-flash-lite') \
             .build()
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
@@ -141,7 +141,8 @@ class Text2ImageStrategy(ContentStrategy):
         # 整合角色名稱、描述和預設標籤
         content_parts = [
             self.config.character,
-            *list(set([row['description'] for row in self.filter_results]))
+            *list(set([row['description'] for row in self.filter_results])),
+            self.config.prompt
         ]
         article_content = self.ollama_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
 

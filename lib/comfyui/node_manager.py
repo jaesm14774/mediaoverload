@@ -64,6 +64,7 @@ class NodeManager:
     def generate_text_updates(workflow: Dict[str, Any], description: str, **additional_params) -> List[Dict[str, Any]]:
         """
         生成文字編碼節點的更新配置
+        先以PrimitiveString節點 當作text 的統一輸入，若無則再以CLIPTextEncode 當作text 的統一輸入
         
         Args:
             workflow (Dict): 工作流配置
@@ -73,17 +74,26 @@ class NodeManager:
         Returns:
             List[Dict]: 文字編碼節點的更新配置列表
         """
+        text_node_name = 'PrimitiveString'
+        text_node_key = 'value'
         indices = NodeManager.get_node_indices(
             workflow, 
-            "CLIPTextEncode", 
+            text_node_name, 
             **{'is_negative' : additional_params.get('is_negative', False)}
         )
-        
+        if len(indices) == 0:
+            indices = NodeManager.get_node_indices(
+                workflow,
+                'CLIPTextEncode',
+                **{'is_negative' : additional_params.get('is_negative', False)}
+            )
+            text_node_name = 'CLIPTextEncode'
+            text_node_key = 'text' 
         return [
             NodeManager.create_node_update(
-                "CLIPTextEncode", 
+                text_node_name, 
                 i, 
-                {"text": description}, 
+                {text_node_key: description}, 
                 **additional_params
             )
             for i in indices

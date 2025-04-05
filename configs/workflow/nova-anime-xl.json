@@ -1,8 +1,59 @@
 {
-  "37": {
+  "171": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "wifth"
+    }
+  },
+  "172": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "height"
+    }
+  },
+  "182": {
+    "inputs": {
+      "value": "Kirby, (kneeling devoutly before a simple tombstone:1.2), Qingming Festival scene, paying respects to ancestors, holding colorful (flower offerings:1.1), faint gentle smile, respectful expression, serene atmosphere, soft daylight, gentle breeze, anime art style, [peaceful remembrance: solemn occasion: 0.6], cute character style."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "183": {
+    "inputs": {
+      "value": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale, multiple"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "187": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_ilV60.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "188": {
+    "inputs": {
+      "width": [
+        "171",
+        0
+      ],
+      "height": [
+        "172",
+        0
+      ],
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -10,20 +61,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "38": {
+  "189": {
     "inputs": {
-      "ckpt_name": "novaAnimeXL_illustriousV10.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
-  "40": {
-    "inputs": {
-      "text": "In a vibrant meadow under a twilight sky, Waddle dee dances with shadows, her feathers shimmering like embers as she weaves dreams into the fabric of night.",
+      "text": [
+        "182",
+        0
+      ],
       "clip": [
-        "38",
+        "187",
         1
       ]
     },
@@ -32,11 +77,14 @@
       "title": "positive prompt"
     }
   },
-  "41": {
+  "190": {
     "inputs": {
-      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "text": [
+        "183",
+        0
+      ],
       "clip": [
-        "38",
+        "187",
         1
       ]
     },
@@ -45,28 +93,28 @@
       "title": "negative prompt"
     }
   },
-  "42": {
+  "191": {
     "inputs": {
-      "seed": 4196,
-      "steps": 30,
+      "seed": 4665,
+      "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "38",
+        "187",
         0
       ],
       "positive": [
-        "40",
+        "189",
         0
       ],
       "negative": [
-        "41",
+        "190",
         0
       ],
       "latent_image": [
-        "37",
+        "188",
         0
       ]
     },
@@ -75,14 +123,14 @@
       "title": "KSampler"
     }
   },
-  "43": {
+  "192": {
     "inputs": {
       "samples": [
-        "42",
+        "191",
         0
       ],
       "vae": [
-        "38",
+        "187",
         2
       ]
     },
@@ -91,11 +139,11 @@
       "title": "VAE Decode"
     }
   },
-  "44": {
+  "193": {
     "inputs": {
-      "filename_prefix": "v1",
+      "filename_prefix": "one_image_v60",
       "images": [
-        "43",
+        "192",
         0
       ]
     },
@@ -104,19 +152,25 @@
       "title": "Save Image"
     }
   },
-  "46:0": {
+  "184:0": {
     "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV25MerryChristmas.safetensors"
+      "ckpt_name": "novaAnimeXL_ilV50.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "46:1": {
+  "184:1": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": [
+        "171",
+        0
+      ],
+      "height": [
+        "172",
+        0
+      ],
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -124,11 +178,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "46:2": {
+  "184:2": {
     "inputs": {
-      "text": "In a vibrant meadow under a twilight sky, Waddle dee dances with shadows, her feathers shimmering like embers as she weaves dreams into the fabric of night.",
+      "text": [
+        "182",
+        0
+      ],
       "clip": [
-        "46:0",
+        "184:0",
         1
       ]
     },
@@ -137,11 +194,14 @@
       "title": "positive prompt"
     }
   },
-  "46:3": {
+  "184:3": {
     "inputs": {
-      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "text": [
+        "183",
+        0
+      ],
       "clip": [
-        "46:0",
+        "184:0",
         1
       ]
     },
@@ -150,28 +210,28 @@
       "title": "negative prompt"
     }
   },
-  "46:4": {
+  "184:4": {
     "inputs": {
-      "seed": 4196,
-      "steps": 30,
+      "seed": 4665,
+      "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "46:0",
+        "184:0",
         0
       ],
       "positive": [
-        "46:2",
+        "184:2",
         0
       ],
       "negative": [
-        "46:3",
+        "184:3",
         0
       ],
       "latent_image": [
-        "46:1",
+        "184:1",
         0
       ]
     },
@@ -180,14 +240,14 @@
       "title": "KSampler"
     }
   },
-  "46:5": {
+  "184:5": {
     "inputs": {
       "samples": [
-        "46:4",
+        "184:4",
         0
       ],
       "vae": [
-        "46:0",
+        "184:0",
         2
       ]
     },
@@ -196,11 +256,11 @@
       "title": "VAE Decode"
     }
   },
-  "46:6": {
+  "184:6": {
     "inputs": {
-      "filename_prefix": "v25",
+      "filename_prefix": "one_image_v50",
       "images": [
-        "46:5",
+        "184:5",
         0
       ]
     },
@@ -209,7 +269,7 @@
       "title": "Save Image"
     }
   },
-  "47:0": {
+  "186:0": {
     "inputs": {
       "ckpt_name": "novaAnimeXL_ilV30HappyNewYear.safetensors"
     },
@@ -218,10 +278,16 @@
       "title": "Load Checkpoint"
     }
   },
-  "47:1": {
+  "186:1": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": [
+        "171",
+        0
+      ],
+      "height": [
+        "172",
+        0
+      ],
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -229,11 +295,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "47:2": {
+  "186:2": {
     "inputs": {
-      "text": "In a vibrant meadow under a twilight sky, Waddle dee dances with shadows, her feathers shimmering like embers as she weaves dreams into the fabric of night.",
+      "text": [
+        "182",
+        0
+      ],
       "clip": [
-        "47:0",
+        "186:0",
         1
       ]
     },
@@ -242,11 +311,11 @@
       "title": "positive prompt"
     }
   },
-  "47:3": {
+  "186:3": {
     "inputs": {
-      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale",
+      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale, multiple",
       "clip": [
-        "47:0",
+        "186:0",
         1
       ]
     },
@@ -255,28 +324,28 @@
       "title": "negative prompt"
     }
   },
-  "47:4": {
+  "186:4": {
     "inputs": {
-      "seed": 4196,
-      "steps": 30,
+      "seed": 4665,
+      "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "47:0",
+        "186:0",
         0
       ],
       "positive": [
-        "47:2",
+        "186:2",
         0
       ],
       "negative": [
-        "47:3",
+        "186:3",
         0
       ],
       "latent_image": [
-        "47:1",
+        "186:1",
         0
       ]
     },
@@ -285,14 +354,14 @@
       "title": "KSampler"
     }
   },
-  "47:5": {
+  "186:5": {
     "inputs": {
       "samples": [
-        "47:4",
+        "186:4",
         0
       ],
       "vae": [
-        "47:0",
+        "186:0",
         2
       ]
     },
@@ -301,11 +370,11 @@
       "title": "VAE Decode"
     }
   },
-  "47:6": {
+  "186:6": {
     "inputs": {
-      "filename_prefix": "v30",
+      "filename_prefix": "one_image_v30",
       "images": [
-        "47:5",
+        "186:5",
         0
       ]
     },
