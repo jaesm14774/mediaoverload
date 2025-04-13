@@ -160,6 +160,7 @@ class Text2ImageStrategy(ContentStrategy):
             {'role': 'user', 'content': article_content}
         ]
         self.article_content = self.ollama_vision_manager.text_model.chat_completion(messages=messages)
+        self.article_content = self.article_content.replace('"', '').replace('*', '').lower()
 
 
         print(f'產生文章內容花費 : {time.time() - start_time}')
