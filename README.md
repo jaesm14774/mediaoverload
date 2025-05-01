@@ -14,7 +14,6 @@
 ## 安裝步驟
 
 ### 1. 安裝基礎環境
-
 ```bash
 # 安裝 Python 依賴
 pip install -r requirements.txt
@@ -53,24 +52,20 @@ pip install -r requirements.txt
 
 ### 3. 配置環境變數
 
-1. 複製環境變數範本：
-```bash
-cp media_overload.env.example media_overload.env
-```
-
-2. 編輯 `media_overload.env`：
+1. 創建並編輯 `media_overload.env` 檔案，填入必要的 API 金鑰和 ID：
 ```env
 discord_review_bot_token=您的Discord機器人Token
 discord_review_channel_id=審核頻道ID
 gemini_api_token=google ai studio api key
+ollama_host=http://host.docker.internal:11434 # 如果使用 Docker 則用這個
+# ollama_host=http://localhost:11434 # 如果在本機運行 Ollama
 ```
 
-3. 設定社群媒體帳號：
-```bash
-# Instagram 設定範例
-cp configs/social_media/ig/example/ig.env.example configs/social_media/ig/your_character/ig.env
-cp configs/social_media/ig/example/ig_account.json.example configs/social_media/ig/your_character/ig_account.json
-```
+2. 設定社群媒體帳號：
+   - 參考 `configs/social_media/ig/` 下的角色目錄（如 `kirby` 或 `wobbuffet`）中的 `ig.env` 和 `ig_account.json` 檔案結構。
+   - 為你的角色創建對應的目錄和設定檔，例如：
+     `configs/social_media/ig/your_character/ig.env`
+     `configs/social_media/ig/your_character/ig_account.json`
 
 ### 4. 啟動服務
 
@@ -157,41 +152,71 @@ flowchart TD
 ### 2. 角色管理
 ```mermaid
 classDiagram
-    class BaseCharacter {
+    class CharacterConfig {
         +character: str
         +output_dir: str
         +workflow_path: str
-        +get_default_config()
-        +get_generation_config()
+        +similarity_threshold: float
+        +generation_type: str
+        +default_hashtags: list[str]
+        +additional_params: dict
+        +group_name: str
+        +generate_prompt_method: str
+    }
+    class BaseCharacter {
+        +config: CharacterConfig
+        +get_default_config() CharacterConfig
+        +get_generation_config(prompt) dict
     }
     class SocialMediaMixin {
-        +register_social_media()
-        +upload_to_social_media()
+        +register_social_media(platforms)
+        +upload_to_social_media(platform_name, content)
     }
-    BaseCharacter <|-- KirbyProcess
-    BaseCharacter <|-- KingDeDeDeProcess
+    class InstagramPlatform {
+        +login()
+        +upload_photo(photo_path, caption)
+    }
     BaseCharacter <|-- WobbuffetProcess
+    BaseCharacter <|-- KirbyProcess
+    BaseCharacter <|-- WaddledeeProcess
+    BaseCharacter <|-- UnbelievableWorldProcess
     SocialMediaMixin <|-- InstagramPlatform
-    SocialMediaMixin <|-- TwitterPlatform
+    WobbuffetProcess ..> SocialMediaMixin : uses
+    KirbyProcess ..> SocialMediaMixin : uses
+    WaddledeeProcess ..> SocialMediaMixin : uses
+    UnbelievableWorldProcess ..> SocialMediaMixin : uses
 ```
 
 ### 3. 策略模式
 ```mermaid
 classDiagram
-    class BaseStrategy {
+    class GenerationConfig {
+        +... attributes based on kwargs
+        +get_all_attributes() dict
+    }
+    class ContentStrategy {
+        +config: GenerationConfig
+        +load_config(config)
+        +generate_description()*
+        +generate_article_content()*
+    }
+    class Text2ImageStrategy {
         +generate_description()
         +generate_image()
         +analyze_image_text_match()
         +generate_article_content()
     }
-    class Text2ImgStrategy {
-        +generate_image()
+    class Image2ImageStrategy {
+        +generate_description() // pass
+        +generate_article_content() // pass
     }
-    class Img2ImgStrategy {
-        +generate_image()
+    class Text2VideoStrategy {
+        +generate_description() // pass
+        +generate_article_content() // pass
     }
-    BaseStrategy <|-- Text2ImgStrategy
-    BaseStrategy <|-- Img2ImgStrategy
+    ContentStrategy <|-- Text2ImageStrategy
+    ContentStrategy <|-- Image2ImageStrategy
+    ContentStrategy <|-- Text2VideoStrategy
 ```
 
 ## 配置說明
@@ -269,15 +294,37 @@ schedules:
    ```bash
    python run_media_interface.py --character "Wobbuffet" --prompt "Your prompt here"
    ```
-
-5. 等待內容生成與審核：
    - 系統會自動生成圖文內容
    - 發送到 Discord 頻道等待審核
    - 審核通過後自動發布
 
-6. 自動發布到社群媒體：
+5. 自動發布到社群媒體：
    - 支援 Instagram
    - 可擴展支援其他平台
+
+### 手動執行範例 (run_media_interface.py)
+
+你可以使用 `run_media_interface.py` 手動觸發特定角色的內容生成流程。
+
+**快速測試 (使用預設的 'Wobbuffet' 角色和 'text2image' 流程):**
+
+```bash
+python run_media_interface.py --prompt "wobbuffet is standing near a tree"
+```
+這會使用 `WobbuffetProcess` 類別和 `text2image` pipeline 來根據提示詞生成內容。
+
+**完整指令範例 (指定角色、提示詞和流程):**
+python run_media_interface.py --character "UnbelievableWorld" --prompt "" --pipeline "text2image"
+
+```bash
+python run_media_interface.py --character "Kirby" --prompt "kirby eating a strawberry cake" --pipeline "text2image"
+```
+這會使用 `KirbyProcess` 類別和 `text2image` pipeline。
+
+**可用的參數:**
+*   `--character CHARACTER_NAME`: 指定要使用的角色類別名稱 (例如 `Wobbuffet`, `Kirby`, `Waddledee`, `UnbelievableWorld`)。預設為 `Wobbuffet`。
+*   `--prompt "YOUR_PROMPT"`: **(必需)** 提供內容生成的提示詞。
+*   `--pipeline PIPELINE_NAME`: 指定要執行的流程。可選值: `text2image`, `image2image`, `text2video`, `complex_media`。預設為 `text2image`。
 
 ## 故障排除
 
@@ -333,13 +380,11 @@ class NewCharacter(BaseCharacter, SocialMediaMixin):
 
 2. 新增生成策略：
 ```python
+from lib.media_auto.strategies.base_strategy import ContentStrategy
+
 class NewStrategy(ContentStrategy):
     def generate_description(self):
         # 實現描述生成邏輯
-        pass
-
-    def generate_image(self):
-        # 實現圖片生成邏輯
         pass
 ```
 

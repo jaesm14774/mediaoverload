@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "Kirby, (kneeling devoutly before a simple tombstone:1.2), Qingming Festival scene, paying respects to ancestors, holding colorful (flower offerings:1.1), faint gentle smile, respectful expression, serene atmosphere, soft daylight, gentle breeze, anime art style, [peaceful remembrance: solemn occasion: 0.6], cute character style."
+      "value": "Single kirby, dancing rhythmically, full body shot, (swaying body side-to-side:1.1), energetic playful arm movements, grooving to a beat, cute expression, slightly clumsy but enthusiastic dance, set against a (plain white background:1.4), minimalist focus on movement, anime style, vibrant pink."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -33,123 +33,6 @@
     "class_type": "PrimitiveString",
     "_meta": {
       "title": "negative prompt"
-    }
-  },
-  "187": {
-    "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV60.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
-  "188": {
-    "inputs": {
-      "width": [
-        "171",
-        0
-      ],
-      "height": [
-        "172",
-        0
-      ],
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
-  },
-  "189": {
-    "inputs": {
-      "text": [
-        "182",
-        0
-      ],
-      "clip": [
-        "187",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "positive prompt"
-    }
-  },
-  "190": {
-    "inputs": {
-      "text": [
-        "183",
-        0
-      ],
-      "clip": [
-        "187",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "negative prompt"
-    }
-  },
-  "191": {
-    "inputs": {
-      "seed": 4665,
-      "steps": 25,
-      "cfg": 8,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "187",
-        0
-      ],
-      "positive": [
-        "189",
-        0
-      ],
-      "negative": [
-        "190",
-        0
-      ],
-      "latent_image": [
-        "188",
-        0
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "192": {
-    "inputs": {
-      "samples": [
-        "191",
-        0
-      ],
-      "vae": [
-        "187",
-        2
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "193": {
-    "inputs": {
-      "filename_prefix": "one_image_v60",
-      "images": [
-        "192",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
     }
   },
   "184:0": {
@@ -212,7 +95,7 @@
   },
   "184:4": {
     "inputs": {
-      "seed": 4665,
+      "seed": 4681,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -258,7 +141,7 @@
   },
   "184:6": {
     "inputs": {
-      "filename_prefix": "one_image_v50",
+      "filename_prefix": "nova_v50",
       "images": [
         "184:5",
         0
@@ -271,7 +154,7 @@
   },
   "186:0": {
     "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV30HappyNewYear.safetensors"
+      "ckpt_name": "waiNSFWIllustrious_v130.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -326,7 +209,7 @@
   },
   "186:4": {
     "inputs": {
-      "seed": 4665,
+      "seed": 4681,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -372,9 +255,126 @@
   },
   "186:6": {
     "inputs": {
-      "filename_prefix": "one_image_v30",
+      "filename_prefix": "walnsfw_model",
       "images": [
         "186:5",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "194:0": {
+    "inputs": {
+      "ckpt_name": "novaAnimeXL_ilV60.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "194:1": {
+    "inputs": {
+      "width": [
+        "171",
+        0
+      ],
+      "height": [
+        "172",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "194:2": {
+    "inputs": {
+      "text": [
+        "182",
+        0
+      ],
+      "clip": [
+        "194:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "194:3": {
+    "inputs": {
+      "text": [
+        "183",
+        0
+      ],
+      "clip": [
+        "194:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "194:4": {
+    "inputs": {
+      "seed": 4681,
+      "steps": 25,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "194:0",
+        0
+      ],
+      "positive": [
+        "194:2",
+        0
+      ],
+      "negative": [
+        "194:3",
+        0
+      ],
+      "latent_image": [
+        "194:1",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "194:5": {
+    "inputs": {
+      "samples": [
+        "194:4",
+        0
+      ],
+      "vae": [
+        "194:0",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "194:6": {
+    "inputs": {
+      "filename_prefix": "nova_v60",
+      "images": [
+        "194:5",
         0
       ]
     },

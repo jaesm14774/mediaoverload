@@ -4,6 +4,7 @@ from abc import ABC
 
 from lib.social_media import *
 import numpy as np
+import random
 
 @dataclass
 class CharacterConfig:
@@ -17,11 +18,15 @@ class CharacterConfig:
     additional_params: Optional[Dict[str, Any]] = field(default_factory=dict)
     group_name: str = ''
     generate_prompt_method : str = 'default'
+    space_strip: bool = True
+    image_system_prompt: str = 'default'
 
 class BaseCharacter(ABC):
     """角色基礎類別"""
     config: CharacterConfig
     group_name: str = ''
+    space_strip = True
+    image_system_prompt = 'default'
 
     def __init__(self):
         self.config = self.get_default_config()
@@ -37,7 +42,9 @@ class BaseCharacter(ABC):
             default_hashtags=self.default_hashtags,
             additional_params=self.additional_params,
             group_name=self.group_name,
-            generate_prompt_method = self.generate_prompt_method
+            generate_prompt_method = self.generate_prompt_method,
+            space_strip = self.space_strip,
+            image_system_prompt = self.image_system_prompt
         )
     
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:
@@ -104,6 +111,31 @@ class KirbyProcess(BaseCharacter, SocialMediaMixin):
     }
     generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.01,0.99])[0]
     
+    def __init__(self):
+        BaseCharacter.__init__(self)
+        SocialMediaMixin.__init__(self)
+        # Register social media platforms
+        self.register_social_media({
+            'instagram': (InstagramPlatform, f'/app/configs/social_media/ig', self.character),
+        })
+
+class UnbelievableWorldProcess(BaseCharacter, SocialMediaMixin):
+    character = 'unbelievable_world'
+    output_dir = f'/app/output_image'
+    workflow_path = '/app/configs/workflow/flux_dev.json'
+    prompt_type = 'unbelievable_world_system_prompt'
+    similarity_threshold = 0.8
+    generation_type = 'text2img'
+    default_hashtags = ['unbelievable', 'world']
+    group_name = 'Creature'
+    additional_params = {
+        'images_per_description': 4,
+        'is_negative': False
+    }
+    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
+    space_strip = False
+    image_system_prompt = 'unbelievable_world_system_prompt'
+
     def __init__(self):
         BaseCharacter.__init__(self)
         SocialMediaMixin.__init__(self)

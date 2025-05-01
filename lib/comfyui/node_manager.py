@@ -102,22 +102,37 @@ class NodeManager:
     @staticmethod
     def generate_sampler_updates(workflow: Dict[str, Any], seed: int) -> List[Dict[str, Any]]:
         """
-        生成採樣器節點的更新配置
+        生成採樣器或隨機噪聲節點的更新配置
+        優先更新 RandomNoise 節點的 seed，如果不存在則更新 KSampler 節點的 seed。
         
         Args:
             workflow (Dict): 工作流配置
             seed (int): 隨機種子值
         
         Returns:
-            List[Dict]: 採樣器節點的更新配置列表
+            List[Dict]: 目標節點的更新配置列表
         """
-        indices = NodeManager.get_node_indices(workflow, "KSampler")
+        # 嘗試尋找 RandomNoise 節點
+        target_node_type = "RandomNoise"
+        seed_key_name = 'noise_seed'
+        indices = NodeManager.get_node_indices(workflow, target_node_type)
         
+        # 如果沒有找到 RandomNoise，則尋找 KSampler 節點
+        if not indices:
+            target_node_type = "KSampler"
+            seed_key_name = 'seed'
+            indices = NodeManager.get_node_indices(workflow, target_node_type)
+            
+        # 如果兩者都沒找到，返回空列表或拋出錯誤？目前返回空列表
+        if not indices:
+            print(f"Warning: Neither RandomNoise nor KSampler node found in the workflow for seed update.")
+            return []
+
         return [
             NodeManager.create_node_update(
-                "KSampler", 
+                target_node_type, 
                 i, 
-                {"seed": seed}
+                {seed_key_name: seed}
             )
             for i in indices
         ]

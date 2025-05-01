@@ -88,13 +88,14 @@ class ContentProcessor:
         # 生成第一層提示詞
         prompt = ollama_vision_manager.generate_arbitrary_input(
             character=character,
-            extra=f"current time : {datetime.now().strftime('%Y-%m-%d')}"
+            extra=f"current time : {datetime.now().strftime('%Y-%m-%d')}",
+            prompt_type=self.character_class.config.generate_prompt_method
         )
         prompt = prompt.replace("'", '').replace('"', '')
         # 生成第二層提示詞
         prompt = ollama_vision_manager.generate_arbitrary_input(
             character=character,
-            extra=f'Given the concept: "{prompt}", randomly retain a MINOR aspect of it. For EVERYTHING else, imagine the MOST unconventional, counterintuitive, and radically different possibilities. Generate a narrative that is built upon a randomly selected, minimal fragment of "{prompt}", while being overwhelmingly divergent in all other aspects.'
+            extra=f'Act as a Chaos Narrative Forge: roll an imaginary 12-sided die to pick a genre, flip a coin for narrative voice, and draw a tarot card for emotional color. Retain at most **one** micro-detail (≤ 5 words) from "{prompt}" as a hidden Easter egg—do NOT mention which. Everything else must be explosively original: collide clashing eras, graft surreal physics, twist clichés inside-out, and end on an unforeseen pivot. Output 1-3 lush, sensory sentences rich in metaphor and motion, with no meta commentary or game mechanics exposed.'
         )
         return prompt
 
@@ -108,11 +109,16 @@ class ContentProcessor:
         choose_index = random.choice(range(0, len(df)))
         keyword = df.loc[choose_index, 'keyword']
         title = df.loc[choose_index, 'title']
-        prompt = f"""
-            main_character : {character}
-            extra_info : {title} ; {keyword}
-        """.strip()
+        info = f"""extra_info : {title} ; {keyword}""".strip()
         
+        # 生成第一層提示詞
+        prompt = ollama_vision_manager.generate_arbitrary_input(
+            character=character,
+            extra=info,
+            prompt_type=self.character_class.config.image_system_prompt
+        )
+        prompt = prompt.replace("'", '').replace('"', '')
+
         return prompt
             
     @log_execution_time(logger=setup_logger(__name__))
@@ -129,7 +135,7 @@ class ContentProcessor:
         try:
             # 如果角色有群組設定，從群組中隨機選擇一個角色
             if self.character_class.group_name:
-                dynamic_character = self.get_random_character_from_group()
+                dynamic_character = self.get_random_character_from_group().lower()
                 # 將character 強轉新角色
                 self.character_class.character = dynamic_character
                 self.character_class.config.character = dynamic_character

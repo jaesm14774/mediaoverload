@@ -44,10 +44,17 @@ class Text2ImageStrategy(ContentStrategy):
         ]
         print(descriptions)
         if self.config.character:
-            self.descriptions = [
-                desc for desc in descriptions
-                if desc.replace(' ', '').lower().find(self.config.character.lower()) != -1
-            ]
+            character = self.config.character.lower()
+            if self.config.space_strip:
+                self.descriptions = [
+                    desc for desc in descriptions
+                    if desc.replace(' ', '').lower().find(character) != -1
+                ]
+            else:
+                self.descriptions = [
+                    desc for desc in descriptions
+                    if desc.lower().find(character) != -1
+                ]
         print(f'Image descriptions : {self.descriptions}\n')
         print(f'生成描述花費 : {time.time() - start_time}')
         return self

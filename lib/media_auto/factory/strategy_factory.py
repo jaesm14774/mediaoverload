@@ -10,8 +10,13 @@ class StrategyFactory:
     """策略工廠類"""
     
     _strategies: Dict[str, Type[ContentStrategy]] = {
+        # 支援舊命名
         'text2img': Text2ImageStrategy,
         'img2img': Image2ImageStrategy,
+        # 新命名
+        'text2image': Text2ImageStrategy,
+        'image2image': Image2ImageStrategy,
+        # 影片策略
         'text2video': Text2VideoStrategy
     }
     

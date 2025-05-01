@@ -162,7 +162,6 @@ class VisionContentManager:
         """根據用戶輸入生成圖片描述提示詞"""
         messages = [
             {'role': 'system', 'content': self.prompts['image_system_prompt']},
-            {'role': 'assistant', 'content': 'Translation any input into precisely English and need 3 description with no any explanation'},
             {'role': 'user', 'content': user_input}
         ]
         response = self.vision_model.chat_completion(messages=messages, **kwargs)
@@ -176,10 +175,12 @@ class VisionContentManager:
         ]
         return self.text_model.chat_completion(messages=messages, **kwargs)
 
-    def generate_arbitrary_input(self, character, extra='') -> str:
+    def generate_arbitrary_input(self, character, extra='', prompt_type='default') -> str:
         """生成 SEO 優化的 hashtags"""
+        if prompt_type == 'default':
+            prompt_type = 'arbitrary_input_system_prompt'
         messages = [
-            {'role': 'system', 'content': self.prompts['arbitrary_input_system_prompt']},
+            {'role': 'system', 'content': self.prompts[prompt_type]},
             {'role': 'assistant', 'content': 'Translation any input into precisely English and only one response without explanation'},
             {'role': 'user', 'content': f"""main character: {character}\n{extra}"""}
         ]
@@ -203,7 +204,8 @@ class VisionManagerBuilder:
             'describe_image_prompt': describe_image_prompt,
             'text_image_similarity_prompt': text_image_similarity_prompt,
             'arbitrary_input_system_prompt': arbitrary_input_system_prompt,
-            'guide_seo_article_system_prompt': guide_seo_article_system_prompt
+            'guide_seo_article_system_prompt': guide_seo_article_system_prompt,
+            'unbelievable_world_system_prompt': unbelievable_world_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):
