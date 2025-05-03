@@ -205,7 +205,8 @@ class VisionManagerBuilder:
             'text_image_similarity_prompt': text_image_similarity_prompt,
             'arbitrary_input_system_prompt': arbitrary_input_system_prompt,
             'guide_seo_article_system_prompt': guide_seo_article_system_prompt,
-            'unbelievable_world_system_prompt': unbelievable_world_system_prompt
+            'unbelievable_world_system_prompt': unbelievable_world_system_prompt,
+            'buddhist_combined_image_system_prompt': buddhist_combined_image_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):

@@ -29,6 +29,7 @@ class Text2ImageStrategy(ContentStrategy):
             .build()
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
+        self.ollama_switcher = ModelSwitcher(self.ollama_vision_manager)
 
     def _load_workflow(self, path: str) -> Dict[str, Any]:
         """載入工作流配置"""
@@ -142,8 +143,7 @@ class Text2ImageStrategy(ContentStrategy):
     def generate_article_content(self):
         start_time = time.time()
         # 需要時可以動態切換模型
-        switcher = ModelSwitcher(self.ollama_vision_manager)
-        switcher.switch_text_model('ollama', model_name='gemma:7b')
+        self.ollama_switcher.switch_text_model('ollama', model_name='gemma:7b')
 
         # 整合角色名稱、描述和預設標籤
         content_parts = [

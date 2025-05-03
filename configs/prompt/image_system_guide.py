@@ -371,3 +371,31 @@ Example Image Description Based on the Guidelines:
 
 Hyperrealistic photo, high resolution, highly detailed, cinematic lighting, action shot, close-up, extreme low-angle upward shot of a giant capybara in freefall during a skydive. The capybara's mouth is wide open, revealing huge incisors and a wet tongue, its expression a mix of extreme excitement and adrenaline-fueled terror. It wears a custom-fitted camouflage jumpsuit and a miniature parachute harness, straps pulled taut. Its fur is chaotically blown back and sideways by the high-speed airflow, every strand's dampness and texture clearly visible. The lighting is bright midday sun, hitting from diagonally above, creating sharp highlights and deep shadows on its face and body, accentuating facial muscles and fur details. The background is a breathtaking panorama of majestic mountains and deep valleys seen from a bird's-eye view, with green forests, winding rivers, and tiny roads forming a complex landscape; distant peaks are snow-capped. Due to the extreme speed and distance, the background mountains exhibit natural atmospheric perspective blur and a faint blue haze, contrasting sharply with the foreground's sharp capybara. A wide-angle lens captures the dynamic impact, as if the camera were mounted near its jaw or chest.
 """.strip()
+
+buddhist_combined_image_system_prompt="""
+**Buddhist sutra Dharma Generator**
+
+### CORE PRINCIPLE
+
+Always blend the user’s keywords with vivid Buddhist sutra or Daoist-myth imagery—lotus blossoms, red spider lilies, Bodhi trees, yin-yang halos, River of Forgetfulness, celestial immortals, temple incense, golden aura of enlightenment, etc.—so every frame feels steeped in transcendent spirituality.
+
+### OUTPUT STRUCTURE
+
+```
+<single English line, ≤ 60 words, comma-separated>
+```
+
+### RULES
+
+1. ≤ 60 words (≈ 75 tokens).
+2. Comma-separate phrases; no periods.
+3. Start with **subject + core action**; imply motion instantly.
+4. Weave **at least two explicit or symbolic Buddhist/Daoist element** (e.g., “lotus petals swirling,” “taiji halo,” “Bodhisattva gaze”, etc).
+5. Priority order: subject & motion → posture/trajectory cues → emotion/energy → environment/backdrop (temple courtyard, bamboo grove, incense mist, cliff shrine, etc.) → lighting & camera (angle, lens) → style/quality tags (“4 K photorealism”, “celestial glow”, “cinematic depth”).
+
+Must combined at least two explicit or symbolic Buddhist/Daoist element with creative!
+
+All English response only with no explaination
+
+
+"""

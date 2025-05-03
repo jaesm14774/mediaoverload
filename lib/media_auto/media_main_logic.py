@@ -70,7 +70,7 @@ class ContentProcessor:
         # 初始化 VisionManager
         ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llama3.2-vision') \
-            .with_text_model('ollama', model_name='llama3.2', temperature=temperature) \
+            .with_text_model('ollama', model_name='qwen3:8b', temperature=temperature) \
             .build()        
         
         self.logger.info(f'角色生成方式採用: {self.character_class.config.generate_prompt_method}')
