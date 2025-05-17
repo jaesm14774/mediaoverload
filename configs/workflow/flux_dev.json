@@ -30,7 +30,7 @@
   },
   "9": {
     "inputs": {
-      "filename_prefix": "flux_fill_dev",
+      "filename_prefix": "flux_dev",
       "images": [
         "8",
         0
@@ -43,7 +43,7 @@
   },
   "10": {
     "inputs": {
-      "vae_name": "ae.safetensors"
+      "vae_name": "flux\\ae.safetensors"
     },
     "class_type": "VAELoader",
     "_meta": {
@@ -64,7 +64,7 @@
   },
   "12": {
     "inputs": {
-      "unet_name": "flux1-dev.safetensors",
+      "unet_name": "flux\\flux1-dev.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",
@@ -142,7 +142,7 @@
   },
   "25": {
     "inputs": {
-      "noise_seed": 36
+      "noise_seed": 44
     },
     "class_type": "RandomNoise",
     "_meta": {
@@ -206,7 +206,7 @@
   },
   "46": {
     "inputs": {
-      "lora_name": "aidmaMJ6.1-FLUX-v0.5.safetensors",
+      "lora_name": "flux\\aidmaMJv7-FLUX-v0.1.safetensors",
       "strength_model": 1,
       "strength_clip": 1,
       "prompt": "",

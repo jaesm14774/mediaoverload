@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "Single kirby, dancing rhythmically, full body shot, (swaying body side-to-side:1.1), energetic playful arm movements, grooving to a beat, cute expression, slightly clumsy but enthusiastic dance, set against a (plain white background:1.4), minimalist focus on movement, anime style, vibrant pink."
+      "value": "A hyperrealistic photograph, high resolution, extremely detailed, cinematic lighting, documentary style. An eye-level shot capturing an unbelievable, bizarre moment: a flock of fluffy domestic sheep is performing a complex, synchronized breakdancing routine on a busy cobblestone city square. The sheep are in mid-action, executing spins, freezes, and power moves with surprising agility. Their wool is rendered with incredible texture and detail, showing individual strands, matting from sweat, and maybe a bit of street dust. Direct mid-afternoon sunlight hits them from the side, creating sharp, defined shadows on the rough cobblestones and highlighting the dynamic shapes of their bodies and limbs. Some sheep are spinning, their lower bodies or legs showing dramatic motion blur to convey speed, while their upper bodies or heads remain relatively sharp, revealing expressions of intense focus. The cobblestone ground is highly detailed, showing wear, cracks, and grit. In the background, slightly out of focus due to a shallow depth of field, are blurred figures of surprised pedestrians, classic city architecture, and moving vehicles, providing context and emphasizing the absurdity of the foreground action. The overall color palette is realistic urban, warm and bright from the sunlight. This is a captured instant of impossible, vibrant energy."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -28,23 +28,23 @@
   },
   "183": {
     "inputs": {
-      "value": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale, multiple"
+      "value": "low quality, blurry, deformed, extra limbs, missing hands, cropped, frame, watermark, text, worst quality, lowres, bad anatomy, signature, jpeg artifacts, ugly, disfigured"
     },
     "class_type": "PrimitiveString",
     "_meta": {
       "title": "negative prompt"
     }
   },
-  "184:0": {
+  "203:0": {
     "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV50.safetensors"
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV50.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "184:1": {
+  "203:1": {
     "inputs": {
       "width": [
         "171",
@@ -61,14 +61,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "184:2": {
+  "203:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "184:0",
+        "203:0",
         1
       ]
     },
@@ -77,14 +77,14 @@
       "title": "positive prompt"
     }
   },
-  "184:3": {
+  "203:3": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "184:0",
+        "203:0",
         1
       ]
     },
@@ -93,28 +93,28 @@
       "title": "negative prompt"
     }
   },
-  "184:4": {
+  "203:4": {
     "inputs": {
-      "seed": 4681,
+      "seed": 11,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "184:0",
+        "203:0",
         0
       ],
       "positive": [
-        "184:2",
+        "203:2",
         0
       ],
       "negative": [
-        "184:3",
+        "203:3",
         0
       ],
       "latent_image": [
-        "184:1",
+        "203:1",
         0
       ]
     },
@@ -123,14 +123,14 @@
       "title": "KSampler"
     }
   },
-  "184:5": {
+  "203:5": {
     "inputs": {
       "samples": [
-        "184:4",
+        "203:4",
         0
       ],
       "vae": [
-        "184:0",
+        "203:0",
         2
       ]
     },
@@ -139,11 +139,11 @@
       "title": "VAE Decode"
     }
   },
-  "184:6": {
+  "203:6": {
     "inputs": {
-      "filename_prefix": "nova_v50",
+      "filename_prefix": "nova_v50_t2i",
       "images": [
-        "184:5",
+        "203:5",
         0
       ]
     },
@@ -152,16 +152,16 @@
       "title": "Save Image"
     }
   },
-  "186:0": {
+  "204:0": {
     "inputs": {
-      "ckpt_name": "waiNSFWIllustrious_v130.safetensors"
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "186:1": {
+  "204:1": {
     "inputs": {
       "width": [
         "171",
@@ -178,14 +178,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "186:2": {
+  "204:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "186:0",
+        "204:0",
         1
       ]
     },
@@ -194,11 +194,14 @@
       "title": "positive prompt"
     }
   },
-  "186:3": {
+  "204:3": {
     "inputs": {
-      "text": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale, multiple",
+      "text": [
+        "183",
+        0
+      ],
       "clip": [
-        "186:0",
+        "204:0",
         1
       ]
     },
@@ -207,28 +210,28 @@
       "title": "negative prompt"
     }
   },
-  "186:4": {
+  "204:4": {
     "inputs": {
-      "seed": 4681,
+      "seed": 11,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "186:0",
+        "204:0",
         0
       ],
       "positive": [
-        "186:2",
+        "204:2",
         0
       ],
       "negative": [
-        "186:3",
+        "204:3",
         0
       ],
       "latent_image": [
-        "186:1",
+        "204:1",
         0
       ]
     },
@@ -237,14 +240,14 @@
       "title": "KSampler"
     }
   },
-  "186:5": {
+  "204:5": {
     "inputs": {
       "samples": [
-        "186:4",
+        "204:4",
         0
       ],
       "vae": [
-        "186:0",
+        "204:0",
         2
       ]
     },
@@ -253,11 +256,11 @@
       "title": "VAE Decode"
     }
   },
-  "186:6": {
+  "204:6": {
     "inputs": {
-      "filename_prefix": "walnsfw_model",
+      "filename_prefix": "nova_v60_t2i",
       "images": [
-        "186:5",
+        "204:5",
         0
       ]
     },
@@ -266,16 +269,16 @@
       "title": "Save Image"
     }
   },
-  "194:0": {
+  "205:0": {
     "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV60.safetensors"
+      "ckpt_name": "sdxl\\waiNSFWIllustrious_v130.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "194:1": {
+  "205:1": {
     "inputs": {
       "width": [
         "171",
@@ -292,14 +295,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "194:2": {
+  "205:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "194:0",
+        "205:0",
         1
       ]
     },
@@ -308,14 +311,14 @@
       "title": "positive prompt"
     }
   },
-  "194:3": {
+  "205:3": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "194:0",
+        "205:0",
         1
       ]
     },
@@ -324,28 +327,28 @@
       "title": "negative prompt"
     }
   },
-  "194:4": {
+  "205:4": {
     "inputs": {
-      "seed": 4681,
+      "seed": 11,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "194:0",
+        "205:0",
         0
       ],
       "positive": [
-        "194:2",
+        "205:2",
         0
       ],
       "negative": [
-        "194:3",
+        "205:3",
         0
       ],
       "latent_image": [
-        "194:1",
+        "205:1",
         0
       ]
     },
@@ -354,14 +357,14 @@
       "title": "KSampler"
     }
   },
-  "194:5": {
+  "205:5": {
     "inputs": {
       "samples": [
-        "194:4",
+        "205:4",
         0
       ],
       "vae": [
-        "194:0",
+        "205:0",
         2
       ]
     },
@@ -370,11 +373,11 @@
       "title": "VAE Decode"
     }
   },
-  "194:6": {
+  "205:6": {
     "inputs": {
-      "filename_prefix": "nova_v60",
+      "filename_prefix": "waiNSFW_t2i",
       "images": [
-        "194:5",
+        "205:5",
         0
       ]
     },

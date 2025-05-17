@@ -18,14 +18,12 @@ class CharacterConfig:
     additional_params: Optional[Dict[str, Any]] = field(default_factory=dict)
     group_name: str = ''
     generate_prompt_method : str = 'default'
-    space_strip: bool = True
     image_system_prompt: str = 'default'
 
 class BaseCharacter(ABC):
     """角色基礎類別"""
     config: CharacterConfig
     group_name: str = ''
-    space_strip = True
     image_system_prompt = 'default'
     additional_params = {
         'images_per_description': 3,
@@ -47,7 +45,6 @@ class BaseCharacter(ABC):
             additional_params=self.additional_params,
             group_name=self.group_name,
             generate_prompt_method = self.generate_prompt_method,
-            space_strip = self.space_strip,
             image_system_prompt = self.image_system_prompt
         )
     
@@ -61,13 +58,13 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     character = 'wobbuffet'
     output_dir = f'/app/output_image'
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
-    similarity_threshold = 0.7
+    similarity_threshold = 0.6
     generation_type = 'text2img'
     default_hashtags = ['pokemon', '寶可夢']
     group_name = 'Pokemon'
     generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
     image_system_prompt = np.random.choice(['unbelievable_world_system_prompt', 'default', 'buddhist_combined_image_system_prompt'], 
-                                           size=1, replace=False, p=[0.2,0.4,0.4])[0]  
+                                           size=1, replace=False, p=[0.3,0.5,0.2])[0]  
     def __init__(self):
         BaseCharacter.__init__(self)
         SocialMediaMixin.__init__(self)
@@ -80,7 +77,7 @@ class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
     character = 'waddledee'
     output_dir = f'/app/output_image'
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
-    similarity_threshold = 0.7
+    similarity_threshold = 0.6
     generation_type = 'text2img'
     default_hashtags = ['kirby']
     group_name = 'Kirby'
@@ -98,13 +95,13 @@ class KirbyProcess(BaseCharacter, SocialMediaMixin):
     character = 'kirby'
     output_dir = f'/app/output_image'
     workflow_path = '/app/configs/workflow/nova-anime-xl.json'
-    similarity_threshold = 0.8
+    similarity_threshold = 0.7
     generation_type = 'text2img'
     default_hashtags = ['カービィ', '星のカービィ']
     group_name = 'Kirby'
     generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
     image_system_prompt = np.random.choice(['unbelievable_world_system_prompt', 'default', 'buddhist_combined_image_system_prompt'], 
-                                           size=1, replace=False, p=[0.2,0.4,0.4])[0]
+                                           size=1, replace=False, p=[0.1,0.7,0.2])[0]
     
     def __init__(self):
         BaseCharacter.__init__(self)
@@ -119,12 +116,11 @@ class UnbelievableWorldProcess(BaseCharacter, SocialMediaMixin):
     output_dir = f'/app/output_image'
     workflow_path = '/app/configs/workflow/flux_dev.json'
     prompt_type = 'unbelievable_world_system_prompt'
-    similarity_threshold = 0.8
+    similarity_threshold = 0.7
     generation_type = 'text2img'
     default_hashtags = ['unbelievable', 'world']
     group_name = 'Creature'
     generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
-    space_strip = False
     image_system_prompt = 'unbelievable_world_system_prompt'
 
     def __init__(self):

@@ -1,489 +1,224 @@
-# 社群媒體內容自動生成系統
+# MediaOverload: 自動化內容生成與社群媒體發布系統
 
-這是一個自動化的社群媒體內容生成系統，能夠根據提示詞自動生成圖片和文字內容，並發布到各種社群媒體平台。
+MediaOverload 是一個自動化的內容創作和社群媒體發布系統。它能夠根據指定的角色 (character) 和提示 (prompt)，利用大型語言模型 (LLM) 和 AI 圖像生成工具 (如 ComfyUI) 產生文字描述、文章內容和對應的圖像。生成的内容會經過 Discord 頻道的人工審核，最終發布到 Instagram 等社群平台。
 
-## 系統需求
+## 核心功能
 
-1. Python 3.12+
-2. Docker & Docker Compose
-3. ComfyUI (需要單獨安裝)
-4. Ollama (需要單獨安裝)
-5. 足夠的硬碟空間 (建議至少 20GB)
-6. NVIDIA GPU (建議至少 8GB VRAM)
+*   **動態角色處理**: 支援基於不同「角色」的內容生成，每個角色可以有獨立的配置 (例如，使用的 AI workflow、風格、預設標籤等)。
+*   **智能提示詞生成**:
+    *   可根據用戶提供的基礎提示詞進行擴展。
+    *   若未提供提示詞，可利用 Ollama LLM (如 `llama3.2-vision`, `qwen3:8b`) 自動生成。
+    *   支援從資料庫中的新聞內容提取靈感，生成與時事相關的提示詞。
+*   **多模態內容生成**:
+    *   **文字內容**: 生成描述、標題、文章等。
+    *   **圖像內容**: 整合 ComfyUI 等 AI 圖像生成工具，根據文字提示生成符合風格的圖像。
+*   **內容策略與客製化**:
+    *   透過 `StrategyFactory` 模式，可以彈性選擇不同的內容生成策略。
+    *   角色配置 (`CharacterConfig`) 允許高度客製化，包括 ComfyUI workflow 路徑、輸出目錄、相似度閾值等。
+*   **人工審核流程**: 生成的圖文內容會發送到指定的 Discord 頻道，由人工進行審核、編輯和選擇最終發布的素材。
+*   **社群媒體整合**:
+    *   目前支援將審核後的內容自動發布到 Instagram。
+    *   透過 `SocialMediaMixin` 設計，方便擴展支援更多社群平台。
+*   **資料庫整合**:
+    *   從 MySQL 資料庫讀取角色群組資訊、新聞內容等，輔助內容生成。
+*   **任務排程**: 系統設計為可透過排程器 (如 `docker-compose.yml` 中定義的 `media-scheduler` 服務結合 `schedule` 套件) 自動執行內容生成與發布任務。
+*   **容器化部署**: 提供 `Dockerfile` 和 `docker-compose.yml`，方便使用 Docker 進行部署和管理。
 
-## 安裝步驟
+## 技術棧
 
-### 1. 安裝基礎環境
-```bash
-# 安裝 Python 依賴
-pip install -r requirements.txt
+*   **程式語言**: Python 3
+*   **核心框架與套件**:
+    *   **命令列介面**: `argparse`
+    *   **任務排程**: `schedule`
+    *   **環境變數管理**: `python-dotenv`
+    *   **資料庫互動**: `SQLAlchemy`, `pymysql` (MySQL)
+    *   **影像處理**: `Pillow`, `piexif`, `numpy`, `pandas`
+    *   **社群平台整合**:
+        *   Discord: `discord.py`
+        *   Instagram: `instagrapi`
+    *   **AI / LLM**:
+        *   `ollama` (用於本地部署和調用 LLM，如 Llama 3.2 Vision, Qwen 3)
+        *   `google-generativeai`
+        *   `websocket-client`, `urllib3` (可能用於與 ComfyUI API 互動)
+    *   **設定檔處理**: `PyYAML`
+*   **AI 模型/服務**:
+    *   Ollama (本地大型語言模型)
+    *   Google Generative AI
+    *   ComfyUI (AI 圖像生成流程引擎)
+*   **資料庫**: MySQL
+*   **容器化**: Docker, Docker Compose
+*   **日誌**: `logging` 模組 (透過 `utils.logger.setup_logger`)
+*   **開發工具**: `rich` (美化終端輸出)
 
-# 安裝 Ollama
-# Windows WSL2
-curl https://ollama.ai/install.sh | sh
-# 或從 https://ollama.ai/download 下載安裝檔
+## 專案架構與流程
 
-# 下載必要的 Ollama 模型
-ollama pull llava:13b
-ollama pull llama3.2
-ollama pull phi4
+```mermaid
+graph TD
+    A["啟動: run_media_interface.py / 排程器"] --> B{"輸入參數 (角色, 提示詞)"}
+    B -- 提供提示詞 --> C["實例化角色處理器 (XxxProcess)"]
+    B -- 未提供提示詞 --> D["ContentProcessor: Ollama LLM 生成提示詞"]
+    D --> C
+    C --> E["ContentProcessor: 執行 etl_process"]
+
+    subgraph "ETL 核心流程 (etl_process)"
+        E --> F{"角色是否屬於群組?"}
+        F -- 是 --> G["資料庫: 隨機選取群組內角色"]
+        G --> H["更新角色配置"]
+        F -- 否 --> H
+        H --> I["載入角色完整生成配置 (含 ComfyUI Workflow 路徑)"]
+        I --> J["StrategyFactory: 選擇內容生成策略 (e.g., ComfyUI 調用)"]
+        J --> K["策略執行: LLM 生成初步描述"]
+        K --> L["策略執行: ComfyUI 生成圖片"]
+        L --> M["策略執行: LLM 分析圖文匹配度"]
+        M --> N["策略執行: LLM 生成最終文章內容"]
+    end
+
+    N --> O{"有合格生成結果?"}
+    O -- 是 --> P["選擇圖片 (最多6張)"]
+    P --> Q["Discord API: 發送內容至頻道進行人工審核/編輯"]
+
+    subgraph "人工審核與發布"
+        Q --> R{"人工審核: 確認內容與選取圖片?"}
+        R -- 是 --> S["ImageProcessor: 處理選定圖片 (e.g., 格式轉換)"]
+        S --> T["Instagram API: 發布內容至 Instagram"]
+        T --> U["流程結束"]
+    end
+
+    O -- 否 (無合格結果) --> U
+    R -- 否 (未選取圖片) --> U
+
+    subgraph "外部依賴與資料源"
+        DataSource1[(MySQL: anime_roles)]:::DB_STYLE
+        DataSource2[(MySQL: news_ch.news)]:::DB_STYLE
+        
+        AI_LLM["Ollama LLM (提示詞/描述/文章)"]:::AI_STYLE
+        AI_Image["ComfyUI (圖像生成)"]:::AI_STYLE
+
+        DiscordService["Discord API"]:::API_STYLE
+        InstagramService["Instagram API"]:::API_STYLE
+        ComfyUIService["ComfyUI API"]:::API_STYLE
+    end
+    
+    classDef default fill:#fff,stroke:#333,stroke-width:2px
+    classDef DB_STYLE fill:#ccf,stroke:#333,stroke-width:2px
+    classDef AI_STYLE fill:#cfc,stroke:#333,stroke-width:2px
+    classDef API_STYLE fill:#ffc,stroke:#333,stroke-width:2px
+    classDef STYLE_EXT fill:#f9f,stroke:#333,stroke-width:2px
+
+    D -.-> AI_LLM
+    K -.-> AI_LLM
+    M -.-> AI_LLM
+    N -.-> AI_LLM
+    L -.-> AI_Image
+    L --> ComfyUIService
+    G -.-> DataSource1
+    D -.-> DataSource2
+    Q --> DiscordService
+    T --> InstagramService
+
 ```
 
-### 2. 安裝 ComfyUI
+### 流程說明：
 
-1. 克隆 ComfyUI 倉庫：
-```bash
-git clone https://github.com/comfyanonymous/ComfyUI.git
-cd ComfyUI
-```
+1.  **啟動與參數**: 腳本 (`run_media_interface.py`) 可由用戶直接執行或由排程器觸發，接收 `character` (角色) 和可選的 `prompt` (提示詞) 作為輸入。
+2.  **角色處理器初始化**: 根據 `character` 參數，系統會實例化相應的角色處理類別 (例如 `WobbuffetProcess`)，該類別繼承自 `BaseCharacter` 並載入該角色的特定配置 (如 ComfyUI workflow 路徑、預設標籤等)。
+3.  **提示詞生成 (可選)**: 如果未提供 `prompt`，`ContentProcessor` 會使用 Ollama LLM (例如 `llama3.2-vision`, `qwen3:8b`) 生成提示詞。此過程可能結合角色配置的 `generate_prompt_method` ('default' 或 'news')，後者會從資料庫讀取新聞內容作為靈感。
+4.  **ETL 核心處理 (`ContentProcessor.etl_process`)**:
+    *   **動態角色選擇**: 若角色配置了 `group_name`，系統會從資料庫 (`anime.anime_roles`) 中隨機選擇一個隸屬於該群組的角色來執行任務。
+    *   **配置加載**: 加載選定角色的完整生成配置，包括用於 ComfyUI 的 workflow JSON 檔案路徑。
+    *   **策略選擇與執行**:
+        *   `StrategyFactory` 根據配置中的 `generation_type` (通常是 'text2img') 選擇合適的內容生成策略。
+        *   該策略將協調 LLM 和 ComfyUI：
+            *   使用 LLM 生成初步的文字描述。
+            *   調用 ComfyUI (基於 workflow) 生成圖像。
+            *   使用 LLM 分析生成圖像與文字描述的匹配度。
+            *   使用 LLM 基於圖像和描述生成最終的文章內容。
+5.  **人工審核**: 經過初步篩選的圖像 (最多6張) 和生成的文章內容，會被發送到指定的 Discord 頻道。人工操作員可以在此頻道審核內容、進行必要的編輯，並選擇最終要發布的圖像。
+6.  **圖像後處理**: 用戶在 Discord 中選定的圖像會經過 `ImageProcessor` 處理 (例如，轉換為 Instagram 偏好的 JPG 格式)。
+7.  **社群媒體發布**: 最終確認的內容 (圖像和編輯後的文字) 將通過相應的社群媒體平台處理器 (目前為 `InstagramPlatform`) 發布到 Instagram。
+8.  **清理與記錄**: 流程結束後，可能會執行清理操作 (例如刪除臨時檔案)，並記錄執行時間和結果。
 
-2. 安裝 Python 依賴：
-```bash
-pip install -r requirements.txt
-```
+## 環境設定與執行
 
-3. 下載必要的模型檔案到 `models/checkpoints/` 目錄：
-   - novaAnimeXL_ilV25MerryChristmas.safetensors
-   - novaAnimeXL_illustriousV20.safetensors
-   - novaAnimeXL_illustriousV10.safetensors
+### 1. 環境變數
 
-4. 下載 LoRA 檔案到 `models/loras/` 目錄：
-   - KirbyV2.safetensors
+專案依賴 `media_overload.env` 檔案來管理敏感資訊和環境特定配置。請複製或建立此檔案，並填寫必要的憑證和路徑，例如：
 
-### 3. 配置環境變數
-
-1. 創建並編輯 `media_overload.env` 檔案，填入必要的 API 金鑰和 ID：
 ```env
-discord_review_bot_token=您的Discord機器人Token
-discord_review_channel_id=審核頻道ID
-gemini_api_token=google ai studio api key
-ollama_host=http://host.docker.internal:11434 # 如果使用 Docker 則用這個
-# ollama_host=http://localhost:11434 # 如果在本機運行 Ollama
+# 資料庫 (MySQL)
+mysql_host=your_mysql_host
+mysql_port=3306
+mysql_user=your_mysql_user
+mysql_password=your_mysql_password
+mysql_db_name=your_mysql_db_name
+
+# Discord
+discord_review_bot_token=your_discord_bot_token
+discord_review_channel_id=your_discord_channel_id
+
+# 其他 (根據需要添加)
+# OLLAMA_API_BASE_URL=http://localhost:11434 (如果 Ollama 不在預設位置)
 ```
+還需要設定 `configs/social_media/discord/Discord.env` (雖然目前主要審核流程的 token 在主 env，但可能用於其他 Discord 功能)。
+以及各社群媒體平台的設定檔，例如 Instagram 的設定可能位於 `/app/configs/social_media/ig/` 下，並由對應的角色（如 `wobbuffet.env`）引用。
 
-2. 設定社群媒體帳號：
-   - 參考 `configs/social_media/ig/` 下的角色目錄（如 `kirby` 或 `wobbuffet`）中的 `ig.env` 和 `ig_account.json` 檔案結構。
-   - 為你的角色創建對應的目錄和設定檔，例如：
-     `configs/social_media/ig/your_character/ig.env`
-     `configs/social_media/ig/your_character/ig_account.json`
-
-### 4. 啟動服務
-
-1. 啟動 ComfyUI：
-```bash
-# 在 ComfyUI 目錄下
-python main.py --listen 0.0.0.0 --port 8188
-```
-
-2. 啟動 Ollama 服務：
-```bash
-ollama serve
-```
-
-3. 啟動排程器：
-```bash
-# 使用 Docker Compose
-docker-compose up -d
-
-# 或直接執行
-python scheduler/scheduler.py
-```
-
-## 系統架構
-
-系統採用模組化設計，主要包含以下幾個核心組件：
-
-1. 內容處理器 (ContentProcessor)
-2. 角色管理 (Character Management)
-3. 策略模式 (Strategy Pattern)
-4. 社群媒體整合 (Social Media Integration)
-5. 圖片處理 (Image Processing)
-6. Discord 審核機制與通知
-
-## 系統流程圖
-
-```mermaid
-flowchart TD
-    A([開始]) --> B{是否執行}
-    B -->|執行| C[phi4\n自動產生提示詞]
-    B -->|不執行| N([結束])
-    
-    C --> D[載入角色配置]
-    D --> E[初始化內容處理器]
-    E --> F1[Ollama LLM\n生成描述文字]
-    F1 --> F2[優化描述文字]
-    F2 --> G1[載入 ComfyUI 工作流]
-    G1 --> G2[更新提示詞和參數]
-    G2 --> G3[生成多張候選圖片]
-    G3 --> H1[Gemini 分析圖片內容]
-    H1 --> H2[計算圖文匹配度]
-    H2 --> H3{匹配度篩選}
-    H3 -->|篩選後無圖片| K2[記錄訊息]
-    H3 -->|篩選有效圖片| I1[phi4 生成文章]
-    K2 --> N
-    I1 --> I2[生成 Hashtags]
-    
-    I2 --> J{Discord 審核}
-    J -->|拒絕| M1[清理暫存檔案]
-    J -->|通過| K1[圖片格式轉換]
-    K1 --> K2[添加 EXIF 資訊]
-    K2 --> L1[準備發布內容]
-    L1 --> L2[發布到社群媒體]
-    L2 --> M1
-    M1 --> M2[記錄日誌]
-    M2 --> N
-
-    classDef default fill:#f4f4f4,stroke:#666,color:#333;
-    classDef highlight fill:#e6f3ff,stroke:#3498db,color:#2980b9;
-    classDef decision fill:#fff8dc,stroke:#f39c12,color:#d35400;
-
-    class A,N default;
-    class B,H3,J decision;
-    class C,D,E,F1,F2,G1,G2,G3,H1,H2,K2,I1,I2,K1,L1,L2,M1,M2 highlight;
-```
-
-## 核心組件說明
-
-### 1. 內容處理器 (ContentProcessor)
-- 負責協調整個生成流程
-- 實現 ETL (Extract, Transform, Load) 處理邏輯
-- 管理資源清理
-
-### 2. 角色管理
-```mermaid
-classDiagram
-    class CharacterConfig {
-        +character: str
-        +output_dir: str
-        +workflow_path: str
-        +similarity_threshold: float
-        +generation_type: str
-        +default_hashtags: list[str]
-        +additional_params: dict
-        +group_name: str
-        +generate_prompt_method: str
-    }
-    class BaseCharacter {
-        +config: CharacterConfig
-        +get_default_config() CharacterConfig
-        +get_generation_config(prompt) dict
-    }
-    class SocialMediaMixin {
-        +register_social_media(platforms)
-        +upload_to_social_media(platform_name, content)
-    }
-    class InstagramPlatform {
-        +login()
-        +upload_photo(photo_path, caption)
-    }
-    BaseCharacter <|-- WobbuffetProcess
-    BaseCharacter <|-- KirbyProcess
-    BaseCharacter <|-- WaddledeeProcess
-    BaseCharacter <|-- UnbelievableWorldProcess
-    SocialMediaMixin <|-- InstagramPlatform
-    WobbuffetProcess ..> SocialMediaMixin : uses
-    KirbyProcess ..> SocialMediaMixin : uses
-    WaddledeeProcess ..> SocialMediaMixin : uses
-    UnbelievableWorldProcess ..> SocialMediaMixin : uses
-```
-
-### 3. 策略模式
-```mermaid
-classDiagram
-    class GenerationConfig {
-        +... attributes based on kwargs
-        +get_all_attributes() dict
-    }
-    class ContentStrategy {
-        +config: GenerationConfig
-        +load_config(config)
-        +generate_description()*
-        +generate_article_content()*
-    }
-    class Text2ImageStrategy {
-        +generate_description()
-        +generate_image()
-        +analyze_image_text_match()
-        +generate_article_content()
-    }
-    class Image2ImageStrategy {
-        +generate_description() // pass
-        +generate_article_content() // pass
-    }
-    class Text2VideoStrategy {
-        +generate_description() // pass
-        +generate_article_content() // pass
-    }
-    ContentStrategy <|-- Text2ImageStrategy
-    ContentStrategy <|-- Image2ImageStrategy
-    ContentStrategy <|-- Text2VideoStrategy
-```
-
-## 配置說明
-
-### ComfyUI 工作流程配置
-
-工作流程配置檔案位於 `configs/workflow/` 目錄下，主要包含：
-
-1. 基礎設定：
-   - 圖片尺寸：1024x1024
-   - 批次大小：1
-
-2. 模型配置：
-   - 檢查點：novaAnimeXL 系列模型
-   - LoRA：角色專用模型 (如 KirbyV2.safetensors)
-
-3. 採樣器設定：
-   - 步數：30
-   - CFG：8
-   - 採樣器：euler
-   - 調度器：normal
-
-### Ollama 模型配置
-
-系統使用多個 Ollama 模型：
-
-1. `llava:13b`：用於圖像分析
-2. `llama3.2`：用於文本生成
-3. `phi4`：用於輔助生成
-
-模型配置可在 `lib/content_generation/image_content_generator.py` 中調整。
-
-### 排程器配置
-
-排程配置文件位於 `scheduler/schedule_config.yaml`：
-
-```yaml
-schedules:
-  wobbuffet:
-    character: "Wobbuffet"
-    prompts:
-      - use_llm: true
-        character: "Wobbuffet"
-        style: "cute and funny"
-        temperature: 1.0
-  
-  kirby:
-    character: "Kirby"
-    prompts:
-      - use_llm: true
-        character: "Kirby"
-        style: "kawaii and energetic"
-        temperature: 1.0
-```
-
-## 使用流程
-
-1. 設定環境變數：
-   - 設定 Discord 機器人 Token
-   - 設定審核頻道 ID
-   - 設定 Google AI Studio API Key
-
-2. 選擇或創建角色類別：
-   - 繼承 `BaseCharacter`
-   - 實現必要的方法
-   - 配置角色專屬參數
-
-3. 初始化內容處理器：
-   ```python
-   from lib.media_auto.media_main_logic import ContentProcessor
-   process = ContentProcessor(character_class())
-   ```
-
-4. 提供提示詞：
-   ```bash
-   python run_media_interface.py --character "Wobbuffet" --prompt "Your prompt here"
-   ```
-   - 系統會自動生成圖文內容
-   - 發送到 Discord 頻道等待審核
-   - 審核通過後自動發布
-
-5. 自動發布到社群媒體：
-   - 支援 Instagram
-   - 可擴展支援其他平台
-
-### 手動執行範例 (run_media_interface.py)
-
-你可以使用 `run_media_interface.py` 手動觸發特定角色的內容生成流程。
-
-**快速測試 (使用預設的 'Wobbuffet' 角色和 'text2image' 流程):**
+### 2. 依賴安裝
 
 ```bash
-python run_media_interface.py --prompt "wobbuffet is standing near a tree"
+pip install -r requirements.txt
 ```
-這會使用 `WobbuffetProcess` 類別和 `text2image` pipeline 來根據提示詞生成內容。
 
-**完整指令範例 (指定角色、提示詞和流程):**
-python run_media_interface.py --character "UnbelievableWorld" --prompt "" --pipeline "text2image"
+### 3. ComfyUI / Ollama 設定
+
+*   確保您的 ComfyUI 服務正在運行，並且 API 是可訪問的。相關的 ComfyUI workflow JSON 檔案應放置在 `configs/workflow/` 目錄下。
+*   確保 Ollama 服務正在運行，並且已下載所需的模型 (如 `llama3.2-vision`, `qwen3:8b`)。
+
+### 4. 資料庫設定
+
+*   確保 MySQL 資料庫已建立，並且相關的表 (如 `anime.anime_roles`, `news_ch.news`) 已存在且包含所需資料。
+
+### 5. 執行
+
+可以直接執行主腳本：
 
 ```bash
-python run_media_interface.py --character "Kirby" --prompt "kirby eating a strawberry cake" --pipeline "text2image"
+python run_media_interface.py --character <CharacterName> --prompt "Your creative prompt here"
 ```
-這會使用 `KirbyProcess` 類別和 `text2image` pipeline。
-
-**可用的參數:**
-*   `--character CHARACTER_NAME`: 指定要使用的角色類別名稱 (例如 `Wobbuffet`, `Kirby`, `Waddledee`, `UnbelievableWorld`)。預設為 `Wobbuffet`。
-*   `--prompt "YOUR_PROMPT"`: **(必需)** 提供內容生成的提示詞。
-*   `--pipeline PIPELINE_NAME`: 指定要執行的流程。可選值: `text2image`, `image2image`, `text2video`, `complex_media`。預設為 `text2image`。
-
-## 故障排除
-
-1. ComfyUI 連接問題：
-   - 確認 ComfyUI 服務正在運行
-   - 檢查端口 8188 是否可訪問
-   - 確認模型檔案存在且權限正確
-
-2. Ollama 服務問題：
-   - 確認 Ollama 服務正在運行
-   - 檢查模型是否已正確下載
-   - 檢查 Docker 網路設定
-
-3. Discord 審核機制：
-   - 確認機器人 Token 正確
-   - 確認機器人具有必要權限
-   - 檢查審核頻道 ID 設定
-
-4. 社群媒體發布：
-   - 確認帳號配置文件格式正確
-   - 檢查帳號登入狀態
-   - 確認發布權限設定
-
-## 日誌和監控
-
-系統日誌位於 `logs/` 目錄下，按日期命名：
-```
-logs/
-  └─ YYYY-MM-DD.log
+例如:
+```bash
+python run_media_interface.py --character Wobbuffet --prompt "A funny scene with Wobbuffet trying to bake a cake"
 ```
 
-主要記錄：
-- 系統運行狀態
-- 內容生成過程
-- 錯誤和異常信息
-- 發布結果追蹤
+如果 `--prompt` 未提供，系統將嘗試自動生成。
 
-## 擴展開發
+### 6. 使用 Docker 運行 (推薦)
 
-1. 新增角色：
-```python
-class NewCharacter(BaseCharacter, SocialMediaMixin):
-    character = 'your_character'
-    output_dir = '/app/output_image'
-    workflow_path = '/app/configs/workflow/your_workflow.json'
-    similarity_threshold = 0.9
-    type = 'text2img'
-    additional_params = {
-        'images_per_description': 3,
-        'is_negative': False
-    }
+專案提供了 `Dockerfile` 和 `docker-compose.yml`，可以使用 Docker Compose 啟動 `media-scheduler` 服務：
+
+```bash
+docker-compose up --build -d
 ```
+此服務可能會根據內建的排程邏輯 (例如使用 `scheduler` 資料夾下的腳本和 `schedule` 套件) 定期觸發內容生成流程。
 
-2. 新增生成策略：
-```python
-from lib.media_auto.strategies.base_strategy import ContentStrategy
+## 主要模組說明
 
-class NewStrategy(ContentStrategy):
-    def generate_description(self):
-        # 實現描述生成邏輯
-        pass
-```
-
-3. 新增社群平台：
-```python
-class NewPlatform(SocialMediaMixin):
-    def upload_to_social_media(self):
-        # 實現平台發布邏輯
-        pass
-```
+*   `run_media_interface.py`: 專案的命令列入口點，解析參數並啟動內容處理流程。
+*   `lib/media_auto/media_main_logic.py`: 包含核心的 `ContentProcessor` 類，負責整個 ETL 流程的協調，包括提示詞生成、內容生成、Discord 審核和社群媒體發布。
+*   `lib/media_auto/process.py`: 定義了 `BaseCharacter` 抽象類和各種具體的角色處理類 (如 `WobbuffetProcess`)。這些類封裝了每個角色的特定配置和行為。
+*   `lib/media_auto/strategies/`: (推測) 包含不同的內容生成策略，例如與 ComfyUI 互動的策略 (`StrategyFactory` 會從這裡載入)。
+*   `lib/content_generation/`: (推測) 包含與 LLM 互動生成文字內容 (如提示詞、描述、文章) 的邏輯，例如 `VisionManagerBuilder`。
+*   `lib/social_media/`: 包含社群媒體發布的通用邏輯 (`SocialMediaMixin`, `MediaPost`) 和特定平台的實現 (如 `InstagramPlatform`)。
+*   `lib/discord/`: 處理與 Discord API 的互動，主要是內容審核流程。
+*   `lib/database/`: 提供資料庫連接池和操作的封裝。
+*   `utils/`: 包含輔助工具，如日誌設定 (`logger.py`)、圖像處理 (`image.py`)。
+*   `configs/`: 存放專案的各種設定檔。
+    *   `workflow/`: 存放 ComfyUI 的 workflow JSON 檔案。
+    *   `social_media/`: 存放各社群媒體平台及帳號的設定檔。
+*   `scheduler/`: (推測) 包含用於排程任務的腳本。
+*   `output_image/`: 生成的圖片預設會輸出到此目錄下以角色名命名的子資料夾中。
+*   `logs/`: 存放應用程式日誌。
 
 ## 注意事項
 
-1. 環境變數安全：
-   - 不要提交敏感配置到版本控制
-   - 使用 .env 文件管理機密信息
-   - 定期更新 API 密鑰
-
-2. 資源管理：
-   - 定期清理輸出目錄
-   - 監控磁盤使用情況
-   - 注意 GPU 記憶體使用
-
-3. 錯誤處理：
-   - 檢查日誌文件
-   - 設置適當的重試機制
-   - 實現錯誤通知機制
-
-4. 性能優化：
-   - 調整批次處理大小
-   - 優化模型參數
-   - 監控系統資源使用
-
-## 目錄架構
-```
-│  .dockerignore
-│  .gitignore
-│  docker-compose.yml
-│  Dockerfile
-│  media_overload.env
-│  README.md
-│  requirements.txt
-│  run_media_interface.py
-│
-├─configs
-│  ├─prompt
-│  │  │  image_system_guide.py
-│  │
-│  ├─social_media
-│  │  └─ig
-│  │      ├─kirby
-│  │      │      ig.env
-│  │      │      ig_account.json
-│  │      │      twitter.env
-│  │      │
-│  │      ├─waddle dee
-│  │      │      ig.env
-│  │      │
-│  │      └─wobbuffet
-│  │              ig.env
-│  │              ig_account.json
-│  │  └─discord
-│  │      Discord.env
-│  │
-│  └─workflow
-│          nova-anime-xl.json
-│
-├─lib
-│  │  discord.py
-│  │  social_media.py
-│  │
-│  ├─comfyui
-│  │  │  analyze.py
-│  │  │  node_manager.py
-│  │  │  websockets_api.py
-│  │
-│  ├─content_generation
-│  │  │  image_content_generator.py
-│  │
-│  ├─media_auto
-│  │  │  media_main_logic.py
-│  │  │  process.py
-│  │  │
-│  │  ├─factory
-│  │  │      strategy_factory.py
-│  │  │
-│  │  └─strategies
-│  │      │  base_strategy.py
-│  │      │  image_strategies.py
-│
-├─logs
-│      2025-01-26.log
-│
-├─output_image
-├─scheduler
-│      scheduler.py
-│      schedule_config.yaml
-│
-└─utils
-    │  image.py
-    │  logger.py
-```
+*   專案中的許多路徑 (如 `workflow_path`, `output_dir`) 在 Docker 環境下是 `/app/...`，在本地運行時請確保路徑對應正確或進行相應調整。
+*   社群媒體平台的登入憑證和 API token 需要安全管理，並正確配置在 `.env` 檔案或相應的設定檔中。
