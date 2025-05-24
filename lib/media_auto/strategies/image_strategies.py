@@ -33,7 +33,7 @@ class Text2ImageStrategy(ContentStrategy):
 
     def _load_workflow(self, path: str) -> Dict[str, Any]:
         """載入工作流配置"""
-        with open(path, "r") as f:
+        with open(path, "r", encoding='utf-8') as f:
             return json.loads(f.read())
 
     def generate_description(self):
