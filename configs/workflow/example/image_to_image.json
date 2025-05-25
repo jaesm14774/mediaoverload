@@ -1,0 +1,157 @@
+{
+  "45": {
+    "inputs": {
+      "image": "PXL_20250501_025306601.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "46": {
+    "inputs": {
+      "pixels": [
+        "45",
+        0
+      ],
+      "vae": [
+        "47:0",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "57": {
+    "inputs": {
+      "value": "Pine on Hollow Moon – A flattened, ochre half-moon leans against a stark background. From its surface rises one stylized ink-black pine. Kirby perches at the tree’s first branch like a single pink leaf. The negative space around the moon amplifies a quiet, weightless mood."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "58": {
+    "inputs": {
+      "value": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "negative_prompt"
+    }
+  },
+  "47:0": {
+    "inputs": {
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "47:2": {
+    "inputs": {
+      "text": [
+        "57",
+        0
+      ],
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "47:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "47:3": {
+    "inputs": {
+      "text": [
+        "58",
+        0
+      ],
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "47:0",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "47:4": {
+    "inputs": {
+      "seed": 344,
+      "steps": 25,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "47:0",
+        0
+      ],
+      "positive": [
+        "47:2",
+        0
+      ],
+      "negative": [
+        "47:3",
+        0
+      ],
+      "latent_image": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "47:5": {
+    "inputs": {
+      "samples": [
+        "47:4",
+        0
+      ],
+      "vae": [
+        "47:0",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "47:6": {
+    "inputs": {
+      "filename_prefix": "i2i",
+      "images": [
+        "47:5",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

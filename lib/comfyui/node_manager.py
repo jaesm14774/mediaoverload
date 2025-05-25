@@ -166,3 +166,77 @@ class NodeManager:
         
         # 合併所有更新
         return text_updates + sampler_updates
+    
+    @staticmethod
+    def generate_generic_updates(workflow: Dict[str, Any], updates_config: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        生成通用的節點更新配置，支援任何類型的節點
+        
+        Args:
+            workflow (Dict): 工作流配置
+            updates_config (List[Dict]): 更新配置列表，每個配置包含：
+                - node_type: 節點類型
+                - node_index: 節點索引（可選，預設為0）
+                - inputs: 要更新的輸入參數
+                - filter: 過濾條件字典（可選）
+        
+        Returns:
+            List[Dict]: 節點更新配置列表
+        
+        Example:
+            updates_config = [
+                {
+                    "node_type": "PrimitiveInt",
+                    "node_index": 0,  # 第一個 PrimitiveInt 節點
+                    "inputs": {"value": 1280}
+                },
+                {
+                    "node_type": "PrimitiveString",
+                    "filter": {"is_negative": True},  # 使用過濾條件
+                    "inputs": {"value": "negative prompt"}
+                },
+                {
+                    "node_type": "KSampler",
+                    "node_index": 1,  # 第二個 KSampler
+                    "inputs": {
+                        "seed": 12345,
+                        "steps": 30,
+                        "cfg": 7.5
+                    }
+                }
+            ]
+        """
+        result_updates = []
+        
+        for config in updates_config:
+            node_type = config.get("node_type")
+            node_index = config.get("node_index", 0)
+            inputs = config.get("inputs", {})
+            filter_params = config.get("filter", {})
+            
+            # 獲取符合條件的節點索引
+            indices = NodeManager.get_node_indices(workflow, node_type, **filter_params)
+            
+            # 如果指定了 node_index，只更新該索引的節點
+            if indices and node_index < len(indices):
+                result_updates.append(
+                    NodeManager.create_node_update(
+                        node_type,
+                        indices[node_index],
+                        inputs,
+                        **filter_params
+                    )
+                )
+            elif indices:
+                # 如果沒有指定 node_index，更新所有符合條件的節點
+                for idx in indices:
+                    result_updates.append(
+                        NodeManager.create_node_update(
+                            node_type,
+                            idx,
+                            inputs,
+                            **filter_params
+                        )
+                    )
+        
+        return result_updates

@@ -240,7 +240,6 @@ class ComfyUICommunicator:
         """
         try:
             os.makedirs(output_path, exist_ok=True)
-            
             # 複製工作流以避免修改原始數據
             workflow_copy = json.loads(json.dumps(workflow))
             self.workflow = workflow_copy

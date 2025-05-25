@@ -230,5 +230,20 @@
     "_meta": {
       "title": "Lora Loader"
     }
+  },
+  "47": {
+    "inputs": {
+      "text": "test",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
   }
 }
