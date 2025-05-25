@@ -62,9 +62,9 @@ class WobbuffetProcess(BaseCharacter, SocialMediaMixin):
     generation_type = 'text2img'
     default_hashtags = ['pokemon', '寶可夢']
     group_name = 'Pokemon'
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
-    image_system_prompt = np.random.choice(['unbelievable_world_system_prompt', 'default', 'buddhist_combined_image_system_prompt'], 
-                                           size=1, replace=False, p=[0.3,0.5,0.2])[0]  
+    generate_prompt_method = str(np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0])
+    image_system_prompt = str(np.random.choice(['unbelievable_world_system_prompt', 'default', 'buddhist_combined_image_system_prompt'], 
+                                           size=1, replace=False, p=[0.3,0.5,0.2])[0])
     def __init__(self):
         BaseCharacter.__init__(self)
         SocialMediaMixin.__init__(self)
@@ -81,7 +81,7 @@ class WaddledeeProcess(BaseCharacter, SocialMediaMixin):
     generation_type = 'text2img'
     default_hashtags = ['kirby']
     group_name = 'Kirby'
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
+    generate_prompt_method = str(np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0])
     
     def __init__(self):
         BaseCharacter.__init__(self)
@@ -99,9 +99,9 @@ class KirbyProcess(BaseCharacter, SocialMediaMixin):
     generation_type = 'text2img'
     default_hashtags = ['カービィ', '星のカービィ']
     group_name = 'Kirby'
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
-    image_system_prompt = np.random.choice(['unbelievable_world_system_prompt', 'default', 'buddhist_combined_image_system_prompt'], 
-                                           size=1, replace=False, p=[0.1,0.7,0.2])[0]
+    generate_prompt_method = str(np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0])
+    image_system_prompt = str(np.random.choice(['unbelievable_world_system_prompt', 'default', 'buddhist_combined_image_system_prompt'], 
+                                           size=1, replace=False, p=[0.1,0.7,0.2])[0])
     
     def __init__(self):
         BaseCharacter.__init__(self)
@@ -120,7 +120,7 @@ class UnbelievableWorldProcess(BaseCharacter, SocialMediaMixin):
     generation_type = 'text2img'
     default_hashtags = ['unbelievable', 'world']
     group_name = 'Creature'
-    generate_prompt_method = np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0]
+    generate_prompt_method = str(np.random.choice(['default', 'news'], size=1, replace=False, p=[0.1,0.9])[0])
     image_system_prompt = 'unbelievable_world_system_prompt'
 
     def __init__(self):

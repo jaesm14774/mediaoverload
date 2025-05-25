@@ -66,13 +66,41 @@ class Text2ImageStrategy(ContentStrategy):
             seed_start = random.randint(1, 999999999999)
             for i in range(images_per_description):
                 print(f'為第{idx}描述，生成第{i}張圖片\n')
-                updates = self.node_manager.generate_updates(
-                    workflow=workflow,
-                    description=description,
-                    seed=seed_start + i,
-                    **self.config.additional_params
-                )
                 
+                # 檢查是否有自定義的節點更新配置
+                custom_updates = self.config.additional_params.get('custom_node_updates', [])
+                if custom_updates:
+                    # 使用通用的節點更新方法
+                    updates = self.node_manager.generate_generic_updates(
+                        workflow=workflow,
+                        updates_config=custom_updates
+                    )
+                    
+                    # 添加文字和種子更新（如果沒有在 custom_updates 中指定）
+                    has_text_update = any(u.get('node_type') in ['PrimitiveString', 'CLIPTextEncode'] for u in custom_updates)
+                    has_seed_update = True
+                    if not has_text_update:
+                        text_updates = self.node_manager.generate_text_updates(
+                            workflow=workflow,
+                            description=description,
+                            **self.config.additional_params
+                        )
+                        updates.extend(text_updates)
+                    
+                    if has_seed_update:
+                        sampler_updates = self.node_manager.generate_sampler_updates(
+                            workflow=workflow,
+                            seed=seed_start + i
+                        )
+                        updates.extend(sampler_updates)
+                else:
+                    # 使用原本的方法
+                    updates = self.node_manager.generate_updates(
+                        workflow=workflow,
+                        description=description,
+                        seed=seed_start + i,
+                        **self.config.additional_params
+                    )
                 self.communicator.process_workflow(
                     workflow=workflow,
                     updates=updates,
