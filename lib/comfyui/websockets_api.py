@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from lib.comfyui.analyze import analyze_workflow
 
 class ComfyUICommunicator:
-    def __init__(self, host="host.docker.internal", port=8188, timeout=600):
+    def __init__(self, host="host.docker.internal", port=8188, timeout=900):
         self.host = host
         self.port = port
         self.client_id = str(uuid.uuid4())
@@ -28,7 +28,10 @@ class ComfyUICommunicator:
         req = request.Request(f"http://{self.server_address}/prompt", data=data)
         return json.loads(request.urlopen(req).read())
     
-    def get_image(self, filename, subfolder, folder_type):
+    def get_media_file(self, filename, subfolder, folder_type):
+        """
+        獲取媒體檔案（圖片、影片、GIF等）
+        """
         data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
         url_values = urllib.parse.urlencode(data)
         with request.urlopen(f"http://{self.server_address}/view?{url_values}") as response:
@@ -124,6 +127,7 @@ class ComfyUICommunicator:
     def save_results(self, prompt_id: str, output_path: str, file_name) -> Tuple[bool, List[str]]:
         """
         儲存執行結果並返回儲存的檔案列表
+        支援圖片和影片的儲存
         """
         try:
             # 獲取歷史記錄
@@ -132,9 +136,10 @@ class ComfyUICommunicator:
             
             # 處理所有輸出節點
             for node_id, node_output in history['outputs'].items():
+                # 處理圖片輸出
                 if 'images' in node_output:
                     for image in node_output['images']:
-                        image_data = self.get_image(
+                        image_data = self.get_media_file(
                             image['filename'],
                             image['subfolder'],
                             image['type']
@@ -149,6 +154,50 @@ class ComfyUICommunicator:
                         
                         with open(save_path, 'wb') as f:
                             f.write(image_data)
+                        saved_files.append(save_path)
+                
+                # 處理 GIF 影片輸出
+                if 'gifs' in node_output:
+                    for gif in node_output['gifs']:
+                        gif_data = self.get_media_file(
+                            gif['filename'],
+                            gif['subfolder'],
+                            gif['type']
+                        )
+                        
+                        # 儲存 GIF
+                        if not file_name:
+                            save_path = os.path.join(output_path, gif['filename'])
+                        else:
+                            # 保持原始副檔名
+                            base_name = os.path.splitext(gif['filename'])[0]
+                            extension = os.path.splitext(gif['filename'])[1]
+                            save_path = f'{output_path}/{base_name}_{file_name}{extension}'
+                        
+                        with open(save_path, 'wb') as f:
+                            f.write(gif_data)
+                        saved_files.append(save_path)
+                
+                # 處理影片輸出 (MP4, AVI 等)
+                if 'videos' in node_output:
+                    for video in node_output['videos']:
+                        video_data = self.get_media_file(
+                            video['filename'],
+                            video['subfolder'],
+                            video['type']
+                        )
+                        
+                        # 儲存影片
+                        if not file_name:
+                            save_path = os.path.join(output_path, video['filename'])
+                        else:
+                            # 保持原始副檔名
+                            base_name = os.path.splitext(video['filename'])[0]
+                            extension = os.path.splitext(video['filename'])[1]
+                            save_path = f'{output_path}/{base_name}_{file_name}{extension}'
+                        
+                        with open(save_path, 'wb') as f:
+                            f.write(video_data)
                         saved_files.append(save_path)
             
             return True, saved_files
