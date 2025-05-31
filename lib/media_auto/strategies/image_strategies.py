@@ -43,7 +43,7 @@ class Text2ImageStrategy(ContentStrategy):
             desc for desc in self.ollama_vision_manager.generate_image_prompts(self.config.prompt)
             if not desc.startswith('Here are')
         ]
-        print(descriptions)
+        print('All generated descriptions : ', descriptions)
         if self.config.character:
             character = self.config.character.lower()
             self.descriptions = [
@@ -165,7 +165,7 @@ class Text2ImageStrategy(ContentStrategy):
     def generate_article_content(self):
         start_time = time.time()
         # 需要時可以動態切換模型
-        self.ollama_switcher.switch_text_model('ollama', model_name='gemma:7b')
+        self.ollama_switcher.switch_text_model('ollama', model_name='gemma3:12b')
 
         # 整合角色名稱、描述和預設標籤
         content_parts = [
@@ -183,13 +183,13 @@ class Text2ImageStrategy(ContentStrategy):
             article_content = article_content.split('</think>')[-1].strip()        
         
         article_content = self.prevent_hashtag_count_too_more(article_content)
-        # 重整ig article post content
-        messages = [
-            {'role': 'system', 'content': self.ollama_vision_manager.prompts['guide_seo_article_system_prompt']},
-            {'role': 'user', 'content': article_content}
-        ]
-        self.article_content = self.ollama_vision_manager.text_model.chat_completion(messages=messages)
-        self.article_content = self.article_content.replace('"', '').replace('*', '').lower()
+        # # 重整ig article post content
+        # messages = [
+        #     {'role': 'system', 'content': self.ollama_vision_manager.prompts['guide_seo_article_system_prompt']},
+        #     {'role': 'user', 'content': article_content}
+        # ]
+        # article_content = self.ollama_vision_manager.text_model.chat_completion(messages=messages)
+        self.article_content = article_content.replace('"', '').replace('*', '').lower()
 
 
         print(f'產生文章內容花費 : {time.time() - start_time}')

@@ -1,7 +1,7 @@
 {
   "6": {
     "inputs": {
-      "text": "Ultra-realistic photo, high resolution, detailed. A solitary Capybara floats peacefully on a small inflatable ring in the middle of the vast, swirling vortex of the Great Pacific Garbage Patch. It wears a tiny, slightly-too-small straw hat. Discarded plastic bottles, fishing nets, and debris stretch in every direction, illuminated by harsh, midday sun that creates shimmering reflections on the oily water surface. The Capybara appears completely calm, its eyes half-closed, undisturbed by the chaotic, polluted environment around it. Sharp focus is on the serene animal and the immediate, grimy details of the floating trash. High angle shot looking down slightly, emphasizing the scale of the patch. Gritty textures, stark light, a bizarre and unsettling documentary moment.",
+      "text": "Hyperrealistic photo, ultra-detailed, dramatic cinematic lighting, low-angle medium shot: A very stoic capybara, wearing a surprisingly well-fitted, miniature black leather biker jacket (zipper slightly undone) and tiny, dark aviator sunglasses, is expertly parallel parking a ridiculously oversized, bright pink children's Barbie DreamCar™️. The scene unfolds on a gritty, rain-slicked urban street at dusk, with neon signs from a ramen shop and a laundromat casting long, colorful reflections on the wet asphalt. One of the capybara's front paws is firmly on the miniature steering wheel, the other delicately poised near a tiny gear stick. Its expression is one of intense, cool concentration, completely unfazed by the absurdity of its task or the sheer impossibility of the vehicle fitting into the tight space between a beat-up pickup truck and an overflowing dumpster. Steam rises from a nearby manhole cover. Sharp focus on the capybara's determined snout and the gleaming, rain-dotted chrome of the Barbie car's hubcap. Background slightly blurred, showing astonished onlookers (a stray cat, a pigeon wearing a tiny discarded bottle cap as a hat) frozen mid-reaction. Unbelievable, bizarre, comedic, a moment of unexpected vehicular prowess. Found footage, 'caught on camera' feel",
       "speak_and_recognation": {
         "__value__": [
           false,
@@ -68,16 +68,6 @@
       "title": "DualCLIPLoader"
     }
   },
-  "12": {
-    "inputs": {
-      "unet_name": "flux\\flux1-dev.safetensors",
-      "weight_dtype": "default"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "Load Diffusion Model"
-    }
-  },
   "13": {
     "inputs": {
       "noise": [
@@ -118,7 +108,7 @@
   "17": {
     "inputs": {
       "scheduler": "simple",
-      "steps": 20,
+      "steps": 8,
       "denoise": 1,
       "model": [
         "30",
@@ -148,7 +138,7 @@
   },
   "25": {
     "inputs": {
-      "noise_seed": 45
+      "noise_seed": 57
     },
     "class_type": "RandomNoise",
     "_meta": {
@@ -170,8 +160,8 @@
   },
   "27": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": 768,
+      "height": 768,
       "batch_size": 1
     },
     "class_type": "EmptySD3LatentImage",
@@ -183,10 +173,10 @@
     "inputs": {
       "max_shift": 1.15,
       "base_shift": 0.5,
-      "width": 1024,
-      "height": 1024,
+      "width": 768,
+      "height": 768,
       "model": [
-        "38",
+        "46",
         0
       ]
     },
@@ -195,30 +185,15 @@
       "title": "ModelSamplingFlux"
     }
   },
-  "38": {
-    "inputs": {
-      "model_type": "flux",
-      "rel_l1_thresh": 0.4,
-      "max_skip_steps": 3,
-      "model": [
-        "46",
-        0
-      ]
-    },
-    "class_type": "TeaCache",
-    "_meta": {
-      "title": "TeaCache"
-    }
-  },
   "46": {
     "inputs": {
-      "lora_name": "flux\\aidmaMJv7-FLUX-v0.1.safetensors",
+      "lora_name": "flux\\FLUX.1-Turbo-Alpha.safetensors",
       "strength_model": 1,
       "strength_clip": 1,
       "prompt": "",
       "example": "[none]",
       "model": [
-        "12",
+        "50",
         0
       ],
       "clip": [
@@ -229,6 +204,15 @@
     "class_type": "LoraLoader|pysssss",
     "_meta": {
       "title": "Lora Loader"
+    }
+  },
+  "50": {
+    "inputs": {
+      "unet_name": "flux\\flux1-dev-Q5_0.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
     }
   }
 }
