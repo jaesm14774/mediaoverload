@@ -4,7 +4,7 @@ import yaml
 import numpy as np
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
-from lib.media_auto.process import CharacterConfig
+from lib.media_auto.character_config import CharacterConfig
 
 
 class ConfigLoader:

@@ -7,7 +7,8 @@ import json
 import numpy as np
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy
-from lib.content_generation.image_content_generator import VisionManagerBuilder, ModelSwitcher
+from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
+from lib.media_auto.models.vision.model_switcher import ModelSwitcher
 from lib.comfyui.websockets_api import ComfyUICommunicator
 from lib.comfyui.node_manager import NodeManager
 
@@ -114,39 +115,14 @@ class Text2ImageStrategy(ContentStrategy):
 
     def analyze_image_text_match(self, similarity_threshold) -> Dict[str, Any]:
         """分析生成的圖片"""
-        start_time = time.time()
-        total_results = []
         image_paths = glob.glob(f'{self.config.output_dir}/*')
-        
-        for image_path in image_paths:
-            print(f'進行文圖匹配程度判斷中 : {image_path}\n')
-            desc_index = int(re.search(f'{self.config.character}_d(\d+)_\d+\.', image_path).group(1))
-            similarity = self.gemini_vision_manager.analyze_image_text_similarity(
-                text=self.descriptions[desc_index],
-                image_path=image_path,
-                main_character=self.config.character,
-                temperature=0.3
-            )
-            
-            total_results.append({
-                'image_path': image_path,
-                'description': self.descriptions[desc_index],
-                'similarity': similarity
-            })
-            time.sleep(8) #google free tier rate limit
-
-        self.total_results = total_results
-
-        # 過濾結果
-        self.filter_results = []
-        for row in total_results:
-            try:
-                similarity = float(row['similarity'].strip())
-                if similarity >= similarity_threshold:
-                    self.filter_results.append(row)
-            except:
-                continue
-        print(f'分析圖文匹配程度 花費 : {time.time() - start_time}')
+        self.filter_results = self.gemini_vision_manager.analyze_image_text_match(
+            image_paths=image_paths,
+            descriptions=self.descriptions,
+            main_character=self.config.character,
+            similarity_threshold=similarity_threshold,
+            temperature=0.3
+        )
         return self
 
     def prevent_hashtag_count_too_more(self, hashtag_text):

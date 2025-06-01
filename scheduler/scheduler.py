@@ -6,12 +6,13 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import sys
 import math
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import asyncio
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from lib.media_auto.media_main_logic import ContentProcessor
-import lib.media_auto.process as media_process
+from lib.services.service_factory import ServiceFactory
+from lib.media_auto.character_base import ConfigurableCharacterWithSocialMedia
 from utils.logger import setup_logger, log_execution_time
 
 class MediaScheduler:
@@ -21,6 +22,8 @@ class MediaScheduler:
         self.load_config()
         
         self.last_execution_times = {}  # 儲存每個角色的上次執行時間
+        self.service_factory = ServiceFactory()
+        self.orchestration_service = self.service_factory.get_orchestration_service()
 
         # 從配置文件讀取或使用默認值
         probability_settings = self.config.get('probability_settings', {})
@@ -33,130 +36,112 @@ class MediaScheduler:
 
     @log_execution_time(logger=setup_logger(__name__))
     def load_config(self):
+        """載入配置文件"""
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
     
     def calculate_time_factor(self, hours_since_last: float) -> float:
-        """
-        計算基於時間的機率調整因子，確保平滑變化：
-        - 0~3 小時內機率大幅下降
-        - 3~7 小時緩步回升
-        - 7 小時後機率大幅提升
-        """
-
+        """計算基於時間的機率調整因子"""
         if hours_since_last <= 0:
-            return 0.1  # 防止異常，最低機率
+            return 0.1
 
-        # 平滑下降與回升的參數調整
-        steepness1 = 4   # 控制前期下降速度
-        steepness2 = 1 # 控制後期回升速度
-        midpoint1 = 4  # 第一段下降的拐點（4小時內）
-        midpoint2 = 7    # 第二段上升的拐點（7小時左右）
+        steepness1 = 4
+        steepness2 = 1
+        midpoint1 = 4
+        midpoint2 = 7
 
-        # 使用雙 sigmoid 函數平滑控制下降與回升
         decline = 1 / (1 + math.exp(steepness1 * (hours_since_last - midpoint1)))
         recovery = 1 / (1 + math.exp(-steepness2 * (hours_since_last - midpoint2)))
 
         factor = 1 - decline + recovery
-
         return max(0.1, factor)
 
     def should_execute(self, character_name: str) -> bool:
-        """決定是否要執行處理，使用改進的機率分布"""
-        # 檢查睡眠時段 (22:00-07:00)
+        """決定是否要執行處理"""
         current_hour = datetime.now().hour
         if current_hour >= 22 or current_hour < 7:
             self.logger.info("當前時間在睡眠時段（22:00-07:00），跳過執行")
             return False
-        
-        # 獲取角色特定的概率設定或使用全局設定
-        char_config = next((cfg for name, cfg in self.config['schedules'].items() if cfg['character'] == character_name), None)
-        prob_settings = char_config.get('probability_settings', {}) if char_config else {}
-        
+
+        char_config = next((cfg for name, cfg in self.config['schedules'].items() 
+                          if cfg['character'] == character_name), None)
+        if not char_config:
+            return False
+
+        prob_settings = char_config.get('probability_settings', {})
         base_prob = float(prob_settings.get('base_probability', self.base_probability))
         max_prob = float(prob_settings.get('max_probability', self.max_probability))
         min_prob = float(prob_settings.get('min_probability', self.min_probability))
-        
-        # 計算距離上次執行的時間
+
         last_execution_time = self.last_execution_times.get(character_name)
         if last_execution_time:
             hours_since_last = (datetime.now() - last_execution_time).total_seconds() / 3600
             time_factor = self.calculate_time_factor(hours_since_last)
-            # 計算當前小時的基礎機率
             current_probability = base_prob * time_factor
-            
-            # 確保機率在合理範圍內
-            current_probability = max(min_prob, 
-                                   min(current_probability, max_prob))
+            current_probability = max(min_prob, min(current_probability, max_prob))
             
             self.logger.info(f"距離上次執行 {hours_since_last:.1f} 小時, "
                            f"時間因子 {time_factor:.2f}, "
                            f"當前執行機率 {current_probability:.3%}/小時")
         else:
-            # 首次執行使用角色特定或全局基礎機率
             current_probability = base_prob
             self.logger.info(f"首次執行，使用基礎機率 {current_probability:.3%}/小時")
-        
+
         return random.random() < current_probability
 
-    @log_execution_time(logger=setup_logger(__name__))
-    def process_character(self, character_name: str, prompt_config: dict):
-        self.logger.info(f"觸發角色 {character_name} 的處理")
-        
-        # 根據機率決定是否執行
+    async def process_character(self, character_name: str, prompt_config: dict) -> None:
+        """處理特定角色的內容"""
         if not self.should_execute(character_name):
             self.logger.info(f"根據機率決定跳過執行角色 {character_name}")
             return
-            
+
         self.logger.info(f"開始處理角色 {character_name}")
         try:
-            # 獲取角色類別
-            character_class = getattr(media_process, f'{character_name}Process')
-            processor = ContentProcessor(character_class())
-            prompt_config['character'] = character_name
-            # 執行處理
-            import asyncio
-            asyncio.run(processor.etl_process(
+            # 載入角色配置
+            character_config_path = f"configs/characters/{character_name.lower()}.yaml"
+            character = ConfigurableCharacterWithSocialMedia(character_config_path)
+            
+            # 執行工作流程
+            result = await self.orchestration_service.execute_workflow(
+                character=character,
                 prompt=prompt_config.get('prompt'),
                 temperature=prompt_config.get('temperature', 1.0)
-            ))
+            )
             
             self.logger.info(f"成功處理角色 {character_name}")
-            self.last_execution_times[character_name] = datetime.now()  # 更新該角色的上次執行時間
+            self.last_execution_times[character_name] = datetime.now()
+            
         except Exception as e:
             self.logger.error(f"處理角色 {character_name} 時發生錯誤: {str(e)}", exc_info=True)
 
-    def instant_execution(self):
+    def instant_execution(self) -> None:
         """立即執行所有角色的處理"""
-        for char_name, char_config in self.config['schedules'].items():
-            self.process_character(character_name=char_config['character'], prompt_config=char_config['prompts'][0])
+        for char_config in self.config['schedules'].values():
+            asyncio.run(self.process_character(
+                character_name=char_config['character'],
+                prompt_config=char_config['prompts'][0]
+            ))
 
-    def get_random_minute(self) -> str:
-        """生成隨機分鐘數（0-59）"""
-        return f"{random.randint(0, 59):02d}"
-    
-    @log_execution_time(logger=setup_logger(__name__))
-    def setup_schedules(self):
+    def setup_schedules(self) -> None:
+        """設置排程"""
         self.logger.info("開始設置排程...")
         
-        # 為每個角色設置每小時執行一次
-        for char_name, char_config in self.config['schedules'].items():
+        for char_config in self.config['schedules'].values():
             try:
-                # 每小時執行一次，每次執行時重新設置下一個小時的隨機時間
                 def schedule_next_run(char_config):
-                    # 取得當前時間
                     now = datetime.now()
-                    # 計算下一個小時
                     next_hour = now + timedelta(hours=1)
-                    next_hour = next_hour.replace(minute=random.randint(0, 59), second=0, microsecond=0)
+                    next_hour = next_hour.replace(
+                        minute=random.randint(0, 59),
+                        second=0,
+                        microsecond=0
+                    )
                     
-                    # 如果下一個時間在睡眠時段（22:00-07:00），則調整到早上7點
                     if next_hour.hour >= 22 or next_hour.hour < 7:
                         next_hour = next_hour.replace(hour=7, minute=random.randint(0, 59))
-                        if next_hour < now:  # 如果調整後的時間比現在早，就加一天
+                        if next_hour < now:
                             next_hour += timedelta(days=1)
                     
-                    # 設置下一次執行
                     schedule.every().day.at(f"{next_hour.strftime('%H:%M')}").do(
                         self.process_and_reschedule,
                         char_config=char_config,
@@ -164,36 +149,32 @@ class MediaScheduler:
                     ).tag(f"schedule_{char_config['character']}")
                     
                     self.logger.info(
-                        f"已為角色 {char_config['character']} 設置下次執行時間: {next_hour.strftime('%H:%M')}, "
+                        f"已為角色 {char_config['character']} 設置下次執行時間: {next_hour.strftime('%H:%M')}"
                     )
                 
-                # 初始設置
                 schedule_next_run(char_config)
                 
             except Exception as e:
-                self.logger.error(f"設置排程 {char_name} 時發生錯誤: {str(e)}")
-    
-    def process_and_reschedule(self, char_config: dict, schedule_func):
-        """處理角色並重新排程下一次執行"""
+                self.logger.error(f"設置排程 {char_config['character']} 時發生錯誤: {str(e)}")
+
+    def process_and_reschedule(self, char_config: dict, schedule_func) -> None:
+        """處理角色並重新排程"""
         try:
-            # 清除當前角色的所有排程
             schedule.clear(f"schedule_{char_config['character']}")
             
-            # 執行處理
-            self.process_character(
+            asyncio.run(self.process_character(
                 character_name=char_config['character'],
                 prompt_config=char_config['prompts'][0]
-            )
+            ))
             
-            # 設置下一次執行
             schedule_func(char_config)
             
         except Exception as e:
             self.logger.error(f"處理和重新排程時發生錯誤: {str(e)}", exc_info=True)
-            # 發生錯誤時也要確保重新排程
             schedule_func(char_config)
-    
-    def run(self):
+
+    def run(self) -> None:
+        """運行排程器"""
         self.logger.info("啟動排程器...")
         self.setup_schedules()
         self.logger.info("所有排程已設置完成，進入主迴圈")
@@ -205,6 +186,13 @@ class MediaScheduler:
             except Exception as e:
                 self.logger.error(f"執行排程時發生錯誤: {str(e)}", exc_info=True)
 
+    def cleanup(self) -> None:
+        """清理資源"""
+        self.service_factory.cleanup()
+
 if __name__ == "__main__":
     scheduler = MediaScheduler()
-    scheduler.run()
+    try:
+        scheduler.run()
+    finally:
+        scheduler.cleanup()

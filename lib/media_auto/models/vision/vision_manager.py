@@ -1,118 +1,9 @@
-from abc import ABC, abstractmethod
-from typing import List, Optional, Type, Dict
-from dataclasses import dataclass
-import ollama
-import os
+from typing import List, Optional, Dict, Any
 import re
-from dotenv import load_dotenv
+import time
+from lib.media_auto.models.interfaces.ai_model import AIModelInterface, ModelConfig
+from lib.media_auto.models.vision.model_registry import ModelRegistry
 from configs.prompt.image_system_guide import *
-
-@dataclass
-class ModelConfig:
-    """模型配置類"""
-    model_name: str
-    temperature: float = 0.3
-    max_tokens: Optional[int] = None
-    
-class AIModelInterface(ABC):
-    """AI 模型接口"""
-    @abstractmethod
-    def chat_completion(self, 
-                       messages: List[dict],
-                       images: Optional[List[str]] = None,
-                       **kwargs) -> str:
-        """執行聊天完成"""
-        pass
-
-class OllamaModel(AIModelInterface):
-    """Ollama 模型實現"""
-    def __init__(self, config: ModelConfig):
-        self.config = config
-        self.client = ollama.Client(
-            host='http://host.docker.internal:11434'
-        )
-
-        
-    def chat_completion(self, 
-                       messages: List[dict],
-                       images: Optional[List[str]] = None,
-                       **kwargs) -> str:
-        if images:
-            messages[-1]['images'] = images
-            
-        response = self.client.chat(
-            model=self.config.model_name,
-            messages=messages,
-            options={
-                "temperature": self.config.temperature
-            }
-        )
-        return response.message.content
-
-class GeminiModel(AIModelInterface):
-    """Gemini 模型實現"""
-    def __init__(self, config: ModelConfig):
-        self.config = config
-        import google.generativeai as genai
-        self.genai = genai
-        # 這裡需要設置你的 API 金鑰
-        load_dotenv(f'media_overload.env')
-        genai.configure(api_key=os.environ['gemini_api_token'])
-
-    def chat_completion(self, 
-                       messages: List[dict],
-                       images: Optional[List[str]] = None,
-                       **kwargs) -> str:
-        # 將 role-based messages 轉換為純文本
-        combined_prompt = self._combine_messages(messages)
-        
-        model = self.genai.GenerativeModel(self.config.model_name)
-        if images:
-            # 處理圖片輸入
-            image_parts = [self._load_image(img_path) for img_path in images]
-            response = model.generate_content([combined_prompt, *image_parts])
-        else:
-            response = model.generate_content(combined_prompt)
-            
-        return response.text
-    
-    def _combine_messages(self, messages: List[dict]) -> str:
-        """將角色型消息合併為單一提示詞"""
-        combined = ""
-        for msg in messages:
-            content = msg.get('content', '')
-            if msg.get('role') == 'system':
-                combined += f"Instructions: {content}\n"
-            else:
-                combined += f"{content}\n"
-        return combined.strip()
-    
-    def _load_image(self, image_path: str):
-        """載入圖片"""
-        from PIL import Image
-        return Image.open(image_path)
-
-class ModelRegistry:
-    """模型註冊表，用於管理不同類型的模型實例"""
-    _models: Dict[str, Type['AIModelInterface']] = {}
-    
-    @classmethod
-    def register(cls, name: str, model_class: Type['AIModelInterface']):
-        """註冊新的模型類別"""
-        cls._models[name] = model_class
-        
-    @classmethod
-    def get_model(cls, name: str) -> Type['AIModelInterface']:
-        """獲取指定名稱的模型類別"""
-        if name not in cls._models:
-            raise ValueError(f"Model {name} not registered")
-        return cls._models[name]
-    
-    @classmethod
-    def available_models(cls) -> List[str]:
-        """獲取所有已註冊的模型名稱"""
-        return list(cls._models.keys())
-
 
 class VisionContentManager:
     """處理圖片內容分析與生成的類別"""
@@ -176,7 +67,7 @@ class VisionContentManager:
         return self.text_model.chat_completion(messages=messages, **kwargs)
 
     def generate_arbitrary_input(self, character, extra='', prompt_type='default') -> str:
-        """生成 SEO 優化的 hashtags"""
+        """生成任意輸入的轉換結果"""
         if prompt_type == 'default':
             prompt_type = 'arbitrary_input_system_prompt'
         messages = [
@@ -184,12 +75,65 @@ class VisionContentManager:
             {'role': 'assistant', 'content': 'Translation any input into precisely English and only one response without explanation'},
             {'role': 'user', 'content': f"""main character: {character} must be in result\n{extra}"""}
         ]
-        result=self.text_model.chat_completion(messages=messages)    
-        if '</think>' in result: #deepseek r1 will have <think>...</think> format
-            result =result.split('</think>')[-1].strip()
+        result = self.text_model.chat_completion(messages=messages)    
+        if '</think>' in result:  # deepseek r1 will have <think>...</think> format
+            result = result.split('</think>')[-1].strip()
         
         return result
+
+    def analyze_image_text_match(self, 
+                               image_paths: List[str],
+                               descriptions: List[str],
+                               main_character: str,
+                               similarity_threshold: float = 0.9,
+                               **kwargs) -> List[Dict[str, Any]]:
+        """分析圖文匹配度並過濾結果
         
+        Args:
+            image_paths: 圖片路徑列表
+            descriptions: 描述文字列表
+            main_character: 主要角色名稱
+            similarity_threshold: 相似度閾值
+            **kwargs: 其他參數
+            
+        Returns:
+            過濾後的結果列表，每個結果包含：
+            - image_path: 圖片路徑
+            - description: 對應的描述
+            - similarity: 相似度分數
+        """
+        start_time = time.time()
+        total_results = []
+        
+        for image_path in image_paths:
+            print(f'進行文圖匹配程度判斷中 : {image_path}\n')
+            desc_index = int(re.search(f'{main_character}_d(\d+)_\d+\.', image_path).group(1))
+            similarity = self.analyze_image_text_similarity(
+                text=descriptions[desc_index],
+                image_path=image_path,
+                main_character=main_character,
+                **kwargs
+            )
+            
+            total_results.append({
+                'image_path': image_path,
+                'description': descriptions[desc_index],
+                'similarity': similarity
+            })
+            time.sleep(3)  # google free tier rate limit
+
+        # 過濾結果
+        filter_results = []
+        for row in total_results:
+            try:
+                similarity = float(row['similarity'].strip())
+                if similarity >= similarity_threshold:
+                    filter_results.append(row)
+            except:
+                continue
+                
+        print(f'分析圖文匹配程度 花費 : {time.time() - start_time}')
+        return filter_results
 
 class VisionManagerBuilder:
     """Vision Manager 建構器"""
@@ -225,6 +169,15 @@ class VisionManagerBuilder:
     
     def with_prompts(self, prompts: dict):
         """設置提示詞配置"""
+        if not isinstance(prompts, dict):
+            raise ValueError("prompts must be a dictionary")
+        
+        # 確保必要的提示詞存在
+        required_prompts = ['image_system_prompt']
+        for prompt in required_prompts:
+            if prompt not in prompts and prompt not in self.prompts_config:
+                raise ValueError(f"Missing required prompt: {prompt}")
+        
         self.prompts_config.update(prompts)
         return self
     
@@ -236,29 +189,12 @@ class VisionManagerBuilder:
         vision_model = vision_model_class(ModelConfig(**self.vision_config))
         text_model = text_model_class(ModelConfig(**self.text_config))
         
+        # 確保必要的提示詞存在
+        if 'image_system_prompt' not in self.prompts_config:
+            raise ValueError("Missing required prompt: image_system_prompt")
+        
         return VisionContentManager(
             vision_model=vision_model,
             text_model=text_model,
             prompts_config=self.prompts_config
-        )
-
-
-class ModelSwitcher:
-    """模型切換器，用於動態更換模型"""
-    def __init__(self, vision_manager: 'VisionContentManager'):
-        self.manager = vision_manager
-    
-    def switch_vision_model(self, model_type: str, **config):
-        """切換視覺模型"""
-        model_class = ModelRegistry.get_model(model_type)
-        self.manager.vision_model = model_class(ModelConfig(**config))
-    
-    def switch_text_model(self, model_type: str, **config):
-        """切換文本模型"""
-        model_class = ModelRegistry.get_model(model_type)
-        self.manager.text_model = model_class(ModelConfig(**config))
-
-
-# 註冊模型
-ModelRegistry.register('ollama', OllamaModel)
-ModelRegistry.register('gemini', GeminiModel)
+        ) 

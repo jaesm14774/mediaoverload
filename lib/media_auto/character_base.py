@@ -1,7 +1,7 @@
 """新的角色基類 - 支援配置外部化"""
 from abc import ABC
 from typing import Dict, Any, Optional
-from lib.media_auto.process import CharacterConfig
+from lib.media_auto.character_config import CharacterConfig, BaseCharacter
 from lib.config_loader import ConfigLoader
 from lib.social_media import SocialMediaMixin
 

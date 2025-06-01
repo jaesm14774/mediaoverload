@@ -3,7 +3,7 @@ from typing import Optional
 from datetime import datetime
 from lib.services.interfaces.prompt_service import IPromptService
 from lib.repositories.news_repository import INewsRepository
-from lib.content_generation.image_content_generator import VisionManagerBuilder
+from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from utils.logger import setup_logger
 
 

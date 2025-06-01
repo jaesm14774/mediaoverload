@@ -54,89 +54,186 @@ MediaOverload 是一個自動化的內容創作和社群媒體發布系統。它
 
 ```mermaid
 graph TD
-    A["啟動: run_media_interface.py / 排程器"] --> B{"輸入參數 (角色, 提示詞)"}
-    B -- 提供提示詞 --> C["實例化角色處理器 (XxxProcess)"]
-    B -- 未提供提示詞 --> D["ContentProcessor: Ollama LLM 生成提示詞"]
+    A["系統啟動"] --> B{"參數檢查"}
+    B -- 有提示詞 --> C["角色處理器"]
+    B -- 無提示詞 --> D["生成提示詞"]
     D --> C
-    C --> E["ContentProcessor: 執行 etl_process"]
+    C --> E["執行流程"]
 
-    subgraph "ETL 核心流程 (etl_process)"
-        E --> F{"角色是否屬於群組?"}
-        F -- 是 --> G["資料庫: 隨機選取群組內角色"]
-        G --> H["更新角色配置"]
-        F -- 否 --> H
-        H --> I["載入角色完整生成配置 (含 ComfyUI Workflow 路徑)"]
-        I --> J["StrategyFactory: 選擇內容生成策略 (e.g., ComfyUI 調用)"]
-        J --> K["策略執行: LLM 生成初步描述"]
-        K --> L["策略執行: ComfyUI 生成圖片"]
-        L --> M["策略執行: LLM 分析圖文匹配度"]
-        M --> N["策略執行: LLM 生成最終文章內容"]
+    subgraph core ["🔧 核心服務"]
+        E --> F["提示詞服務"]
+        F --> |"基礎擴展 → 新聞靈感 → LLM生成"| G["內容生成"]
+        G --> |"生成描述 → 創建圖片 → 匹配分析 → 完成文章"| H["Discord審核"]
+        H --> |"發送內容 → 等待審核 → 獲取結果"| I["社群發布"]
+        I --> |"格式轉換 → 平台發布 → 結果處理"| J["通知服務"]
+        J --> |"狀態通知 → 錯誤處理 → 資源清理"| K["流程完成"]
     end
 
-    N --> O{"有合格生成結果?"}
-    O -- 是 --> P["選擇圖片 (最多6張)"]
-    P --> Q["Discord API: 發送內容至頻道進行人工審核/編輯"]
-
-    subgraph "人工審核與發布"
-        Q --> R{"人工審核: 確認內容與選取圖片?"}
-        R -- 是 --> S["ImageProcessor: 處理選定圖片 (e.g., 格式轉換)"]
-        S --> T["Instagram API: 發布內容至 Instagram"]
-        T --> U["流程結束"]
+    subgraph data ["💾 資料管理"]
+        L["角色資料"]
+        M["新聞資料"]
+        N["配置管理"]
     end
 
-    O -- 否 (無合格結果) --> U
-    R -- 否 (未選取圖片) --> U
-
-    subgraph "外部依賴與資料源"
-        DataSource1[(MySQL: anime_roles)]:::DB_STYLE
-        DataSource2[(MySQL: news_ch.news)]:::DB_STYLE
-        
-        AI_LLM["Ollama LLM (提示詞/描述/文章)"]:::AI_STYLE
-        AI_Image["ComfyUI (圖像生成)"]:::AI_STYLE
-
-        DiscordService["Discord API"]:::API_STYLE
-        InstagramService["Instagram API"]:::API_STYLE
-        ComfyUIService["ComfyUI API"]:::API_STYLE
+    subgraph external ["🌐 外部服務"]
+        O[(資料庫)]
+        P[LLM模型]
+        Q[圖像生成]
+        R[Discord]
+        S[Instagram]
     end
     
-    classDef default fill:#fff,stroke:#333,stroke-width:2px
-    classDef DB_STYLE fill:#ccf,stroke:#333,stroke-width:2px
-    classDef AI_STYLE fill:#cfc,stroke:#333,stroke-width:2px
-    classDef API_STYLE fill:#ffc,stroke:#333,stroke-width:2px
-    classDef STYLE_EXT fill:#f9f,stroke:#333,stroke-width:2px
+    classDef default fill:#f8f9fa,stroke:#495057,stroke-width:2px,color:#212529
+    classDef service fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    classDef data fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
+    classDef external fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#0d47a1
+    
+    class F,G,H,I,J,E service
+    class L,M,N,O data
+    class P,Q,R,S external
 
-    D -.-> AI_LLM
-    K -.-> AI_LLM
-    M -.-> AI_LLM
-    N -.-> AI_LLM
-    L -.-> AI_Image
-    L --> ComfyUIService
-    G -.-> DataSource1
-    D -.-> DataSource2
-    Q --> DiscordService
-    T --> InstagramService
-
+    F -.-> P
+    G -.-> P
+    G -.-> Q
+    H -.-> R
+    I -.-> S
+    L -.-> O
+    M -.-> O
+    N -.-> C
 ```
 
-### 流程說明：
+### 新架構說明
 
-1.  **啟動與參數**: 腳本 (`run_media_interface.py`) 可由用戶直接執行或由排程器觸發，接收 `character` (角色) 和可選的 `prompt` (提示詞) 作為輸入。
-2.  **角色處理器初始化**: 根據 `character` 參數，系統會實例化相應的角色處理類別 (例如 `WobbuffetProcess`)，該類別繼承自 `BaseCharacter` 並載入該角色的特定配置 (如 ComfyUI workflow 路徑、預設標籤等)。
-3.  **提示詞生成 (可選)**: 如果未提供 `prompt`，`ContentProcessor` 會使用 Ollama LLM (例如 `llama3.2-vision`, `qwen3:8b`) 生成提示詞。此過程可能結合角色配置的 `generate_prompt_method` ('default' 或 'news')，後者會從資料庫讀取新聞內容作為靈感。
-4.  **ETL 核心處理 (`ContentProcessor.etl_process`)**:
-    *   **動態角色選擇**: 若角色配置了 `group_name`，系統會從資料庫 (`anime.anime_roles`) 中隨機選擇一個隸屬於該群組的角色來執行任務。
-    *   **配置加載**: 加載選定角色的完整生成配置，包括用於 ComfyUI 的 workflow JSON 檔案路徑。
-    *   **策略選擇與執行**:
-        *   `StrategyFactory` 根據配置中的 `generation_type` (通常是 'text2img') 選擇合適的內容生成策略。
-        *   該策略將協調 LLM 和 ComfyUI：
-            *   使用 LLM 生成初步的文字描述。
-            *   調用 ComfyUI (基於 workflow) 生成圖像。
-            *   使用 LLM 分析生成圖像與文字描述的匹配度。
-            *   使用 LLM 基於圖像和描述生成最終的文章內容。
-5.  **人工審核**: 經過初步篩選的圖像 (最多6張) 和生成的文章內容，會被發送到指定的 Discord 頻道。人工操作員可以在此頻道審核內容、進行必要的編輯，並選擇最終要發布的圖像。
-6.  **圖像後處理**: 用戶在 Discord 中選定的圖像會經過 `ImageProcessor` 處理 (例如，轉換為 Instagram 偏好的 JPG 格式)。
-7.  **社群媒體發布**: 最終確認的內容 (圖像和編輯後的文字) 將通過相應的社群媒體平台處理器 (目前為 `InstagramPlatform`) 發布到 Instagram。
-8.  **清理與記錄**: 流程結束後，可能會執行清理操作 (例如刪除臨時檔案)，並記錄執行時間和結果。
+1. **服務層 (Services)**
+   - **PromptService**: 負責生成提示詞
+     - 基礎提示詞擴展
+     - 新聞靈感提取
+     - LLM 生成提示詞
+   - **ContentGenerationService**: 負責內容生成
+     - 文字描述生成
+     - 圖片生成（ComfyUI）
+     - 圖文匹配度分析
+     - 最終文章生成
+   - **ReviewService**: 負責 Discord 審核流程
+     - 內容發送
+     - 人工審核等待
+     - 結果處理
+   - **PublishingService**: 負責社群媒體發布
+     - 圖片處理
+     - 平台發布
+     - 結果處理
+   - **NotificationService**: 負責通知
+     - 成功/失敗通知
+     - 錯誤處理
+     - 資源清理
+   - **OrchestrationService**: 工作流程協調
+     - 服務調度
+     - 錯誤處理
+     - 流程控制
+
+2. **資料存取層 (Repositories)**
+   - **CharacterRepository**: 角色資料操作
+     - 角色查詢
+     - 群組管理
+     - 配置讀取
+   - **NewsRepository**: 新聞資料操作
+     - 新聞檢索
+     - 內容提取
+     - 資料更新
+   - **ConfigLoader**: 配置管理
+     - YAML 解析
+     - 配置驗證
+     - 動態載入
+
+3. **配置管理**
+   - **ConfigurableCharacter**: 可配置角色基類
+     - 配置繼承
+     - 動態屬性
+     - 驗證機制
+   - **YAML 配置結構**:
+     ```yaml
+     character:
+       name: your_character
+       group_name: YourGroup
+       
+     generation:
+       output_dir: /app/output_image
+       workflow_path: /app/configs/workflow/your-workflow.json
+       similarity_threshold: 0.7
+       generation_type: text2img
+       
+       prompt_method_weights:
+         default: 0.3
+         news: 0.7
+         
+       image_system_prompt_weights:
+         default: 0.6
+         unbelievable_world_system_prompt: 0.4
+
+     social_media:
+       default_hashtags:
+         - tag1
+         - tag2
+       platforms:
+         instagram:
+           config_folder_path: /app/configs/social_media/ig
+           enabled: true
+
+     additional_params:
+       images_per_description: 3
+       is_negative: false
+     ```
+
+### 流程說明
+
+1. **啟動與參數**
+   - 腳本 (`run_media_interface.py`) 可由用戶直接執行或由排程器觸發
+   - 接收 `character` (角色) 和可選的 `prompt` (提示詞) 作為輸入
+   - 支援環境變數配置和命令列參數
+
+2. **角色處理器初始化**
+   - 根據 `character` 參數實例化相應的角色處理類別
+   - 從 YAML 配置檔案載入角色特定設定
+   - 初始化必要的服務和依賴
+
+3. **提示詞生成 (可選)**
+   - 如果未提供 `prompt`，`PromptService` 會使用 Ollama LLM 生成
+   - 支援多種生成策略：
+     - 基礎提示詞擴展
+     - 新聞靈感提取
+     - 純 LLM 生成
+   - 可配置生成策略的權重
+
+4. **工作流程執行**
+   - **動態角色選擇**
+     - 檢查角色是否屬於群組
+     - 從資料庫隨機選擇群組內角色
+     - 更新角色配置
+   - **配置加載**
+     - 載入角色完整生成配置
+     - 驗證配置有效性
+     - 初始化相關服務
+   - **服務協調**
+     - `PromptService`: 生成或擴展提示詞
+     - `ContentGenerationService`: 生成內容
+     - `ReviewService`: 處理審核流程
+     - `PublishingService`: 處理發布
+     - `NotificationService`: 發送通知
+
+5. **人工審核**
+   - 內容發送到 Discord 頻道
+   - 等待人工審核和編輯
+   - 處理審核結果和反饋
+
+6. **社群媒體發布**
+   - 處理選定的圖片（格式轉換等）
+   - 發布到配置的社群平台
+   - 處理發布結果和錯誤
+
+7. **通知與清理**
+   - 發送成功/失敗通知
+   - 清理臨時檔案和資源
+   - 記錄執行日誌
 
 ## 環境設定與執行
 
@@ -156,8 +253,12 @@ mysql_db_name=your_mysql_db_name
 discord_review_bot_token=your_discord_bot_token
 discord_review_channel_id=your_discord_channel_id
 
-# 其他 (根據需要添加)
-# OLLAMA_API_BASE_URL=http://localhost:11434 (如果 Ollama 不在預設位置)
+# Ollama
+OLLAMA_API_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2-vision
+
+# ComfyUI
+COMFYUI_API_URL=http://localhost:8188
 ```
 還需要設定 `configs/social_media/discord/Discord.env` (雖然目前主要審核流程的 token 在主 env，但可能用於其他 Discord 功能)。
 以及各社群媒體平台的設定檔，例如 Instagram 的設定可能位於 `/app/configs/social_media/ig/` 下，並由對應的角色（如 `wobbuffet.env`）引用。

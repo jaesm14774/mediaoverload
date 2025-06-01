@@ -1,7 +1,7 @@
 """協調服務介面"""
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from lib.media_auto.process import BaseCharacter
+from lib.media_auto.character_config import BaseCharacter
 
 
 class IOrchestrationService(ABC):

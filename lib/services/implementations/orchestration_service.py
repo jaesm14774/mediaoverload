@@ -6,7 +6,7 @@ import shutil
 import numpy as np
 from typing import Dict, Any, Optional
 from lib.services.interfaces.orchestration_service import IOrchestrationService
-from lib.media_auto.process import BaseCharacter
+from lib.media_auto.character_config import BaseCharacter
 from lib.media_auto.strategies.base_strategy import GenerationConfig
 from lib.repositories.character_repository import ICharacterRepository
 from lib.social_media import MediaPost
