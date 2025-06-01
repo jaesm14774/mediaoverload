@@ -1,0 +1,34 @@
+# Wobbuffet 角色配置
+character:
+  name: wobbuffet
+  group_name: Pokemon
+  
+generation:
+  output_dir: /app/output_image
+  workflow_path: /app/configs/workflow/nova-anime-xl.json
+  similarity_threshold: 0.6
+  generation_type: text2img
+  
+  # 提示詞生成方法的權重配置
+  prompt_method_weights:
+    default: 0.1
+    news: 0.9
+    
+  # 圖片系統提示的權重配置  
+  image_system_prompt_weights:
+    unbelievable_world_system_prompt: 0.3
+    default: 0.5
+    buddhist_combined_image_system_prompt: 0.2
+
+social_media:
+  default_hashtags:
+    - pokemon
+    - 寶可夢
+  platforms:
+    instagram:
+      config_folder_path: /app/configs/social_media/ig/wobbuffet
+      enabled: true
+
+additional_params:
+  images_per_description: 3
+  is_negative: false 
