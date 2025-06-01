@@ -304,8 +304,7 @@ docker-compose up --build -d
 ## 主要模組說明
 
 *   `run_media_interface.py`: 專案的命令列入口點，解析參數並啟動內容處理流程。
-*   `lib/media_auto/media_main_logic.py`: 包含核心的 `ContentProcessor` 類，負責整個 ETL 流程的協調，包括提示詞生成、內容生成、Discord 審核和社群媒體發布。
-*   `lib/media_auto/process.py`: 定義了 `BaseCharacter` 抽象類和各種具體的角色處理類 (如 `WobbuffetProcess`)。這些類封裝了每個角色的特定配置和行為。
+*   `lib/services/`: 包含各種服務實現，負責整個工作流程的協調，包括提示詞生成、內容生成、Discord 審核和社群媒體發布。
 *   `lib/media_auto/strategies/`: (推測) 包含不同的內容生成策略，例如與 ComfyUI 互動的策略 (`StrategyFactory` 會從這裡載入)。
 *   `lib/content_generation/`: (推測) 包含與 LLM 互動生成文字內容 (如提示詞、描述、文章) 的邏輯，例如 `VisionManagerBuilder`。
 *   `lib/social_media/`: 包含社群媒體發布的通用邏輯 (`SocialMediaMixin`, `MediaPost`) 和特定平台的實現 (如 `InstagramPlatform`)。
