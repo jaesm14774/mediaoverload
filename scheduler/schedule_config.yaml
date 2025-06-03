@@ -27,7 +27,7 @@ schedules:
       max_probability: 0.2    # 最大機率（每15小時3次）
       min_probability: 0.03334  # 最小機率（每15小時0.5次）
   unbelievable_world:
-    character: "UnbelievableWorld"
+    character: "unbelievable_world"
     prompts:
       - use_llm: true
         prompt: ""

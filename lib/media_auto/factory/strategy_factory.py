@@ -1,6 +1,6 @@
 from typing import Dict, Type
 from lib.media_auto.strategies.base_strategy import ContentStrategy
-from lib.media_auto.strategies.image_strategies import (
+from lib.media_auto.strategies.generate_strategies import (
     Text2ImageStrategy,
     Image2ImageStrategy,
     Text2VideoStrategy
@@ -17,7 +17,8 @@ class StrategyFactory:
         'text2image': Text2ImageStrategy,
         'image2image': Image2ImageStrategy,
         # 影片策略
-        'text2video': Text2VideoStrategy
+        'text2video': Text2VideoStrategy,
+        't2v': Text2VideoStrategy
     }
     
     @classmethod

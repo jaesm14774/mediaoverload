@@ -41,16 +41,31 @@ class CharacterRepository(ICharacterRepository):
     
     def get_characters_by_group(self, group_name: str, workflow_name: str) -> List[str]:
         """根據群組獲取角色列表"""
-        cursor = self.db_connection.cursor
-        query = """
-            SELECT role_name_en 
-            FROM anime.anime_roles
-            WHERE group_name = %s AND status = 1 AND workflow_name = %s AND weight > 0
-        """.strip()
+        max_retries = 3
+        retry_count = 0
         
-        cursor.execute(query, (group_name, workflow_name))
-        results = cursor.fetchall()
-        return [row[0] for row in results]
+        while retry_count < max_retries:
+            try:
+                cursor = self.db_connection.cursor
+                query = """
+                    SELECT role_name_en 
+                    FROM anime.anime_roles
+                    WHERE group_name = %s AND status = 1 AND workflow_name = %s AND weight > 0
+                """.strip()
+                
+                cursor.execute(query, (group_name, workflow_name))
+                results = cursor.fetchall()
+                return [row[0] for row in results]
+                
+            except Exception as e:
+                retry_count += 1
+                if retry_count == max_retries:
+                    raise
+                
+                # 重新獲取連接
+                from lib.database import db_pool
+                self.db_connection = db_pool.get_connection('mysql')
+                continue
     
     def get_random_character_from_group(self, group_name: str, workflow_name: str) -> Optional[str]:
         """從群組中隨機獲取一個角色"""

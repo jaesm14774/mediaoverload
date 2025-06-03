@@ -159,14 +159,7 @@ class Text2ImageStrategy(ContentStrategy):
             article_content = article_content.split('</think>')[-1].strip()        
         
         article_content = self.prevent_hashtag_count_too_more(article_content)
-        # # 重整ig article post content
-        # messages = [
-        #     {'role': 'system', 'content': self.ollama_vision_manager.prompts['guide_seo_article_system_prompt']},
-        #     {'role': 'user', 'content': article_content}
-        # ]
-        # article_content = self.ollama_vision_manager.text_model.chat_completion(messages=messages)
         self.article_content = article_content.replace('"', '').replace('*', '').lower()
-
 
         print(f'產生文章內容花費 : {time.time() - start_time}')
         return self

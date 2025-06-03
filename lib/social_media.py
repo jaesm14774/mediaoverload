@@ -46,7 +46,6 @@ class InstagramPlatform(SocialMediaPlatform):
         from instagrapi import Client
         self.client = Client()
         self.settings_path = f"{self.config_path}/{os.getenv('IG_ACCOUNT_COOKIE_FILE_PATH')}"
-        
         if not os.path.exists(self.settings_path):
             self._create_new_session()
         else:

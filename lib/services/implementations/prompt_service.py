@@ -58,7 +58,7 @@ class PromptService(IPromptService):
         # 生成第二層提示詞
         prompt = vision_manager.generate_arbitrary_input(
             character=character,
-            extra=f'Act as a Chaos Narrative Forge: roll an imaginary 12-sided die to pick a genre, flip a coin for narrative voice, and draw a tarot card for emotional color. Retain at most **one** micro-detail (≤ 5 words) from "{prompt}" as a hidden Easter egg—do NOT mention which. Everything else must be explosively original: collide clashing eras, graft surreal physics, twist clichés inside-out, and end on an unforeseen pivot. Output 1-3 lush, sensory sentences rich in metaphor and motion, with no meta commentary or game mechanics exposed.'
+            extra=f'Invent a unique genre, narrative voice, and emotional core. From {prompt}, extract only one micro-detail (≤5 words) as a deeply buried, unmentioned anchor. Everything else must be radically original: collide disparate eras, graft surreal physics, invert clichés, and pivot to an entirely unforeseen conclusion. Output 1-3 lush, sensory sentences, rich in metaphor and motion. No meta-commentary or exposed mechanics.'
         )
         return prompt
     
@@ -77,7 +77,7 @@ class PromptService(IPromptService):
         
         vision_manager = self._get_vision_manager(temperature)
         
-        info = f"""extra_info : {news_info['title']} ; {news_info['keyword']}""".strip()
+        info = f"""additional reference information : {news_info['title']} ; {news_info['keyword']}""".strip()
         
         # 生成提示詞
         prompt = vision_manager.generate_arbitrary_input(

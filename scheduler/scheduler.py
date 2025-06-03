@@ -31,6 +31,9 @@ class MediaScheduler:
         self.max_probability = float(probability_settings.get('max_probability', 1/2))    # 最大機率（每15小時7.5次）
         self.min_probability = float(probability_settings.get('min_probability', 0.5/15))     # 最小機率（每15小時0.5次）
 
+        # 設置定期清理閒置連接的任務
+        schedule.every(30).minutes.do(self.cleanup_idle_connections)
+
         # 立即執行一次處理
         self.instant_execution()
 
@@ -100,6 +103,15 @@ class MediaScheduler:
             # 載入角色配置
             character_config_path = f"configs/characters/{character_name.lower()}.yaml"
             character = ConfigurableCharacterWithSocialMedia(character_config_path)
+
+            # 註冊社群媒體平台
+            publishing_service = self.service_factory.get_publishing_service()
+            
+            # 如果使用配置檔案，從配置中註冊平台
+            if hasattr(character, '_social_media_config'):
+                for platform_name, platform_config in character._social_media_config.items():
+                    publishing_service.register_platform(platform_name, platform_config)
+
             
             # 執行工作流程
             result = await self.orchestration_service.execute_workflow(
@@ -173,6 +185,15 @@ class MediaScheduler:
             self.logger.error(f"處理和重新排程時發生錯誤: {str(e)}", exc_info=True)
             schedule_func(char_config)
 
+    def cleanup_idle_connections(self):
+        """清理閒置的資料庫連接"""
+        try:
+            from lib.database import db_pool
+            db_pool.cleanup_idle_connections(max_idle_time=1800)  # 30分鐘未使用的連接會被清理
+            self.logger.info("已清理閒置的資料庫連接")
+        except Exception as e:
+            self.logger.error(f"清理閒置連接時發生錯誤: {str(e)}")
+
     def run(self) -> None:
         """運行排程器"""
         self.logger.info("啟動排程器...")
@@ -185,6 +206,8 @@ class MediaScheduler:
                 time.sleep(60)
             except Exception as e:
                 self.logger.error(f"執行排程時發生錯誤: {str(e)}", exc_info=True)
+                # 發生錯誤時，嘗試清理並重新建立連接
+                self.cleanup_idle_connections()
 
     def cleanup(self) -> None:
         """清理資源"""
