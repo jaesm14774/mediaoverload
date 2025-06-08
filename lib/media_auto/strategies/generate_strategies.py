@@ -22,7 +22,7 @@ class Text2ImageStrategy(ContentStrategy):
     def __init__(self):
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llava:13b') \
-            .with_text_model('ollama', model_name='llama3.2') \
+            .with_text_model('ollama', model_name='deepseek-r1:8b') \
             .build()
         self.gemini_vision_manager = VisionManagerBuilder() \
             .with_vision_model('gemini', model_name='gemini-2.0-flash-lite') \
@@ -40,8 +40,14 @@ class Text2ImageStrategy(ContentStrategy):
     def generate_description(self):
         """描述生成"""        
         start_time = time.time()
+        
+        style = getattr(self.config, 'style', '')
+        prompt = self.config.prompt
+        if style:
+            prompt = f"""{prompt}\nstyle:{style}""".strip()
+
         descriptions = [
-            desc for desc in self.ollama_vision_manager.generate_image_prompts(self.config.prompt)
+            desc for desc in self.ollama_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
             if not desc.startswith('Here are')
         ]
         print('All generated descriptions : ', descriptions)
@@ -79,7 +85,6 @@ class Text2ImageStrategy(ContentStrategy):
                     
                     # 添加文字和種子更新（如果沒有在 custom_updates 中指定）
                     has_text_update = any(u.get('node_type') in ['PrimitiveString', 'CLIPTextEncode'] for u in custom_updates)
-                    has_seed_update = True
                     if not has_text_update:
                         text_updates = self.node_manager.generate_text_updates(
                             workflow=workflow,
@@ -88,12 +93,11 @@ class Text2ImageStrategy(ContentStrategy):
                         )
                         updates.extend(text_updates)
                     
-                    if has_seed_update:
-                        sampler_updates = self.node_manager.generate_sampler_updates(
-                            workflow=workflow,
-                            seed=seed_start + i
-                        )
-                        updates.extend(sampler_updates)
+                    sampler_updates = self.node_manager.generate_sampler_updates(
+                        workflow=workflow,
+                        seed=seed_start + i
+                    )
+                    updates.extend(sampler_updates)
                 else:
                     # 使用原本的方法
                     updates = self.node_manager.generate_updates(
@@ -102,14 +106,16 @@ class Text2ImageStrategy(ContentStrategy):
                         seed=seed_start + i,
                         **self.config.additional_params
                     )
-                self.communicator.process_workflow(
-                    workflow=workflow,
-                    updates=updates,
-                    output_path=f"{self.config.output_dir}",
-                    file_name=f"{self.config.character}_d{idx}_{i}"
-                )
-        
-        self.communicator.ws.close()
+                try:
+                    self.communicator.process_workflow(
+                        workflow=workflow,
+                        updates=updates,
+                        output_path=f"{self.config.output_dir}",
+                        file_name=f"{self.config.character}_d{idx}_{i}"
+                    )
+                finally:
+                    if self.communicator and self.communicator.ws:
+                        self.communicator.ws.close()
         print(f'生成圖片花費 : {time.time() - start_time}')
         return self
 

@@ -6,17 +6,18 @@ character:
 generation:
   output_dir: /app/output_image
   workflow_path: /app/configs/workflow/flux_dev.json
-  similarity_threshold: 0.7
+  similarity_threshold: 0.6
   generation_type: text2img
   
   # 提示詞生成方法的權重配置
   prompt_method_weights:
-    default: 0.3
+    arbitrary: 0.3
     news: 0.7
     
   # 圖片系統提示的權重配置  
   image_system_prompt_weights:
     unbelievable_world_system_prompt: 1
+  style: CINEMATIC STYLE
 
 social_media:
   default_hashtags:
@@ -28,5 +29,5 @@ social_media:
       enabled: true
 
 additional_params:
-  images_per_description: 3
+  images_per_description: 9
   is_negative: false 

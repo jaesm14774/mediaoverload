@@ -60,6 +60,7 @@ class ContentGenerationService(IContentGenerationService):
     def generate_descriptions(self, config: GenerationConfig) -> List[str]:
         """生成描述文字"""
         self.logger.info("開始生成描述")
+        self.logger.info(f"採用圖片生成策略 : {config.image_system_prompt}")
         self.strategy.generate_description()
         descriptions = self.strategy.descriptions
         self.logger.info(f"描述生成完成，共 {len(descriptions)} 個描述")

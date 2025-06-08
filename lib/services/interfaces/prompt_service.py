@@ -29,7 +29,7 @@ class IPromptService(ABC):
         pass
     
     @abstractmethod
-    def generate_by_default(self, character: str, temperature: float = 1.0) -> str:
+    def generate_by_arbitrary(self, character: str, temperature: float = 1.0) -> str:
         """使用默認方法生成提示詞"""
         pass
     

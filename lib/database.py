@@ -183,7 +183,8 @@ class MySQLConnection(DatabaseConnection):
             
             # 建立 SQLAlchemy engine
             self.engine = create_engine(
-                f'mysql+pymysql://{user}:{quote_plus(password)}@{host}:{port}/{db_name}?charset=utf8mb4'
+                f'mysql+pymysql://{user}:{quote_plus(password)}@{host}:{port}/{db_name}?charset=utf8mb4',
+                pool_recycle=3600
             )
             logger.info(f"Successfully connected to MySQL database: {db_name}")
         except Exception as e:
@@ -206,7 +207,8 @@ class PostgreSQLConnection(DatabaseConnection):
             
             # 建立 SQLAlchemy engine
             self.engine = create_engine(
-                f'postgresql://{user}:{quote_plus(password)}@{host}:{port}/{db_name}'
+                f'postgresql://{user}:{quote_plus(password)}@{host}:{port}/{db_name}',
+                pool_recycle=3600
             )
             logger.info(f"Successfully connected to PostgreSQL database: {db_name}")
         except Exception as e:
@@ -231,7 +233,8 @@ class MSSQLConnection(DatabaseConnection):
             
             # 建立 SQLAlchemy engine
             self.engine = create_engine(
-                f'mssql+pyodbc://{user}:{quote_plus(password)}@{host}:{port}/{db_name}?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes'
+                f'mssql+pyodbc://{user}:{quote_plus(password)}@{host}:{port}/{db_name}?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes',
+                pool_recycle=3600
             )
             logger.info(f"Successfully connected to MSSQL database: {db_name}")
         except Exception as e:

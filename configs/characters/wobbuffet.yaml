@@ -11,14 +11,15 @@ generation:
   
   # 提示詞生成方法的權重配置
   prompt_method_weights:
-    default: 0.1
+    arbitrary: 0.1
     news: 0.9
     
   # 圖片系統提示的權重配置  
   image_system_prompt_weights:
     unbelievable_world_system_prompt: 0.3
-    default: 0.5
-    buddhist_combined_image_system_prompt: 0.2
+    stable_diffusion_prompt: 0.4
+    buddhist_combined_image_system_prompt: 0.3
+  style: minimalism style with pure background
 
 social_media:
   default_hashtags:

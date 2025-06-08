@@ -63,14 +63,14 @@ class ConfigLoader:
         social_media_info = config_dict.get('social_media', {})
         
         # 處理提示詞生成方法
-        prompt_method = 'default'
+        prompt_method = 'arbitrary'
         if 'prompt_method_weights' in generation_info:
             prompt_method = ConfigLoader.process_weighted_choice(
                 generation_info['prompt_method_weights']
             )
         
         # 處理圖片系統提示
-        image_system_prompt = 'default'
+        image_system_prompt = 'stable_diffusion_prompt'
         if 'image_system_prompt_weights' in generation_info:
             image_system_prompt = ConfigLoader.process_weighted_choice(
                 generation_info['image_system_prompt_weights']
@@ -86,7 +86,8 @@ class ConfigLoader:
             additional_params=config_dict.get('additional_params', {}),
             group_name=character_info.get('group_name', ''),
             generate_prompt_method=prompt_method,
-            image_system_prompt=image_system_prompt
+            image_system_prompt=image_system_prompt,
+            style=generation_info.get('style', '')
         )
     
     @staticmethod

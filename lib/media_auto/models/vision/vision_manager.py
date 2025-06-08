@@ -49,31 +49,39 @@ class VisionContentManager:
             **kwargs
         )
     
-    def generate_image_prompts(self, user_input: str, **kwargs) -> List[str]:
+    def generate_image_prompts(self, user_input: str, system_prompt_key: str = 'stable_diffusion_prompt', **kwargs) -> List[str]:
         """根據用戶輸入生成圖片描述提示詞"""
+        
+        actual_key_to_use = system_prompt_key
+        if system_prompt_key not in self.prompts:
+            print(f"Warning: Prompt key '{system_prompt_key}' not found in prompts configuration. Falling back to default 'stable_diffusion_prompt'.")
+            actual_key_to_use = 'stable_diffusion_prompt'
+            # if actual_key_to_use not in self.prompts:
+            #     raise ValueError(f"Default prompt key '{actual_key_to_use}' is also missing from prompts configuration.")
+
+        print(f"Using image system prompt key: {actual_key_to_use}")
         messages = [
-            {'role': 'system', 'content': self.prompts['image_system_prompt']},
+            {'role': 'system', 'content': self.prompts[actual_key_to_use]},
             {'role': 'user', 'content': user_input}
         ]
-        response = self.vision_model.chat_completion(messages=messages, **kwargs)
-        return [re.sub(r'^\d+\.* ', '', part) for part in response.split('\n') if part]
+        result = self.vision_model.chat_completion(messages=messages, **kwargs)
+        if '</think>' in result:  # deepseek r1 will have <think>...</think> format
+            result = result.split('</think>')[-1].strip()
+        return [re.sub(r'^\d+\.* ', '', part) for part in result.split('\n') if part]
     
     def generate_seo_hashtags(self, description: str, **kwargs) -> str:
         """生成 SEO 優化的 hashtags"""
         messages = [
-            {'role': 'system', 'content': self.prompts['hashtag_system_prompt']},
+            {'role': 'system', 'content': self.prompts['seo_hashtag_prompt']},
             {'role': 'user', 'content': description}
         ]
         return self.text_model.chat_completion(messages=messages, **kwargs)
 
-    def generate_arbitrary_input(self, character, extra='', prompt_type='default') -> str:
+    def generate_input_prompt(self, character, extra='', prompt_type='arbitrary_input_system_prompt') -> str:
         """生成任意輸入的轉換結果"""
-        if prompt_type == 'default':
-            prompt_type = 'arbitrary_input_system_prompt'
         messages = [
             {'role': 'system', 'content': self.prompts[prompt_type]},
-            {'role': 'assistant', 'content': 'Translation any input into precisely English and only one response without explanation'},
-            {'role': 'user', 'content': f"""main character: {character} must be in result\n{extra}"""}
+            {'role': 'user', 'content': f"""main character: {character} additional reference information: {extra}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)    
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
@@ -143,14 +151,15 @@ class VisionManagerBuilder:
         self.vision_config = {'model_name': 'llava:13b', 'temperature': 0.3}
         self.text_config = {'model_name': 'llama3.2', 'temperature': 0.3}
         self.prompts_config = {
-            'hashtag_system_prompt': seo_hashtag_prompt,
-            'image_system_prompt': stable_diffusion_prompt,
+            'seo_hashtag_prompt': seo_hashtag_prompt,
+            'stable_diffusion_prompt': stable_diffusion_prompt,
             'describe_image_prompt': describe_image_prompt,
             'text_image_similarity_prompt': text_image_similarity_prompt,
             'arbitrary_input_system_prompt': arbitrary_input_system_prompt,
             'guide_seo_article_system_prompt': guide_seo_article_system_prompt,
             'unbelievable_world_system_prompt': unbelievable_world_system_prompt,
-            'buddhist_combined_image_system_prompt': buddhist_combined_image_system_prompt
+            'buddhist_combined_image_system_prompt': buddhist_combined_image_system_prompt,
+            'fill_missing_details_system_prompt': fill_missing_details_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):
@@ -173,7 +182,11 @@ class VisionManagerBuilder:
             raise ValueError("prompts must be a dictionary")
         
         # 確保必要的提示詞存在
-        required_prompts = ['image_system_prompt']
+        required_prompts = [
+            'seo_hashtag_prompt', 'stable_diffusion_prompt', 'describe_image_prompt', 
+            'text_image_similarity_prompt', 'arbitrary_input_system_prompt', 'guide_seo_article_system_prompt', 
+            'unbelievable_world_system_prompt', 'buddhist_combined_image_system_prompt'
+        ]
         for prompt in required_prompts:
             if prompt not in prompts and prompt not in self.prompts_config:
                 raise ValueError(f"Missing required prompt: {prompt}")
@@ -190,8 +203,8 @@ class VisionManagerBuilder:
         text_model = text_model_class(ModelConfig(**self.text_config))
         
         # 確保必要的提示詞存在
-        if 'image_system_prompt' not in self.prompts_config:
-            raise ValueError("Missing required prompt: image_system_prompt")
+        if 'stable_diffusion_prompt' not in self.prompts_config:
+            raise ValueError("Missing required prompt: stable_diffusion_prompt")
         
         return VisionContentManager(
             vision_model=vision_model,

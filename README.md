@@ -163,11 +163,11 @@ graph TD
        generation_type: text2img
        
        prompt_method_weights:
-         default: 0.3
+         arbitrary: 0.3
          news: 0.7
          
        image_system_prompt_weights:
-         default: 0.6
+         stable_diffusion_prompt: 0.6
          unbelievable_world_system_prompt: 0.4
 
      social_media:

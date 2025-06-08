@@ -13,14 +13,15 @@ class CharacterConfig:
     default_hashtags: list[str] = field(default_factory=list)
     additional_params: Optional[Dict[str, Any]] = field(default_factory=dict)
     group_name: str = ''
-    generate_prompt_method : str = 'default'
-    image_system_prompt: str = 'default'
+    generate_prompt_method : str = 'arbitrary'
+    image_system_prompt: str = 'stable_diffusion_prompt'
+    style: str = ''
 
 class BaseCharacter(ABC):
     """角色基礎類別"""
     config: CharacterConfig
     group_name: str = ''
-    image_system_prompt = 'default'
+    image_system_prompt = 'stable_diffusion_prompt'
     additional_params = {
         'images_per_description': 3,
         'is_negative': False
@@ -41,7 +42,8 @@ class BaseCharacter(ABC):
             additional_params=self.additional_params,
             group_name=self.group_name,
             generate_prompt_method = self.generate_prompt_method,
-            image_system_prompt = self.image_system_prompt
+            image_system_prompt = self.image_system_prompt,
+            style = self.style
         )
     
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:
