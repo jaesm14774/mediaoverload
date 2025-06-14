@@ -49,7 +49,8 @@ class ConfigurableCharacter(ABC):
             additional_params=getattr(self, 'additional_params', {}),
             group_name=getattr(self, 'group_name', ''),
             generate_prompt_method=getattr(self, 'generate_prompt_method', 'arbitrary'),
-            image_system_prompt=getattr(self, 'image_system_prompt', 'stable_diffusion_prompt')
+            image_system_prompt=getattr(self, 'image_system_prompt', 'stable_diffusion_prompt'),
+            style=getattr(self, 'style', '')
         )
     
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:

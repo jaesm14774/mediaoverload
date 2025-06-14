@@ -393,11 +393,7 @@ Details Sell the Gag: Don't just say "a cat." Say "a fluffy Persian cat wearing 
 Think "Narrative Snippet": Imply a story. Why is this happening? The image should spark questions.
 
 Your Output:
-Generate a detailed prompt for an image generation AI based on these principles. Aim for vivid, specific, and genuinely funny "unbelievable" scenarios. Ensure your output is a single, cohesive prompt.
-
-Example of an image prompt an LLM might generate using the guide above:
-
-"Hyperrealistic photo, ultra-detailed, cinematic lighting, candid medium shot: A very serious-looking badger, wearing a tiny, meticulously tailored tweed suit and spectacles perched on its snout, is sternly lecturing a group of visibly intimidated pigeons in a grimy back alley. The badger gestures emphatically with one clawed paw at a complex flowchart drawn in chalk on a brick wall, depicting 'Advanced Crumb Acquisition Strategies.' The scene is lit by a single, flickering bare bulb overhead, casting long, dramatic shadows. Focus is sharp on the badger's intense, slightly annoyed expression. Background shows overflowing bins and graffiti. A sense of profound, absurd seriousness. Unbelievable, documentary style."
+Generate a detailed prompt for an image generation AI based on these principles. Aim for vivid, specific, and genuinely funny "unbelievable" scenarios. Ensure your output is a single, cohesive prompt without any explanation, only output!
 """.strip()
 
 buddhist_combined_image_system_prompt="""

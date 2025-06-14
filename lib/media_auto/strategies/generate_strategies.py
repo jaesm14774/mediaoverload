@@ -22,7 +22,7 @@ class Text2ImageStrategy(ContentStrategy):
     def __init__(self):
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llava:13b') \
-            .with_text_model('ollama', model_name='deepseek-r1:8b') \
+            .with_text_model('ollama', model_name='llama3.2:latest') \
             .build()
         self.gemini_vision_manager = VisionManagerBuilder() \
             .with_vision_model('gemini', model_name='gemini-2.0-flash-lite') \
