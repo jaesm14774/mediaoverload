@@ -29,5 +29,5 @@ social_media:
       enabled: true
 
 additional_params:
-  images_per_description: 9
+  images_per_description: 10
   is_negative: false 

@@ -30,5 +30,5 @@ social_media:
       enabled: false
 
 additional_params:
-  images_per_description: 3
+  images_per_description: 10
   is_negative: false 

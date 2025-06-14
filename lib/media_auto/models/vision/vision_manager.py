@@ -67,7 +67,7 @@ class VisionContentManager:
         result = self.vision_model.chat_completion(messages=messages, **kwargs)
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
-        return [re.sub(r'^\d+\.* ', '', part) for part in result.split('\n') if part]
+        return [result]
     
     def generate_seo_hashtags(self, description: str, **kwargs) -> str:
         """生成 SEO 優化的 hashtags"""
@@ -81,7 +81,7 @@ class VisionContentManager:
         """生成任意輸入的轉換結果"""
         messages = [
             {'role': 'system', 'content': self.prompts[prompt_type]},
-            {'role': 'user', 'content': f"""main character: {character} additional reference information: {extra}"""}
+            {'role': 'user', 'content': f"""main character: {character} {extra}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)    
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format

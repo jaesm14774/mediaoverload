@@ -76,7 +76,7 @@ class PromptService(IPromptService):
         
         vision_manager = self._get_vision_manager(temperature)
         
-        info = f"""additional reference information : {news_info['title']} ; {news_info['keyword']}""".strip()
+        info = f"""additional reference information : news_title: {news_info['title']} ; news_keyword: {news_info['keyword']}""".strip()
         
         # 生成提示詞
         prompt = vision_manager.generate_input_prompt(
