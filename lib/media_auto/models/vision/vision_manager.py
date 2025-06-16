@@ -67,7 +67,7 @@ class VisionContentManager:
         result = self.vision_model.chat_completion(messages=messages, **kwargs)
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
-        return [result]
+        return result
     
     def generate_seo_hashtags(self, description: str, **kwargs) -> str:
         """生成 SEO 優化的 hashtags"""
@@ -86,6 +86,15 @@ class VisionContentManager:
         result = self.text_model.chat_completion(messages=messages)    
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
+        
+        messages = [
+            {'role': 'system', 'content': "As an expert editor, distill the text's essence. You must preserve the main character's name, along with the original style and emotion. Keep the output under 30 words."},
+            {'role': 'user', 'content': f"""{result}"""}
+        ]
+        result = self.text_model.chat_completion(messages=messages)   
+
+        if '</think>' in result:  # deepseek r1 will have <think>...</think> format
+            result = result.split('</think>')[-1].strip()         
         
         return result
 

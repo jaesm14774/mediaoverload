@@ -53,12 +53,6 @@ class PromptService(IPromptService):
         )
         prompt = prompt.replace("'", '').replace('"', '')
         
-        # # 生成第二層提示詞
-        # prompt = vision_manager.generate_input_prompt(
-        #     character=character,
-        #     extra=f'Invent a unique genre, narrative voice, and emotional core. From {prompt}, extract only one micro-detail (≤5 words) as a deeply buried, unmentioned anchor. Everything else must be radically original: collide disparate eras, graft surreal physics, invert clichés, and pivot to an entirely unforeseen conclusion. Output 1-3 lush, sensory sentences, rich in metaphor and motion. No meta-commentary or exposed mechanics.',
-        #     prompt_type='stable_diffusion_prompt'
-        # )
         return prompt
     
     def generate_by_news(self, character: str, temperature: float = 1.0) -> str:

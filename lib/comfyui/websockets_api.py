@@ -17,10 +17,15 @@ class ComfyUICommunicator:
         self.client_id = str(uuid.uuid4())
         self.server_address = f"{host}:{port}"
         self.timeout = timeout
+        self.ws = None
 
     def connect_websocket(self):
         self.ws = websocket.WebSocket()
-        self.ws.connect(f"ws://{self.server_address}/ws?clientId={self.client_id}")
+        self.ws.connect(
+            f"ws://{self.server_address}/ws?clientId={self.client_id}",
+            ping_interval=20, # 每 20 秒發送一次 ping
+            ping_timeout=10   # 10 秒內未收到 pong 則超時
+        )
 
     def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
@@ -50,7 +55,7 @@ class ComfyUICommunicator:
             
             try:
                 # 設置 websocket 接收超時時間為 1 秒，這樣可以定期檢查總時間
-                self.ws.settimeout(1.0)
+                self.ws.settimeout(5.0)
                 out = self.ws.recv()
                 
                 if isinstance(out, str):
@@ -271,6 +276,8 @@ class ComfyUICommunicator:
         ]
         """
         try:
+            # 為每個工作流程建立獨立的 WebSocket 連線
+            self.connect_websocket()
             os.makedirs(output_path, exist_ok=True)
             # 複製工作流以避免修改原始數據
             workflow_copy = json.loads(json.dumps(workflow))
@@ -322,3 +329,7 @@ class ComfyUICommunicator:
         except Exception as e:
             print(f"Error processing workflow: {str(e)}")
             return False, []
+        finally:
+            # 確保 WebSocket 連線在結束時被關閉
+            if self.ws and self.ws.connected:
+                self.ws.close()

@@ -41,7 +41,7 @@ class ContentGenerationService(IContentGenerationService):
             }
         
         # 生成圖片
-        images = self.generate_images(config, descriptions)
+        images = self.generate_images(config)
         
         # 分析圖文匹配度
         similarity_threshold = config.get_all_attributes().get('similarity_threshold', 0.9)
@@ -68,7 +68,7 @@ class ContentGenerationService(IContentGenerationService):
             self.logger.info(f"描述: {desc}")
         return descriptions
     
-    def generate_images(self, config: GenerationConfig, descriptions: List[str]) -> List[str]:
+    def generate_images(self, config: GenerationConfig) -> List[str]:
         """根據描述生成圖片"""
         self.logger.info("開始生成圖片")
         self.strategy.generate_image()

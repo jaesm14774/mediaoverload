@@ -35,7 +35,7 @@ class MediaScheduler:
         schedule.every(30).minutes.do(self.cleanup_idle_connections)
 
         # 立即執行一次處理
-        self.instant_execution()
+        asyncio.run(self.instant_execution())
 
     @log_execution_time(logger=setup_logger(__name__))
     def load_config(self):
@@ -61,6 +61,11 @@ class MediaScheduler:
 
     def should_execute(self, character_name: str) -> bool:
         """決定是否要執行處理"""
+        # 如果是角色的首次執行（通常在程式啟動時），則強制執行
+        if character_name not in self.last_execution_times:
+            self.logger.info(f"角色 {character_name} 首次執行，強制執行。")
+            return True
+            
         current_hour = datetime.now().hour
         if current_hour >= 22 or current_hour < 7:
             self.logger.info("當前時間在睡眠時段（22:00-07:00），跳過執行")
@@ -87,6 +92,7 @@ class MediaScheduler:
                            f"時間因子 {time_factor:.2f}, "
                            f"當前執行機率 {current_probability:.3%}/小時")
         else:
+            # 此分支在新的邏輯下理論上不會被走到，因為首次執行會在上一個if條件中返回True
             current_probability = base_prob
             self.logger.info(f"首次執行，使用基礎機率 {current_probability:.3%}/小時")
 
@@ -126,13 +132,14 @@ class MediaScheduler:
         except Exception as e:
             self.logger.error(f"處理角色 {character_name} 時發生錯誤: {str(e)}", exc_info=True)
 
-    def instant_execution(self) -> None:
+    async def instant_execution(self) -> None:
         """立即執行所有角色的處理"""
+        self.logger.info("開始執行首次啟動任務...")
         for char_config in self.config['schedules'].values():
-            asyncio.run(self.process_character(
+            await self.process_character(
                 character_name=char_config['character'],
                 prompt_config=char_config['prompts'][0]
-            ))
+            )
 
     def setup_schedules(self) -> None:
         """設置排程"""

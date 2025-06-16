@@ -46,17 +46,12 @@ class Text2ImageStrategy(ContentStrategy):
         if style:
             prompt = f"""{prompt}\nstyle:{style}""".strip()
 
-        descriptions = [
-            desc for desc in self.ollama_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
-            if not desc.startswith('Here are')
-        ]
+        descriptions = self.ollama_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
         print('All generated descriptions : ', descriptions)
         if self.config.character:
             character = self.config.character.lower()
-            self.descriptions = [
-                desc for desc in descriptions
-                if desc.replace(' ', '').lower().find(character) != -1 or desc.lower().find(character) != -1
-            ]
+            self.descriptions = [descriptions] if descriptions.replace(' ', '').lower().find(character) != -1 or descriptions.lower().find(character) != -1 else []
+
         print(f'Image descriptions : {self.descriptions}\n')
         print(f'生成描述花費 : {time.time() - start_time}')
         return self
