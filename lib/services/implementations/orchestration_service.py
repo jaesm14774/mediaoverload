@@ -68,7 +68,8 @@ class OrchestrationService(IOrchestrationService):
                 prompt = self.prompt_service.generate_prompt(
                     character=character.character,
                     method=character.config.generate_prompt_method,
-                    temperature=temperature
+                    temperature=temperature,
+                    character_config=character.config
                 )
             
             # 特例處理 waddledee

@@ -5,6 +5,7 @@ import glob
 import re
 import json
 import numpy as np
+import os
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
@@ -25,8 +26,8 @@ class Text2ImageStrategy(ContentStrategy):
             .with_text_model('ollama', model_name='llama3.2:latest') \
             .build()
         self.gemini_vision_manager = VisionManagerBuilder() \
-            .with_vision_model('gemini', model_name='gemini-2.0-flash-lite') \
-            .with_text_model('gemini', model_name='gemini-2.0-flash-lite') \
+            .with_vision_model('gemini', model_name='gemini-2.5-flash-lite-preview-06-17') \
+            .with_text_model('gemini', model_name='gemini-2.5-flash-lite-preview-06-17') \
             .build()
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
@@ -46,7 +47,14 @@ class Text2ImageStrategy(ContentStrategy):
         if style:
             prompt = f"""{prompt}\nstyle:{style}""".strip()
 
-        descriptions = self.ollama_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
+        # 檢查是否使用雙角色互動系統提示詞
+        if self.config.image_system_prompt == 'two_character_interaction_generate_system_prompt':
+            # 使用雙角色互動生成邏輯
+            descriptions = self._generate_two_character_interaction_description(prompt, style)
+        else:
+            # 使用原有的生成邏輯
+            descriptions = self.ollama_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
+        
         print('All generated descriptions : ', descriptions)
         if self.config.character:
             character = self.config.character.lower()
@@ -55,6 +63,88 @@ class Text2ImageStrategy(ContentStrategy):
         print(f'Image descriptions : {self.descriptions}\n')
         print(f'生成描述花費 : {time.time() - start_time}')
         return self
+
+    def _generate_two_character_interaction_description(self, prompt: str, style: str = '') -> str:
+        """生成雙角色互動描述
+        
+        這個方法會從資料庫中獲取一個Secondary Role，並使用雙角色互動系統提示詞
+        """
+        try:
+            # 導入必要的模組 - 這裡需要訪問角色資料庫
+            from lib.services.service_factory import ServiceFactory
+            
+            # 創建服務工廠並獲取角色資料庫
+            service_factory = ServiceFactory()
+            character_repository = service_factory.get_character_repository()
+            
+            # 獲取 Secondary Role - 使用相同的邏輯
+            secondary_character = self._get_random_secondary_character(
+                self.config.character, 
+                character_repository
+            )
+            
+            if secondary_character:
+                print(f'雙角色互動：Main Role: {self.config.character}, Secondary Role: {secondary_character}')
+                
+                # 使用雙角色互動生成
+                descriptions = self.ollama_vision_manager.generate_two_character_interaction_prompt(
+                    main_character=self.config.character,
+                    secondary_character=secondary_character,
+                    style=style if style else 'minimalist'
+                )
+                return descriptions
+            else:
+                print('無法獲取 Secondary Role，使用預設方法')
+                # 回退到原有方法
+                return self.ollama_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
+                
+        except Exception as e:
+            print(f'雙角色互動生成時發生錯誤: {e}，使用預設方法')
+            # 回退到原有方法
+            return self.ollama_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
+    
+    def _get_random_secondary_character(self, main_character: str, character_repository) -> str:
+        """獲取隨機的 Secondary Role"""
+        try:
+            # 從角色配置中獲取 group_name 和 workflow
+            group_name = getattr(self.config, 'group_name', '')
+            workflow_path = getattr(self.config, 'workflow_path', '')
+            
+            # 從 workflow_path 中提取 workflow 名稱（去掉路徑和副檔名）
+            workflow_name = os.path.splitext(os.path.basename(workflow_path))[0] if workflow_path else ''
+            
+            print(f"嘗試從群組 '{group_name}' 和工作流 '{workflow_name}' 中獲取角色")
+            
+            if group_name and workflow_name:
+                # 從資料庫中獲取同群組的角色
+                characters = character_repository.get_characters_by_group(group_name, workflow_name)
+                
+                # 過濾掉主角色
+                available_characters = [char for char in characters if char.lower() != main_character.lower()]
+                
+                if available_characters:
+                    import random
+                    selected_character = random.choice(available_characters)
+                    print(f"從資料庫獲取到 Secondary Role: {selected_character}")
+                    return selected_character
+                else:
+                    print(f"群組 '{group_name}' 中沒有其他可用角色")
+            else:
+                print(f"角色配置中缺少 group_name 或 workflow_path")
+            
+            # 如果無法從資料庫獲取，使用預設角色
+            default_characters = ["wobbuffet", "Pikachu", "Mario", "fantastic"]
+            available_defaults = [char for char in default_characters if char.lower() != main_character.lower()]
+            if available_defaults:
+                import random
+                selected_default = random.choice(available_defaults)
+                print(f"使用預設 Secondary Role: {selected_default}")
+                return selected_default
+                    
+        except Exception as e:
+            print(f"獲取 Secondary Role 時發生錯誤: {e}")
+        
+        return None
 
     def generate_image(self):
         start_time = time.time()
