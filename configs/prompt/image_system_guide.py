@@ -300,6 +300,7 @@ Only provide the image description, nothing else. No introductions, explanations
 
 Main Role: [well-known character name]
 Secondary Role: [well-known character name]
+Original Context: [user's original prompt/context - optional, incorporate into the scene naturally]
 Interaction Type: [Any/AI Choice, character-driven]
 Desired Tone: [e.g., Romantic, Tense, Peaceful, Mysterious, Joyful, Melancholy, Dramatic, Humorous, Other (describe briefly)]
 Style: [Photorealistic, Impressionistic, Surreal, Abstract, minimalist]

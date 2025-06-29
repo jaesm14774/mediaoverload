@@ -99,13 +99,17 @@ class VisionContentManager:
         
         return result
 
-    def generate_two_character_interaction_prompt(self, main_character, secondary_character, style='minimalist', **kwargs) -> str:
+    def generate_two_character_interaction_prompt(self, main_character, secondary_character, prompt='', style='minimalist', **kwargs) -> str:
         """生成雙角色互動的提示詞"""
         # 構建輸入格式，包含所有必要字段
         user_input = f"""Main Role: {main_character}
-                    Secondary Role: {secondary_character}
-                    Style: {style}
-                    """
+Secondary Role: {secondary_character}
+Style: {style}"""
+        
+        # 如果有原始prompt，將其納入輸入
+        if prompt and prompt.strip():
+            user_input += f"""
+Original Context: {prompt.strip()}"""
         
         messages = [
             {'role': 'system', 'content': self.prompts['two_character_interaction_generate_system_prompt']},

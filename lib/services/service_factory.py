@@ -74,7 +74,9 @@ class ServiceFactory:
     def get_content_service(self) -> ContentGenerationService:
         """獲取內容生成服務"""
         if self._content_service is None:
-            self._content_service = ContentGenerationService()
+            self._content_service = ContentGenerationService(
+                character_repository=self.get_character_repository()
+            )
         return self._content_service
     
     def get_review_service(self) -> ReviewService:

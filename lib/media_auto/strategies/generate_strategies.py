@@ -8,7 +8,6 @@ import numpy as np
 import os
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy
-from lib.services.service_factory import ServiceFactory
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.media_auto.models.vision.model_switcher import ModelSwitcher
 from lib.comfyui.websockets_api import ComfyUICommunicator
@@ -21,7 +20,7 @@ class Text2ImageStrategy(ContentStrategy):
     改成google 大幅 增加準確性
     """
     
-    def __init__(self):
+    def __init__(self, character_repository=None):
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llava:13b') \
             .with_text_model('ollama', model_name='llama3.2:latest') \
@@ -33,6 +32,7 @@ class Text2ImageStrategy(ContentStrategy):
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
         self.ollama_switcher = ModelSwitcher(self.ollama_vision_manager)
+        self.character_repository = character_repository
 
     def _load_workflow(self, path: str) -> Dict[str, Any]:
         """載入工作流配置"""
@@ -69,41 +69,49 @@ class Text2ImageStrategy(ContentStrategy):
         """生成雙角色互動描述
         
         這個方法會從資料庫中獲取一個Secondary Role，並使用雙角色互動系統提示詞
+        包含用戶原始prompt
         """
         try:
-            # 創建服務工廠並獲取角色資料庫
-            service_factory = ServiceFactory()
-            character_repository = service_factory.get_character_repository()
-            
-            # 獲取 Secondary Role - 使用相同的邏輯
+            # 獲取 Secondary Role
             secondary_character = self._get_random_secondary_character(
                 self.config.character, 
-                character_repository
+                self.character_repository
             )
             
             if secondary_character:
                 print(f'雙角色互動：Main Role: {self.config.character}, Secondary Role: {secondary_character}')
                 
-                # 使用雙角色互動生成
+                # 修復：傳遞原始prompt給雙角色互動生成
                 descriptions = self.ollama_vision_manager.generate_two_character_interaction_prompt(
                     main_character=self.config.character,
                     secondary_character=secondary_character,
+                    prompt=prompt,  # 添加原始prompt
                     style=style if style else 'minimalist'
                 )
                 return descriptions
             else:
                 print('無法獲取 Secondary Role，使用預設方法')
-                # 回退到原有方法
+                # 回退到原有方法，保留原始prompt
                 return self.ollama_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
                 
         except Exception as e:
             print(f'雙角色互動生成時發生錯誤: {e}，使用預設方法')
-            # 回退到原有方法
+            # 回退到原有方法，保留原始prompt
             return self.ollama_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
     
     def _get_random_secondary_character(self, main_character: str, character_repository) -> str:
         """獲取隨機的 Secondary Role"""
         try:
+            # 如果沒有character_repository，嘗試延遲導入
+            if character_repository is None:
+                try:
+                    from lib.services.service_factory import ServiceFactory
+                    service_factory = ServiceFactory()
+                    character_repository = service_factory.get_character_repository()
+                except ImportError:
+                    print("無法導入ServiceFactory，使用預設角色")
+                    return self._get_default_secondary_character(main_character)
+            
             # 從角色配置中獲取 group_name 和 workflow
             group_name = getattr(self.config, 'group_name', '')
             workflow_path = getattr(self.config, 'workflow_path', '')
@@ -130,17 +138,20 @@ class Text2ImageStrategy(ContentStrategy):
                 print(f"角色配置中缺少 group_name 或 workflow_path")
             
             # 如果無法從資料庫獲取，使用預設角色
-            default_characters = ["wobbuffet", "Pikachu", "Mario", "fantastic"]
-            available_defaults = [char for char in default_characters if char.lower() != main_character.lower()]
-            if available_defaults:
-                import random
-                selected_default = random.choice(available_defaults)
-                print(f"使用預設 Secondary Role: {selected_default}")
-                return selected_default
+            return self._get_default_secondary_character(main_character)
                     
         except Exception as e:
             print(f"獲取 Secondary Role 時發生錯誤: {e}")
-        
+            return self._get_default_secondary_character(main_character)
+    
+    def _get_default_secondary_character(self, main_character: str) -> str:
+        """獲取預設的 Secondary Role"""
+        default_characters = ["wobbuffet", "Pikachu", "Mario", "fantastic"]
+        available_defaults = [char for char in default_characters if char.lower() != main_character.lower()]
+        if available_defaults:
+            selected_default = random.choice(available_defaults)
+            print(f"使用預設 Secondary Role: {selected_default}")
+            return selected_default
         return None
 
     def generate_image(self):

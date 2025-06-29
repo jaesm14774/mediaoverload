@@ -10,9 +10,10 @@ import glob
 class ContentGenerationService(IContentGenerationService):
     """內容生成服務實現"""
     
-    def __init__(self):
+    def __init__(self, character_repository=None):
         self.logger = setup_logger(__name__)
         self.strategy = None
+        self.character_repository = character_repository
     
     def generate_content(self, config: GenerationConfig) -> Dict[str, Any]:
         """生成內容"""
@@ -20,7 +21,7 @@ class ContentGenerationService(IContentGenerationService):
         
         # 獲取對應的策略
         generation_type = config.get_all_attributes().get('generation_type', 'text2img')
-        self.strategy = StrategyFactory.get_strategy(generation_type)
+        self.strategy = StrategyFactory.get_strategy(generation_type, character_repository=self.character_repository)
         self.logger.info(f"使用策略: {generation_type}")
         
         # 載入配置
