@@ -8,6 +8,7 @@ import numpy as np
 import os
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy
+from lib.services.service_factory import ServiceFactory
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.media_auto.models.vision.model_switcher import ModelSwitcher
 from lib.comfyui.websockets_api import ComfyUICommunicator
@@ -70,9 +71,6 @@ class Text2ImageStrategy(ContentStrategy):
         這個方法會從資料庫中獲取一個Secondary Role，並使用雙角色互動系統提示詞
         """
         try:
-            # 導入必要的模組 - 這裡需要訪問角色資料庫
-            from lib.services.service_factory import ServiceFactory
-            
             # 創建服務工廠並獲取角色資料庫
             service_factory = ServiceFactory()
             character_repository = service_factory.get_character_repository()
@@ -123,7 +121,6 @@ class Text2ImageStrategy(ContentStrategy):
                 available_characters = [char for char in characters if char.lower() != main_character.lower()]
                 
                 if available_characters:
-                    import random
                     selected_character = random.choice(available_characters)
                     print(f"從資料庫獲取到 Secondary Role: {selected_character}")
                     return selected_character

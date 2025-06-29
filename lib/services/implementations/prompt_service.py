@@ -1,5 +1,6 @@
 """提示詞生成服務實現"""
 import os
+import random
 from typing import Optional
 import datetime
 from lib.services.interfaces.prompt_service import IPromptService
@@ -134,7 +135,6 @@ class PromptService(IPromptService):
                     available_characters = [char for char in characters if char.lower() != main_character.lower()]
                     
                     if available_characters:
-                        import random
                         selected_character = random.choice(available_characters)
                         self.logger.info(f"從資料庫獲取到 Secondary Role: {selected_character}")
                         return selected_character
@@ -147,7 +147,6 @@ class PromptService(IPromptService):
             default_characters = ["waddledee", "wobbuffet", "pikachu", "mario", "sonic"]
             available_defaults = [char for char in default_characters if char.lower() != main_character.lower()]
             if available_defaults:
-                import random
                 selected_default = random.choice(available_defaults)
                 self.logger.info(f"使用預設 Secondary Role: {selected_default}")
                 return selected_default
