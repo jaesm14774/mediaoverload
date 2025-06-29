@@ -81,6 +81,7 @@ class VisionContentManager:
         """生成任意輸入的轉換結果"""
         messages = [
             {'role': 'system', 'content': self.prompts[prompt_type]},
+            {'role': 'assistant', 'content': "Check main character name must be in the output"},
             {'role': 'user', 'content': f"""main character: {character} {extra}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)    
@@ -95,6 +96,29 @@ class VisionContentManager:
 
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()         
+        
+        return result
+
+    def generate_two_character_interaction_prompt(self, main_character, secondary_character, prompt='', style='minimalist', **kwargs) -> str:
+        """生成雙角色互動的提示詞"""
+        # 構建輸入格式，包含所有必要字段
+        user_input = f"""Main Role: {main_character}
+Secondary Role: {secondary_character}
+Style: {style}"""
+        
+        # 如果有原始prompt，將其納入輸入
+        if prompt and prompt.strip():
+            user_input += f"""
+Original Context: {prompt.strip()}"""
+        
+        messages = [
+            {'role': 'system', 'content': self.prompts['two_character_interaction_generate_system_prompt']},
+            {'role': 'user', 'content': user_input}
+        ]
+        
+        result = self.text_model.chat_completion(messages=messages, **kwargs)
+        if '</think>' in result:  # deepseek r1 will have <think>...</think> format
+            result = result.split('</think>')[-1].strip()
         
         return result
 
@@ -168,7 +192,8 @@ class VisionManagerBuilder:
             'guide_seo_article_system_prompt': guide_seo_article_system_prompt,
             'unbelievable_world_system_prompt': unbelievable_world_system_prompt,
             'buddhist_combined_image_system_prompt': buddhist_combined_image_system_prompt,
-            'fill_missing_details_system_prompt': fill_missing_details_system_prompt
+            'fill_missing_details_system_prompt': fill_missing_details_system_prompt,
+            'two_character_interaction_generate_system_prompt': two_character_interaction_generate_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):
@@ -194,7 +219,7 @@ class VisionManagerBuilder:
         required_prompts = [
             'seo_hashtag_prompt', 'stable_diffusion_prompt', 'describe_image_prompt', 
             'text_image_similarity_prompt', 'arbitrary_input_system_prompt', 'guide_seo_article_system_prompt', 
-            'unbelievable_world_system_prompt', 'buddhist_combined_image_system_prompt'
+            'unbelievable_world_system_prompt', 'buddhist_combined_image_system_prompt', 'two_character_interaction_generate_system_prompt'
         ]
         for prompt in required_prompts:
             if prompt not in prompts and prompt not in self.prompts_config:

@@ -272,7 +272,7 @@ You are an AI specialized in creating evocative, character-driven image descript
 
 - Output in English only.
 - Pure description, no explanations.
-- Maximum 150 words (target 120-180).
+- Maximum 150 words (target 120-150).
 - Focus on the *interaction* between the main and secondary roles, emphasizing their distinct personalities.
     - Interaction Type: (See Input; default is any appropriate interaction chosen by the AI, tailored to the characters' inherent traits).
     - Example interaction words: echoing, contrasting, challenging, shielding, manipulating, being influenced by, surpassing, being haunted by, empowering, being consumed by.
@@ -300,6 +300,7 @@ Only provide the image description, nothing else. No introductions, explanations
 
 Main Role: [well-known character name]
 Secondary Role: [well-known character name]
+Original Context: [user's original prompt/context - optional, incorporate into the scene naturally]
 Interaction Type: [Any/AI Choice, character-driven]
 Desired Tone: [e.g., Romantic, Tense, Peaceful, Mysterious, Joyful, Melancholy, Dramatic, Humorous, Other (describe briefly)]
 Style: [Photorealistic, Impressionistic, Surreal, Abstract, minimalist]

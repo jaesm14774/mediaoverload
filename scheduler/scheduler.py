@@ -44,20 +44,26 @@ class MediaScheduler:
             self.config = yaml.safe_load(f)
     
     def calculate_time_factor(self, hours_since_last: float) -> float:
-        """計算基於時間的機率調整因子"""
-        if hours_since_last <= 0:
-            return 0.1
+        """
+        計算基於時間的機率調整因子。
+        使用邏輯函數（Sigmoid）來模擬增長曲線：
+        - 初期（0-4小時）：因子非常低，增長緩慢。
+        - 中期（7小時後）：因子開始快速、大幅度增長。
+        - 後期：因子趨於平穩，達到最大值。
+        """
+        if hours_since_last < 0:
+            hours_since_last = 0
 
-        steepness1 = 4
-        steepness2 = 1
-        midpoint1 = 4
-        midpoint2 = 7
+        min_factor = 0.1  # 初始的最小因子
+        max_factor = 10  # 可達到的最大因子
+        midpoint = 8.0    # 增長曲線的中點（小時），在7小時後開始快速增長
+        steepness = 1.5   # 曲線的陡峭程度，數值越大增長越快
 
-        decline = 1 / (1 + math.exp(steepness1 * (hours_since_last - midpoint1)))
-        recovery = 1 / (1 + math.exp(-steepness2 * (hours_since_last - midpoint2)))
-
-        factor = 1 - decline + recovery
-        return max(0.1, factor)
+        # 邏輯函數（Sigmoid
+        growth = (max_factor - min_factor) / (1 + math.exp(-steepness * (hours_since_last - midpoint)))
+        factor = min_factor + growth
+        
+        return factor
 
     def should_execute(self, character_name: str) -> bool:
         """決定是否要執行處理"""
