@@ -81,16 +81,15 @@ class VisionContentManager:
         """生成任意輸入的轉換結果"""
         messages = [
             {'role': 'system', 'content': self.prompts[prompt_type]},
-            {'role': 'assistant', 'content': "Check main character name must be in the output"},
-            {'role': 'user', 'content': f"""main character: {character} {extra}"""}
+            {'role': 'user', 'content': f"""Central Figure: {character}, central figure's name must be in the final response! {extra}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)    
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
         
         messages = [
-            {'role': 'system', 'content': "As an expert editor, distill the text's essence. You must preserve the main character's name, along with the original style and emotion. Keep the output under 30 words."},
-            {'role': 'user', 'content': f"""{result}"""}
+            {'role': 'system', 'content': f"As an expert editor, distill the text's essence. You must preserve the principal character's name, along with the original style and emotion. Keep the output under 30 words."},
+            {'role': 'user', 'content': f"""Central Figure: {character}, central figure's name must be in the final response! {result}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)   
 
@@ -102,15 +101,18 @@ class VisionContentManager:
     def generate_two_character_interaction_prompt(self, main_character, secondary_character, prompt='', style='minimalist', **kwargs) -> str:
         """生成雙角色互動的提示詞"""
         # 構建輸入格式，包含所有必要字段
-        user_input = f"""Main Role: {main_character}
-Secondary Role: {secondary_character}
-Style: {style}"""
+        user_input = f"""
+        Main Role: {main_character}
+        Secondary Role: {secondary_character}
+        Style: {style}
+        """
         
         # 如果有原始prompt，將其納入輸入
         if prompt and prompt.strip():
             user_input += f"""
-Original Context: {prompt.strip()}"""
-        
+            Original Context: {prompt.strip()}
+            """
+                    
         messages = [
             {'role': 'system', 'content': self.prompts['two_character_interaction_generate_system_prompt']},
             {'role': 'user', 'content': user_input}
@@ -193,7 +195,8 @@ class VisionManagerBuilder:
             'unbelievable_world_system_prompt': unbelievable_world_system_prompt,
             'buddhist_combined_image_system_prompt': buddhist_combined_image_system_prompt,
             'fill_missing_details_system_prompt': fill_missing_details_system_prompt,
-            'two_character_interaction_generate_system_prompt': two_character_interaction_generate_system_prompt
+            'two_character_interaction_generate_system_prompt': two_character_interaction_generate_system_prompt,
+            'black_humor_system_prompt': black_humor_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):
@@ -208,24 +211,6 @@ class VisionManagerBuilder:
         self.text_model_type = model_type
         if config:
             self.text_config.update(config)
-        return self
-    
-    def with_prompts(self, prompts: dict):
-        """設置提示詞配置"""
-        if not isinstance(prompts, dict):
-            raise ValueError("prompts must be a dictionary")
-        
-        # 確保必要的提示詞存在
-        required_prompts = [
-            'seo_hashtag_prompt', 'stable_diffusion_prompt', 'describe_image_prompt', 
-            'text_image_similarity_prompt', 'arbitrary_input_system_prompt', 'guide_seo_article_system_prompt', 
-            'unbelievable_world_system_prompt', 'buddhist_combined_image_system_prompt', 'two_character_interaction_generate_system_prompt'
-        ]
-        for prompt in required_prompts:
-            if prompt not in prompts and prompt not in self.prompts_config:
-                raise ValueError(f"Missing required prompt: {prompt}")
-        
-        self.prompts_config.update(prompts)
         return self
     
     def build(self) -> 'VisionContentManager':
