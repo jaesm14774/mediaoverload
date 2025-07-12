@@ -112,30 +112,30 @@ class NodeManager:
         Returns:
             List[Dict]: 目標節點的更新配置列表
         """
-        # 嘗試尋找 RandomNoise 節點
-        target_node_type = "RandomNoise"
-        seed_key_name = 'noise_seed'
-        indices = NodeManager.get_node_indices(workflow, target_node_type)
-        
-        # 如果沒有找到 RandomNoise，則尋找 KSampler 節點
-        if not indices:
-            target_node_type = "KSampler"
-            seed_key_name = 'seed'
-            indices = NodeManager.get_node_indices(workflow, target_node_type)
-            
-        # 如果兩者都沒找到，返回空列表或拋出錯誤？目前返回空列表
-        if not indices:
-            print(f"Warning: Neither RandomNoise nor KSampler node found in the workflow for seed update.")
-            return []
-
-        return [
-            NodeManager.create_node_update(
-                target_node_type, 
-                i, 
-                {seed_key_name: seed}
-            )
-            for i in indices
+        # 配置採樣器節點的優先級和對應的 seed 參數名稱
+        sampler_configs = [
+            {"node_type": "RandomNoise", "seed_key": "noise_seed"},
+            {"node_type": "KSampler", "seed_key": "seed"},
+            {"node_type": "MMAudioSampler", "seed_key": "seed"}
         ]
+        
+        # 依序嘗試每個配置，直到找到符合的節點
+        for config in sampler_configs:
+            indices = NodeManager.get_node_indices(workflow, config["node_type"])
+            if indices:
+                return [
+                    NodeManager.create_node_update(
+                        config["node_type"], 
+                        i, 
+                        {config["seed_key"]: seed}
+                    )
+                    for i in indices
+                ]
+        
+        # 如果都沒找到，顯示警告
+        node_types = [config["node_type"] for config in sampler_configs]
+        print(f"Warning: None of the following node types found in the workflow for seed update: {', '.join(node_types)}")
+        return []
 
     @staticmethod
     def generate_updates(workflow: Dict[str, Any], description: str, seed: int, **additional_params) -> List[Dict[str, Any]]:
