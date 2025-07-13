@@ -175,39 +175,18 @@ class Text2ImageStrategy(ContentStrategy):
                 # 優先使用圖片專用配置，然後是通用配置
                 custom_updates = (image_params.get('custom_node_updates') or 
                                 self.config.additional_params.get('custom_node_updates', []))
-                if custom_updates:
-                    # 使用通用的節點更新方法
-                    updates = self.node_manager.generate_generic_updates(
-                        workflow=workflow,
-                        updates_config=custom_updates
-                    )
-                    
-                    # 添加文字和種子更新（如果沒有在 custom_updates 中指定）
-                    has_text_update = any(u.get('node_type') in ['PrimitiveString', 'CLIPTextEncode'] for u in custom_updates)
-                    if not has_text_update:
-                        # 合併圖片專用參數和通用參數
-                        merged_params = {**self.config.additional_params, **image_params}
-                        text_updates = self.node_manager.generate_text_updates(
-                            workflow=workflow,
-                            description=description,
-                            **merged_params
-                        )
-                        updates.extend(text_updates)
-                    
-                    sampler_updates = self.node_manager.generate_sampler_updates(
-                        workflow=workflow,
-                        seed=seed_start + i
-                    )
-                    updates.extend(sampler_updates)
-                else:
-                    # 使用原本的方法，合併圖片專用參數和通用參數
-                    merged_params = {**self.config.additional_params, **image_params}
-                    updates = self.node_manager.generate_updates(
-                        workflow=workflow,
-                        description=description,
-                        seed=seed_start + i,
-                        **merged_params
-                    )
+                
+                # 合併圖片專用參數和通用參數
+                merged_params = {**self.config.additional_params, **image_params}
+                
+                # 使用統一的更新方法（自動處理衝突檢查）
+                updates = self.node_manager.generate_updates(
+                    workflow=workflow,
+                    updates_config=custom_updates,
+                    description=description,
+                    seed=seed_start + i,
+                    **merged_params
+                )
                 try:
                     self.communicator.process_workflow(
                         workflow=workflow,
@@ -393,28 +372,17 @@ class Text2VideoStrategy(ContentStrategy):
                     custom_updates = (video_params.get('custom_node_updates') or 
                                     self.config.additional_params.get('custom_node_updates', default_video_updates))
                     
-                    # 使用通用的節點更新方法
-                    updates = self.node_manager.generate_generic_updates(
-                        workflow=workflow,
-                        updates_config=custom_updates
-                    )
-                    
-                    # 添加文字更新
                     # 合併視頻專用參數和通用參數
                     merged_params = {**self.config.additional_params, **video_params}
-                    text_updates = self.node_manager.generate_text_updates(
+                    
+                    # 使用統一的更新方法（自動處理衝突檢查）
+                    updates = self.node_manager.generate_updates(
                         workflow=workflow,
+                        updates_config=custom_updates,
                         description=description,
+                        seed=seed_start + i,
                         **merged_params
                     )
-                    updates.extend(text_updates)
-                    
-                    # 添加種子更新
-                    sampler_updates = self.node_manager.generate_sampler_updates(
-                        workflow=workflow,
-                        seed=seed_start + i
-                    )
-                    updates.extend(sampler_updates)
                     
                     # 處理工作流
                     self.communicator.process_workflow(

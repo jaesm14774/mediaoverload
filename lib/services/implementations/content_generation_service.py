@@ -128,6 +128,7 @@ class ContentGenerationService(IContentGenerationService):
         article_content = ""
         if hasattr(self.strategy, 'article_content'):
             article_content = self.strategy.article_content
-        
+        if len(article_content) > 4000:
+            article_content = '#ai #video #unbelievable #world #humor #interesting #funny #creative'
         self.logger.info(f"文章內容生成完成，長度: {len(article_content)}")
         return article_content 

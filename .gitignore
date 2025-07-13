@@ -10,6 +10,7 @@ configs/social_media/discord/**
 
 # 輸出目錄
 ouput_media/
+instagrapi/
 __pycache__/
 *.pyc
 
