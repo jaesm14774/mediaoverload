@@ -14,7 +14,7 @@ class PublishingService(IPublishingService):
         self.logger = setup_logger(__name__)
         self.social_media_manager = SocialMediaManager()
     
-    def process_images(self, image_paths: List[str], output_dir: str) -> List[str]:
+    def process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
         """處理圖片（格式轉換等）"""
         self.logger.info("開始圖片處理")
         
@@ -24,8 +24,8 @@ class PublishingService(IPublishingService):
         
         # 將圖片路徑轉換為 jpg 格式
         processed_paths = []
-        for image_path in image_paths:
-            processed_path = re.sub(string=image_path, pattern=r'\.png|\.jpeg', repl='.jpg')
+        for media_path in media_paths:
+            processed_path = re.sub(string=media_path, pattern=r'\.png|\.jpeg', repl='.jpg')
             processed_paths.append(processed_path)
         
         self.logger.info(f"圖片處理完成，共處理 {len(processed_paths)} 張圖片")
@@ -40,16 +40,6 @@ class PublishingService(IPublishingService):
         if platforms:
             results = {}
             for platform in platforms:
-                # try:
-                #     result = self.social_media_manager.upload_to_platform(platform, post)
-                #     results[platform] = result
-                #     if result:
-                #         self.logger.info(f'{platform} 上傳成功')
-                #     else:
-                #         self.logger.warning(f'{platform} 上傳失敗')
-                # except Exception as e:
-                #     self.logger.error(f'{platform} 上傳時發生錯誤: {str(e)}')
-                #     results[platform] = False
                 result = self.social_media_manager.upload_to_platform(platform, post)
                 results[platform] = result
                 if result:

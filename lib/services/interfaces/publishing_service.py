@@ -8,14 +8,13 @@ class IPublishingService(ABC):
     """發布服務介面
     
     負責圖片的後續處理和社群媒體的上傳
-    """
-    
+    """    
     @abstractmethod
-    def process_images(self, image_paths: List[str], output_dir: str) -> List[str]:
+    def process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
         """處理圖片（格式轉換等）
         
         Args:
-            image_paths: 原始圖片路徑列表
+            media_paths: 原始圖片路徑列表
             output_dir: 輸出目錄
             
         Returns:

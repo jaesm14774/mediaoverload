@@ -12,13 +12,13 @@ class IReviewService(ABC):
     @abstractmethod
     async def review_content(self,
                            text: str,
-                           image_paths: List[str],
+                           media_paths: List[str],
                            timeout: int = 3600) -> Tuple[bool, str, Optional[str], Optional[List[int]]]:
         """審核內容
         
         Args:
             text: 要審核的文字內容
-            image_paths: 要審核的圖片路徑列表
+            media_paths: 要審核的圖片路徑列表
             timeout: 審核超時時間（秒）
             
         Returns:

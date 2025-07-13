@@ -29,6 +29,16 @@ class ContentStrategy(ABC):
         pass
     
     @abstractmethod
+    def generate_media(self):
+        """生成媒體的抽象方法（圖片或視頻）"""
+        pass
+    
+    @abstractmethod
+    def analyze_media_text_match(self, similarity_threshold):
+        """分析媒體文本匹配的抽象方法"""
+        pass
+    
+    @abstractmethod
     def generate_article_content(self):
         """生成發文的抽象方法"""
         pass

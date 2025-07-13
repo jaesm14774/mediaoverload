@@ -13,7 +13,7 @@ configs/social_media/**/*.env
 configs/social_media/discord/**
 
 # 輸出和暫存
-output_image/
+ouput_media/
 __pycache__/
 *.pyc
 tmp/

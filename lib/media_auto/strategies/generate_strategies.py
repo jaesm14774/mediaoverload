@@ -153,52 +153,40 @@ class Text2ImageStrategy(ContentStrategy):
             print(f"使用預設 Secondary Role: {selected_default}")
             return selected_default
         return None
-
-    def generate_image(self):
+        
+    def generate_media(self):
         start_time = time.time()
         workflow = self._load_workflow(self.config.workflow_path)
         self.communicator = ComfyUICommunicator()
         self.communicator.connect_websocket()
         
         # 為每個描述生成圖片
-        images_per_description = self.config.additional_params.get('images_per_description', 4)
+        # 優先使用圖片專用參數，然後是通用參數
+        image_params = self.config.additional_params.get('image', {})
+        images_per_description = image_params.get('images_per_description', 
+                                                self.config.additional_params.get('images_per_description', 4))
+        
         for idx, description in enumerate(self.descriptions):
             seed_start = random.randint(1, 999999999999)
             for i in range(images_per_description):
                 print(f'為第{idx}描述，生成第{i}張圖片\n')
                 
                 # 檢查是否有自定義的節點更新配置
-                custom_updates = self.config.additional_params.get('custom_node_updates', [])
-                if custom_updates:
-                    # 使用通用的節點更新方法
-                    updates = self.node_manager.generate_generic_updates(
-                        workflow=workflow,
-                        updates_config=custom_updates
-                    )
-                    
-                    # 添加文字和種子更新（如果沒有在 custom_updates 中指定）
-                    has_text_update = any(u.get('node_type') in ['PrimitiveString', 'CLIPTextEncode'] for u in custom_updates)
-                    if not has_text_update:
-                        text_updates = self.node_manager.generate_text_updates(
-                            workflow=workflow,
-                            description=description,
-                            **self.config.additional_params
-                        )
-                        updates.extend(text_updates)
-                    
-                    sampler_updates = self.node_manager.generate_sampler_updates(
-                        workflow=workflow,
-                        seed=seed_start + i
-                    )
-                    updates.extend(sampler_updates)
-                else:
-                    # 使用原本的方法
-                    updates = self.node_manager.generate_updates(
-                        workflow=workflow,
-                        description=description,
-                        seed=seed_start + i,
-                        **self.config.additional_params
-                    )
+                # 優先使用圖片專用配置，然後是通用配置
+                custom_updates = (image_params.get('custom_node_updates') or 
+                                self.config.additional_params.get('custom_node_updates', []))
+                
+                # 合併圖片專用參數和通用參數
+                merged_params = {**self.config.additional_params, **image_params}
+                
+                # 使用統一的更新方法（自動處理衝突檢查）
+                updates = self.node_manager.generate_updates(
+                    workflow=workflow,
+                    updates_config=custom_updates,
+                    description=description,
+                    seed=seed_start + i,
+                    **merged_params
+                )
                 try:
                     self.communicator.process_workflow(
                         workflow=workflow,
@@ -212,11 +200,11 @@ class Text2ImageStrategy(ContentStrategy):
         print(f'生成圖片花費 : {time.time() - start_time}')
         return self
 
-    def analyze_image_text_match(self, similarity_threshold) -> Dict[str, Any]:
+    def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
         """分析生成的圖片"""
-        image_paths = glob.glob(f'{self.config.output_dir}/*')
-        self.filter_results = self.gemini_vision_manager.analyze_image_text_match(
-            image_paths=image_paths,
+        media_paths = glob.glob(f'{self.config.output_dir}/*')
+        self.filter_results = self.gemini_vision_manager.analyze_media_text_match(
+            media_paths=media_paths,
             descriptions=self.descriptions,
             main_character=self.config.character,
             similarity_threshold=similarity_threshold,
@@ -270,6 +258,14 @@ class Image2ImageStrategy(ContentStrategy):
     def generate_description(self):
         # 實現圖生圖的邏輯
         pass
+    
+    def generate_media(self):
+        # 實現圖生圖的媒體生成邏輯
+        pass
+    
+    def analyze_media_text_match(self, similarity_threshold):
+        # 實現圖生圖的媒體文本匹配邏輯
+        pass
         
     def generate_article_content(self):
         pass
@@ -278,9 +274,176 @@ class Image2ImageStrategy(ContentStrategy):
 class Text2VideoStrategy(ContentStrategy):
     """文生影片策略"""
     
+    def __init__(self, character_repository=None):
+        self.ollama_vision_manager = VisionManagerBuilder() \
+            .with_vision_model('ollama', model_name='qwen2.5vl:7b') \
+            .with_text_model('ollama', model_name='gemma3:4b') \
+            .build()
+        self.node_manager = NodeManager()
+        self.descriptions: List[str] = []
+        self.character_repository = character_repository
+        self.communicator = None
+        
+    def _load_workflow(self, path: str) -> Dict[str, Any]:
+        """載入工作流配置"""
+        with open(path, "r", encoding='utf-8') as f:
+            return json.loads(f.read())
+    
     def generate_description(self):
-        # 實現文生影片的邏輯
-        pass
-
+        """生成視頻描述"""
+        start_time = time.time()
+        
+        # 獲取基本配置
+        style = getattr(self.config, 'style', '')
+        prompt = self.config.prompt
+        if style:
+            prompt = f"""{prompt}\nstyle:{style}""".strip()
+        
+        # 第一階段：使用角色名稱生成基礎描述
+        character_description = self.ollama_vision_manager.generate_image_prompts(
+            user_input=self.config.character,
+            system_prompt_key=self.config.image_system_prompt or 'unbelievable_world_system_prompt'
+        )
+        
+        # 第二階段：使用視頻系統提示詞生成詳細的視頻描述
+        video_description = self.ollama_vision_manager.generate_video_prompts(
+            user_input=character_description,
+            system_prompt_key='video_description_system_prompt'
+        )
+        
+        print(f'Character description: {character_description}')
+        print(f'Video description: {video_description}')
+        
+        # 檢查角色名稱是否存在於描述中
+        if self.config.character:
+            character = self.config.character.lower()
+            if video_description.replace(' ', '').lower().find(character) != -1 or video_description.lower().find(character) != -1:
+                self.descriptions = [video_description]
+            else:
+                self.descriptions = []
+        else:
+            self.descriptions = [video_description]
+        
+        print(f'Final video descriptions: {self.descriptions}')
+        print(f'生成描述花費: {time.time() - start_time}')
+        return self
+    
+    def generate_media(self):
+        """生成視頻或圖片"""
+        start_time = time.time()
+        
+        if not self.descriptions:
+            print("沒有描述可供生成視頻")
+            return self
+        
+        # 載入工作流
+        workflow = self._load_workflow(self.config.workflow_path)
+        self.communicator = ComfyUICommunicator()
+        self.communicator.connect_websocket()
+        
+        try:
+            # 為每個描述生成視頻
+            # 優先使用視頻專用參數，然後是通用參數
+            video_params = self.config.additional_params.get('video', {})
+            videos_per_description = video_params.get('videos_per_description', 
+                                                    self.config.additional_params.get('videos_per_description', 2))
+            
+            for idx, description in enumerate(self.descriptions):
+                seed_start = random.randint(1, 999999999999)
+                
+                for i in range(videos_per_description):
+                    print(f'為第{idx}描述，生成第{i}個視頻\n')
+                    
+                    # 準備自定義的節點更新配置
+                    # 優先使用視頻專用配置，然後是通用配置
+                    default_video_updates = [
+                        # 更新寬度和高度
+                        {
+                            "node_type": "PrimitiveInt",
+                            "inputs": {"value": 512}
+                        },
+                        # 更新影片長度
+                        {
+                            "node_type": "EmptyHunyuanLatentVideo",
+                            "inputs": {"length": 97}
+                        }
+                    ]
+                    
+                    custom_updates = (video_params.get('custom_node_updates') or 
+                                    self.config.additional_params.get('custom_node_updates', default_video_updates))
+                    
+                    # 合併視頻專用參數和通用參數
+                    merged_params = {**self.config.additional_params, **video_params}
+                    
+                    # 使用統一的更新方法（自動處理衝突檢查）
+                    updates = self.node_manager.generate_updates(
+                        workflow=workflow,
+                        updates_config=custom_updates,
+                        description=description,
+                        seed=seed_start + i,
+                        **merged_params
+                    )
+                    
+                    # 處理工作流
+                    self.communicator.process_workflow(
+                        workflow=workflow,
+                        updates=updates,
+                        output_path=f"{self.config.output_dir}",
+                        file_name=f"{self.config.character}_video_d{idx}_{i}"
+                    )
+                    
+        finally:
+            if self.communicator and self.communicator.ws:
+                self.communicator.ws.close()
+        
+        print(f'生成視頻花費: {time.time() - start_time}')
+        return self
+    
+    def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
+        """分析生成的視頻（暫時不做文本匹配分析）"""
+        # 對於視頻，我們暫時不做文本匹配分析
+        # 可以在未來擴展此功能
+        video_paths = glob.glob(f'{self.config.output_dir}/*')
+        
+        # 簡單地返回所有生成的視頻
+        self.filter_results = []
+        for video_path in video_paths:
+            if any(video_path.endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.gif']):
+                self.filter_results.append({
+                    'media_path': video_path,  # 保持與現有接口一致
+                    'description': self.descriptions[0] if self.descriptions else '',
+                    'similarity': 1.0  # 暫時設為1.0
+                })
+        
+        return self
+    
     def generate_article_content(self):
-        pass
+        """生成文章內容"""
+        start_time = time.time()
+        
+        # 使用現有的邏輯生成文章內容
+        if not self.filter_results:
+            self.article_content = f"#{self.config.character} #AI #video"
+            return self
+        
+        # 整合角色名稱、描述和預設標籤
+        content_parts = [
+            self.config.character,
+            *list(set([row['description'] for row in self.filter_results])),
+            self.config.prompt
+        ]
+        
+        article_content = self.ollama_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
+        
+        # 加入預設標籤
+        if hasattr(self.config, 'default_hashtags') and self.config.default_hashtags:
+            article_content += ' #' + ' #'.join([tag.lstrip('#') for tag in self.config.default_hashtags])
+        
+        if '</think>' in article_content:  # deepseek r1 will have <think>...</think> format
+            article_content = article_content.split('</think>')[-1].strip()
+        
+        self.article_content = article_content.replace('"', '').replace('*', '').lower()
+        
+        print(f'產生文章內容花費: {time.time() - start_time}')
+        return self
+    

@@ -20,7 +20,7 @@ pandas>=2.1.4
 discord.py>=2.3.2
 
 # 社群媒體
-instagrapi>=2.0.3
+instagrapi>=2.2.1
 
 # AI 和 LLM
 ollama>=0.1.6

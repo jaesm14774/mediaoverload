@@ -1,0 +1,352 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 24,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "beta",
+      "denoise": 1,
+      "model": [
+        "51",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": "獅子在噁台上搖滾狂歡，搖滾派對風格",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "51",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "Overly bright and washed-out colors, static composition, blurry details, presence of subtitles, [stylistic] style, artwork/painting, still image, overall gray tone, worst quality, low quality, JPEG compression artifacts, ugly, deformed, extra fingers, poorly drawn hands, poorly drawn face, distorted, disfigured, misshapen limbs, fused fingers, static scene, cluttered background, three legs, crowded background, walking in reverse.",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "51",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "38": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "39": {
+    "inputs": {
+      "vae_name": "wan\\wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "40": {
+    "inputs": {
+      "width": [
+        "54",
+        0
+      ],
+      "height": [
+        "53",
+        0
+      ],
+      "length": [
+        "68",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyHunyuanLatentVideo",
+    "_meta": {
+      "title": "EmptyHunyuanLatentVideo"
+    }
+  },
+  "49": {
+    "inputs": {
+      "unet_name": "wan\\wan2.1-t2v-14b-Q3_K_S.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "51": {
+    "inputs": {
+      "lora_name": "wan\\Wan21_CausVid_14B_T2V_lora_rank32.safetensors",
+      "strength_model": 0.7000000000000002,
+      "strength_clip": 0.7000000000000002,
+      "model": [
+        "49",
+        0
+      ],
+      "clip": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "53": {
+    "inputs": {
+      "value": 512
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "height"
+    }
+  },
+  "54": {
+    "inputs": {
+      "value": 512
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "width"
+    }
+  },
+  "55": {
+    "inputs": {
+      "vae_model": "mmaudio_vae_44k_fp16.safetensors",
+      "synchformer_model": "mmaudio_synchformer_fp16.safetensors",
+      "clip_model": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+      "mode": "44k",
+      "precision": "fp16",
+      "force_reload": false
+    },
+    "class_type": "MMAudioFeatureUtilsLoader",
+    "_meta": {
+      "title": "MMAudio FeatureUtilsLoader"
+    }
+  },
+  "57": {
+    "inputs": {
+      "query": "You are a world-class Soundscape Designer. Your sole task is to translate a visual scene into 1-3 of the most potent, representative English sound keywords.\n\nYour Process:\n\nAnalyze: Deconstruct the scene's subject, action, setting, and emotional atmosphere.\n\nPrioritize & Select: From all possible sounds (direct, ambient, emotional, cultural), choose the 1-3 keywords with the highest impact. The hierarchy is: Emotional/Cultural > Environmental Ambience > Direct Sound. A highly characteristic direct sound (e.g., galloping) can be the top priority.\n\nOutput: Your response must follow these rules strictly.\n\nOutput Rules:\n\nEnglish only.\n\nKeywords only (single words or short phrases).\n\nUse a comma , to separate multiple keywords.\n\nAbsolutely no explanations, descriptions, sentences, or prefixes (like \"Sound:\"). Your entire response is only the keyword(s).\n\nExamples to Follow:\n\nInput: A sunset over the ocean, with seagulls flying by.\n\nOutput: waves, seagulls\n\nInput: A close-up of a unicorn figurine and a rubber duck next to a bathtub.\n\nOutput: bubbles\n\nInput: People walking through a grand archway with the Taj Mahal in the distance.\n\nOutput: Indian holy music\n\nInput: A black horse running across a field.\n\nOutput: galloping\n\nInput: Giant tentacles rise from a stormy sea towards an old sailing ship.\n\nOutput: waves, storm",
+      "debug": "enable",
+      "url": "http://127.0.0.1:11434",
+      "model": "gemma:7b",
+      "keep_alive": 5,
+      "format": "text",
+      "seed": 394931732,
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          false
+        ]
+      },
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "OllamaVision",
+    "_meta": {
+      "title": "Ollama Vision"
+    }
+  },
+  "58": {
+    "inputs": {
+      "duration": [
+        "70",
+        0
+      ],
+      "steps": 25,
+      "cfg": 4.5,
+      "seed": 104,
+      "prompt": [
+        "57",
+        0
+      ],
+      "negative_prompt": "",
+      "mask_away_clip": false,
+      "force_offload": true,
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "mmaudio_model": [
+        "63",
+        0
+      ],
+      "feature_utils": [
+        "55",
+        0
+      ],
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "MMAudioSampler",
+    "_meta": {
+      "title": "MMAudio Sampler"
+    }
+  },
+  "59": {
+    "inputs": {
+      "text_0": "[No response provided as the visual scene was not included in the prompt.]",
+      "text": [
+        "57",
+        0
+      ]
+    },
+    "class_type": "ShowText|pysssss",
+    "_meta": {
+      "title": "Show Text 🐍"
+    }
+  },
+  "60": {
+    "inputs": {
+      "frame_rate": [
+        "69",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "wan2.1_t2v_mmaudio",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "8",
+        0
+      ],
+      "audio": [
+        "58",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "61": {
+    "inputs": {
+      "audioUI": "",
+      "audio": [
+        "58",
+        0
+      ]
+    },
+    "class_type": "PreviewAudio",
+    "_meta": {
+      "title": "PreviewAudio"
+    }
+  },
+  "63": {
+    "inputs": {
+      "mmaudio_model": "mmaudio_large_44k_v2_fp16.safetensors",
+      "base_precision": "fp16",
+      "force_reload": false
+    },
+    "class_type": "MMAudioModelLoader",
+    "_meta": {
+      "title": "MMAudio ModelLoader"
+    }
+  },
+  "68": {
+    "inputs": {
+      "value": 97
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "total_frame"
+    }
+  },
+  "69": {
+    "inputs": {
+      "value": 16
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "frame_rate"
+    }
+  },
+  "70": {
+    "inputs": {
+      "input1": [
+        "68",
+        0
+      ],
+      "input2": [
+        "69",
+        0
+      ]
+    },
+    "class_type": "DivideNode",
+    "_meta": {
+      "title": "video_duration"
+    }
+  }
+}

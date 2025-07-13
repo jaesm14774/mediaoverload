@@ -17,7 +17,7 @@ class NotificationService(INotificationService):
     def notify_success(self,
                       character: str,
                       execution_time: float,
-                      image_count: int,
+                      media_count: int,
                       additional_info: Optional[Dict[str, Any]] = None) -> None:
         """發送成功通知"""
         if 'success' not in self.webhooks:
@@ -37,7 +37,7 @@ class NotificationService(INotificationService):
             f"🎭 角色: {character}\n"
             f"⏰ 完成時間: {current_time}\n"
             f"⌛ 總執行時間: {hours}小時 {minutes}分鐘 {seconds}秒\n"
-            f"📸 成功上傳圖片數量: {image_count}張"
+            f"📸 成功上傳圖片數量: {media_count}張"
         )
         
         # 添加額外資訊
