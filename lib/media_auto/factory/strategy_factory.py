@@ -29,7 +29,7 @@ class StrategyFactory:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
         
         # 支持依賴注入，避免循環導入
-        if strategy_class == Text2ImageStrategy:
+        if strategy_class in [Text2ImageStrategy, Text2VideoStrategy]:
             return strategy_class(character_repository=character_repository)
         else:
             return strategy_class()

@@ -10,7 +10,7 @@ from instagrapi.types import StoryLink
 @dataclass
 class MediaPost:
     """Base structure for social media posts"""
-    images: List[str]
+    media_paths: List[str]
     caption: str
     hashtags: Optional[str] = None
     additional_params: Dict[str, Any] = None
@@ -61,36 +61,46 @@ class InstagramPlatform(SocialMediaPlatform):
     def upload_post(self, post: MediaPost) -> bool:
         try:
             caption = f"{post.caption}\n{post.hashtags}" if post.hashtags else post.caption
-            
-            if len(post.images) == 1:
+            if len(post.media_paths) == 1 and (post.media_paths[0].endswith('.png') or post.media_paths[0].endswith('.jpg')):
                 media = self.client.photo_upload(
-                    path=post.images[0],
+                    post.media_paths[0],
+                    caption=caption
+                )
+            elif len(post.media_paths) == 1 and post.media_paths[0].endswith('.mp4'):
+                media = self.client.video_upload(
+                    post.media_paths[0],
                     caption=caption
                 )
             else:
                 media = self.client.album_upload(
-                    paths=post.images,
+                    paths=post.media_paths,
                     caption=caption
                 )
-            
             # Handle Instagram-specific features
             if post.additional_params.get('share_to_story'):
                 time.sleep(5)
-                self._share_to_story(post.images, media.code)
+                self._share_to_story(post.media_paths, media.code)
             
             return True
         except Exception as e:
             print(f"Instagram upload failed: {str(e)}")
             return False
 
-    def _share_to_story(self, images: List[str], post_code: str):
+    def _share_to_story(self, media_paths: List[str], post_code: str):
         """分享貼文到限時動態"""
         try:
-            self.client.photo_upload_to_story(
-                random.choice(images),
-                caption="查看最新貼文 ⬆️",
-                links=[StoryLink(webUri=f'https://www.instagram.com/p/{post_code}')]
-            )
+            if len(media_paths) == 1 and (media_paths[0].endswith('.png') or media_paths[0].endswith('.jpg')):
+                self.client.photo_upload_to_story(
+                    random.choice(media_paths),
+                    caption="查看最新貼文 ⬆️",
+                    links=[StoryLink(webUri=f'https://www.instagram.com/p/{post_code}')]
+                )
+            elif len(media_paths) == 1 and media_paths[0].endswith('.mp4'):
+                self.client.video_upload_to_story(
+                    random.choice(media_paths),
+                    caption="查看最新貼文 ⬆️",
+                    links=[StoryLink(webUri=f'https://www.instagram.com/p/{post_code}')]
+                )
         except Exception as e:
             print(f"分享限時動態失敗: {str(e)}")
 

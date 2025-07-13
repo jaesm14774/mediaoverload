@@ -4,7 +4,7 @@ character:
   group_name: Pokemon
   
 generation:
-  output_dir: /app/output_image
+  output_dir: /app/ouput_media
   workflow_path: /app/configs/workflow/nova-anime-xl.json
   similarity_threshold: 0.6
   generation_type: text2img
@@ -32,5 +32,13 @@ social_media:
       enabled: true
 
 additional_params:
-  images_per_description: 10
-  is_negative: false 
+  # 通用參數（向後兼容）
+  is_negative: false
+  
+  # 圖片生成專用參數
+  image:
+    images_per_description: 10
+    custom_node_updates:
+      - node_type: "PrimitiveInt"
+        inputs:
+          value: 1024  # 圖片使用更高解析度

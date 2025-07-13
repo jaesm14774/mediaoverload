@@ -43,17 +43,17 @@ class CharacterRepository(ICharacterRepository):
         """根據群組獲取角色列表"""
         max_retries = 3
         retry_count = 0
-        
+        json_workflow_name = f'"{workflow_name}"'
         while retry_count < max_retries:
             try:
                 cursor = self.db_connection.cursor
                 query = """
                     SELECT role_name_en 
                     FROM anime.anime_roles
-                    WHERE group_name = %s AND status = 1 AND workflow_name = %s AND weight > 0
+                    WHERE group_name = %s AND status = 1 AND json_contains(workflow_list, %s) AND weight > 0
                 """.strip()
                 
-                cursor.execute(query, (group_name, workflow_name))
+                cursor.execute(query, (group_name, json_workflow_name))
                 results = cursor.fetchall()
                 return [row[0] for row in results]
                 

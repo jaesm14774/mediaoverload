@@ -4,6 +4,7 @@ import time
 from lib.media_auto.models.interfaces.ai_model import AIModelInterface, ModelConfig
 from lib.media_auto.models.vision.model_registry import ModelRegistry
 from configs.prompt.image_system_guide import *
+from configs.prompt.video_system_guide import *
 
 class VisionContentManager:
     """處理圖片內容分析與生成的類別"""
@@ -68,6 +69,24 @@ class VisionContentManager:
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
         return result
+
+    def generate_video_prompts(self, user_input: str, system_prompt_key: str = 'video_description_system_prompt', **kwargs) -> str:
+        """根據用戶輸入生成視頻描述提示詞"""
+        
+        actual_key_to_use = system_prompt_key
+        if system_prompt_key not in self.prompts:
+            print(f"Warning: Prompt key '{system_prompt_key}' not found in prompts configuration. Falling back to default 'video_description_system_prompt'.")
+            actual_key_to_use = 'video_description_system_prompt'
+
+        print(f"Using video system prompt key: {actual_key_to_use}")
+        messages = [
+            {'role': 'system', 'content': self.prompts[actual_key_to_use]},
+            {'role': 'user', 'content': user_input}
+        ]
+        result = self.text_model.chat_completion(messages=messages, **kwargs)
+        if '</think>' in result:  # deepseek r1 will have <think>...</think> format
+            result = result.split('</think>')[-1].strip()
+        return result
     
     def generate_seo_hashtags(self, description: str, **kwargs) -> str:
         """生成 SEO 優化的 hashtags"""
@@ -124,8 +143,8 @@ class VisionContentManager:
         
         return result
 
-    def analyze_image_text_match(self, 
-                               image_paths: List[str],
+    def analyze_media_text_match(self, 
+                               media_paths: List[str],
                                descriptions: List[str],
                                main_character: str,
                                similarity_threshold: float = 0.9,
@@ -133,7 +152,7 @@ class VisionContentManager:
         """分析圖文匹配度並過濾結果
         
         Args:
-            image_paths: 圖片路徑列表
+            media_paths: 圖片路徑列表
             descriptions: 描述文字列表
             main_character: 主要角色名稱
             similarity_threshold: 相似度閾值
@@ -148,18 +167,18 @@ class VisionContentManager:
         start_time = time.time()
         total_results = []
         
-        for image_path in image_paths:
-            print(f'進行文圖匹配程度判斷中 : {image_path}\n')
-            desc_index = int(re.search(f'{main_character}_d(\d+)_\d+\.', image_path).group(1))
+        for media_path in media_paths:
+            print(f'進行文圖匹配程度判斷中 : {media_path}\n')
+            desc_index = int(re.search(f'{main_character}_d(\d+)_\d+\.', media_path).group(1))
             similarity = self.analyze_image_text_similarity(
                 text=descriptions[desc_index],
-                image_path=image_path,
+                image_path=media_path,
                 main_character=main_character,
                 **kwargs
             )
             
             total_results.append({
-                'image_path': image_path,
+                'media_path': media_path,
                 'description': descriptions[desc_index],
                 'similarity': similarity
             })
@@ -196,7 +215,8 @@ class VisionManagerBuilder:
             'buddhist_combined_image_system_prompt': buddhist_combined_image_system_prompt,
             'fill_missing_details_system_prompt': fill_missing_details_system_prompt,
             'two_character_interaction_generate_system_prompt': two_character_interaction_generate_system_prompt,
-            'black_humor_system_prompt': black_humor_system_prompt
+            'black_humor_system_prompt': black_humor_system_prompt,
+            'video_description_system_prompt': video_description_system_prompt
         }
     
     def with_vision_model(self, model_type: str, **config):

@@ -13,14 +13,14 @@ class INotificationService(ABC):
     def notify_success(self,
                       character: str,
                       execution_time: float,
-                      image_count: int,
+                      media_count: int,
                       additional_info: Optional[Dict[str, Any]] = None) -> None:
         """發送成功通知
         
         Args:
             character: 角色名稱
             execution_time: 執行時間（秒）
-            image_count: 成功上傳的圖片數量
+            media_count: 成功上傳的圖片(影片)數量
             additional_info: 額外資訊
         """
         pass

@@ -76,12 +76,24 @@ class ConfigLoader:
                 generation_info['image_system_prompt_weights']
             )
         
+        # 處理生成類型選擇
+        generation_type = generation_info.get('generation_type', 'text2img')
+        if 'generation_type_weights' in generation_info:
+            generation_type = ConfigLoader.process_weighted_choice(
+                generation_info['generation_type_weights']
+            )
+        
+        # 根據生成類型選擇工作流
+        workflow_path = generation_info.get('workflow_path', '')
+        if 'workflows' in generation_info and generation_type in generation_info['workflows']:
+            workflow_path = generation_info['workflows'][generation_type]
+        
         return CharacterConfig(
             character=character_info.get('name', '').lower(),
-            output_dir=generation_info.get('output_dir', '/app/output_image'),
-            workflow_path=generation_info.get('workflow_path', ''),
+            output_dir=generation_info.get('output_dir', '/app/ouput_media'),
+            workflow_path=workflow_path,
             similarity_threshold=generation_info.get('similarity_threshold', 0.9),
-            generation_type=generation_info.get('generation_type', 'text2img'),
+            generation_type=generation_type,
             default_hashtags=social_media_info.get('default_hashtags', []),
             additional_params=config_dict.get('additional_params', {}),
             group_name=character_info.get('group_name', ''),

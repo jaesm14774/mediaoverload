@@ -32,12 +32,12 @@ class IContentGenerationService(ABC):
         pass
     
     @abstractmethod
-    def generate_images(self, config: GenerationConfig, descriptions: List[str]) -> List[str]:
-        """根據描述生成圖片"""
+    def generate_media(self, config: GenerationConfig) -> List[str]:
+        """根據描述生成圖片或視頻"""
         pass
     
     @abstractmethod
-    def analyze_image_text_match(self, 
+    def analyze_media_text_match(self, 
                                images: List[str], 
                                descriptions: List[str],
                                similarity_threshold: float = 0.9) -> List[Dict[str, Any]]:

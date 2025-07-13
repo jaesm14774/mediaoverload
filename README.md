@@ -157,7 +157,7 @@ graph TD
        group_name: YourGroup
        
      generation:
-       output_dir: /app/output_image
+       output_dir: /app/ouput_media
        workflow_path: /app/configs/workflow/your-workflow.json
        similarity_threshold: 0.7
        generation_type: text2img
@@ -315,7 +315,7 @@ docker-compose up --build -d
     *   `workflow/`: 存放 ComfyUI 的 workflow JSON 檔案。
     *   `social_media/`: 存放各社群媒體平台及帳號的設定檔。
 *   `scheduler/`: (推測) 包含用於排程任務的腳本。
-*   `output_image/`: 生成的圖片預設會輸出到此目錄下以角色名命名的子資料夾中。
+*   `ouput_media/`: 生成的圖片預設會輸出到此目錄下以角色名命名的子資料夾中。
 *   `logs/`: 存放應用程式日誌。
 
 ## 注意事項

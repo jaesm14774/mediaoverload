@@ -4,10 +4,19 @@ character:
   group_name: Kirby
   
 generation:
-  output_dir: /app/output_image
-  workflow_path: /app/configs/workflow/nova-anime-xl.json
+  output_dir: /app/ouput_media
+  
+  # 生成類型的權重配置（機率選擇）
+  generation_type_weights:
+    text2img: 1
+    text2video: 0
+  
+  # 工作流路徑配置（根據生成類型自動選擇）
+  workflows:
+    text2img: /app/configs/workflow/nova-anime-xl.json
+    text2video: /app/configs/workflow/wan2.1_t2v_audio.json
+  
   similarity_threshold: 0.7
-  generation_type: text2img
   
   # 提示詞生成方法的權重配置
   prompt_method_weights:
@@ -32,5 +41,14 @@ social_media:
       enabled: true
 
 additional_params:
-  images_per_description: 10
-  is_negative: false 
+  # 通用參數（向後兼容）
+  is_negative: false
+  
+  # 圖片生成專用參數
+  image:
+    images_per_description: 10
+    custom_node_updates:
+      - node_type: "PrimitiveInt"
+        inputs:
+          value: 1024  # 圖片使用更高解析度
+  

@@ -36,24 +36,24 @@ class ContentGenerationService(IContentGenerationService):
             self.logger.warning("沒有生成任何描述，終止流程")
             return {
                 'descriptions': [],
-                'images': [],
+                'media_files': [],
                 'filter_results': [],
                 'article_content': ''
             }
         
-        # 生成圖片
-        images = self.generate_images(config)
+        # 生成圖片或視頻
+        media_files = self.generate_media(config)
         
         # 分析圖文匹配度
         similarity_threshold = config.get_all_attributes().get('similarity_threshold', 0.9)
-        filter_results = self.analyze_image_text_match(images, descriptions, similarity_threshold)
+        filter_results = self.analyze_media_text_match(media_files, descriptions, similarity_threshold)
         
         # 生成文章內容
         article_content = self.generate_article(config, filter_results)
         
         return {
             'descriptions': descriptions,
-            'images': images,
+            'media_files': media_files,
             'filter_results': filter_results,
             'article_content': article_content
         }
@@ -69,31 +69,55 @@ class ContentGenerationService(IContentGenerationService):
             self.logger.info(f"描述: {desc}")
         return descriptions
     
-    def generate_images(self, config: GenerationConfig) -> List[str]:
-        """根據描述生成圖片"""
-        self.logger.info("開始生成圖片")
-        self.strategy.generate_image()
+    def generate_media(self, config: GenerationConfig) -> List[str]:
+        """根據描述生成圖片或視頻"""
+        generation_type = config.get_all_attributes().get('generation_type', 'text2img')
         
-        # 獲取生成的圖片路徑
-        images = []
-        images = glob.glob(f'{config.output_dir}/*png')
-        
-        self.logger.info(f"圖片生成完成，共生成 {len(images)} 張圖片")
-        return images
+        if generation_type in ['text2video', 't2v']:
+            self.logger.info("開始生成視頻")
+            self.strategy.generate_media()  #enerate_video
+            
+            # 獲取生成的視頻路徑
+            video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
+            media_files = []
+            for ext in video_extensions:
+                media_files.extend(glob.glob(f'{config.output_dir}/{ext}'))
+            
+            self.logger.info(f"視頻生成完成，共生成 {len(media_files)} 個視頻")
+            return media_files
+        else:
+            self.logger.info("開始生成圖片")
+            self.strategy.generate_media()
+            
+            # 獲取生成的圖片路徑
+            images = glob.glob(f'{config.output_dir}/*png')
+            
+            self.logger.info(f"圖片生成完成，共生成 {len(images)} 張圖片")
+            return images
     
-    def analyze_image_text_match(self, 
+    def analyze_media_text_match(self, 
                                images: List[str], 
                                descriptions: List[str],
                                similarity_threshold: float = 0.9) -> List[Dict[str, Any]]:
         """分析圖文匹配度"""
-        self.logger.info("開始分析圖文匹配度")
-        self.strategy.analyze_image_text_match(similarity_threshold)
+        generation_type = self.strategy.config.get_all_attributes().get('generation_type', 'text2img')
+        
+        if generation_type in ['text2video', 't2v']:
+            self.logger.info("開始分析視頻內容")
+        else:
+            self.logger.info("開始分析圖文匹配度")
+            
+        self.strategy.analyze_media_text_match(similarity_threshold)
         
         filter_results = []
         if hasattr(self.strategy, 'filter_results'):
             filter_results = self.strategy.filter_results
         
-        self.logger.info(f"圖文匹配分析完成，篩選出 {len(filter_results)} 張圖片")
+        if generation_type in ['text2video', 't2v']:
+            self.logger.info(f"視頻內容分析完成，篩選出 {len(filter_results)} 個視頻")
+        else:
+            self.logger.info(f"圖文匹配分析完成，篩選出 {len(filter_results)} 張圖片")
+        
         return filter_results
     
     def generate_article(self, config: GenerationConfig, filter_results: List[Dict[str, Any]]) -> str:
