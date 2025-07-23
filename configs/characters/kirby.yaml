@@ -4,7 +4,7 @@ character:
   group_name: Kirby
   
 generation:
-  output_dir: /app/ouput_media
+  output_dir: /app/output_media
   
   # 生成類型的權重配置（機率選擇）
   generation_type_weights:

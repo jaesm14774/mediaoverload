@@ -90,7 +90,7 @@ class ConfigLoader:
         
         return CharacterConfig(
             character=character_info.get('name', '').lower(),
-            output_dir=generation_info.get('output_dir', '/app/ouput_media'),
+            output_dir=generation_info.get('output_dir', '/app/output_media'),
             workflow_path=workflow_path,
             similarity_threshold=generation_info.get('similarity_threshold', 0.9),
             generation_type=generation_type,

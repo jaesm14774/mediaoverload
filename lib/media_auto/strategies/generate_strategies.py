@@ -446,4 +446,4 @@ class Text2VideoStrategy(ContentStrategy):
         
         print(f'產生文章內容花費: {time.time() - start_time}')
         return self
-    
+        

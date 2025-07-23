@@ -4,7 +4,7 @@ character:
   group_name: Pokemon
   
 generation:
-  output_dir: /app/ouput_media
+  output_dir: /app/output_media
   workflow_path: /app/configs/workflow/nova-anime-xl.json
   similarity_threshold: 0.6
   generation_type: text2img

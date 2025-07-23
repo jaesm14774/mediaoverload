@@ -41,7 +41,7 @@ class ConfigurableCharacter(ABC):
         """返回角色的默認配置"""
         return CharacterConfig(
             character=getattr(self, 'character', '').lower(),
-            output_dir=getattr(self, 'output_dir', '/app/ouput_media'),
+            output_dir=getattr(self, 'output_dir', '/app/output_media'),
             workflow_path=getattr(self, 'workflow_path', ''),
             similarity_threshold=getattr(self, 'similarity_threshold', 0.9),
             generation_type=getattr(self, 'generation_type', 'text2img'),
