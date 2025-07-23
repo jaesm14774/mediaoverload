@@ -4,12 +4,12 @@ character:
   group_name: Creature
   
 generation:
-  output_dir: /app/ouput_media
+  output_dir: /app/output_media
   
   # 生成類型的權重配置（機率選擇）
   generation_type_weights:
-    text2img: 0
-    text2video: 1
+    text2img: 0.5
+    text2video: 0.5
   
   # 工作流路徑配置（根據生成類型自動選擇）
   workflows:

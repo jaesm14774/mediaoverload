@@ -9,7 +9,7 @@ configs/social_media/**/*.env
 configs/social_media/discord/**
 
 # 輸出目錄
-ouput_media/
+output_media/
 instagrapi/
 __pycache__/
 *.pyc
