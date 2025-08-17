@@ -22,7 +22,7 @@ class StrategyFactory:
     }
     
     @classmethod
-    def get_strategy(cls, strategy_type: str, character_repository=None) -> ContentStrategy:
+    def get_strategy(cls, strategy_type: str, character_repository=None, vision_manager=None) -> ContentStrategy:
         """獲取對應的策略實例"""
         strategy_class = cls._strategies.get(strategy_type)
         if not strategy_class:
@@ -30,7 +30,7 @@ class StrategyFactory:
         
         # 支持依賴注入，避免循環導入
         if strategy_class in [Text2ImageStrategy, Text2VideoStrategy]:
-            return strategy_class(character_repository=character_repository)
+            return strategy_class(character_repository=character_repository, vision_manager=vision_manager)
         else:
             return strategy_class()
     

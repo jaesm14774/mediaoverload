@@ -36,11 +36,13 @@ python run_media_interface.py --config configs/characters/kirby.yaml
 *   **🧠 智慧提示詞引擎**:
     *   **無提示啟動**: 若未提供，可利用本地 LLM (如 Ollama) 自動生成創意提示詞。
     *   **多策略生成**: 結合新聞時事、預設模板等多種方式生成或擴展提示詞，並可配置不同策略的權重。
+    *   **雙角色互動**: 支援從資料庫隨機選擇次要角色，生成主角與次要角色互動的創意場景。
 
 *   **🎨 多模態內容生成**:
     *   **文案創作**: 自動生成標題、描述、標籤 (Hashtags) 等。
-    *   **圖像生成 (Text-to-Image)**: 整合 ComfyUI，根據提示詞和角色風格生成高品質圖像。
-    *   **影片生成 (Text-to-Video)**: 支援實驗性的文字轉影片功能，可生成短影片內容並附加音訊。
+    *   **圖像生成 (Text-to-Image)**: 整合 ComfyUI，支援多種工作流 (Flux Dev, Nova Anime XL, Flux Krea Dev)。
+    *   **影片生成 (Text-to-Video)**: 支援文字轉影片功能，使用 MMAudio 技術可生成帶音效的短影片內容。
+    *   **多模型支援**: 整合 Ollama、Google Gemini、OpenRouter 等多種 AI 模型提供者。
 
 *   **🔧 彈性的生成策略**:
     *   透過策略模式 (`StrategyFactory`)，可為不同任務（如圖像生成、影片生成）配置和切換不同的後端實現。
@@ -69,18 +71,19 @@ python run_media_interface.py --config configs/characters/kirby.yaml
     *   **設定檔**: `PyYAML`
     *   **任務排程**: `schedule`
     *   **環境變數**: `python-dotenv`
-    *   **資料庫**: `SQLAlchemy` (支援 `pymysql` for MySQL, `psycopg2` for PostgreSQL, `pyodbc`)
+    *   **資料庫**: `SQLAlchemy` (支援 `pymysql` for MySQL, `psycopg2-binary` for PostgreSQL, `pyodbc` for MSSQL)
     *   **多媒體處理**: `Pillow` (圖像), `piexif` (EXIF), `numpy`, `pandas`
     *   **命令列介面**: `argparse`
     *   **開發工具**: `rich` (美化終端輸出)
 *   **AI / LLM**:
     *   **本地模型**: `ollama`
     *   **雲端模型**: `google-generativeai`
+    *   **API 整合**: OpenRouter (支援多種免費模型)
     *   **ComfyUI API**: `websocket-client`
 *   **核心服務與平台**:
     *   **AI 工作流引擎**: ComfyUI
     *   **大型語言模型**: Ollama (Llama 3, Qwen, etc.), Google Gemini
-    *   **資料庫**: MySQL, PostgreSQL
+    *   **資料庫**: MySQL, PostgreSQL, MSSQL
     *   **審核與通知**: Discord
     *   **發布平台**: Instagram
 *   **容器化**: Docker, Docker Compose
@@ -125,7 +128,7 @@ graph TB
     end
 
     subgraph "🌐 External Systems"
-        LLM[("🤖 LLM<br/>Ollama/Google")]
+        LLM[("🤖 LLM<br/>Ollama/Gemini/OpenRouter")]
         COMFY[("🎨 ComfyUI<br/>圖像/影片生成")]
         DISCORD[("💬 Discord<br/>審核與通知")]
         INSTAGRAM[("📱 Instagram<br/>內容發布")]
@@ -318,10 +321,10 @@ flowchart TD
 
 #### 必要的環境變數 (`media_overload.env`)
 ```env
-# 資料庫設定 (MySQL/PostgreSQL)
-DB_TYPE=mysql
+# 資料庫設定 (MySQL/PostgreSQL/MSSQL)
+DB_TYPE=mysql  # 可選值: mysql, postgresql, mssql
 DB_HOST=localhost
-DB_PORT=3306
+DB_PORT=3306   # MySQL: 3306, PostgreSQL: 5432, MSSQL: 1433
 DB_USER=your_username
 DB_PASSWORD=your_password
 DB_NAME=your_database
@@ -337,6 +340,12 @@ COMFYUI_API_URL=http://localhost:8188
 
 # Google Gemini (可選)
 GOOGLE_API_KEY=your_google_api_key
+
+# OpenRouter API (可選，支援多種免費模型)
+OPEN_ROUTER_TOKEN=your_openrouter_api_key
+
+# 影片生成設定 (可選)
+VIDEO_GENERATION_ENABLED=true
 ```
 
 #### 社群媒體憑證 (`configs/social_media/ig/{character}/ig.env`)
@@ -368,6 +377,7 @@ generation:
   workflows:
     text2img: /app/configs/workflow/nova-anime-xl.json
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
+    # 支援多種工作流：flux_krea_dev.json, flux_dev.json 等
   
   similarity_threshold: 0.7      # 文圖匹配度閾值
   
@@ -379,8 +389,11 @@ generation:
     
   # 圖像系統提示詞權重
   image_system_prompt_weights:
-    stable_diffusion_prompt: 0.4
-    two_character_interaction_generate_system_prompt: 0.6
+    stable_diffusion_prompt: 0.3
+    two_character_interaction_generate_system_prompt: 0.4
+    unbelievable_world_system_prompt: 0.1
+    buddhist_combined_image_system_prompt: 0.1
+    black_humor_system_prompt: 0.1
   
   style: "anime style with vibrant colors"  # 風格描述
 
@@ -394,12 +407,27 @@ social_media:
       enabled: true
 
 additional_params:
+  # 通用參數（向後兼容）
+  is_negative: false
+  
+  # 圖片生成專用參數
   image:
     images_per_description: 10   # 每個描述生成的圖片數量
     custom_node_updates:         # 自定義 ComfyUI 節點參數
       - node_type: "PrimitiveInt"
         inputs:
-          value: 1024
+          value: 1024            # 圖片解析度
+  
+  # 視頻生成專用參數
+  video:
+    videos_per_description: 2    # 每個描述生成的視頻數量
+    custom_node_updates:
+      - node_type: "PrimitiveInt"
+        inputs:
+          value: 512             # 視頻解析度
+      - node_type: "EmptyHunyuanLatentVideo"
+        inputs:
+          length: 97             # 視頻長度
 ```
 
 ### 3. 後端服務設定
@@ -420,6 +448,8 @@ ollama serve
 ollama pull llama3.2:latest
 ollama pull llama3.2-vision:latest
 ollama pull llava:13b
+ollama pull gemma3:12b
+ollama pull qwen2.5vl:7b
 ```
 
 #### 資料庫設定
@@ -444,6 +474,38 @@ CREATE TABLE news (
 );
 ```
 
+## 🆕 近期重大更新
+
+### v2.1.0 新功能亮點
+
+#### 🌐 OpenRouter 整合
+- **多模型支援**: 新增 OpenRouter API 整合，支援多種免費 AI 模型
+- **隨機模型選擇**: 系統可自動從免費模型池中隨機選擇，提高多樣性並降低成本
+- **支援模型**:
+  - **文本模型**: `tngtech/deepseek-r1t2-chimera:free`, `qwen/qwen3-235b-a22b:free`
+  - **視覺模型**: `qwen/qwen2.5-vl-72b-instruct:free`, `google/gemma-3-27b-it:free`
+- **自動錯誤處理**: 支援 DeepSeek R1 模型的特殊輸出格式（`<think>...</think>`）
+
+#### 🎭 雙角色互動系統
+- **智慧角色配對**: 系統可從資料庫中隨機選擇次要角色，與主角色進行互動
+- **動態場景生成**: 基於兩個角色的特性生成有趣的互動場景
+- **群組角色支援**: 同群組角色可以相互配對，創造更豐富的內容
+
+#### 🎨 多樣化系統提示詞
+- **unbelievable_world_system_prompt**: 生成荒誕有趣的「難以置信」場景
+- **buddhist_combined_image_system_prompt**: 融合佛教、道教等宗教元素的靈性場景
+- **black_humor_system_prompt**: 黑色幽默風格的諷刺場景
+- **two_character_interaction_generate_system_prompt**: 專門用於雙角色互動的場景生成
+
+#### 🔧 工作流程優化
+- **Flux 系列支援**: 新增 `flux_krea_dev.json` 工作流，支援更快的圖像生成
+- **參數分離**: 圖片和視頻生成參數完全分離，支援不同的解析度和數量設定
+- **智慧模型切換**: 可在運行時動態切換 AI 模型提供者
+
+#### 📊 智慧分析改進
+- **混合模型分析**: 圖文匹配分析隨機使用 Gemini 或 OpenRouter 模型，提高準確性
+- **DeepSeek R1 支援**: 自動處理 DeepSeek R1 模型的 `<think>...</think>` 格式輸出
+
 ## 🔧 開發與維護指南
 
 ### 新增角色
@@ -458,8 +520,9 @@ CREATE TABLE news (
 
 ### 新增生成策略
 1. 繼承 `ContentStrategy` 基類
-2. 實現必要的方法：`generate_description()`, `generate_media()`, `analyze_media_text_match()`
+2. 實現必要的方法：`generate_description()`, `generate_media()`, `analyze_media_text_match()`, `generate_article_content()`
 3. 在 `StrategyFactory` 中註冊新策略
+4. 配置對應的 AI 模型提供者（支援 Ollama、Gemini、OpenRouter）
 
 ### 自定義 ComfyUI 工作流
 1. 在 ComfyUI 中設計工作流
@@ -522,15 +585,18 @@ services:
     restart: unless-stopped
     depends_on:
       - mysql
-      - redis
 
   mysql:
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: mediaoverload
+      MYSQL_USER: mediauser
+      MYSQL_PASSWORD: mediapassword
     volumes:
       - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
     restart: unless-stopped
 
 volumes:
@@ -576,7 +642,17 @@ sudo systemctl start mediaoverload
 
 ## 🔄 更新日誌
 
-### v2.0.0 (Latest)
+### v2.1.0 (Latest)
+- 🌐 新增 OpenRouter API 整合，支援多種免費 AI 模型
+- 🎭 實現雙角色互動系統，支援動態角色配對
+- 🎨 新增多樣化系統提示詞（荒誕世界、佛教元素、黑色幽默等）
+- 🔧 新增 Flux Krea Dev 工作流支援
+- 📊 改進圖文匹配分析，支援混合模型分析
+- ⚡ 優化參數配置，支援圖片和視頻專用參數
+- 🎬 完整的文生影片功能，支援 MMAudio 音效生成
+- 🗄️ 新增 MSSQL 資料庫支援，擴展資料庫相容性
+
+### v2.0.0
 - 🏗️ 重構為服務導向架構
 - 🎭 支援可配置角色系統
 - 🔄 實現策略模式
@@ -613,12 +689,83 @@ cp media_overload.env.example media_overload.env
 
 本專案使用 MIT 授權條款 - 詳見 [LICENSE](LICENSE) 文件。
 
+## 🎯 配置範例
+
+### 完整角色配置範例 (unbelievable_world.yaml)
+```yaml
+character:
+  name: unbelievable_world
+  group_name: Creature
+  
+generation:
+  output_dir: /app/output_media
+  
+  # 生成類型的權重配置（機率選擇）
+  generation_type_weights:
+    text2img: 0.5
+    text2video: 0.5
+  
+  # 工作流路徑配置（根據生成類型自動選擇）
+  workflows:
+    text2img: /app/configs/workflow/flux_krea_dev.json
+    text2video: /app/configs/workflow/wan2.1_t2v_audio.json
+  
+  similarity_threshold: 0.6
+  
+  # 提示詞生成方法的權重配置
+  prompt_method_weights:
+    arbitrary: 0.3
+    news: 0.7
+    
+  # 圖片系統提示的權重配置  
+  image_system_prompt_weights:
+    unbelievable_world_system_prompt: 0.5
+    black_humor_system_prompt: 0.5
+  style: CINEMATIC STYLE
+
+social_media:
+  default_hashtags:
+    - unbelievable
+    - world 
+  platforms:
+    instagram:
+      config_folder_path: /app/configs/social_media/ig/unbelievable_world
+      enabled: true
+
+additional_params:
+  # 通用參數
+  is_negative: false
+  
+  # 圖片生成專用參數
+  image:
+    images_per_description: 10
+    custom_node_updates:
+      - node_type: "PrimitiveInt"
+        inputs:
+          value: 768  # 圖片使用中等解析度
+  
+  # 視頻生成專用參數
+  video:
+    videos_per_description: 2
+    custom_node_updates:
+      - node_type: "PrimitiveInt"
+        inputs:
+          value: 512  # 視頻使用較低解析度
+      - node_type: "EmptyHunyuanLatentVideo"
+        inputs:
+          length: 97
+```
+
 ## ⚠️ 注意事項
 
 *   **路徑設定**: 請確保 Docker 容器內外的路徑對應正確
 *   **憑證安全**: 請使用 `.env` 文件管理敏感資訊，勿直接寫入程式碼
 *   **資源管理**: 定期清理生成的媒體文件以節省儲存空間
 *   **API 限制**: 注意各服務的 API 調用限制，避免超出配額
+*   **模型選擇**: OpenRouter 免費模型有使用限制，建議配置多種模型提供者作為備選
+*   **雙角色互動**: 確保資料庫中有足夠的角色資料以支援雙角色互動功能
+*   **影片生成**: MMAudio 功能需要額外的 GPU 記憶體，建議至少 8GB VRAM
+*   **資料庫選擇**: MSSQL 支援需要 Docker 容器內的 ODBC 驅動程式，已在 Dockerfile 中預先配置
 
 ---
 

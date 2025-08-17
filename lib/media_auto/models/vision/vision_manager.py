@@ -65,7 +65,7 @@ class VisionContentManager:
             {'role': 'system', 'content': self.prompts[actual_key_to_use]},
             {'role': 'user', 'content': user_input}
         ]
-        result = self.vision_model.chat_completion(messages=messages, **kwargs)
+        result = self.text_model.chat_completion(messages=messages, **kwargs)
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
         return result
@@ -204,6 +204,7 @@ class VisionManagerBuilder:
         self.text_model_type = 'ollama'
         self.vision_config = {'model_name': 'llava:13b', 'temperature': 0.3}
         self.text_config = {'model_name': 'llama3.2', 'temperature': 0.3}
+        self.use_random_models = False  # 新增：是否使用隨機模型選擇
         self.prompts_config = {
             'seo_hashtag_prompt': seo_hashtag_prompt,
             'stable_diffusion_prompt': stable_diffusion_prompt,
@@ -233,13 +234,32 @@ class VisionManagerBuilder:
             self.text_config.update(config)
         return self
     
+    def with_random_models(self, enabled: bool = True):
+        """啟用隨機模型選擇 (僅適用於 OpenRouter)"""
+        self.use_random_models = enabled
+        return self
+    
     def build(self) -> 'VisionContentManager':
         """建構 VisionContentManager 實例"""
         vision_model_class = ModelRegistry.get_model(self.vision_model_type)
         text_model_class = ModelRegistry.get_model(self.text_model_type)
         
-        vision_model = vision_model_class(ModelConfig(**self.vision_config))
-        text_model = text_model_class(ModelConfig(**self.text_config))
+        # 如果啟用隨機模型選擇且使用 OpenRouter，則隨機選擇模型
+        vision_config = self.vision_config.copy()
+        text_config = self.text_config.copy()
+        
+        if self.use_random_models and self.vision_model_type == 'openrouter':
+            from lib.media_auto.models.vision.model_registry import OpenRouterModel
+            vision_config['model_name'] = OpenRouterModel.get_random_free_vision_model()
+            print(f"隨機選擇的 Vision 模型: {vision_config['model_name']}")
+            
+        if self.use_random_models and self.text_model_type == 'openrouter':
+            from lib.media_auto.models.vision.model_registry import OpenRouterModel
+            text_config['model_name'] = OpenRouterModel.get_random_free_text_model()
+            print(f"隨機選擇的 Text 模型: {text_config['model_name']}")
+        
+        vision_model = vision_model_class(ModelConfig(**vision_config))
+        text_model = text_model_class(ModelConfig(**text_config))
         
         # 確保必要的提示詞存在
         if 'stable_diffusion_prompt' not in self.prompts_config:

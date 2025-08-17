@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from lib.database import db_pool
 from lib.repositories.character_repository import CharacterRepository
 from lib.repositories.news_repository import NewsRepository
+from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.services.implementations import (
     PromptService,
     ContentGenerationService,
@@ -37,6 +38,15 @@ class ServiceFactory:
         # Repository 實例
         self._character_repository = None
         self._news_repository = None
+        
+        # VisionManager 實例
+        self._vision_manager = None
+        self._vision_provider = 'openrouter'  # 默認使用 openrouter
+        self._text_provider = 'openrouter'
+        self._use_random_models = True
+        self._vision_model_name = None
+        self._text_model_name = None
+        self._temperature = 1.0
     
     def _init_database(self):
         """初始化資料庫連接"""
@@ -49,6 +59,46 @@ class ServiceFactory:
             db_name=os.environ['mysql_db_name']
         )
         self.mysql_conn = db_pool.get_connection('mysql')
+    
+    def configure_vision_manager(self, vision_provider: str = 'openrouter', 
+                                text_provider: str = 'openrouter', 
+                                use_random_models: bool = True,
+                                vision_model_name: str = None,
+                                text_model_name: str = None):
+        """配置 VisionManager 的提供者和模型"""
+        self._vision_provider = vision_provider
+        self._use_random_models = use_random_models
+        self._text_provider = text_provider
+        self._vision_model_name = vision_model_name
+        self._text_model_name = text_model_name
+        
+        # 重置 VisionManager 實例，強制重新創建
+        self._vision_manager = None
+    
+    def get_vision_manager(self):
+        """獲取 VisionManager 實例"""
+        if self._vision_manager is None:
+            builder = VisionManagerBuilder()
+            
+            # 配置 vision model
+            if self._vision_model_name:
+                builder = builder.with_vision_model(self._vision_provider, model_name=self._vision_model_name)
+            else:
+                builder = builder.with_vision_model(self._vision_provider)
+            
+            # 配置 text model
+            if self._text_model_name:
+                builder = builder.with_text_model(self._text_provider, model_name=self._text_model_name)
+            else:
+                builder = builder.with_text_model(self._text_provider)
+            
+            # 配置隨機模型選擇
+            if self._use_random_models:
+                builder = builder.with_random_models(True)
+            
+            self._vision_manager = builder.build()
+            
+        return self._vision_manager
     
     def get_character_repository(self) -> CharacterRepository:
         """獲取角色資料庫存取層"""
@@ -67,7 +117,8 @@ class ServiceFactory:
         if self._prompt_service is None:
             self._prompt_service = PromptService(
                 news_repository=self.get_news_repository(),
-                character_repository=self.get_character_repository()
+                character_repository=self.get_character_repository(),
+                vision_manager=self.get_vision_manager()
             )
         return self._prompt_service
     
@@ -75,7 +126,8 @@ class ServiceFactory:
         """獲取內容生成服務"""
         if self._content_service is None:
             self._content_service = ContentGenerationService(
-                character_repository=self.get_character_repository()
+                character_repository=self.get_character_repository(),
+                vision_manager=self.get_vision_manager()
             )
         return self._content_service
     
@@ -131,4 +183,4 @@ class ServiceFactory:
     
     def cleanup(self):
         """清理資源"""
-        db_pool.close_all() 
+        db_pool.close_all()
