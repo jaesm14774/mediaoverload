@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "(Kirby:1.3) and a (friendly capybara:1.1), joyfully rolling in thick mud, (splashing everywhere:1.2), gleeful expressions, bright sunny daylight, sparkling mud splashes, gooey mud texture, smooth Kirby skin, soft capybara fur, whimsical illustration, vibrant colors, lighthearted atmosphere, (happy chaos:0.9)"
+      "value": "(Dragonite as a mail carrier:1.2) gently handing a (star-shaped parcel:1.1) to an overjoyed Kirby, Kirby standing on his tiptoes in front of his dome house, Dragonite wearing its official mail delivery satchel, bright cheerful morning atmosphere, a moment of happy delivery, (clean Nintendo art style:1.1), bold colors, detailed characters, negative: night, rain, (damaged package:1.0), sad."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -107,7 +107,7 @@
   },
   "203:4": {
     "inputs": {
-      "seed": 27,
+      "seed": 67,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -236,7 +236,7 @@
   },
   "204:4": {
     "inputs": {
-      "seed": 27,
+      "seed": 67,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -295,7 +295,7 @@
   },
   "205:0": {
     "inputs": {
-      "ckpt_name": "sdxl\\novaCartoonXL_v20.safetensors"
+      "ckpt_name": "sdxl\\novaCartoonXL_v30.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -365,7 +365,7 @@
   },
   "205:4": {
     "inputs": {
-      "seed": 27,
+      "seed": 67,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -411,7 +411,7 @@
   },
   "205:6": {
     "inputs": {
-      "filename_prefix": "nova_cartoonxl_v20",
+      "filename_prefix": "nova_cartoonxl_v30",
       "images": [
         "205:5",
         0

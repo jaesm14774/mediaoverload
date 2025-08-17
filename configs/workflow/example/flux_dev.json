@@ -36,7 +36,7 @@
   },
   "9": {
     "inputs": {
-      "filename_prefix": "flux_dev",
+      "filename_prefix": "flux_krea_dev",
       "images": [
         "8",
         0

@@ -1,7 +1,7 @@
 {
   "6": {
     "inputs": {
-      "text": "Hyperrealistic photo, ultra-detailed, dramatic cinematic lighting, low-angle medium shot: A very stoic capybara, wearing a surprisingly well-fitted, miniature black leather biker jacket (zipper slightly undone) and tiny, dark aviator sunglasses, is expertly parallel parking a ridiculously oversized, bright pink children's Barbie DreamCar™️. The scene unfolds on a gritty, rain-slicked urban street at dusk, with neon signs from a ramen shop and a laundromat casting long, colorful reflections on the wet asphalt. One of the capybara's front paws is firmly on the miniature steering wheel, the other delicately poised near a tiny gear stick. Its expression is one of intense, cool concentration, completely unfazed by the absurdity of its task or the sheer impossibility of the vehicle fitting into the tight space between a beat-up pickup truck and an overflowing dumpster. Steam rises from a nearby manhole cover. Sharp focus on the capybara's determined snout and the gleaming, rain-dotted chrome of the Barbie car's hubcap. Background slightly blurred, showing astonished onlookers (a stray cat, a pigeon wearing a tiny discarded bottle cap as a hat) frozen mid-reaction. Unbelievable, bizarre, comedic, a moment of unexpected vehicular prowess. Found footage, 'caught on camera' feel",
+      "text": "  \"scene_description\": \"A capybara, low and focused on a custom-built motorcycle, leans hard into a sharp turn in a narrow alley. Sparks fly as its foot pedal scrapes against the wet asphalt. Just ahead, a tiny mouse thief scrambles desperately, clutching a comically oversized wedge of cheese, its eyes wide with panic.\",\n  \"visual_style\": \"Hyper-stylized, slick action sequence reminiscent of 'John Wick' meets a high-budget anime. The motion is fluid yet intense, with dramatic speed ramping.\",\n  \"camera_movement\": \"A low-angle tracking shot, racing alongside the motorcycle at ground level. The camera whips to follow the mouse for a beat, then snaps back to the capybara, emphasizing the speed and intensity of the pursuit. Lens flares from the wet ground punctuate the movement.\",\n  \"main_subject\": \"The capybara is wearing a tiny, custom-fitted black leather vest and miniature aviator goggles pushed up on its forehead, its expression one of stoic determination. The motorcycle is a heavily modified 'Hog' style bike, scaled down to fit its rider. The mouse is scruffy, wearing a ragged tunic, and visibly terrified.\",\n  \"background_setting\": \"A rain-slicked, narrow back alley in a dense, modern metropolis at night. The walls are covered in graffiti and glowing neon signs written in various languages, reflecting in the puddles on the ground.\",\n  \"lighting_mood\": \"Dramatic and high-contrast, created by the vibrant, electric glow of neon signs. The primary light sources are the motorcycle's single, powerful headlamp cutting through the darkness and the colorful reflections off the wet pavement, creating an energetic and tense atmosphere.\",\n  \"audio_cue\": \"The deep, guttural roar of the capybara's custom V-twin engine, echoing powerfully off the narrow alley walls, mixed with the high-pitched, frantic squeaking of the fleeing mouse.\",\n  \"color_palette\": \"Dominated by saturated cyan, magenta, and electric blue from the neon signs, contrasted against the deep, wet blacks of the asphalt and the warm, intense yellow beam of the motorcycle's headlamp.",
       "speak_and_recognation": {
         "__value__": [
           false,
@@ -36,7 +36,7 @@
   },
   "9": {
     "inputs": {
-      "filename_prefix": "flux_dev",
+      "filename_prefix": "flux_krea_dev",
       "images": [
         "8",
         0
@@ -138,7 +138,7 @@
   },
   "25": {
     "inputs": {
-      "noise_seed": 57
+      "noise_seed": 65
     },
     "class_type": "RandomNoise",
     "_meta": {
@@ -208,7 +208,7 @@
   },
   "50": {
     "inputs": {
-      "unet_name": "flux\\flux1-dev-Q5_0.gguf"
+      "unet_name": "flux\\flux1-krea-dev-Q5_0.gguf"
     },
     "class_type": "UnetLoaderGGUF",
     "_meta": {

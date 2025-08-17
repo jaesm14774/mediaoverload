@@ -13,7 +13,7 @@ generation:
   
   # 工作流路徑配置（根據生成類型自動選擇）
   workflows:
-    text2img: /app/configs/workflow/flux_dev.json
+    text2img: /app/configs/workflow/flux_krea_dev.json
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
   
   similarity_threshold: 0.6

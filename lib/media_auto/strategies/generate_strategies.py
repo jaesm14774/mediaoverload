@@ -20,7 +20,8 @@ class Text2ImageStrategy(ContentStrategy):
     改成google 大幅 增加準確性
     """
     
-    def __init__(self, character_repository=None):
+    def __init__(self, character_repository=None, vision_manager=None):
+        # 保留原有的邏輯作為後備
         self.ollama_vision_manager = VisionManagerBuilder() \
             .with_vision_model('ollama', model_name='llava:13b') \
             .with_text_model('ollama', model_name='llama3.2:latest') \
@@ -29,10 +30,44 @@ class Text2ImageStrategy(ContentStrategy):
             .with_vision_model('gemini', model_name='gemini-2.5-flash-lite-preview-06-17') \
             .with_text_model('gemini', model_name='gemini-2.5-flash-lite-preview-06-17') \
             .build()
+        # 添加 OpenRouter 視覺管理器 - 使用隨機 free 模型
+        self.openrouter_vision_manager = VisionManagerBuilder() \
+            .with_vision_model('openrouter') \
+            .with_text_model('openrouter') \
+            .with_random_models(True) \
+            .build()
+        self.ollama_switcher = ModelSwitcher(self.ollama_vision_manager)
+        # 如果有外部傳入的 VisionManager，優先使用
+        if vision_manager is not None:
+            self.current_vision_manager = vision_manager
+            self.external_vision_manager = True
+        else:
+            self.current_vision_manager = self.openrouter_vision_manager
+            self.external_vision_manager = False
+        
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
-        self.ollama_switcher = ModelSwitcher(self.ollama_vision_manager)
         self.character_repository = character_repository
+
+    def set_vision_provider(self, provider: str = 'openrouter'):
+        """設置視覺模型提供者
+        
+        Args:
+            provider: 'ollama', 'gemini', 或 'openrouter'
+        """
+        if self.external_vision_manager:
+            print(f"警告：正在使用外部傳入的 VisionManager，無法切換提供者到 {provider}")
+            return
+            
+        if provider == 'ollama':
+            self.current_vision_manager = self.ollama_vision_manager
+        elif provider == 'gemini':
+            self.current_vision_manager = self.gemini_vision_manager
+        elif provider == 'openrouter':
+            self.current_vision_manager = self.openrouter_vision_manager
+        else:
+            raise ValueError(f"不支援的視覺模型提供者: {provider}")
+        print(f"已切換至 {provider} 視覺模型提供者")
 
     def _load_workflow(self, path: str) -> Dict[str, Any]:
         """載入工作流配置"""
@@ -54,7 +89,7 @@ class Text2ImageStrategy(ContentStrategy):
             descriptions = self._generate_two_character_interaction_description(prompt, style)
         else:
             # 使用原有的生成邏輯
-            descriptions = self.ollama_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
+            descriptions = self.current_vision_manager.generate_image_prompts(prompt, self.config.image_system_prompt)
         
         print('All generated descriptions : ', descriptions)
         if self.config.character:
@@ -82,7 +117,7 @@ class Text2ImageStrategy(ContentStrategy):
                 print(f'雙角色互動：Main Role: {self.config.character}, Secondary Role: {secondary_character}')
                 
                 # 修復：傳遞原始prompt給雙角色互動生成
-                descriptions = self.ollama_vision_manager.generate_two_character_interaction_prompt(
+                descriptions = self.current_vision_manager.generate_two_character_interaction_prompt(
                     main_character=self.config.character,
                     secondary_character=secondary_character,
                     prompt=prompt,  # 添加原始prompt
@@ -92,12 +127,12 @@ class Text2ImageStrategy(ContentStrategy):
             else:
                 print('無法獲取 Secondary Role，使用預設方法')
                 # 回退到原有方法，保留原始prompt
-                return self.ollama_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
+                return self.current_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
                 
         except Exception as e:
             print(f'雙角色互動生成時發生錯誤: {e}，使用預設方法')
             # 回退到原有方法，保留原始prompt
-            return self.ollama_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
+            return self.current_vision_manager.generate_image_prompts(prompt, 'stable_diffusion_prompt')
     
     def _get_random_secondary_character(self, main_character: str, character_repository) -> str:
         """獲取隨機的 Secondary Role"""
@@ -201,9 +236,20 @@ class Text2ImageStrategy(ContentStrategy):
         return self
 
     def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
-        """分析生成的圖片"""
+        """分析生成的圖片 - 隨機選擇分析模型"""
         media_paths = glob.glob(f'{self.config.output_dir}/*')
-        self.filter_results = self.gemini_vision_manager.analyze_media_text_match(
+        
+        # 隨機選擇分析管理器：Gemini 或 OpenRouter
+        available_managers = [self.gemini_vision_manager, self.openrouter_vision_manager]
+        selected_manager = random.choice(available_managers)
+        
+        # 輸出所選擇的模型類型
+        if selected_manager == self.gemini_vision_manager:
+            print("使用 Gemini 進行圖像相似度分析")
+        else:
+            print("使用 OpenRouter 隨機模型進行圖像相似度分析")
+        
+        self.filter_results = selected_manager.analyze_media_text_match(
             media_paths=media_paths,
             descriptions=self.descriptions,
             main_character=self.config.character,
@@ -236,7 +282,7 @@ class Text2ImageStrategy(ContentStrategy):
             *list(set([row['description'] for row in self.filter_results])),
             self.config.prompt
         ]
-        article_content = self.ollama_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
+        article_content = self.current_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
 
         # 加入預設標籤
         if self.config.default_hashtags:
@@ -274,15 +320,49 @@ class Image2ImageStrategy(ContentStrategy):
 class Text2VideoStrategy(ContentStrategy):
     """文生影片策略"""
     
-    def __init__(self, character_repository=None):
-        self.ollama_vision_manager = VisionManagerBuilder() \
-            .with_vision_model('ollama', model_name='qwen2.5vl:7b') \
-            .with_text_model('ollama', model_name='gemma3:4b') \
-            .build()
+    def __init__(self, character_repository=None, vision_manager=None):
+        # 如果有外部傳入的 VisionManager，優先使用
+        if vision_manager is not None:
+            self.current_vision_manager = vision_manager
+            self.external_vision_manager = True
+        else:
+            # 保留原有的邏輯作為後備
+            self.ollama_vision_manager = VisionManagerBuilder() \
+                .with_vision_model('ollama', model_name='qwen2.5vl:7b') \
+                .with_text_model('ollama', model_name='gemma3:4b') \
+                .build()
+            # 添加 OpenRouter 視覺管理器用於視頻生成 - 使用隨機 free 模型
+            self.openrouter_vision_manager = VisionManagerBuilder() \
+                .with_vision_model('openrouter') \
+                .with_text_model('openrouter') \
+                .with_random_models(True) \
+                .build()
+            # 預設使用 openrouter，可以透過 set_vision_provider 方法切換
+            self.current_vision_manager = self.openrouter_vision_manager
+            self.external_vision_manager = False
+        
         self.node_manager = NodeManager()
         self.descriptions: List[str] = []
         self.character_repository = character_repository
         self.communicator = None
+
+    def set_vision_provider(self, provider: str = 'openrouter'):
+        """設置視覺模型提供者
+        
+        Args:
+            provider: 'ollama' 或 'openrouter'
+        """
+        if self.external_vision_manager:
+            print(f"警告：正在使用外部傳入的 VisionManager，無法切換提供者到 {provider}")
+            return
+            
+        if provider == 'ollama':
+            self.current_vision_manager = self.ollama_vision_manager
+        elif provider == 'openrouter':
+            self.current_vision_manager = self.openrouter_vision_manager
+        else:
+            raise ValueError(f"不支援的視覺模型提供者: {provider}")
+        print(f"已切換至 {provider} 視覺模型提供者")
         
     def _load_workflow(self, path: str) -> Dict[str, Any]:
         """載入工作流配置"""
@@ -300,13 +380,13 @@ class Text2VideoStrategy(ContentStrategy):
             prompt = f"""{prompt}\nstyle:{style}""".strip()
         
         # 第一階段：使用角色名稱生成基礎描述
-        character_description = self.ollama_vision_manager.generate_image_prompts(
+        character_description = self.current_vision_manager.generate_image_prompts(
             user_input=self.config.character,
             system_prompt_key=self.config.image_system_prompt or 'unbelievable_world_system_prompt'
         )
         
         # 第二階段：使用視頻系統提示詞生成詳細的視頻描述
-        video_description = self.ollama_vision_manager.generate_video_prompts(
+        video_description = self.current_vision_manager.generate_video_prompts(
             user_input=character_description,
             system_prompt_key='video_description_system_prompt'
         )
@@ -433,7 +513,7 @@ class Text2VideoStrategy(ContentStrategy):
             self.config.prompt
         ]
         
-        article_content = self.ollama_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
+        article_content = self.current_vision_manager.generate_seo_hashtags('\n\n'.join(content_parts))
         
         # 加入預設標籤
         if hasattr(self.config, 'default_hashtags') and self.config.default_hashtags:

@@ -13,15 +13,17 @@ from utils.logger import setup_logger
 class PromptService(IPromptService):
     """提示詞生成服務實現"""
     
-    def __init__(self, news_repository: INewsRepository = None, character_repository: ICharacterRepository = None):
+    def __init__(self, news_repository: INewsRepository = None, character_repository: ICharacterRepository = None, vision_manager=None):
         self.news_repository = news_repository
         self.character_repository = character_repository
         self.logger = setup_logger(__name__)
-        self.vision_manager = None
+        self.vision_manager = vision_manager
     
     def _get_vision_manager(self, temperature: float = 1.0):
         """獲取或創建 VisionManager"""
         if self.vision_manager is None:
+            # 如果沒有從外部傳入，則創建默認的 VisionManager
+            self.logger.warning("沒有從外部傳入 VisionManager，使用默認配置創建")
             self.vision_manager = VisionManagerBuilder() \
                 .with_vision_model('ollama', model_name='llama3.2-vision') \
                 .with_text_model('ollama', model_name='deepseek-r1:8b', temperature=temperature) \
@@ -37,7 +39,6 @@ class PromptService(IPromptService):
         """生成提示詞"""
         self.logger.info(f'開始為角色生成提示詞: {character}')
         self.logger.info(f'角色生成方式採用: {method}')
-        
         if method == 'arbitrary':
             prompt = self.generate_by_arbitrary(character, temperature)
         elif method == 'news':
