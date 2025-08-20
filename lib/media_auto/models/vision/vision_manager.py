@@ -5,6 +5,7 @@ from lib.media_auto.models.interfaces.ai_model import AIModelInterface, ModelCon
 from lib.media_auto.models.vision.model_registry import ModelRegistry
 from configs.prompt.image_system_guide import *
 from configs.prompt.video_system_guide import *
+from utils.retry_decorator import vision_api_retry
 
 class VisionContentManager:
     """處理圖片內容分析與生成的類別"""
@@ -16,24 +17,30 @@ class VisionContentManager:
         self.text_model = text_model
         self.prompts = prompts_config
     
+    @vision_api_retry(max_attempts=3)
     def extract_image_content(self, image_path: str, **kwargs) -> str:
         """分析已有圖片並提取內容描述"""
+        print(f"提取圖片內容 {image_path}...")
         messages = [{
             'role': 'user',
             'content': self.prompts['describe_image_prompt']
         }]
-        return self.vision_model.chat_completion(
+        result = self.vision_model.chat_completion(
             messages=messages,
             images=[image_path],
             **kwargs
         )
+        print(f"圖片 {image_path} 內容提取成功")
+        return result
     
+    @vision_api_retry(max_attempts=3)
     def analyze_image_text_similarity(self, 
                                     text: str, 
                                     image_path: str, 
                                     main_character: str = '',
                                     **kwargs) -> str:
         """分析已有圖片並提取內容描述"""
+        print(f"分析圖片 {image_path}...")
         messages = [
             {
                 'role': 'system',
@@ -44,11 +51,14 @@ class VisionContentManager:
                 'content': f'main_character: {main_character} and image description: {text}'
             }
         ]
-        return self.vision_model.chat_completion(
+        
+        result = self.vision_model.chat_completion(
             messages=messages,
             images=[image_path],
             **kwargs
         )
+        print(f"圖片 {image_path} 分析成功")
+        return result
     
     def generate_image_prompts(self, user_input: str, system_prompt_key: str = 'stable_diffusion_prompt', **kwargs) -> List[str]:
         """根據用戶輸入生成圖片描述提示詞"""
