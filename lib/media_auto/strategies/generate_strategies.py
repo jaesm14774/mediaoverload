@@ -241,7 +241,7 @@ class Text2ImageStrategy(ContentStrategy):
         
         # 隨機選擇分析管理器：Gemini 或 OpenRouter
         available_managers = [self.gemini_vision_manager, self.openrouter_vision_manager]
-        selected_manager = random.choice(available_managers)
+        selected_manager = np.random.choice(available_managers, p=[0.8, 0.2])
         
         # 輸出所選擇的模型類型
         if selected_manager == self.gemini_vision_manager:
