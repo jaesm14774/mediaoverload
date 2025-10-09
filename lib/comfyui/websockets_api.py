@@ -77,6 +77,10 @@ class ComfyUICommunicator:
         connections = {}
         
         for node_id, node_data in workflow.items():
+            # 如果 node_data 不是 dict，跳過
+            if not isinstance(node_data, dict):
+                continue
+                
             connections[node_id] = {
                 "inputs": {},
                 "outputs": {},
@@ -101,7 +105,7 @@ class ComfyUICommunicator:
         return [
             (node_id, node_data) 
             for node_id, node_data in workflow.items()
-            if node_data.get("class_type") == node_type
+            if isinstance(node_data, dict) and node_data.get("class_type") == node_type
         ]
 
     def trace_back_to_text_encoder(self, node_id: str, connections: Dict) -> Optional[str]:
@@ -203,6 +207,10 @@ class ComfyUICommunicator:
         
         # 收集所有節點類型
         for node_id, node_data in workflow.items():
+            # 如果 node_data 不是 dict，跳過
+            if not isinstance(node_data, dict):
+                continue
+                
             class_type = node_data.get("class_type")
             if not class_type:
                 continue
