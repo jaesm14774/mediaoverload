@@ -17,6 +17,8 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+.cursor/
+.clangd/
 
 # 系統文件
 .DS_Store

@@ -5,7 +5,7 @@
     },
     "class_type": "PrimitiveInt",
     "_meta": {
-      "title": "wifth"
+      "title": "width"
     }
   },
   "172": {
@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "(Dragonite as a mail carrier:1.2) gently handing a (star-shaped parcel:1.1) to an overjoyed Kirby, Kirby standing on his tiptoes in front of his dome house, Dragonite wearing its official mail delivery satchel, bright cheerful morning atmosphere, a moment of happy delivery, (clean Nintendo art style:1.1), bold colors, detailed characters, negative: night, rain, (damaged package:1.0), sad."
+      "value": "Waddle dee , simple background, minimalist style, sleep"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -107,7 +107,7 @@
   },
   "203:4": {
     "inputs": {
-      "seed": 67,
+      "seed": 93,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -236,7 +236,7 @@
   },
   "204:4": {
     "inputs": {
-      "seed": 67,
+      "seed": 93,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -365,7 +365,7 @@
   },
   "205:4": {
     "inputs": {
-      "seed": 67,
+      "seed": 93,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
