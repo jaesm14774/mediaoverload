@@ -111,11 +111,21 @@ class OpenRouterModel(AIModelInterface):
         """隨機選擇一個免費視覺模型"""
         return random.choice(self.FREE_VISION_MODELS)
     
-    def chat_completion(self, 
+    def chat_completion(self,
                        messages: List[dict],
                        images: Optional[List[str]] = None,
+                       max_retries: int = 3,
+                       retry_delay: float = 10.0,
                        **kwargs) -> str:
-        """使用 OpenRouter API 進行聊天完成"""
+        """使用 OpenRouter API 進行聊天完成（含 retry 機制）
+
+        Args:
+            messages: 訊息列表
+            images: 圖片列表（可選）
+            max_retries: 最大重試次數（預設 3 次）
+            retry_delay: 重試間隔秒數（預設 2 秒）
+            **kwargs: 其他參數
+        """
         # 處理圖片輸入 - 將圖片轉換為 base64
         processed_messages = self._process_messages_with_images(messages, images)
         # 準備 API 請求數據
@@ -124,28 +134,43 @@ class OpenRouterModel(AIModelInterface):
             "messages": processed_messages,
             "temperature": self.config.temperature
         }
-        
+
         # 添加額外的參數
         for key, value in kwargs.items():
-            if key not in ['images']:  # 排除已處理的參數
+            if key not in ['images', 'max_retries', 'retry_delay']:  # 排除已處理的參數
                 data[key] = value
-        
-        try:
-            response = requests.post(
-                self.base_url,
-                headers=self.headers,
-                data=json.dumps(data),
-                timeout=120
-            )
-            response.raise_for_status()
-            
-            response_data = response.json()
-            return response_data['choices'][0]['message']['content']
-            
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"OpenRouter API 請求失敗: {e}")
-        except KeyError as e:
-            raise Exception(f"OpenRouter API 回應格式錯誤: {e}")
+
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    self.base_url,
+                    headers=self.headers,
+                    data=json.dumps(data),
+                    timeout=120
+                )
+                response.raise_for_status()
+
+                response_data = response.json()
+                return response_data['choices'][0]['message']['content']
+
+            except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError) as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    print(f"OpenRouter API 請求失敗 (嘗試 {attempt + 1}/{max_retries}): {e}")
+                    print(f"等待 {retry_delay} 秒後重試...")
+                    time.sleep(retry_delay)
+                    # 每次重試時增加延遲（指數退避）
+                    retry_delay *= 1.5
+                else:
+                    # 最後一次嘗試失敗
+                    if isinstance(e, json.JSONDecodeError):
+                        raise Exception(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: JSON 解析錯誤 - {e}")
+                    elif isinstance(e, KeyError):
+                        raise Exception(f"OpenRouter API 回應格式錯誤（已重試 {max_retries} 次）: {e}")
+                    else:
+                        raise Exception(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {e}")
     
     def _process_messages_with_images(self, messages: List[dict], images: Optional[List[str]] = None) -> List[dict]:
         """處理包含圖片的訊息"""

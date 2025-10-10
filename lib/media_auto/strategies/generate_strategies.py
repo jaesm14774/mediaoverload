@@ -83,6 +83,15 @@ class Text2ImageStrategy(ContentStrategy):
         if style:
             prompt = f"""{prompt}\nstyle:{style}""".strip()
 
+        # 如果有指定角色，且 prompt 中不包含角色信息，則加入角色
+        if self.config.character:
+            character_lower = self.config.character.lower()
+            prompt_lower = prompt.lower()
+            # 檢查 prompt 中是否已包含角色名稱或 "main character" 等關鍵字
+            if character_lower not in prompt_lower and "main character" not in prompt_lower:
+                prompt = f"Main character: {self.config.character}\n{prompt}"
+                print(f"已自動加入主角色到 prompt: {self.config.character}")
+
         # 檢查是否使用雙角色互動系統提示詞
         if self.config.image_system_prompt == 'two_character_interaction_generate_system_prompt':
             # 使用雙角色互動生成邏輯
@@ -107,11 +116,17 @@ class Text2ImageStrategy(ContentStrategy):
         包含用戶原始prompt
         """
         try:
-            # 獲取 Secondary Role
-            secondary_character = self._get_random_secondary_character(
-                self.config.character, 
-                self.character_repository
-            )
+            # 優先使用 config 中指定的 secondary_character
+            secondary_character = getattr(self.config, 'secondary_character', None)
+
+            if not secondary_character:
+                # 如果 config 中沒有指定，才從資料庫隨機獲取
+                secondary_character = self._get_random_secondary_character(
+                    self.config.character,
+                    self.character_repository
+                )
+            else:
+                print(f'使用指定的 Secondary Role: {secondary_character}')
             
             if secondary_character:
                 print(f'雙角色互動：Main Role: {self.config.character}, Secondary Role: {secondary_character}')
@@ -378,6 +393,15 @@ class Text2VideoStrategy(ContentStrategy):
         prompt = self.config.prompt
         if style:
             prompt = f"""{prompt}\nstyle:{style}""".strip()
+
+        # 如果有指定角色，且 prompt 中不包含角色信息，則加入角色
+        if self.config.character:
+            character_lower = self.config.character.lower()
+            prompt_lower = prompt.lower()
+            # 檢查 prompt 中是否已包含角色名稱或 "main character" 等關鍵字
+            if character_lower not in prompt_lower and "main character" not in prompt_lower:
+                prompt = f"Main character: {self.config.character}\n{prompt}"
+                print(f"已自動加入主角色到 prompt: {self.config.character}")
         
         # 第一階段：使用角色名稱生成基礎描述
         character_description = self.current_vision_manager.generate_image_prompts(
