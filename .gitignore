@@ -31,3 +31,15 @@ logs/
 # 暫存文件
 tmp/
 temp/ 
+.cursor/
+.claude/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.spyderproject
+.spyproject
+.ropeproject
+.pytest_cache/
