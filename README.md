@@ -4,6 +4,28 @@ MediaOverload 是一個高度自動化的內容創作與社群媒體發布引擎
 
 ## 🚀 快速開始
 
+### 📚 範例優先 (最快上手)
+
+如果您想快速體驗圖片生成功能，可以直接使用我們的範例系統：
+
+#### 選項 1: Jupyter Notebook（推薦）
+```bash
+jupyter notebook examples/quick_draw_examples.ipynb
+```
+
+#### 選項 2: Python 腳本
+```bash
+python examples/quick_draw_example.py
+```
+
+範例特點：
+- ✅ **跳過耗時步驟** - 不進行圖文匹配分析和文章生成
+- ✅ **快速生成** - 專注於圖片生成，適合測試和學習
+- ✅ **完整範例** - 包含 6 種不同的使用案例
+- ✅ **互動式環境** - Jupyter Notebook 可直接顯示圖片
+
+詳細說明請參考 [examples/README.md](examples/README.md)
+
 ### 一鍵部署 (推薦)
 ```bash
 # 1. 克隆專案
@@ -505,6 +527,103 @@ CREATE TABLE news (
 #### 📊 智慧分析改進
 - **混合模型分析**: 圖文匹配分析隨機使用 Gemini 或 OpenRouter 模型，提高準確性
 - **DeepSeek R1 支援**: 自動處理 DeepSeek R1 模型的 `<think>...</think>` 格式輸出
+
+## 📚 範例與使用指南
+
+本專案提供了完整的範例系統，幫助您快速上手和理解各種功能。
+
+### Quick Draw 範例系統
+
+位於 `examples/quick_draw/`，提供 6 種完整的使用案例：
+
+#### 1. 單角色圖片生成
+```python
+from examples.quick_draw.use_cases import SingleCharacterUseCase
+
+use_case = SingleCharacterUseCase()
+result = use_case.execute(
+    character='Kirby',
+    topic='peaceful sleeping',
+    images_per_description=2
+)
+```
+
+#### 2. 雙角色互動
+```python
+from examples.quick_draw.use_cases import CharacterInteractionUseCase
+
+use_case = CharacterInteractionUseCase()
+result = use_case.execute(
+    main_character='Kirby',
+    secondary_character='Waddle Dee',
+    topic='friendship'
+)
+```
+
+#### 3. 基於新聞關鍵字
+```python
+from examples.quick_draw.use_cases import NewsBasedUseCase
+
+use_case = NewsBasedUseCase()
+result = use_case.execute(
+    character='Kirby',
+    news_count=3
+)
+```
+
+#### 4. 佛性/靈性風格
+```python
+from examples.quick_draw.use_cases import BuddhistStyleUseCase
+
+use_case = BuddhistStyleUseCase()
+result = use_case.execute(
+    character='Kirby',
+    spiritual_theme='meditation'
+)
+```
+
+#### 5. 黑色幽默
+```python
+from examples.quick_draw.use_cases import BlackHumorUseCase
+
+use_case = BlackHumorUseCase()
+result = use_case.execute(
+    main_character='Kirby',
+    secondary_character='Waddle Dee'
+)
+```
+
+#### 6. 電影級別
+```python
+from examples.quick_draw.use_cases import CinematicUseCase
+
+use_case = CinematicUseCase()
+result = use_case.execute(
+    main_character='Kirby',
+    aspect_ratio='cinematic'  # 16:9
+)
+```
+
+### 範例 vs 完整版
+
+| 功能 | 範例版 | 完整版 |
+|------|--------|--------|
+| 描述生成 | ✅ | ✅ |
+| 圖片生成 | ✅ | ✅ |
+| 圖文匹配分析 | ❌ (跳過) | ✅ |
+| 文章生成 | ❌ (跳過) | ✅ |
+| Hashtag 生成 | ❌ (跳過) | ✅ |
+| 執行速度 | **快** | 慢 |
+| 適用場景 | 測試、學習 | 生產環境 |
+
+**範例的優勢**：
+- 跳過耗時的圖文匹配分析和文章生成
+- 專注於圖片生成本身
+- 適合快速測試和人工審核的情況
+
+詳細說明請參考：
+- [examples/README.md](examples/README.md) - 範例總覽
+- [examples/quick_draw/README.md](examples/quick_draw/README.md) - Quick Draw 詳細說明
 
 ## 🔧 開發與維護指南
 
