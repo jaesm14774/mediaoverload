@@ -208,46 +208,62 @@ class Text2ImageStrategy(ContentStrategy):
         start_time = time.time()
         workflow = self._load_workflow(self.config.workflow_path)
         self.communicator = ComfyUICommunicator()
-        self.communicator.connect_websocket()
         
-        # 為每個描述生成圖片
-        # 優先使用圖片專用參數，然後是通用參數
-        image_params = self.config.additional_params.get('image', {})
-        images_per_description = image_params.get('images_per_description', 
-                                                self.config.additional_params.get('images_per_description', 4))
-        
-        for idx, description in enumerate(self.descriptions):
-            seed_start = random.randint(1, 999999999999)
-            for i in range(images_per_description):
-                print(f'為第{idx}描述，生成第{i}張圖片\n')
-                
-                # 檢查是否有自定義的節點更新配置
-                # 優先使用圖片專用配置，然後是通用配置
-                custom_updates = (image_params.get('custom_node_updates') or 
-                                self.config.additional_params.get('custom_node_updates', []))
-                
-                # 合併圖片專用參數和通用參數
-                merged_params = {**self.config.additional_params, **image_params}
-                
-                # 使用統一的更新方法（自動處理衝突檢查）
-                updates = self.node_manager.generate_updates(
-                    workflow=workflow,
-                    updates_config=custom_updates,
-                    description=description,
-                    seed=seed_start + i,
-                    **merged_params
-                )
-                try:
+        try:
+            # 建立 WebSocket 連接（僅一次）
+            self.communicator.connect_websocket()
+            print("已建立 WebSocket 連接，開始批次生成圖片")
+            
+            # 為每個描述生成圖片
+            # 優先使用圖片專用參數，然後是通用參數
+            image_params = self.config.additional_params.get('image', {})
+            images_per_description = image_params.get('images_per_description', 
+                                                    self.config.additional_params.get('images_per_description', 4))
+            
+            total_images = len(self.descriptions) * images_per_description
+            current_image = 0
+            
+            for idx, description in enumerate(self.descriptions):
+                seed_start = random.randint(1, 999999999999)
+                for i in range(images_per_description):
+                    current_image += 1
+                    print(f'\n[{current_image}/{total_images}] 為描述 {idx+1}/{len(self.descriptions)}，生成第 {i+1}/{images_per_description} 張圖片')
+                    
+                    # 檢查是否有自定義的節點更新配置
+                    # 優先使用圖片專用配置，然後是通用配置
+                    custom_updates = (image_params.get('custom_node_updates') or 
+                                    self.config.additional_params.get('custom_node_updates', []))
+                    
+                    # 合併圖片專用參數和通用參數
+                    merged_params = {**self.config.additional_params, **image_params}
+                    
+                    # 使用統一的更新方法（自動處理衝突檢查）
+                    updates = self.node_manager.generate_updates(
+                        workflow=workflow,
+                        updates_config=custom_updates,
+                        description=description,
+                        seed=seed_start + i,
+                        **merged_params
+                    )
+                    
+                    # 處理工作流，但不自動關閉 WebSocket（auto_close=False）
+                    # 只有在最後一張圖片時才關閉（通過 finally 處理）
+                    is_last_image = (idx == len(self.descriptions) - 1 and i == images_per_description - 1)
                     self.communicator.process_workflow(
                         workflow=workflow,
                         updates=updates,
                         output_path=f"{self.config.output_dir}",
-                        file_name=f"{self.config.character}_d{idx}_{i}"
+                        file_name=f"{self.config.character}_d{idx}_{i}",
+                        auto_close=False  # 不自動關閉，保持連接以供下次使用
                     )
-                finally:
-                    if self.communicator and self.communicator.ws:
-                        self.communicator.ws.close()
-        print(f'生成圖片花費 : {time.time() - start_time}')
+                    
+        finally:
+            # 確保在所有圖片生成完成後關閉 WebSocket
+            if self.communicator and self.communicator.ws and self.communicator.ws.connected:
+                print("\n所有圖片生成完成，關閉 WebSocket 連接")
+                self.communicator.ws.close()
+                
+        print(f'\n✅ 生成圖片總耗時: {time.time() - start_time:.2f} 秒')
         return self
 
     def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
@@ -443,20 +459,27 @@ class Text2VideoStrategy(ContentStrategy):
         # 載入工作流
         workflow = self._load_workflow(self.config.workflow_path)
         self.communicator = ComfyUICommunicator()
-        self.communicator.connect_websocket()
         
         try:
+            # 建立 WebSocket 連接（僅一次）
+            self.communicator.connect_websocket()
+            print("已建立 WebSocket 連接，開始批次生成視頻")
+            
             # 為每個描述生成視頻
             # 優先使用視頻專用參數，然後是通用參數
             video_params = self.config.additional_params.get('video', {})
             videos_per_description = video_params.get('videos_per_description', 
                                                     self.config.additional_params.get('videos_per_description', 2))
             
+            total_videos = len(self.descriptions) * videos_per_description
+            current_video = 0
+            
             for idx, description in enumerate(self.descriptions):
                 seed_start = random.randint(1, 999999999999)
                 
                 for i in range(videos_per_description):
-                    print(f'為第{idx}描述，生成第{i}個視頻\n')
+                    current_video += 1
+                    print(f'\n[{current_video}/{total_videos}] 為描述 {idx+1}/{len(self.descriptions)}，生成第 {i+1}/{videos_per_description} 個視頻')
                     
                     # 準備自定義的節點更新配置
                     # 優先使用視頻專用配置，然後是通用配置
@@ -488,19 +511,23 @@ class Text2VideoStrategy(ContentStrategy):
                         **merged_params
                     )
                     
-                    # 處理工作流
+                    # 處理工作流，但不自動關閉 WebSocket（auto_close=False）
+                    # 只有在最後一個視頻時才關閉（通過 finally 處理）
                     self.communicator.process_workflow(
                         workflow=workflow,
                         updates=updates,
                         output_path=f"{self.config.output_dir}",
-                        file_name=f"{self.config.character}_video_d{idx}_{i}"
+                        file_name=f"{self.config.character}_video_d{idx}_{i}",
+                        auto_close=False  # 不自動關閉，保持連接以供下次使用
                     )
                     
         finally:
-            if self.communicator and self.communicator.ws:
+            # 確保在所有視頻生成完成後關閉 WebSocket
+            if self.communicator and self.communicator.ws and self.communicator.ws.connected:
+                print("\n所有視頻生成完成，關閉 WebSocket 連接")
                 self.communicator.ws.close()
         
-        print(f'生成視頻花費: {time.time() - start_time}')
+        print(f'\n✅ 生成視頻總耗時: {time.time() - start_time:.2f} 秒')
         return self
     
     def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
