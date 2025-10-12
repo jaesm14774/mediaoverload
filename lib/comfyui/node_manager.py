@@ -187,8 +187,13 @@ class NodeManager:
     
     @staticmethod
     def _generate_builtin_sampler_updates(workflow: Dict[str, Any], seed: int) -> List[Dict[str, Any]]:
-        """生成內建採樣器策略的更新配置"""
+        """生成內建採樣器策略的更新配置
+        
+        會檢查所有類型的採樣器節點，並更新所有找到的節點的 seed。
+        這樣可以確保在同一個工作流中有多種採樣器時，所有採樣器的 seed 都會被更新。
+        """
         strategy = NodeManager.BUILTIN_STRATEGIES['sampler']
+        result_updates = []
         
         for priority_config in strategy['priority']:
             node_type = priority_config['node_type']
@@ -197,17 +202,20 @@ class NodeManager:
             indices = NodeManager.get_node_indices(workflow, node_type)
             
             if indices:
-                return [
+                # 將找到的更新加入結果列表，而不是立即返回
+                result_updates.extend([
                     NodeManager.create_node_update(
                         node_type,
                         i,
                         {input_key: seed}
                     )
                     for i in indices
-                ]
+                ])
         
         # 如果都沒找到，顯示警告
-        node_types = [config['node_type'] for config in strategy['priority']]
-        print(f"Warning: None of the following node types found in the workflow for seed update: {', '.join(node_types)}")
-        return []
+        if not result_updates:
+            node_types = [config['node_type'] for config in strategy['priority']]
+            print(f"Warning: None of the following node types found in the workflow for seed update: {', '.join(node_types)}")
+        
+        return result_updates
     
