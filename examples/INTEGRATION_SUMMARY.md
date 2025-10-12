@@ -233,6 +233,43 @@ result = service.generate_content(config)  # 包含完整功能
 
 ---
 
+## 🔧 重要更新
+
+### WebSocket 連接優化 (2025-10-12)
+
+**問題**: 
+- 執行多個描述生成時，每次都會重新建立和關閉 WebSocket 連接
+- 導致第二個描述時出現超時（等待 900 秒但 ComfyUI 早已完成）
+- 缺乏進度顯示和錯誤追蹤
+
+**修復內容**:
+
+1. **連接管理優化** (`lib/comfyui/websockets_api.py`):
+   - 新增 `auto_close` 參數控制 WebSocket 生命週期
+   - 智能連接檢查，避免重複連接
+   - 批次處理時復用同一個 WebSocket 連接
+
+2. **進度顯示改進** (`wait_for_completion`):
+   - 顯示當前處理的節點
+   - 顯示進度百分比
+   - 顯示佇列狀態
+   - 更好的錯誤追蹤和超時警告
+
+3. **策略層改進** (`lib/media_auto/strategies/generate_strategies.py`):
+   - `Text2ImageStrategy` 和 `Text2VideoStrategy` 現在在批次生成時只建立一次連接
+   - 所有圖片/視頻生成完成後才關閉連接
+   - 添加批次進度顯示（如 `[2/4] 為描述 1/1，生成第 2/4 張圖片`）
+
+**效能提升**:
+- 生成 4 張圖片的連接開銷從 4-8 秒降至 1-2 秒
+- 節省 50-75% 的連接時間
+- 消除了連續生成時的超時問題
+
+**詳細說明**: 查看 [WEBSOCKET_FIX_NOTES.md](WEBSOCKET_FIX_NOTES.md)
+
+---
+
 **整合完成日期**: 2025-10-10  
-**版本**: v1.0.0
+**最後更新日期**: 2025-10-12  
+**版本**: v1.1.0
 

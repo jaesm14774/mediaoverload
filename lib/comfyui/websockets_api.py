@@ -48,29 +48,95 @@ class ComfyUICommunicator:
     
     def wait_for_completion(self, prompt_id):
         start_time = time.time()
+        last_message_time = start_time
+        last_node = None
+        
+        print(f"開始等待工作流 {prompt_id} 完成...")
+        
         while True:
             # 檢查是否超時
-            if time.time() - start_time > self.timeout:
-                raise TimeoutError(f"Operation timed out after {self.timeout} seconds")
+            elapsed_time = time.time() - start_time
+            if elapsed_time > self.timeout:
+                raise TimeoutError(f"工作流 {prompt_id} 執行超時（{self.timeout} 秒）。最後處理的節點: {last_node}")
+            
+            # 檢查 WebSocket 是否仍然連接
+            if not self.ws or not self.ws.connected:
+                raise Exception(f"WebSocket 連接已斷開。最後處理的節點: {last_node}")
             
             try:
-                # 設置 websocket 接收超時時間為 1 秒，這樣可以定期檢查總時間
+                # 設置 websocket 接收超時時間為 5 秒
                 self.ws.settimeout(5.0)
                 out = self.ws.recv()
                 
                 if isinstance(out, str):
                     message = json.loads(out)
-                    if message['type'] == 'executing':
-                        data = message['data']
-                        if data['node'] is None and data['prompt_id'] == prompt_id:
-                            break
+                    message_type = message.get('type', 'unknown')
+                    
+                    # 更新最後接收消息的時間
+                    last_message_time = time.time()
+                    
+                    # 處理不同類型的消息
+                    if message_type == 'executing':
+                        data = message.get('data', {})
+                        current_node = data.get('node')
+                        current_prompt_id = data.get('prompt_id')
+                        
+                        # 檢查是否是我們的 prompt_id
+                        if current_prompt_id == prompt_id:
+                            if current_node is None:
+                                # 工作流執行完成
+                                print(f"✓ 工作流 {prompt_id} 執行完成（耗時 {elapsed_time:.2f} 秒）")
+                                break
+                            else:
+                                # 更新當前處理的節點
+                                if current_node != last_node:
+                                    last_node = current_node
+                                    print(f"  → 正在處理節點: {current_node}")
+                    
+                    elif message_type == 'progress':
+                        # 顯示進度信息
+                        data = message.get('data', {})
+                        value = data.get('value', 0)
+                        max_value = data.get('max', 100)
+                        if max_value > 0:
+                            progress = (value / max_value) * 100
+                            print(f"  → 進度: {progress:.1f}% ({value}/{max_value})")
+                    
+                    elif message_type == 'status':
+                        # 顯示狀態信息
+                        data = message.get('data', {})
+                        status_data = data.get('status', {})
+                        exec_info = status_data.get('exec_info', {})
+                        queue_remaining = exec_info.get('queue_remaining', 0)
+                        if queue_remaining > 0:
+                            print(f"  → 佇列中還有 {queue_remaining} 個任務")
+                    
+                    elif message_type == 'execution_error':
+                        # 執行錯誤
+                        data = message.get('data', {})
+                        error_prompt_id = data.get('prompt_id')
+                        if error_prompt_id == prompt_id:
+                            error_node = data.get('node_id')
+                            error_type = data.get('exception_type')
+                            error_message = data.get('exception_message')
+                            raise Exception(f"工作流執行錯誤 - 節點: {error_node}, 類型: {error_type}, 消息: {error_message}")
                             
             except websocket.WebSocketTimeoutException:
-                # 接收超時，繼續循環
+                # 接收超時，檢查是否長時間沒有收到消息
+                time_since_last_message = time.time() - last_message_time
+                if time_since_last_message > 60:  # 60 秒沒有收到任何消息
+                    print(f"⚠ 警告: 已經 {time_since_last_message:.1f} 秒沒有收到消息了...")
+                # 繼續等待
                 continue
+                
+            except json.JSONDecodeError as e:
+                # JSON 解析錯誤，忽略並繼續
+                print(f"⚠ 收到無效的 JSON 消息: {e}")
+                continue
+                
             except Exception as e:
-                # 其他錯誤，拋出異常
-                raise Exception(f"Error while waiting for completion: {str(e)}")
+                # 其他錯誤
+                raise Exception(f"等待工作流完成時發生錯誤: {str(e)}")
 
     def analyze_node_connections(self, workflow: Dict) -> Dict[str, Dict]:
         """分析節點之間的連接關係"""
@@ -250,7 +316,7 @@ class ComfyUICommunicator:
 
         return workflow
 
-    def process_workflow(self, workflow: Dict, updates: List[Dict], output_path: str, file_name = None):
+    def process_workflow(self, workflow: Dict, updates: List[Dict], output_path: str, file_name = None, auto_close=True):
         """
         處理工作流，支援所有類型節點的更新
         
@@ -282,10 +348,20 @@ class ComfyUICommunicator:
                 }
             }
         ]
+        
+        Args:
+            workflow: 工作流配置
+            updates: 節點更新配置列表
+            output_path: 輸出路徑
+            file_name: 檔案名稱
+            auto_close: 是否自動關閉 WebSocket（預設 True，當需要連續處理多個工作流時設為 False）
         """
         try:
-            # 為每個工作流程建立獨立的 WebSocket 連線
-            self.connect_websocket()
+            # 只在 WebSocket 未連接時才建立新連線
+            if not self.ws or not self.ws.connected:
+                print("建立新的 WebSocket 連線")
+                self.connect_websocket()
+            
             os.makedirs(output_path, exist_ok=True)
             # 複製工作流以避免修改原始數據
             workflow_copy = json.loads(json.dumps(workflow))
@@ -327,17 +403,22 @@ class ComfyUICommunicator:
             # 執行工作流
             prompt_result = self.queue_prompt(workflow_copy)
             prompt_id = prompt_result['prompt_id']
+            print(f"工作流已提交，prompt_id: {prompt_id}")
             
             # 等待完成
             self.wait_for_completion(prompt_id)
+            print(f"工作流 {prompt_id} 執行完成")
             
             # 儲存並返回結果
             return self.save_results(prompt_id, output_path, file_name)
             
         except Exception as e:
             print(f"Error processing workflow: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False, []
         finally:
-            # 確保 WebSocket 連線在結束時被關閉
-            if self.ws and self.ws.connected:
+            # 只在 auto_close=True 時關閉 WebSocket
+            if auto_close and self.ws and self.ws.connected:
+                print("關閉 WebSocket 連線")
                 self.ws.close()
