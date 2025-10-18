@@ -27,8 +27,9 @@ generation:
   image_system_prompt_weights:
     unbelievable_world_system_prompt: 0.1
     stable_diffusion_prompt: 0.3
-    buddhist_combined_image_system_prompt: 0.2
-    two_character_interaction_generate_system_prompt: 0.4
+    buddhist_combined_image_system_prompt: 0.1
+    two_character_interaction_generate_system_prompt: 0.3
+    warm_scene_description_system_prompt: 0.2
   style: minimalism style with pure background
 
 social_media:
@@ -41,10 +42,7 @@ social_media:
       enabled: true
 
 additional_params:
-  # 通用參數（向後兼容）
   is_negative: false
-  
-  # 圖片生成專用參數
   image:
     images_per_description: 10
     custom_node_updates:
