@@ -25,9 +25,9 @@ generation:
     
   # 圖片系統提示的權重配置  
   image_system_prompt_weights:
-    unbelievable_world_system_prompt: 0.1
+    black_humor_system_prompt: 0.1
     stable_diffusion_prompt: 0.3
-    buddhist_combined_image_system_prompt: 0.1
+    cinematic_stable_diffusion_prompt: 0.1
     two_character_interaction_generate_system_prompt: 0.3
     warm_scene_description_system_prompt: 0.2
   style: minimalism style with pure background

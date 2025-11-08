@@ -23,9 +23,9 @@ schedules:
         prompt: ""
         temperature: 1.0
     probability_settings:
-      base_probability: 0.06667  # 基礎機率（每15小時1次）
-      max_probability: 0.2    # 最大機率（每15小時3次）
-      min_probability: 0.03334  # 最小機率（每15小時0.5次）
+      base_probability: 0.4
+      max_probability: 0.8
+      min_probability: 0.25
   # unbelievable_world:
   #   character: "unbelievable_world"
   #   prompts:

@@ -97,10 +97,6 @@ class MediaScheduler:
             self.logger.info(f"距離上次執行 {hours_since_last:.1f} 小時, "
                            f"時間因子 {time_factor:.2f}, "
                            f"當前執行機率 {current_probability:.3%}/小時")
-        else:
-            # 此分支在新的邏輯下理論上不會被走到，因為首次執行會在上一個if條件中返回True
-            current_probability = base_prob
-            self.logger.info(f"首次執行，使用基礎機率 {current_probability:.3%}/小時")
 
         return random.random() < current_probability
 

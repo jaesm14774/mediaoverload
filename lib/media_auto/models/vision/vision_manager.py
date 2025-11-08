@@ -271,10 +271,6 @@ class VisionManagerBuilder:
         vision_model = vision_model_class(ModelConfig(**vision_config))
         text_model = text_model_class(ModelConfig(**text_config))
         
-        # 確保必要的提示詞存在
-        if 'stable_diffusion_prompt' not in self.prompts_config:
-            raise ValueError("Missing required prompt: stable_diffusion_prompt")
-        
         return VisionContentManager(
             vision_model=vision_model,
             text_model=text_model,

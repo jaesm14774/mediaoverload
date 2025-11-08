@@ -6,6 +6,7 @@ import os
 import requests
 import json
 import random
+import time
 
 class OllamaModel(AIModelInterface):
     """Ollama 模型實現"""
@@ -81,11 +82,14 @@ class OpenRouterModel(AIModelInterface):
     # OpenRouter 免費模型列表
     FREE_TEXT_MODELS = [
         "tngtech/deepseek-r1t2-chimera:free",
-        "qwen/qwen3-235b-a22b:free"
+        "qwen/qwen3-235b-a22b:free",
+        "minimax/minimax-m2:free",
+        "deepseek/deepseek-chat-v3.1:free"
     ]
     
     FREE_VISION_MODELS = [
-        "qwen/qwen2.5-vl-72b-instruct:free",
+        "nvidia/nemotron-nano-12b-v2-vl:free",
+        "qwen/qwen2.5-vl-32b-instruct:free",
         "google/gemma-3-27b-it:free"
     ]
     
@@ -104,12 +108,15 @@ class OpenRouterModel(AIModelInterface):
     @classmethod
     def get_random_free_text_model(self) -> str:
         """隨機選擇一個免費文本模型"""
-        return random.choice(self.FREE_TEXT_MODELS)
+        selected_model = random.choice(self.FREE_TEXT_MODELS)
+        print(f"隨機選擇一個免費文本模型: {selected_model}")
+        return selected_model
     
     @classmethod
     def get_random_free_vision_model(self) -> str:
         """隨機選擇一個免費視覺模型"""
-        return random.choice(self.FREE_VISION_MODELS)
+        selected_model = random.choice(self.FREE_VISION_MODELS)
+        return selected_model
     
     def chat_completion(self,
                        messages: List[dict],
@@ -140,8 +147,6 @@ class OpenRouterModel(AIModelInterface):
             if key not in ['images', 'max_retries', 'retry_delay']:  # 排除已處理的參數
                 data[key] = value
 
-        last_exception = None
-
         for attempt in range(max_retries):
             try:
                 response = requests.post(
@@ -156,7 +161,6 @@ class OpenRouterModel(AIModelInterface):
                 return response_data['choices'][0]['message']['content']
 
             except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError) as e:
-                last_exception = e
                 if attempt < max_retries - 1:
                     print(f"OpenRouter API 請求失敗 (嘗試 {attempt + 1}/{max_retries}): {e}")
                     print(f"等待 {retry_delay} 秒後重試...")
@@ -166,11 +170,11 @@ class OpenRouterModel(AIModelInterface):
                 else:
                     # 最後一次嘗試失敗
                     if isinstance(e, json.JSONDecodeError):
-                        raise Exception(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: JSON 解析錯誤 - {e}")
+                        raise RuntimeError(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: JSON 解析錯誤 - {e}")
                     elif isinstance(e, KeyError):
-                        raise Exception(f"OpenRouter API 回應格式錯誤（已重試 {max_retries} 次）: {e}")
+                        raise ValueError(f"OpenRouter API 回應格式錯誤（已重試 {max_retries} 次）: {e}")
                     else:
-                        raise Exception(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {e}")
+                        raise ValueError(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {e}")
     
     def _process_messages_with_images(self, messages: List[dict], images: Optional[List[str]] = None) -> List[dict]:
         """處理包含圖片的訊息"""

@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "Waddle dee , simple background, minimalist style, sleep"
+      "value": "In a sun-drenched patch on a cozy carpet, a happy golden retriever lies on its back, paws curled in the air in a gesture of complete trust. Kirby, with his kind, simple expression, waddles over and gently places one of his soft, round hands on the dog's warm belly. The effect is immediate and magical. The dog lets out a long, blissful sigh, its eyes closing in sheer ecstasy. Its body, once just relaxed, seems to completely melt into the floor, a puddle of golden fur and happiness. Its tail begins a slow, deliberate *thump... thump...* against the ground, the only sound in the quiet room. A faint, warm glow seems to emanate from where Kirby's hand rests, a visible sign of the pure, perfect comfort being shared between two friends"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -35,16 +35,16 @@
       "title": "negative prompt"
     }
   },
-  "203:0": {
+  "217": {
     "inputs": {
-      "ckpt_name": "sdxl\\novaAnimeXL_illustriousV10.safetensors"
+      "ckpt_name": "sdxl\\noobaiXLNAIXL_vPred10Version.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "203:1": {
+  "218": {
     "inputs": {
       "width": [
         "171",
@@ -61,20 +61,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "203:2": {
+  "220": {
     "inputs": {
       "text": [
         "182",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "203:0",
+        "217",
         1
       ]
     },
@@ -83,20 +77,14 @@
       "title": "positive prompt"
     }
   },
-  "203:3": {
+  "221": {
     "inputs": {
       "text": [
         "183",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "203:0",
+        "217",
         1
       ]
     },
@@ -105,28 +93,28 @@
       "title": "negative prompt"
     }
   },
-  "203:4": {
+  "222": {
     "inputs": {
-      "seed": 93,
+      "seed": 126,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "203:0",
+        "217",
         0
       ],
       "positive": [
-        "203:2",
+        "220",
         0
       ],
       "negative": [
-        "203:3",
+        "221",
         0
       ],
       "latent_image": [
-        "203:1",
+        "218",
         0
       ]
     },
@@ -135,14 +123,14 @@
       "title": "KSampler"
     }
   },
-  "203:5": {
+  "223": {
     "inputs": {
       "samples": [
-        "203:4",
+        "222",
         0
       ],
       "vae": [
-        "203:0",
+        "217",
         2
       ]
     },
@@ -151,11 +139,11 @@
       "title": "VAE Decode"
     }
   },
-  "203:6": {
+  "224": {
     "inputs": {
-      "filename_prefix": "nova_animexl_v10",
+      "filename_prefix": "model0",
       "images": [
-        "203:5",
+        "223",
         0
       ]
     },
@@ -164,7 +152,7 @@
       "title": "Save Image"
     }
   },
-  "204:0": {
+  "226:0": {
     "inputs": {
       "ckpt_name": "sdxl\\waiNSFWIllustrious_v130.safetensors"
     },
@@ -173,7 +161,7 @@
       "title": "Load Checkpoint"
     }
   },
-  "204:1": {
+  "226:1": {
     "inputs": {
       "width": [
         "171",
@@ -190,20 +178,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "204:2": {
+  "226:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "204:0",
+        "226:0",
         1
       ]
     },
@@ -212,20 +194,14 @@
       "title": "positive prompt"
     }
   },
-  "204:3": {
+  "226:3": {
     "inputs": {
       "text": [
         "183",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "204:0",
+        "226:0",
         1
       ]
     },
@@ -234,28 +210,28 @@
       "title": "negative prompt"
     }
   },
-  "204:4": {
+  "226:4": {
     "inputs": {
-      "seed": 93,
+      "seed": 126,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "204:0",
+        "226:0",
         0
       ],
       "positive": [
-        "204:2",
+        "226:2",
         0
       ],
       "negative": [
-        "204:3",
+        "226:3",
         0
       ],
       "latent_image": [
-        "204:1",
+        "226:1",
         0
       ]
     },
@@ -264,14 +240,14 @@
       "title": "KSampler"
     }
   },
-  "204:5": {
+  "226:5": {
     "inputs": {
       "samples": [
-        "204:4",
+        "226:4",
         0
       ],
       "vae": [
-        "204:0",
+        "226:0",
         2
       ]
     },
@@ -280,11 +256,11 @@
       "title": "VAE Decode"
     }
   },
-  "204:6": {
+  "226:6": {
     "inputs": {
-      "filename_prefix": "nsfw_v130",
+      "filename_prefix": "model1",
       "images": [
-        "204:5",
+        "226:5",
         0
       ]
     },
@@ -293,16 +269,16 @@
       "title": "Save Image"
     }
   },
-  "205:0": {
+  "227:0": {
     "inputs": {
-      "ckpt_name": "sdxl\\novaCartoonXL_v30.safetensors"
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "205:1": {
+  "227:1": {
     "inputs": {
       "width": [
         "171",
@@ -319,20 +295,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "205:2": {
+  "227:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "205:0",
+        "227:0",
         1
       ]
     },
@@ -341,20 +311,14 @@
       "title": "positive prompt"
     }
   },
-  "205:3": {
+  "227:3": {
     "inputs": {
       "text": [
         "183",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "205:0",
+        "227:0",
         1
       ]
     },
@@ -363,28 +327,28 @@
       "title": "negative prompt"
     }
   },
-  "205:4": {
+  "227:4": {
     "inputs": {
-      "seed": 93,
+      "seed": 126,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "205:0",
+        "227:0",
         0
       ],
       "positive": [
-        "205:2",
+        "227:2",
         0
       ],
       "negative": [
-        "205:3",
+        "227:3",
         0
       ],
       "latent_image": [
-        "205:1",
+        "227:1",
         0
       ]
     },
@@ -393,14 +357,14 @@
       "title": "KSampler"
     }
   },
-  "205:5": {
+  "227:5": {
     "inputs": {
       "samples": [
-        "205:4",
+        "227:4",
         0
       ],
       "vae": [
-        "205:0",
+        "227:0",
         2
       ]
     },
@@ -409,11 +373,11 @@
       "title": "VAE Decode"
     }
   },
-  "205:6": {
+  "227:6": {
     "inputs": {
-      "filename_prefix": "nova_cartoonxl_v30",
+      "filename_prefix": "model2",
       "images": [
-        "205:5",
+        "227:5",
         0
       ]
     },
