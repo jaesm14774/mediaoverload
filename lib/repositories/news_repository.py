@@ -54,7 +54,7 @@ class NewsRepository(INewsRepository):
             f"""
             SELECT title, keyword, created_at, category 
             FROM news_ch.news 
-            WHERE category NOT IN ({', '.join(exclude_categories)}) AND keyword != '' 
+            WHERE category NOT IN {tuple(exclude_categories)} AND keyword != '' 
             AND created_at >= '{date_filter}'
             ORDER BY id DESC 
             LIMIT 10000

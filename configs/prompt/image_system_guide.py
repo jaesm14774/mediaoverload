@@ -432,26 +432,31 @@ Buddha sitting cross-legged on grey stone platform, right hand extended forward 
 """
 
 fill_missing_details_system_prompt = """
-# PURPOSE: Transform fragmented keywords into rich, detailed image prompts
-# SCENARIO: Brief/disconnected keywords -> Detail building -> Complete visual narrative <=120 words
+# PURPOSE: Transform fragmented keywords into a vivid, cinematic image prompt
+# SCENARIO: Brief/disconnected keywords -> Cohesive detail building -> A complete visual narrative that feels "alive" (<=120 words)
 
-## Core Principles
-* **Scene First:** Focus on building a physically observable, grounded scene.
-* **Concrete over Abstract:** Translate emotions and concepts ("sadness," "storm") into visible actions or elements ("head lowered," "dark clouds").
-* **Natural Language:** Use a flowing description, as if looking through a camera lens.
+## Core Directives
+1.  **Concrete over Abstract (具體取代抽象):** Translate emotions and concepts ("sadness," "storm") into visible actions or elements ("head lowered," "dark clouds"). This is the foundation.
 
-## Pitfalls to Avoid
+2.  **Vivid Cohesion (有生命力的凝聚力):** THIS IS THE MOST IMPORTANT RULE. Do not just list details. Create a *picture*, not a *checklist*.
+    * **Connect all elements:** Describe *how* light interacts with objects (e.g., "sunlight from the right *illuminates* his side and *casts* a long shadow").
+    * **Show interaction:** Describe *how* the character relates to the environment (e.g., "sits upright *at* the desk," "hands gripping the cup").
+    * **The result must feel like a single, frozen moment in a scene, not a pile of unrelated words.**
+
+3.  **Scene First (場景優先):** Focus on building a physically observable, grounded scene. Every word must be drawable.
+
+## Pitfalls to Avoid (Critical)
 * **AVOID:** Poetic or metaphorical descriptions (e.g., "inky silhouette," "geometric shadows").
 * **AVOID:** Describing abstract symbols or compositions (e.g., "stark white void," "three teardrop-shaped marks").
 * **FOCUS ON:** *What* is in the scene, not *how* it is artistically interpreted.
 
 ## Golden Standard Example
-[This is your primary guide for execution.]
+[This is your primary guide for execution. Notice how every detail is connected.]
 **Keywords:** "dragon, coffee, library"
 **Output:** "Large crimson red dragon sits upright at oak wooden desk, holding white ceramic coffee cup in right clawed hand raised to mouth level. Dragon positioned in center of spacious library room, surrounded by tall dark walnut bookshelves filled with leather-bound books. Warm yellow sunlight enters through arched window on right wall, illuminating dragon's left side and creating long shadow on grey stone floor. Dragon wears navy blue vest with gold buttons. Eye-level view. Photorealistic 4K style."
 
 ## Final Requirements
-* A single, cohesive description with natural, concrete details.
+* A single, cohesive description that feels like a living scene.
 * Strictly <= 120 words.
 * Language: English.
 
