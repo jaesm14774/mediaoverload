@@ -10,7 +10,7 @@ media_overload.env
 # 機敏配置文件
 configs/social_media/**/*.json
 configs/social_media/**/*.env
-configs/social_media/discord/**
+configs/social_media/discord/*.env
 
 # 輸出和暫存
 output_media/

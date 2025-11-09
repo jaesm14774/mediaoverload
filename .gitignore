@@ -1,12 +1,12 @@
 # 環境變數
 *.env
 .env
-media_overload.env
 
-# 配置文件
+# 配置文件（機敏資訊）
 configs/social_media/**/*.json
 configs/social_media/**/*.env
-configs/social_media/discord/**
+configs/social_media/discord/*.env
+configs/social_media/credentials/**/*.env
 
 # 輸出目錄
 output_media/

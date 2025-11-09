@@ -6,6 +6,7 @@ from lib.media_auto.models.vision.model_registry import ModelRegistry
 from configs.prompt.image_system_guide import *
 from configs.prompt.video_system_guide import *
 from utils.retry_decorator import vision_api_retry
+from utils.logger import setup_logger
 
 class VisionContentManager:
     """處理圖片內容分析與生成的類別"""
@@ -258,15 +259,17 @@ class VisionManagerBuilder:
         vision_config = self.vision_config.copy()
         text_config = self.text_config.copy()
         
+        logger = setup_logger('mediaoverload')
+        
         if self.use_random_models and self.vision_model_type == 'openrouter':
             from lib.media_auto.models.vision.model_registry import OpenRouterModel
             vision_config['model_name'] = OpenRouterModel.get_random_free_vision_model()
-            print(f"隨機選擇的 Vision 模型: {vision_config['model_name']}")
+            logger.info(f"隨機選擇的 Vision 模型: {vision_config['model_name']}")
             
         if self.use_random_models and self.text_model_type == 'openrouter':
             from lib.media_auto.models.vision.model_registry import OpenRouterModel
             text_config['model_name'] = OpenRouterModel.get_random_free_text_model()
-            print(f"隨機選擇的 Text 模型: {text_config['model_name']}")
+            logger.info(f"隨機選擇的 Text 模型: {text_config['model_name']}")
         
         vision_model = vision_model_class(ModelConfig(**vision_config))
         text_model = text_model_class(ModelConfig(**text_config))

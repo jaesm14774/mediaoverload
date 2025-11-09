@@ -28,7 +28,7 @@ social_media:
     - 寶可夢
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/wobbuffet
+      config_folder_path: /app/configs/social_media/credentials/wobbuffet
       enabled: true
 
 additional_params:

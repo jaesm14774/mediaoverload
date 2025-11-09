@@ -32,13 +32,24 @@ python examples/quick_draw_example.py
 git clone https://github.com/your-repo/mediaoverload.git
 cd mediaoverload
 
-# 2. 配置環境變數
+# 2. 配置環境變數（使用範例檔案）
 cp media_overload.env.example media_overload.env
-# 編輯 media_overload.env 填入你的配置
+cp configs/social_media/discord/Discord.env.example configs/social_media/discord/Discord.env
+
+# 為角色設定憑證（以 kirby 為例）
+mkdir -p configs/social_media/credentials/kirby
+cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/kirby/ig.env
+cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/kirby/twitter.env
+
+# 編輯檔案填入實際配置
+# Windows: notepad media_overload.env
+# Linux/Mac: nano media_overload.env
 
 # 3. 啟動服務
 docker-compose up --build -d
 ```
+
+> 📝 **詳細設定說明**: 請參考下方「📋 詳細設定指南」章節中的「📝 使用範例檔案快速設定」部分。
 
 ### 手動執行
 ```bash
@@ -341,6 +352,64 @@ flowchart TD
 
 ### 1. 環境設定
 
+#### 📝 使用範例檔案快速設定
+
+本專案提供了多個 `.example` 範例檔案，幫助您快速設定環境變數和憑證。請按照以下步驟操作：
+
+**步驟 1: 設定主環境變數**
+```bash
+# 複製主環境變數範例檔案
+cp media_overload.env.example media_overload.env
+
+# 編輯並填入實際值
+# Windows: notepad media_overload.env
+# Linux/Mac: nano media_overload.env
+```
+
+**步驟 2: 設定 Discord Webhook**
+```bash
+# 複製 Discord Webhook 範例檔案
+cp configs/social_media/discord/Discord.env.example configs/social_media/discord/Discord.env
+
+# 編輯並填入實際的 Discord Webhook URLs
+```
+
+**步驟 3: 為每個角色設定社群媒體憑證**
+
+對於每個角色（如 `kirby`、`wobbuffet` 等），您需要：
+
+```bash
+# 創建角色憑證目錄（如果不存在）
+mkdir -p configs/social_media/credentials/{character_name}
+
+# 複製 Instagram 憑證範例
+cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/{character_name}/ig.env
+
+# 複製 Twitter 憑證範例（如果使用 Twitter）
+cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/{character_name}/twitter.env
+
+# 編輯並填入實際的憑證資訊
+```
+
+**範例：為 kirby 角色設定憑證**
+```bash
+# 創建目錄
+mkdir -p configs/social_media/credentials/kirby
+
+# 複製範例檔案
+cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/kirby/ig.env
+cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/kirby/twitter.env
+
+# 編輯檔案填入實際值
+nano configs/social_media/credentials/kirby/ig.env
+nano configs/social_media/credentials/kirby/twitter.env
+```
+
+> ⚠️ **重要安全提醒**：
+> - 所有 `.env` 檔案都包含機敏資訊，**切勿**提交到 Git 倉庫
+> - 專案已配置 `.gitignore`，確保 `credentials/` 目錄和所有 `.env` 檔案不會被追蹤
+> - 請妥善保管您的憑證檔案，不要分享給他人
+
 #### 必要的環境變數 (`media_overload.env`)
 ```env
 # 資料庫設定 (MySQL/PostgreSQL/MSSQL)
@@ -370,12 +439,67 @@ OPEN_ROUTER_TOKEN=your_openrouter_api_key
 VIDEO_GENERATION_ENABLED=true
 ```
 
-#### 社群媒體憑證 (`configs/social_media/ig/{character}/ig.env`)
-```env
-# Instagram 帳號資訊
-INSTAGRAM_USERNAME=your_username
-INSTAGRAM_PASSWORD=your_password
-```
+#### 社群媒體憑證
+
+> 💡 **提示**: 請使用上述「使用範例檔案快速設定」步驟，從 `.example` 檔案複製並設定憑證。
+
+**Instagram** (`configs/social_media/credentials/{character}/ig.env`)
+
+參考範例檔案：`configs/social_media/credentials/ig.env.example`
+
+主要設定項目：
+- `IG_USERNAME`: Instagram 帳號名稱
+- `IG_PASSWORD`: Instagram 帳號密碼
+- `IG_USER_ID`: Instagram 用戶 ID（可選）
+- `IG_ACCOUNT_COOKIE_FILE_PATH`: Cookie 檔案路徑（預設為 `ig_account.json`）
+
+**Twitter** (`configs/social_media/credentials/{character}/twitter.env`)
+
+參考範例檔案：`configs/social_media/credentials/twitter.env.example`
+
+主要設定項目：
+- `TWITTER_API_KEY`: Twitter API Key
+- `TWITTER_API_SECRET`: Twitter API Secret
+- `TWITTER_ACCESS_TOKEN`: Twitter Access Token
+- `TWITTER_ACCESS_TOKEN_SECRET`: Twitter Access Token Secret
+- `TWITTER_BEARER_TOKEN`: Twitter Bearer Token（可選，用於 API v2）
+- `TWITTER_OAUTH_CLIENT_ID`: OAuth Client ID（可選）
+- `TWITTER_OAUTH_CLIENT_SECRET`: OAuth Client Secret（可選）
+
+> **注意**: Twitter API 憑證需要從 [Twitter Developer Portal](https://developer.twitter.com/) 申請取得。詳細說明請參考範例檔案中的註解。
+
+**重要：Twitter API 權限設定**
+
+如果遇到 `403 Forbidden: You are not permitted to perform this action` 錯誤，請檢查以下設定：
+
+1. **應用程式權限設定**：
+   - 登入 [Twitter Developer Portal](https://developer.twitter.com/)
+   - 進入你的應用程式設定
+   - 在 "User authentication settings" 中，確保權限設定為 **"Read and Write"**（讀寫權限）
+   - 如果只有 "Read" 權限，將無法發布推文
+
+2. **重新生成 Access Token**：
+   - 修改權限後，必須重新生成 Access Token 和 Access Token Secret
+   - 在應用程式設定頁面，點擊 "Regenerate" 按鈕
+   - 將新的 Access Token 和 Access Token Secret 更新到 `twitter.env` 檔案中
+
+3. **API 方案限制**：
+   - **免費方案（Free Tier）**：可以使用 API v2 發布推文（需要正確的權限設定）
+   - **API v1.1**：需要付費方案才能發布推文
+   - 系統會自動嘗試使用 v2 API，如果失敗會回退到 v1.1 API
+
+4. **推文長度限制**：
+   - Twitter 推文限制為 280 字元
+   - 如果內容超過限制，系統會自動截斷並添加 "..." 後綴
+
+5. **速率限制處理**：
+   - 系統已內建自動速率限制處理機制
+   - 當遇到 429 Too Many Requests 錯誤時，系統會：
+     - 自動從響應 headers 中提取等待時間
+     - 等待適當時間後自動重試（最多 3 次）
+     - 在媒體上傳之間自動添加 2 秒間隔，避免觸發速率限制
+   - 如果速率限制持續，系統會記錄詳細的錯誤訊息
+   - **建議**：避免在短時間內發布過多推文，免費方案有嚴格的速率限制
 
 ### 2. 角色配置詳解
 
@@ -425,7 +549,11 @@ social_media:
     - "#nintendo"
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/kirby
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      enabled: true
+    twitter:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""  # 可選，用於區分不同帳號
       enabled: true
 
 additional_params:
@@ -629,7 +757,7 @@ result = use_case.execute(
 
 ### 新增角色
 1. 在 `configs/characters/` 創建新的 YAML 配置文件
-2. 在 `configs/social_media/ig/` 創建對應的資料夾和憑證
+2. 在 `configs/social_media/credentials/` 創建對應的資料夾和憑證
 3. 如需要群組功能，在資料庫中添加角色記錄
 
 ### 新增社群媒體平台
@@ -848,7 +976,7 @@ social_media:
     - world 
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/unbelievable_world
+      config_folder_path: /app/configs/social_media/credentials/unbelievable_world
       enabled: true
 
 additional_params:

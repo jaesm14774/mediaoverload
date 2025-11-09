@@ -21,6 +21,7 @@ discord.py>=2.3.2
 
 # 社群媒體
 instagrapi>=2.2.1
+tweepy>=4.14.0
 
 # AI 和 LLM
 ollama>=0.1.6

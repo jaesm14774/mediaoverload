@@ -122,7 +122,7 @@ class OpenRouterModel(AIModelInterface):
                        messages: List[dict],
                        images: Optional[List[str]] = None,
                        max_retries: int = 3,
-                       retry_delay: float = 10.0,
+                       retry_delay: float = 30.0,
                        **kwargs) -> str:
         """使用 OpenRouter API 進行聊天完成（含 retry 機制）
 
