@@ -1,50 +1,91 @@
-stable_diffusion_prompt = f"""
-# PURPOSE: Transform user keywords into optimized Stable Diffusion prompts
-# SCENARIO: User provides keywords → System outputs single structured prompt → Image generation
-
+stable_diffusion_prompt = """
 ## CORE MISSION
-Convert user keywords into ONE high-quality Stable Diffusion prompt (≤120 words).
-Build directly from user's keywords—use provided concepts.
-Natural descriptions with strategic precision.
+# Transform user keywords → ONE optimized SDXL prompt (≤120 words)
+# Build from user concepts with architectural awareness
 
-## CONCRETE DESCRIPTION PRINCIPLES (CRITICAL)
-✅ USE SPECIFIC: Physical observations like "warm yellow-orange sunlight", "long shadows", "wide tree trunks"
-✅ USE CLEAR: Tangible adjectives describing color, size, texture, position
-✅ USE NATURAL: Spatial descriptions with occasional measurements for key relationships
-✅ USE OBSERVABLE: Physical details you can see, touch, or measure
-✅ PRIORITIZE: Weather-based atmosphere, concrete environmental conditions
-✅ TEST: Can you draw this from the description? If yes, you're using concrete details effectively
+## SDXL-OPTIMIZED CONSTRUCTION (6-Part Golden Structure)
 
-## CONSTRUCTION SEQUENCE
-1. **Subject (Required)**: Main character/object with weight (keyword:1.2-1.3)
-   - Specify: size, color, material, natural pose/position
-2. **Visual Details**: Appearance, pose, expression (1 detail per keyword)
-   - PREFER: "arms raised upward" - direct physical action
-   - PREFER: "slight smile, eyes half-closed" - specific facial features
-   - BALANCE: Natural descriptions over technical angles
-3. **Environment**: Setting with specific objects/features
-   - PREFER: "oak forest, moss-covered rocks, ferns" - concrete named objects
-   - INCLUDE: Specific tree types, vegetation, ground features
-4. **Lighting**: Source + color + direction + quality
-   - PREFER: "warm yellow sunlight from upper left, casting long shadows" - complete light description
-   - INCLUDE: Light source, color name, direction, effect on scene
-   - BALANCE: Measurements only when crucial for composition
-5. **Style**: Medium + aesthetic (digital art, photorealistic, etc.)
-6. **Quality Tags**: masterpiece, highly detailed, 8k, sharp focus
+### 1. SUBJECT (Focus) - OpenCLIP-G domain
+# Natural language description, weight (keyword:1.2-1.3)
+# Example: "A cat in a reflective spacesuit"
+# PRINCIPLE: Complete noun phrases with relationships
+
+### 2. DETAILED IMAGERY - OpenCLIP-G domain  
+# Rich specifics: clothing, expression, color, texture, proportions
+# Example: "wearing a reflective helmet, intricate suit details"
+# USE: Observable physical attributes in sentence form
+
+### 3. ENVIRONMENT - OpenCLIP-G domain
+# Scene setting: indoor/outdoor, landscape, weather, spatial layout
+# Example: "sitting inside the cockpit of a stealth fighter jet"
+# INCLUDE: Spatial relationships using prepositions (in, on, under)
+
+### 4. MOOD/ATMOSPHERE - OpenCLIP-G domain
+# Emotional tone, energy, ambiance
+# Example: "claustrophobic, high-tech, intense atmosphere"
+# PREFER: Concrete environmental conditions over abstract emotions
+
+### 5. STYLE - CLIP-L domain (transition point)
+# Artistic medium or aesthetic
+# Example: "analog photograph, vintage photography"
+# USE: Tag-like style identifiers
+
+### 6. STYLE EXECUTION - Hybrid domain
+# Technical style instructions (SDXL's advanced NLP capability)
+# Example: "Fujifilm, Kodak Portra 400, grainy, shallow depth of field"
+# INCLUDE: Technical details, quality modifiers
 
 ## EMPHASIS SYNTAX
-- Strong: (keyword:1.3) or ((keyword))
-- Normal: keyword
-- Weak: (keyword:0.8)
-- Blend: [keyword1:keyword2:0.5]
+# Strong: (keyword:1.3) or ((keyword))
+# Normal: keyword
+# Weak: (keyword:0.8)
+# Blend: [keyword1:keyword2:0.5]
+
+## WORD ORDER PRIORITY
+# CRITICAL: SDXL reads left-to-right, higher weight to earlier terms
+# Structure: Subject → Details → Environment → Mood → Style → Execution
+
+## LANGUAGE STRATEGY (Hybrid)
+# OpenCLIP-G (70%): Natural language sentences with grammar
+#   ✅ "A cat in a spacesuit sitting in a cockpit"
+#   ❌ "cat, spacesuit, cockpit" (SD 1.5 style - don't use)
+# CLIP-L (30%): Style tags at the end
+#   ✅ "masterpiece, oil painting, 8k, cinematic lighting"
 
 ## OUTPUT FORMAT
-Single comma-separated line, English only, direct prompt:
-(main subject:1.X), appearance, action, setting, lighting style, medium, style, quality tags
+# Single line, English, structured as:
+# [Natural language description (Subject→Details→Environment→Mood)], [Style medium], [Style execution], [Quality tags]
 
-## EXAMPLE
-INPUT: "forest spirit, glowing, ancient trees"
-OUTPUT: (translucent humanoid figure:1.3), pale blue-white skin with visible light glow from chest, standing upright with arms at sides, oak forest with wide tree trunks and green moss covering ground, (bright white light beams:1.2) shining through upper canopy from top-right creating diagonal shadows, fantasy digital painting, photorealistic, highly detailed, masterpiece
+## EXAMPLE TRANSFORMATION
+# INPUT: "森林精靈, 發光, 古樹"
+# 
+# OUTPUT: 
+# A translucent humanoid forest spirit with pale blue-white skin, soft glow emanating from chest, 
+# standing with arms at sides in an ancient oak forest, wide tree trunks covered in green moss, 
+# ferns scattered on forest floor, warm golden sunlight filtering through upper canopy from top-right 
+# creating diagonal light beams and long shadows, mystical atmosphere, fantasy digital painting, 
+# photorealistic style, highly detailed, 8k, masterpiece, sharp focus
+
+## QUALITY TAG LEXICON (CLIP-L optimization)
+# Photography: analog film photo, 35mm, Kodak Portra 400, shallow depth of field, bokeh
+# Painting: oil painting, watercolor, impressionist, digital painting, concept art
+# Lighting: cinematic lighting, volumetric light rays, rim light, golden hour
+# Composition: rule of thirds, wide shot, macro, 85mm lens, f1.8
+# Quality: masterpiece, highly detailed, 8k, sharp focus, professional
+
+## ADVANCED: DUAL PROMPT SEPARATION (Expert Level)
+# For maximum control in ComfyUI/diffusers:
+# prompt_2 (OpenCLIP-G): Full natural language description (parts 1-4)
+# prompt (CLIP-L): Style tags only (parts 5-6)
+# This eliminates "token competition" between style and subject
+
+## USAGE INSTRUCTIONS
+1. User provides keywords in any language
+2. System identifies: Subject, Details, Environment, Mood, Style preferences
+3. Construct natural language description (parts 1-4) using complete sentences
+4. Append style tags (parts 5-6) using lexicon
+5. Apply emphasis syntax to key subject elements
+6. Output single line, ≤120 words
 """.strip()
 
 best_past_prompt = """
@@ -593,10 +634,10 @@ Ultra-detailed + physically accurate + visually concrete + naturally described.
 ## OUTPUT FORMAT
 1 unique cinematic prompt, English, concrete vocabulary
 OUTPUT CONTAINS: Pure technical prompt, direct description only
-Structure: (subject:1.X), precise physical descriptors, specific environmental elements, (lighting:1.X) with source and angle, material textures, [depth specification], camera specs, color grading, negative controls
+Structure: (subject:1.X), precise physical descriptors, specific environmental elements, (lighting:1.X) with source and angle, material textures, [depth specification], camera specs, color grading
 
 ## EXAMPLE
-(forest clearing with moss-covered oak:1.3), oak trunk 2m diameter with bright green moss patches 5-10cm thick, warm yellow-orange sunlight (#FFB347) entering from upper-right at 60-degree angle casting 3m shadows, (visible light beams:1.2) 10cm wide illuminating 25-30 floating dust particles, translucent spider webs with dew droplets 2mm diameter reflecting light, weathered grey limestone altar 1m tall with orange-red maple leaves 8cm wide scattered on top, [foreground ferns 1m away sharp focus], [background trees 8m away soft bokeh], shot on RED 8K with 85mm f/2.8 lens, Kodak Portra color grading warm shadows, cinematic depth, 4K resolution, negative: artificial lighting, oversaturated, amateur, vague details, abstract elements
+(forest clearing with moss-covered oak:1.3), oak trunk 2m diameter with bright green moss patches 5-10cm thick, warm yellow-orange sunlight (#FFB347) entering from upper-right at 60-degree angle casting 3m shadows, (visible light beams:1.2) 10cm wide illuminating 25-30 floating dust particles, translucent spider webs with dew droplets 2mm diameter reflecting light, weathered grey limestone altar 1m tall with orange-red maple leaves 8cm wide scattered on top, [foreground ferns 1m away sharp focus], [background trees 8m away soft bokeh], shot on RED 8K with 85mm f/2.8 lens, Kodak Portra color grading warm shadows, cinematic depth, 4K resolution
 """.strip()
 
 warm_scene_description_system_prompt = """

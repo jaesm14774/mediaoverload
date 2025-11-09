@@ -155,8 +155,7 @@ class TwitterPlatform(SocialMediaPlatform):
             )
             
             # 創建 v1.1 API 客戶端（用於媒體上傳，免費方案可用）
-            # 啟用 wait_on_rate_limit=True 讓 tweepy 自動處理速率限制
-            self.client_v1 = tweepy.API(auth, wait_on_rate_limit=True)
+            self.client_v1 = tweepy.API(auth, wait_on_rate_limit=False)
             
             # 使用 Twitter API v2 Client（推薦，支援免費方案）
             # v2 API 使用 OAuth 1.0a User Context
@@ -167,47 +166,16 @@ class TwitterPlatform(SocialMediaPlatform):
                     access_token=access_token,
                     access_token_secret=access_token_secret,
                     bearer_token=bearer_token if bearer_token else None,
-                    wait_on_rate_limit=True  # 啟用自動速率限制處理
+                    wait_on_rate_limit=False
                 )
-                
-                # 驗證認證是否成功
-                try:
-                    user_info = self.client_v2.get_me()
-                    if user_info.data:
-                        self.logger.info(f"Twitter API v2 認證成功，用戶: @{user_info.data.username}")
-                        self.logger.info("v1.1 API 客戶端已初始化（用於媒體上傳）")
-                        self.client = None  # 標記使用 v2
-                        return
-                except tweepy.TooManyRequests as e:
-                    wait_time = self._extract_rate_limit_wait_time(e)
-                    self.logger.warning(f"認證時遇到速率限制，等待 {wait_time} 秒後重試")
-                    time.sleep(wait_time)
-                    # 重試一次
-                    try:
-                        user_info = self.client_v2.get_me()
-                        if user_info.data:
-                            self.logger.info(f"Twitter API v2 認證成功（重試），用戶: @{user_info.data.username}")
-                            self.client = None
-                            return
-                    except Exception as retry_error:
-                        self.logger.warning(f"Twitter API v2 認證重試失敗，嘗試使用 v1.1: {str(retry_error)}")
-                except Exception as e:
-                    self.logger.warning(f"Twitter API v2 認證失敗，嘗試使用 v1.1: {str(e)}")
+                self.logger.info("Twitter API v2 客戶端已初始化（不進行連線測試以節省 API 呼叫次數）")
+                self.logger.info("v1.1 API 客戶端已初始化（用於媒體上傳）")
+                self.client = None  # 標記使用 v2
             except Exception as e:
-                self.logger.warning(f"無法初始化 Twitter API v2，嘗試使用 v1.1: {str(e)}")
-            
-            # 備用方案：使用 v1.1 API（需要付費方案才能發布推文）
-            self.client = self.client_v1  # 標記使用 v1.1
-            
-            # 驗證認證是否成功
-            try:
-                user_info = self.client_v1.verify_credentials()
-                self.logger.info(f"Twitter API v1.1 認證成功，用戶: @{user_info.screen_name}")
-                self.logger.warning("注意：v1.1 API 需要付費方案，建議使用 v2 API")
-            except Exception as e:
-                error_msg = f"Twitter 認證失敗: {str(e)}"
-                self.logger.error(error_msg, exc_info=True)
-                raise
+                self.logger.warning(f"無法初始化 Twitter API v2，將使用 v1.1: {str(e)}")
+                # 備用方案：使用 v1.1 API
+                self.client = self.client_v1  # 標記使用 v1.1
+                self.logger.info("Twitter API v1.1 客戶端已初始化（不進行連線測試以節省 API 呼叫次數）")
         except ImportError:
             error_msg = "請安裝 tweepy 套件: pip install tweepy"
             self.logger.error(error_msg)
@@ -277,7 +245,7 @@ class TwitterPlatform(SocialMediaPlatform):
                         access_token=access_token,
                         access_token_secret=access_token_secret
                     )
-                    self.client_v1 = tweepy.API(auth, wait_on_rate_limit=True)  # 已啟用速率限制處理
+                    self.client_v1 = tweepy.API(auth, wait_on_rate_limit=False)  # 已啟用速率限制處理
                 except Exception as e:
                     self.logger.error(f"無法初始化 v1.1 API 客戶端: {str(e)}")
             
