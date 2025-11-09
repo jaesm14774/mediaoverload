@@ -370,11 +370,87 @@ OPEN_ROUTER_TOKEN=your_openrouter_api_key
 VIDEO_GENERATION_ENABLED=true
 ```
 
-#### 社群媒體憑證 (`configs/social_media/ig/{character}/ig.env`)
+#### 社群媒體憑證
+
+**Instagram** (`configs/social_media/ig/{character}/ig.env`)
 ```env
 # Instagram 帳號資訊
 INSTAGRAM_USERNAME=your_username
 INSTAGRAM_PASSWORD=your_password
+```
+
+**Twitter** (`configs/social_media/ig/{character}/twitter.env`)
+```env
+# Twitter API 憑證
+TWITTER_API_KEY=your_api_key
+TWITTER_API_SECRET=your_api_secret
+TWITTER_ACCESS_TOKEN=your_access_token
+TWITTER_ACCESS_TOKEN_SECRET=your_access_token_secret
+TWITTER_BEARER_TOKEN=your_bearer_token
+TWITTER_OAUTH_CLIENT_ID=your_oauth_client_id
+TWITTER_OAUTH_CLIENT_SECRET=your_oauth_client_secret
+```
+
+> **注意**: Twitter API 憑證需要從 [Twitter Developer Portal](https://developer.twitter.com/) 申請取得。
+
+**重要：Twitter API 權限設定**
+
+如果遇到 `403 Forbidden: You are not permitted to perform this action` 錯誤，請檢查以下設定：
+
+1. **應用程式權限設定**：
+   - 登入 [Twitter Developer Portal](https://developer.twitter.com/)
+   - 進入你的應用程式設定
+   - 在 "User authentication settings" 中，確保權限設定為 **"Read and Write"**（讀寫權限）
+   - 如果只有 "Read" 權限，將無法發布推文
+
+2. **重新生成 Access Token**：
+   - 修改權限後，必須重新生成 Access Token 和 Access Token Secret
+   - 在應用程式設定頁面，點擊 "Regenerate" 按鈕
+   - 將新的 Access Token 和 Access Token Secret 更新到 `twitter.env` 檔案中
+
+3. **API 方案限制**：
+   - **免費方案（Free Tier）**：可以使用 API v2 發布推文（需要正確的權限設定）
+   - **API v1.1**：需要付費方案才能發布推文
+   - 系統會自動嘗試使用 v2 API，如果失敗會回退到 v1.1 API
+
+4. **推文長度限制**：
+   - Twitter 推文限制為 280 字元
+   - 如果內容超過限制，系統會自動截斷並添加 "..." 後綴
+
+5. **速率限制處理**：
+   - 系統已內建自動速率限制處理機制
+   - 當遇到 429 Too Many Requests 錯誤時，系統會：
+     - 自動從響應 headers 中提取等待時間
+     - 等待適當時間後自動重試（最多 3 次）
+     - 在媒體上傳之間自動添加 2 秒間隔，避免觸發速率限制
+   - 如果速率限制持續，系統會記錄詳細的錯誤訊息
+   - **建議**：避免在短時間內發布過多推文，免費方案有嚴格的速率限制
+
+#### Twitter 發布測試
+
+使用測試程式驗證 Twitter 發布功能：
+
+```bash
+# 基本測試（認證 + 純文字推文）
+python test_twitter.py
+
+# 測試單張圖片推文
+python test_twitter.py --test-image /path/to/image.jpg
+
+# 測試多張圖片推文（最多 4 張）
+python test_twitter.py --test-images image1.jpg image2.jpg image3.jpg
+
+# 測試純文字推文（自訂內容）
+python test_twitter.py --test-text "你的推文內容"
+
+# 測試影片推文
+python test_twitter.py --test-video /path/to/video.mp4
+
+# 執行所有測試
+python test_twitter.py --all --test-image /path/to/image.jpg
+
+# 指定配置路徑
+python test_twitter.py --config-path configs/social_media/ig/kirby
 ```
 
 ### 2. 角色配置詳解
@@ -426,6 +502,10 @@ social_media:
   platforms:
     instagram:
       config_folder_path: /app/configs/social_media/ig/kirby
+      enabled: true
+    twitter:
+      config_folder_path: /app/configs/social_media/ig/kirby
+      prefix: ""  # 可選，用於區分不同帳號
       enabled: true
 
 additional_params:

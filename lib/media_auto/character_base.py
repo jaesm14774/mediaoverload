@@ -73,10 +73,11 @@ class ConfigurableCharacterWithSocialMedia(ConfigurableCharacter, SocialMediaMix
     
     def _register_platforms_from_config(self):
         """從配置註冊社群媒體平台"""
-        from lib.social_media import InstagramPlatform
+        from lib.social_media import InstagramPlatform, TwitterPlatform
         
         platform_mapping = {
-            'instagram': InstagramPlatform
+            'instagram': InstagramPlatform,
+            'twitter': TwitterPlatform
         }
         
         platforms_to_register = {}

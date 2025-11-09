@@ -2,7 +2,7 @@
 import re
 from typing import List, Dict, Any, Optional
 from lib.services.interfaces.publishing_service import IPublishingService
-from lib.social_media import MediaPost, SocialMediaManager, InstagramPlatform
+from lib.social_media import MediaPost, SocialMediaManager, InstagramPlatform, TwitterPlatform
 from utils.image import ImageProcessor
 from utils.logger import setup_logger
 
@@ -55,8 +55,17 @@ class PublishingService(IPublishingService):
                          platform_config: Dict[str, Any]) -> None:
         """註冊社群媒體平台"""
         # 根據平台類型創建對應的平台實例
-        if platform_name.lower() == 'instagram':
+        platform_name_lower = platform_name.lower()
+        
+        if platform_name_lower == 'instagram':
             platform = InstagramPlatform(
+                config_folder_path=platform_config['config_folder_path'],
+                prefix=platform_config.get('prefix', '')
+            )
+            self.social_media_manager.register_platform(platform_name, platform)
+            self.logger.info(f"已註冊平台: {platform_name}")
+        elif platform_name_lower == 'twitter':
+            platform = TwitterPlatform(
                 config_folder_path=platform_config['config_folder_path'],
                 prefix=platform_config.get('prefix', '')
             )

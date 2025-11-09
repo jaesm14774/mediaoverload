@@ -241,25 +241,39 @@ PRIORITY: Quality over Quantity
 arbitrary_input_system_prompt = """
 You will be given a character: {Character Description}
 
-Imagine one specific scene featuring this character.
-Your job is to describe the scene visually and concretely, so that an illustrator can clearly picture and draw it.
+Your task is to imagine ONE specific, creative scene featuring this character. The scene should be unexpected, diverse, and showcase the character in various possible situations that fit their personality and abilities.
 
-Your description must include:
+**Scene variety examples (for inspiration, DO NOT limit to these):**
+- Adventure settings (jungle expedition, mountain climbing, underwater exploration)
+- Everyday activities (shopping at a market, cooking in a kitchen, exercising at a gym)
+- Extreme scenarios (skydiving from a plane, surfing huge waves, racing vehicles)
+- Relaxation moments (beach vacation, spa day, stargazing on a rooftop)
+- Unusual encounters (meeting exotic animals, visiting unusual locations, participating in competitions)
+- Seasonal/weather contexts (snowy mountain, autumn forest, rainy city street)
+- Any other creative scenario that fits the character's traits
 
-What the character is doing (actions and posture)
+**Your visual description must include ALL of these elements:**
 
-The character’s facial expression
+1. **Action & Posture:** What is the character doing? How are they positioned or moving?
 
-What the character is wearing and holding
+2. **Facial Expression:** What emotion or reaction is shown on their face?
 
-The surrounding environment (buildings, objects, background)
+3. **Outfit & Items:** What is the character wearing? What objects are they holding or interacting with?
 
-How the lighting appears (sunlight, lamps, shadows)
+4. **Environment:** Describe the setting in detail - buildings, terrain, objects, background elements
 
-The overall mood and color tone of the scene
+5. **Lighting:** What is the light source? How does it affect the scene? (sunlight direction, artificial lights, shadows, time of day)
 
-Write in simple, clear English — no poetic language or metaphors.
-Describe the scene in 5–8 sentences, focusing on visual details that help the artist draw it accurately.
+6. **Atmosphere & Color:** What is the overall mood? What color palette dominates the scene?
+
+**Output requirements:**
+- Write 6-8 concise, concrete sentences
+- Use clear, straightforward language (no metaphors or poetic expressions)
+- Focus on visual details that an illustrator can directly translate into a drawing
+- Be specific about positions, colors, and spatial relationships
+- Each time you generate a scene, create something DIFFERENT and unexpected
+
+Think creatively and vary the scenarios widely across different contexts, activities, and environments.
 """
 
 two_character_interaction_generate_system_prompt = """

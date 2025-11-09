@@ -127,9 +127,14 @@ class OrchestrationService(IOrchestrationService):
                 additional_params={'share_to_story': True}
             )
             
+            # 從角色配置中獲取啟用的平台列表
+            enabled_platforms = None
+            if hasattr(character, '_social_media_config') and character._social_media_config:
+                enabled_platforms = list(character._social_media_config.keys())
+            
             publish_results = self.publishing_service.publish_to_social_media(
                 post, 
-                platforms=['instagram']
+                platforms=enabled_platforms
             )
             
             # 步驟 9: 發送通知
