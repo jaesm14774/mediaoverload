@@ -32,13 +32,24 @@ python examples/quick_draw_example.py
 git clone https://github.com/your-repo/mediaoverload.git
 cd mediaoverload
 
-# 2. 配置環境變數
+# 2. 配置環境變數（使用範例檔案）
 cp media_overload.env.example media_overload.env
-# 編輯 media_overload.env 填入你的配置
+cp configs/social_media/discord/Discord.env.example configs/social_media/discord/Discord.env
+
+# 為角色設定憑證（以 kirby 為例）
+mkdir -p configs/social_media/credentials/kirby
+cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/kirby/ig.env
+cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/kirby/twitter.env
+
+# 編輯檔案填入實際配置
+# Windows: notepad media_overload.env
+# Linux/Mac: nano media_overload.env
 
 # 3. 啟動服務
 docker-compose up --build -d
 ```
+
+> 📝 **詳細設定說明**: 請參考下方「📋 詳細設定指南」章節中的「📝 使用範例檔案快速設定」部分。
 
 ### 手動執行
 ```bash
@@ -341,6 +352,64 @@ flowchart TD
 
 ### 1. 環境設定
 
+#### 📝 使用範例檔案快速設定
+
+本專案提供了多個 `.example` 範例檔案，幫助您快速設定環境變數和憑證。請按照以下步驟操作：
+
+**步驟 1: 設定主環境變數**
+```bash
+# 複製主環境變數範例檔案
+cp media_overload.env.example media_overload.env
+
+# 編輯並填入實際值
+# Windows: notepad media_overload.env
+# Linux/Mac: nano media_overload.env
+```
+
+**步驟 2: 設定 Discord Webhook**
+```bash
+# 複製 Discord Webhook 範例檔案
+cp configs/social_media/discord/Discord.env.example configs/social_media/discord/Discord.env
+
+# 編輯並填入實際的 Discord Webhook URLs
+```
+
+**步驟 3: 為每個角色設定社群媒體憑證**
+
+對於每個角色（如 `kirby`、`wobbuffet` 等），您需要：
+
+```bash
+# 創建角色憑證目錄（如果不存在）
+mkdir -p configs/social_media/credentials/{character_name}
+
+# 複製 Instagram 憑證範例
+cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/{character_name}/ig.env
+
+# 複製 Twitter 憑證範例（如果使用 Twitter）
+cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/{character_name}/twitter.env
+
+# 編輯並填入實際的憑證資訊
+```
+
+**範例：為 kirby 角色設定憑證**
+```bash
+# 創建目錄
+mkdir -p configs/social_media/credentials/kirby
+
+# 複製範例檔案
+cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/kirby/ig.env
+cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/kirby/twitter.env
+
+# 編輯檔案填入實際值
+nano configs/social_media/credentials/kirby/ig.env
+nano configs/social_media/credentials/kirby/twitter.env
+```
+
+> ⚠️ **重要安全提醒**：
+> - 所有 `.env` 檔案都包含機敏資訊，**切勿**提交到 Git 倉庫
+> - 專案已配置 `.gitignore`，確保 `credentials/` 目錄和所有 `.env` 檔案不會被追蹤
+> - 請妥善保管您的憑證檔案，不要分享給他人
+
 #### 必要的環境變數 (`media_overload.env`)
 ```env
 # 資料庫設定 (MySQL/PostgreSQL/MSSQL)
@@ -372,26 +441,32 @@ VIDEO_GENERATION_ENABLED=true
 
 #### 社群媒體憑證
 
+> 💡 **提示**: 請使用上述「使用範例檔案快速設定」步驟，從 `.example` 檔案複製並設定憑證。
+
 **Instagram** (`configs/social_media/credentials/{character}/ig.env`)
-```env
-# Instagram 帳號資訊
-INSTAGRAM_USERNAME=your_username
-INSTAGRAM_PASSWORD=your_password
-```
+
+參考範例檔案：`configs/social_media/credentials/ig.env.example`
+
+主要設定項目：
+- `IG_USERNAME`: Instagram 帳號名稱
+- `IG_PASSWORD`: Instagram 帳號密碼
+- `IG_USER_ID`: Instagram 用戶 ID（可選）
+- `IG_ACCOUNT_COOKIE_FILE_PATH`: Cookie 檔案路徑（預設為 `ig_account.json`）
 
 **Twitter** (`configs/social_media/credentials/{character}/twitter.env`)
-```env
-# Twitter API 憑證
-TWITTER_API_KEY=your_api_key
-TWITTER_API_SECRET=your_api_secret
-TWITTER_ACCESS_TOKEN=your_access_token
-TWITTER_ACCESS_TOKEN_SECRET=your_access_token_secret
-TWITTER_BEARER_TOKEN=your_bearer_token
-TWITTER_OAUTH_CLIENT_ID=your_oauth_client_id
-TWITTER_OAUTH_CLIENT_SECRET=your_oauth_client_secret
-```
 
-> **注意**: Twitter API 憑證需要從 [Twitter Developer Portal](https://developer.twitter.com/) 申請取得。
+參考範例檔案：`configs/social_media/credentials/twitter.env.example`
+
+主要設定項目：
+- `TWITTER_API_KEY`: Twitter API Key
+- `TWITTER_API_SECRET`: Twitter API Secret
+- `TWITTER_ACCESS_TOKEN`: Twitter Access Token
+- `TWITTER_ACCESS_TOKEN_SECRET`: Twitter Access Token Secret
+- `TWITTER_BEARER_TOKEN`: Twitter Bearer Token（可選，用於 API v2）
+- `TWITTER_OAUTH_CLIENT_ID`: OAuth Client ID（可選）
+- `TWITTER_OAUTH_CLIENT_SECRET`: OAuth Client Secret（可選）
+
+> **注意**: Twitter API 憑證需要從 [Twitter Developer Portal](https://developer.twitter.com/) 申請取得。詳細說明請參考範例檔案中的註解。
 
 **重要：Twitter API 權限設定**
 
