@@ -7,6 +7,7 @@ import requests
 import json
 import random
 import time
+import logging
 
 class OllamaModel(AIModelInterface):
     """Ollama 模型實現"""
@@ -104,6 +105,7 @@ class OpenRouterModel(AIModelInterface):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+        self.logger = logging.getLogger(__name__)
     
     @classmethod
     def get_random_free_text_model(self) -> str:
@@ -121,60 +123,289 @@ class OpenRouterModel(AIModelInterface):
     def chat_completion(self,
                        messages: List[dict],
                        images: Optional[List[str]] = None,
-                       max_retries: int = 3,
-                       retry_delay: float = 30.0,
+                       max_retries: int = 7,
+                       initial_retry_delay: float = 10.0,
                        **kwargs) -> str:
-        """使用 OpenRouter API 進行聊天完成（含 retry 機制）
+        """使用 OpenRouter API 進行聊天完成（含增強的重試機制）
 
         Args:
             messages: 訊息列表
             images: 圖片列表（可選）
-            max_retries: 最大重試次數（預設 3 次）
-            retry_delay: 重試間隔秒數（預設 2 秒）
+            max_retries: 最大重試次數（預設 7 次）
+            initial_retry_delay: 初始重試間隔秒數（預設 10 秒）
             **kwargs: 其他參數
         """
         # 處理圖片輸入 - 將圖片轉換為 base64
         processed_messages = self._process_messages_with_images(messages, images)
+        
+        # 判斷當前模型是否為免費模型，並準備備用模型列表
+        current_model = self.config.model_name
+        
+        # 根據是否有圖片選擇對應的免費模型列表
+        if images:
+            available_models = self.FREE_VISION_MODELS.copy()
+            is_free_model = current_model in self.FREE_VISION_MODELS
+        else:
+            available_models = self.FREE_TEXT_MODELS.copy()
+            is_free_model = current_model in self.FREE_TEXT_MODELS
+        
+        # 記錄已嘗試過的模型（只有當當前模型在對應的免費模型列表中時才記錄）
+        tried_models = [current_model] if is_free_model else []
+        
         # 準備 API 請求數據
         data = {
-            "model": self.config.model_name,
+            "model": current_model,
             "messages": processed_messages,
             "temperature": self.config.temperature
         }
 
         # 添加額外的參數
         for key, value in kwargs.items():
-            if key not in ['images', 'max_retries', 'retry_delay']:  # 排除已處理的參數
+            if key not in ['images', 'max_retries', 'initial_retry_delay']:  # 排除已處理的參數
                 data[key] = value
 
+        retry_delay = initial_retry_delay
+        last_exception = None
+        
         for attempt in range(max_retries):
             try:
                 response = requests.post(
                     self.base_url,
                     headers=self.headers,
-                    data=json.dumps(data),
+                    json=data,  # 使用 json 參數而不是 data=json.dumps()
                     timeout=120
                 )
                 response.raise_for_status()
 
                 response_data = response.json()
+                if attempt > 0:
+                    model_info = f"（使用模型: {data['model']}）" if is_free_model else ""
+                    self.logger.info(f"OpenRouter API 請求在第 {attempt + 1} 次嘗試後成功{model_info}")
                 return response_data['choices'][0]['message']['content']
 
-            except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError) as e:
-                if attempt < max_retries - 1:
-                    print(f"OpenRouter API 請求失敗 (嘗試 {attempt + 1}/{max_retries}): {e}")
-                    print(f"等待 {retry_delay} 秒後重試...")
-                    time.sleep(retry_delay)
-                    # 每次重試時增加延遲（指數退避）
-                    retry_delay *= 1.5
+            except requests.exceptions.HTTPError as e:
+                last_exception = e
+                status_code = e.response.status_code if e.response else None
+                
+                # 判斷是否應該重試
+                should_retry = self._should_retry(status_code, attempt, max_retries)
+                
+                if should_retry:
+                    # 如果是免費模型且還有其他模型可選，切換模型
+                    if is_free_model and attempt < max_retries - 1:
+                        new_model = self._switch_to_another_free_model(
+                            available_models, tried_models, current_model
+                        )
+                        if new_model:
+                            data['model'] = new_model
+                            tried_models.append(new_model)
+                            self.logger.info(
+                                f"切換模型: {current_model} -> {new_model} "
+                                f"（嘗試 {attempt + 1}/{max_retries}）"
+                            )
+                            current_model = new_model
+                    
+                    # 根據狀態碼調整退避策略
+                    delay_multiplier = self._get_delay_multiplier(status_code)
+                    current_delay = retry_delay * (delay_multiplier ** attempt)
+                    
+                    # 添加隨機抖動（jitter），避免雷群效應
+                    jitter = random.uniform(0.8, 1.2)
+                    actual_delay = current_delay * jitter
+                    
+                    model_info = f"（當前模型: {data['model']}）" if is_free_model else ""
+                    self.logger.warning(
+                        f"OpenRouter API 請求失敗 (嘗試 {attempt + 1}/{max_retries}): "
+                        f"HTTP {status_code} - {str(e)}。{model_info}"
+                        f"等待 {actual_delay:.1f} 秒後重試..."
+                    )
+                    time.sleep(actual_delay)
                 else:
-                    # 最後一次嘗試失敗
-                    if isinstance(e, json.JSONDecodeError):
-                        raise RuntimeError(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: JSON 解析錯誤 - {e}")
-                    elif isinstance(e, KeyError):
-                        raise ValueError(f"OpenRouter API 回應格式錯誤（已重試 {max_retries} 次）: {e}")
-                    else:
-                        raise ValueError(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {e}")
+                    # 不應該重試的錯誤，直接拋出
+                    self.logger.error(f"OpenRouter API 請求失敗: HTTP {status_code} - {str(e)}")
+                    raise ValueError(f"OpenRouter API 請求失敗（HTTP {status_code}）: {e}")
+                    
+            except (requests.exceptions.ConnectionError, 
+                    requests.exceptions.Timeout,
+                    requests.exceptions.RequestException) as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    # 如果是免費模型且還有其他模型可選，切換模型
+                    if is_free_model:
+                        new_model = self._switch_to_another_free_model(
+                            available_models, tried_models, current_model
+                        )
+                        if new_model:
+                            data['model'] = new_model
+                            tried_models.append(new_model)
+                            self.logger.info(
+                                f"切換模型: {current_model} -> {new_model} "
+                                f"（嘗試 {attempt + 1}/{max_retries}）"
+                            )
+                            current_model = new_model
+                    
+                    # 網絡錯誤使用指數退避
+                    current_delay = retry_delay * (1.5 ** attempt)
+                    jitter = random.uniform(0.8, 1.2)
+                    actual_delay = current_delay * jitter
+                    
+                    model_info = f"（當前模型: {data['model']}）" if is_free_model else ""
+                    self.logger.warning(
+                        f"OpenRouter API 網絡錯誤 (嘗試 {attempt + 1}/{max_retries}): {str(e)}。{model_info}"
+                        f"等待 {actual_delay:.1f} 秒後重試..."
+                    )
+                    time.sleep(actual_delay)
+                else:
+                    self.logger.error(f"OpenRouter API 網絡錯誤（已重試 {max_retries} 次）: {e}")
+                    raise ValueError(f"OpenRouter API 網絡錯誤（已重試 {max_retries} 次）: {e}")
+                    
+            except json.JSONDecodeError as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    current_delay = retry_delay * (1.2 ** attempt)
+                    self.logger.warning(
+                        f"OpenRouter API JSON 解析錯誤 (嘗試 {attempt + 1}/{max_retries}): {str(e)}。"
+                        f"等待 {current_delay:.1f} 秒後重試..."
+                    )
+                    time.sleep(current_delay)
+                else:
+                    self.logger.error(f"OpenRouter API JSON 解析錯誤（已重試 {max_retries} 次）: {e}")
+                    raise RuntimeError(f"OpenRouter API JSON 解析錯誤（已重試 {max_retries} 次）: {e}")
+                    
+            except KeyError as e:
+                # KeyError 通常是回應格式問題，不應該重試
+                self.logger.error(f"OpenRouter API 回應格式錯誤: {e}")
+                raise ValueError(f"OpenRouter API 回應格式錯誤: {e}")
+            except Exception as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    # 如果是免費模型且還有其他模型可選，切換模型
+                    if is_free_model:
+                        new_model = self._switch_to_another_free_model(
+                            available_models, tried_models, current_model
+                        )
+                        if new_model:
+                            data['model'] = new_model
+                            tried_models.append(new_model)
+                            self.logger.info(
+                                f"切換模型: {current_model} -> {new_model} "
+                                f"（嘗試 {attempt + 1}/{max_retries}）"
+                            )
+                            current_model = new_model
+                    
+                    current_delay = retry_delay * (1.3 ** attempt)
+                    jitter = random.uniform(0.9, 1.1)
+                    actual_delay = current_delay * jitter
+                    
+                    model_info = f"（當前模型: {data['model']}）" if is_free_model else ""
+                    self.logger.warning(
+                        f"OpenRouter API 未知錯誤 (嘗試 {attempt + 1}/{max_retries}): {str(e)}。{model_info}"
+                        f"等待 {actual_delay:.1f} 秒後重試..."
+                    )
+                    time.sleep(actual_delay)
+                else:
+                    self.logger.error(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {e}")
+                    raise ValueError(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {e}")
+        
+        # 如果所有重試都失敗
+        if last_exception:
+            self.logger.error(f"OpenRouter API 請求最終失敗（已重試 {max_retries} 次）: {last_exception}")
+            raise ValueError(f"OpenRouter API 請求失敗（已重試 {max_retries} 次）: {last_exception}")
+    
+    def _switch_to_another_free_model(self, 
+                                       available_models: List[str], 
+                                       tried_models: List[str], 
+                                       current_model: str) -> Optional[str]:
+        """切換到另一個免費模型
+        
+        Args:
+            available_models: 可用的免費模型列表
+            tried_models: 已嘗試過的模型列表
+            current_model: 當前使用的模型
+            
+        Returns:
+            新的模型名稱，如果沒有可用模型則返回 None
+        """
+        # 找出尚未嘗試過的模型
+        untried_models = [m for m in available_models if m not in tried_models]
+        
+        if not untried_models:
+            # 如果所有模型都嘗試過了，記錄警告但繼續使用當前模型
+            self.logger.warning(
+                f"所有免費模型都已嘗試過，繼續使用當前模型: {current_model}"
+            )
+            return None
+        
+        # 隨機選擇一個未嘗試過的模型
+        new_model = random.choice(untried_models)
+        return new_model
+    
+    def _should_retry(self, status_code: Optional[int], attempt: int, max_retries: int) -> bool:
+        """判斷是否應該重試
+        
+        Args:
+            status_code: HTTP 狀態碼
+            attempt: 當前嘗試次數
+            max_retries: 最大重試次數
+            
+        Returns:
+            是否應該重試
+        """
+        if attempt >= max_retries - 1:
+            return False
+        
+        if status_code is None:
+            return True
+        
+        # 可重試的狀態碼
+        retryable_status_codes = {
+            404,  # 暫時的服務不可用
+            408,  # 請求超時
+            429,  # 速率限制
+            500,  # 服務器錯誤
+            502,  # 網關錯誤
+            503,  # 服務不可用
+            504,  # 網關超時
+        }
+        
+        # 不可重試的狀態碼
+        non_retryable_status_codes = {
+            400,  # 錯誤請求
+            401,  # 未授權
+            403,  # 禁止訪問
+        }
+        
+        if status_code in retryable_status_codes:
+            return True
+        elif status_code in non_retryable_status_codes:
+            return False
+        else:
+            # 其他狀態碼，保守地重試
+            return True
+    
+    def _get_delay_multiplier(self, status_code: Optional[int]) -> float:
+        """根據 HTTP 狀態碼獲取延遲倍數
+        
+        Args:
+            status_code: HTTP 狀態碼
+            
+        Returns:
+            延遲倍數
+        """
+        if status_code is None:
+            return 1.5
+        
+        # 對於速率限制（429），使用更長的退避時間
+        if status_code == 429:
+            return 2.0
+        # 對於服務器錯誤（5xx），使用中等退避時間
+        elif status_code and 500 <= status_code < 600:
+            return 1.8
+        # 對於404等暫時錯誤，使用較短的退避時間
+        elif status_code == 404:
+            return 1.3
+        else:
+            return 1.5
     
     def _process_messages_with_images(self, messages: List[dict], images: Optional[List[str]] = None) -> List[dict]:
         """處理包含圖片的訊息"""
