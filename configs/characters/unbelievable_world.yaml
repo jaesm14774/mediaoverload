@@ -35,7 +35,7 @@ social_media:
     - world 
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/unbelievable_world
+      config_folder_path: /app/configs/social_media/credentials/unbelievable_world
       enabled: true
 
 additional_params:

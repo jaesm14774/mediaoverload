@@ -372,14 +372,14 @@ VIDEO_GENERATION_ENABLED=true
 
 #### 社群媒體憑證
 
-**Instagram** (`configs/social_media/ig/{character}/ig.env`)
+**Instagram** (`configs/social_media/credentials/{character}/ig.env`)
 ```env
 # Instagram 帳號資訊
 INSTAGRAM_USERNAME=your_username
 INSTAGRAM_PASSWORD=your_password
 ```
 
-**Twitter** (`configs/social_media/ig/{character}/twitter.env`)
+**Twitter** (`configs/social_media/credentials/{character}/twitter.env`)
 ```env
 # Twitter API 憑證
 TWITTER_API_KEY=your_api_key
@@ -425,33 +425,6 @@ TWITTER_OAUTH_CLIENT_SECRET=your_oauth_client_secret
      - 在媒體上傳之間自動添加 2 秒間隔，避免觸發速率限制
    - 如果速率限制持續，系統會記錄詳細的錯誤訊息
    - **建議**：避免在短時間內發布過多推文，免費方案有嚴格的速率限制
-
-#### Twitter 發布測試
-
-使用測試程式驗證 Twitter 發布功能：
-
-```bash
-# 基本測試（認證 + 純文字推文）
-python test_twitter.py
-
-# 測試單張圖片推文
-python test_twitter.py --test-image /path/to/image.jpg
-
-# 測試多張圖片推文（最多 4 張）
-python test_twitter.py --test-images image1.jpg image2.jpg image3.jpg
-
-# 測試純文字推文（自訂內容）
-python test_twitter.py --test-text "你的推文內容"
-
-# 測試影片推文
-python test_twitter.py --test-video /path/to/video.mp4
-
-# 執行所有測試
-python test_twitter.py --all --test-image /path/to/image.jpg
-
-# 指定配置路徑
-python test_twitter.py --config-path configs/social_media/ig/kirby
-```
 
 ### 2. 角色配置詳解
 
@@ -501,10 +474,10 @@ social_media:
     - "#nintendo"
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/kirby
+      config_folder_path: /app/configs/social_media/credentials/kirby
       enabled: true
     twitter:
-      config_folder_path: /app/configs/social_media/ig/kirby
+      config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""  # 可選，用於區分不同帳號
       enabled: true
 
@@ -709,7 +682,7 @@ result = use_case.execute(
 
 ### 新增角色
 1. 在 `configs/characters/` 創建新的 YAML 配置文件
-2. 在 `configs/social_media/ig/` 創建對應的資料夾和憑證
+2. 在 `configs/social_media/credentials/` 創建對應的資料夾和憑證
 3. 如需要群組功能，在資料庫中添加角色記錄
 
 ### 新增社群媒體平台
@@ -928,7 +901,7 @@ social_media:
     - world 
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/unbelievable_world
+      config_folder_path: /app/configs/social_media/credentials/unbelievable_world
       enabled: true
 
 additional_params:

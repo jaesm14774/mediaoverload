@@ -38,10 +38,10 @@ social_media:
     - 星のカービィ
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/kirby
+      config_folder_path: /app/configs/social_media/credentials/kirby
       enabled: true
     twitter:
-      config_folder_path: /app/configs/social_media/ig/kirby
+      config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""  # 可選
       enabled: true
 

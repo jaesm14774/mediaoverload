@@ -26,7 +26,7 @@ social_media:
     - waddledee
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/ig/waddledee
+      config_folder_path: /app/configs/social_media/credentials/waddledee
       enabled: false
 
 additional_params:
