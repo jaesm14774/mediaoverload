@@ -168,14 +168,14 @@ class TwitterPlatform(SocialMediaPlatform):
                     bearer_token=bearer_token if bearer_token else None,
                     wait_on_rate_limit=False
                 )
-                self.logger.info("Twitter API v2 客戶端已初始化（不進行連線測試以節省 API 呼叫次數）")
-                self.logger.info("v1.1 API 客戶端已初始化（用於媒體上傳）")
+                self.logger.debug("Twitter API v2 客戶端已初始化（不進行連線測試以節省 API 呼叫次數）")
+                self.logger.debug("v1.1 API 客戶端已初始化（用於媒體上傳）")
                 self.client = None  # 標記使用 v2
             except Exception as e:
                 self.logger.warning(f"無法初始化 Twitter API v2，將使用 v1.1: {str(e)}")
                 # 備用方案：使用 v1.1 API
                 self.client = self.client_v1  # 標記使用 v1.1
-                self.logger.info("Twitter API v1.1 客戶端已初始化（不進行連線測試以節省 API 呼叫次數）")
+                self.logger.debug("Twitter API v1.1 客戶端已初始化（不進行連線測試以節省 API 呼叫次數）")
         except ImportError:
             error_msg = "請安裝 tweepy 套件: pip install tweepy"
             self.logger.error(error_msg)
@@ -356,7 +356,7 @@ class TwitterPlatform(SocialMediaPlatform):
                 # 如果 v2 失敗，嘗試使用 v1.1（如果有）
                 # 注意：媒體已經上傳，只需要發布推文
                 if self.client_v1:
-                    self.logger.info("嘗試使用 API v1.1 作為備用方案發布推文")
+                    self.logger.debug("嘗試使用 API v1.1 作為備用方案發布推文")
                     try:
                         # 使用 v1.1 API 發布推文（媒體已上傳）
                         if media_ids:
@@ -390,7 +390,7 @@ class TwitterPlatform(SocialMediaPlatform):
                         return False
                 elif self.client:
                     # 如果 self.client 存在（舊的 v1.1 客戶端）
-                    self.logger.info("嘗試使用 API v1.1 作為備用方案")
+                    self.logger.debug("嘗試使用 API v1.1 作為備用方案")
                     return self._upload_with_v1(post, text)
                 else:
                     self.logger.error("沒有可用的備用 API 客戶端")

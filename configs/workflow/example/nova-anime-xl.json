@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "Gooey's inky blue form glistens under soft diffused light, his gelatinous body quivering slightly as he faces Kirby across a low wooden table. Kirby leans forward on rounded pink feet, stubby arm extended toward Gooey with chopsticks pinching a single ramen noodle. Steam curls upward from the ceramic bowl between them, its milky broth catching the overhead illumination that casts perfect circular shadows beneath both characters.  The minimalist composition frames them against an infinite white plane, their spherical silhouettes creating stark contrast - Kirby's bubblegum curves smooth and matte against Gooey's glossy, dripping edges. Three elements anchor the scene: the black-lacquered chopsticks in Kirby's grip, the asymmetrical clay bowl's earthy orange glaze, and the trembling noodle strand bridging the gap between Kirby's determined squint and Gooey's lolling crimson tongue.  Gooey's entire body stretches toward the offering, viscous tendrils elongating across the table's pale surface while maintaining his central mass. Their spherical forms mirror each other at different scales - Kirby compact and focused, Gooey fluid and receptive - separated by precisely twelve inches of negative space that highlights the noodle's delicate arc. A single drop of broth falls from the suspended noodle, captured mid-descent toward Gooey's waiting tongue."
+      "value": "In a sun-drenched patch on a cozy carpet, a happy golden retriever lies on its back, paws curled in the air in a gesture of complete trust. Kirby, with his kind, simple expression, waddles over and gently places one of his soft, round hands on the dog's warm belly. The effect is immediate and magical. The dog lets out a long, blissful sigh, its eyes closing in sheer ecstasy. Its body, once just relaxed, seems to completely melt into the floor, a puddle of golden fur and happiness. Its tail begins a slow, deliberate *thump... thump...* against the ground, the only sound in the quiet room. A faint, warm glow seems to emanate from where Kirby's hand rests, a visible sign of the pure, perfect comfort being shared between two friends"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -28,14 +28,14 @@
   },
   "183": {
     "inputs": {
-      "value": "worst quality, bad anatomy, poorly drawn hands"
+      "value": "low quality, blurry, deformed, extra limbs, missing hands, cropped, frame, watermark, text, worst quality, lowres, bad anatomy, signature, jpeg artifacts, ugly, disfigured"
     },
     "class_type": "PrimitiveString",
     "_meta": {
       "title": "negative prompt"
     }
   },
-  "237:0": {
+  "217": {
     "inputs": {
       "ckpt_name": "sdxl\\noobaiXLNAIXL_vPred10Version.safetensors"
     },
@@ -44,7 +44,7 @@
       "title": "Load Checkpoint"
     }
   },
-  "237:1": {
+  "218": {
     "inputs": {
       "width": [
         "171",
@@ -61,33 +61,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "237:2": {
-    "inputs": {
-      "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
-      "model": [
-        "237:0",
-        0
-      ],
-      "clip": [
-        "237:0",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "237:3": {
+  "220": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "237:2",
+        "217",
         1
       ]
     },
@@ -96,14 +77,14 @@
       "title": "positive prompt"
     }
   },
-  "237:4": {
+  "221": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "237:2",
+        "217",
         1
       ]
     },
@@ -112,28 +93,28 @@
       "title": "negative prompt"
     }
   },
-  "237:5": {
+  "222": {
     "inputs": {
-      "seed": 208,
+      "seed": 126,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "237:2",
+        "217",
         0
       ],
       "positive": [
-        "237:3",
+        "220",
         0
       ],
       "negative": [
-        "237:4",
+        "221",
         0
       ],
       "latent_image": [
-        "237:1",
+        "218",
         0
       ]
     },
@@ -142,14 +123,14 @@
       "title": "KSampler"
     }
   },
-  "237:6": {
+  "223": {
     "inputs": {
       "samples": [
-        "237:5",
+        "222",
         0
       ],
       "vae": [
-        "237:0",
+        "217",
         2
       ]
     },
@@ -158,11 +139,11 @@
       "title": "VAE Decode"
     }
   },
-  "237:7": {
+  "224": {
     "inputs": {
-      "filename_prefix": "model1_lora",
+      "filename_prefix": "model0",
       "images": [
-        "237:6",
+        "223",
         0
       ]
     },
@@ -171,7 +152,7 @@
       "title": "Save Image"
     }
   },
-  "240:0": {
+  "226:0": {
     "inputs": {
       "ckpt_name": "sdxl\\waiNSFWIllustrious_v130.safetensors"
     },
@@ -180,7 +161,7 @@
       "title": "Load Checkpoint"
     }
   },
-  "240:1": {
+  "226:1": {
     "inputs": {
       "width": [
         "171",
@@ -197,33 +178,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "240:2": {
-    "inputs": {
-      "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
-      "model": [
-        "240:0",
-        0
-      ],
-      "clip": [
-        "240:0",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "240:3": {
+  "226:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "240:2",
+        "226:0",
         1
       ]
     },
@@ -232,14 +194,14 @@
       "title": "positive prompt"
     }
   },
-  "240:4": {
+  "226:3": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "240:2",
+        "226:0",
         1
       ]
     },
@@ -248,28 +210,28 @@
       "title": "negative prompt"
     }
   },
-  "240:5": {
+  "226:4": {
     "inputs": {
-      "seed": 208,
+      "seed": 126,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "240:2",
+        "226:0",
         0
       ],
       "positive": [
-        "240:3",
+        "226:2",
         0
       ],
       "negative": [
-        "240:4",
+        "226:3",
         0
       ],
       "latent_image": [
-        "240:1",
+        "226:1",
         0
       ]
     },
@@ -278,14 +240,14 @@
       "title": "KSampler"
     }
   },
-  "240:6": {
+  "226:5": {
     "inputs": {
       "samples": [
-        "240:5",
+        "226:4",
         0
       ],
       "vae": [
-        "240:0",
+        "226:0",
         2
       ]
     },
@@ -294,11 +256,11 @@
       "title": "VAE Decode"
     }
   },
-  "240:7": {
+  "226:6": {
     "inputs": {
-      "filename_prefix": "model2_lora",
+      "filename_prefix": "model1",
       "images": [
-        "240:6",
+        "226:5",
         0
       ]
     },
@@ -307,7 +269,7 @@
       "title": "Save Image"
     }
   },
-  "241:0": {
+  "227:0": {
     "inputs": {
       "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
     },
@@ -316,7 +278,7 @@
       "title": "Load Checkpoint"
     }
   },
-  "241:1": {
+  "227:1": {
     "inputs": {
       "width": [
         "171",
@@ -333,33 +295,14 @@
       "title": "Empty Latent Image"
     }
   },
-  "241:2": {
-    "inputs": {
-      "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
-      "model": [
-        "241:0",
-        0
-      ],
-      "clip": [
-        "241:0",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "241:3": {
+  "227:2": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "241:2",
+        "227:0",
         1
       ]
     },
@@ -368,14 +311,14 @@
       "title": "positive prompt"
     }
   },
-  "241:4": {
+  "227:3": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "241:2",
+        "227:0",
         1
       ]
     },
@@ -384,28 +327,28 @@
       "title": "negative prompt"
     }
   },
-  "241:5": {
+  "227:4": {
     "inputs": {
-      "seed": 208,
+      "seed": 126,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "241:2",
+        "227:0",
         0
       ],
       "positive": [
-        "241:3",
+        "227:2",
         0
       ],
       "negative": [
-        "241:4",
+        "227:3",
         0
       ],
       "latent_image": [
-        "241:1",
+        "227:1",
         0
       ]
     },
@@ -414,14 +357,14 @@
       "title": "KSampler"
     }
   },
-  "241:6": {
+  "227:5": {
     "inputs": {
       "samples": [
-        "241:5",
+        "227:4",
         0
       ],
       "vae": [
-        "241:0",
+        "227:0",
         2
       ]
     },
@@ -430,11 +373,11 @@
       "title": "VAE Decode"
     }
   },
-  "241:7": {
+  "227:6": {
     "inputs": {
-      "filename_prefix": "model3_lora",
+      "filename_prefix": "model2",
       "images": [
-        "241:6",
+        "227:5",
         0
       ]
     },

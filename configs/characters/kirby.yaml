@@ -23,14 +23,22 @@ generation:
     arbitrary: 0.1
     news: 0.9
     
-  # 圖片系統提示的權重配置  
+  # 圖片系統提示的權重配置
   image_system_prompt_weights:
     black_humor_system_prompt: 0.1
-    stable_diffusion_prompt: 0.3
-    cinematic_stable_diffusion_prompt: 0.1
-    two_character_interaction_generate_system_prompt: 0.3
+    stable_diffusion_prompt: 0.2
+    two_character_interaction_generate_system_prompt: 0.25
     warm_scene_description_system_prompt: 0.2
-  style: minimalism style with pure background
+    sticker_prompt_system_prompt: 0.25
+
+  # 風格選項的權重配置
+  # 包含多種風格選項，以及空字串（讓 LLM 自由發揮）
+  style_weights:
+    "minimalism style with pure background": 0.2
+    "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.2
+    "watercolor painting style with pure background": 0.10
+    "sketch-like illustration with minimalist approach": 0.10
+    "": 0.4
 
 social_media:
   default_hashtags:
@@ -48,7 +56,7 @@ social_media:
 additional_params:
   is_negative: false
   image:
-    images_per_description: 10
+    images_per_description: 8
     custom_node_updates:
       - node_type: "PrimitiveInt"
         inputs:

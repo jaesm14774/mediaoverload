@@ -74,6 +74,8 @@ python run_media_interface.py --config configs/characters/kirby.yaml
 *   **🎨 多模態內容生成**:
     *   **文案創作**: 自動生成標題、描述、標籤 (Hashtags) 等。
     *   **圖像生成 (Text-to-Image)**: 整合 ComfyUI，支援多種工作流 (Flux Dev, Nova Anime XL, Flux Krea Dev)。
+    *   **圖像到圖像 (Image-to-Image)**: 支援直接使用現有圖片進行 image to image 生成，可調整 denoise 權重 (0.5-0.7)。
+    *   **文生圖 -> 圖生圖 (Text2Image2Image)**: 先進行 text to image 生成，自動篩選符合描述的圖片，再用 image to image 進行二次生成，提升生成品質。
     *   **影片生成 (Text-to-Video)**: 支援文字轉影片功能，使用 MMAudio 技術可生成帶音效的短影片內容。
     *   **多模型支援**: 整合 Ollama、Google Gemini、OpenRouter 等多種 AI 模型提供者。
 
@@ -309,7 +311,8 @@ flowchart TD
     SelectStrategy --> CheckType{生成類型}
     CheckType -->|text2img| T2IStrategy[文生圖策略]
     CheckType -->|text2video| T2VStrategy[文生影片策略]
-    CheckType -->|img2img| I2IStrategy[圖生圖策略]
+    CheckType -->|image2image| I2IStrategy[圖生圖策略]
+    CheckType -->|text2image2image| T2I2IStrategy[文生圖->圖生圖策略]
     
     T2IStrategy --> GenerateDesc[生成描述]
     T2VStrategy --> GenerateDesc
@@ -516,12 +519,16 @@ generation:
   
   # 生成類型權重 (系統會根據權重隨機選擇)
   generation_type_weights:
-    text2img: 0.8               # 80% 機率生成圖片
-    text2video: 0.2             # 20% 機率生成影片
+    text2img: 0.6               # 60% 機率生成圖片
+    image2image: 0.1             # 10% 機率使用 image to image
+    text2image2image: 0.2        # 20% 機率使用 text2image -> image2image 二次生成
+    text2video: 0.1              # 10% 機率生成影片
   
   # 對應的工作流配置
   workflows:
     text2img: /app/configs/workflow/nova-anime-xl.json
+    image2image: /app/configs/workflow/example/image_to_image.json
+    text2image2image: /app/configs/workflow/nova-anime-xl.json  # 第一階段使用 text2img 工作流
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
     # 支援多種工作流：flux_krea_dev.json, flux_dev.json 等
   
@@ -567,6 +574,18 @@ additional_params:
       - node_type: "PrimitiveInt"
         inputs:
           value: 1024            # 圖片解析度
+    
+    # Image to Image 專用參數
+    denoise: 0.6                 # denoise 權重 (0.5-0.7)，控制對原圖的參考程度
+    images_per_input: 1          # 每個輸入圖片生成的數量
+    
+    # Text2Image2Image 專用參數
+    first_stage:                  # 第一階段 (text2image) 參數
+      images_per_description: 4  # 第一階段每個描述生成的圖片數量
+    second_stage:                 # 第二階段 (image2image) 參數
+      images_per_input: 1        # 第二階段每個輸入圖片生成的數量
+      denoise: 0.6               # 第二階段 denoise 權重 (0.5-0.7)
+    i2i_workflow_path: /app/configs/workflow/example/image_to_image.json  # 第二階段工作流
   
   # 視頻生成專用參數
   video:
@@ -580,7 +599,103 @@ additional_params:
           length: 97             # 視頻長度
 ```
 
-### 3. 後端服務設定
+### 3. 生成策略詳解
+
+#### Image to Image (圖生圖)
+
+直接使用現有圖片進行 image to image 生成，適合對已有圖片進行風格轉換或細節優化。
+
+**使用方式：**
+```python
+from lib.media_auto.strategies.base_strategy import GenerationConfig
+from lib.media_auto.factory.strategy_factory import StrategyFactory
+
+config = GenerationConfig(
+    generation_type='image2image',
+    input_image_path='/path/to/input/image.jpg',  # 必需：輸入圖片路徑
+    prompt='A beautiful sunset scene',  # 可選：提示詞
+    workflow_path='configs/workflow/example/image_to_image.json',
+    output_dir='output',
+    character='kirby',
+    additional_params={
+        'image': {
+            'denoise': 0.6,  # denoise 權重 (0.5-0.7)，數值越小越接近原圖
+            'images_per_input': 1
+        }
+    }
+)
+
+strategy = StrategyFactory.get_strategy('image2image')
+strategy.load_config(config)
+strategy.generate_description()
+strategy.generate_media()
+```
+
+**配置參數：**
+- `input_image_path`: 輸入圖片路徑（必需）
+- `denoise`: 控制對原圖的參考程度，範圍 0.5-0.7
+  - 0.5: 較多保留原圖特徵
+  - 0.7: 較多創新變化
+- `extract_description`: 是否從圖片中提取描述（可選）
+
+#### Text2Image2Image (文生圖 -> 圖生圖)
+
+先進行 text to image 生成，自動篩選符合描述的圖片，再用 image to image 進行二次生成，提升生成品質。
+
+**工作流程：**
+1. **第一階段**：使用 text to image 生成多張圖片
+2. **篩選階段**：使用視覺模型分析圖文匹配度，篩選符合描述的圖片
+3. **第二階段**：對篩選後的圖片使用 image to image 進行二次生成（denoise 0.5-0.7）
+
+**使用方式：**
+```python
+config = GenerationConfig(
+    generation_type='text2image2image',
+    prompt='Kirby eating ramen',
+    workflow_path='configs/workflow/nova-anime-xl.json',  # 第一階段工作流
+    output_dir='output',
+    character='kirby',
+    similarity_threshold=0.9,  # 第一階段篩選閾值
+    additional_params={
+        'image': {
+            'first_stage': {
+                'images_per_description': 4  # 第一階段生成數量
+            },
+            'second_stage': {
+                'images_per_input': 1,  # 第二階段每個輸入生成數量
+                'denoise': 0.6  # 第二階段 denoise 權重
+            },
+            'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'  # 第二階段工作流
+        }
+    }
+)
+
+strategy = StrategyFactory.get_strategy('text2image2image')
+strategy.load_config(config)
+strategy.generate_description()
+strategy.generate_media()
+strategy.analyze_media_text_match(similarity_threshold=0.9)
+```
+
+**輸出結構：**
+```
+output/
+├── first_stage/          # 第一階段生成的圖片
+│   ├── kirby_d0_0.png
+│   ├── kirby_d0_1.png
+│   └── ...
+└── second_stage/         # 第二階段生成的圖片
+    ├── kirby_i2i_0_0.png
+    └── ...
+```
+
+**優勢：**
+- ✅ 自動篩選高品質圖片，減少人工審核工作量
+- ✅ 二次生成提升圖片品質和細節
+- ✅ 保持原圖風格特徵的同時進行優化
+- ✅ 適合需要高品質輸出的場景
+
+### 4. 後端服務設定
 
 #### ComfyUI 設定
 ```bash
