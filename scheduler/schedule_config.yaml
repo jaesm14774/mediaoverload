@@ -1,5 +1,5 @@
 probability_settings:
-  base_probability: 0.1  # 基礎機率（每15小時3次）
+  base_probability: 0.2  # 基礎機率（每15小時3次）
   max_probability: 0.5    # 最大機率（每15小時7.5次）
   min_probability: 0.03334  # 最小機率（每15小時0.5次）
 

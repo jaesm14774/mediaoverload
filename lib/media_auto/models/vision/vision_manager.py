@@ -68,8 +68,6 @@ class VisionContentManager:
         if system_prompt_key not in self.prompts:
             print(f"Warning: Prompt key '{system_prompt_key}' not found in prompts configuration. Falling back to default 'stable_diffusion_prompt'.")
             actual_key_to_use = 'stable_diffusion_prompt'
-            # if actual_key_to_use not in self.prompts:
-            #     raise ValueError(f"Default prompt key '{actual_key_to_use}' is also missing from prompts configuration.")
 
         print(f"Using image system prompt key: {actual_key_to_use}")
         messages = [
@@ -128,12 +126,17 @@ class VisionContentManager:
         
         return result
 
-    def generate_two_character_interaction_prompt(self, main_character, secondary_character, prompt='', style='minimalist', **kwargs) -> str:
+    def generate_two_character_interaction_prompt(self, main_character, secondary_character, prompt='', style='', **kwargs) -> str:
         """生成雙角色互動的提示詞"""
         # 構建輸入格式，包含所有必要字段
         user_input = f"""
         Main Role: {main_character}
         Secondary Role: {secondary_character}
+        """
+
+        # 只有當 style 不為空時才加上 Style 欄位
+        if style and style.strip():
+            user_input += f"""
         Style: {style}
         """
         
@@ -180,7 +183,26 @@ class VisionContentManager:
         
         for media_path in media_paths:
             print(f'進行文圖匹配程度判斷中 : {media_path}\n')
-            desc_index = int(re.search(f'{main_character}_d(\d+)_\d+\.', media_path).group(1))
+
+            # 嘗試匹配第一階段的文件名格式: {character}_d{idx}_{i}
+            match = re.search(rf'{re.escape(main_character)}_d(\d+)_\d+\.', media_path, re.IGNORECASE)
+
+            # 如果第一階段匹配失敗，嘗試匹配第二階段的文件名格式: {character}_i2i_{img_idx}_{i}
+            if not match:
+                match = re.search(rf'{re.escape(main_character)}_i2i_(\d+)_\d+\.', media_path, re.IGNORECASE)
+
+            # 如果都匹配失敗，跳過這個文件
+            if not match:
+                print(f'⚠️  警告：無法從文件名解析描述索引: {media_path}')
+                continue
+
+            desc_index = int(match.group(1))
+
+            # 確保索引在有效範圍內
+            if desc_index >= len(descriptions):
+                print(f'⚠️  警告：描述索引 {desc_index} 超出範圍（共有 {len(descriptions)} 個描述）')
+                continue
+
             similarity = self.analyze_image_text_similarity(
                 text=descriptions[desc_index],
                 image_path=media_path,
@@ -228,7 +250,11 @@ class VisionManagerBuilder:
             'fill_missing_details_system_prompt': fill_missing_details_system_prompt,
             'two_character_interaction_generate_system_prompt': two_character_interaction_generate_system_prompt,
             'black_humor_system_prompt': black_humor_system_prompt,
-            'video_description_system_prompt': video_description_system_prompt
+            'video_description_system_prompt': video_description_system_prompt,
+            'sticker_prompt_system_prompt': sticker_prompt_system_prompt,
+            'warm_scene_description_system_prompt': warm_scene_description_system_prompt,
+            'cinematic_stable_diffusion_prompt': cinematic_stable_diffusion_prompt
+
         }
     
     def with_vision_model(self, model_type: str, **config):

@@ -33,6 +33,80 @@ class ComfyUICommunicator:
         req = request.Request(f"http://{self.server_address}/prompt", data=data)
         return json.loads(request.urlopen(req).read())
     
+    def upload_image(self, image_path: str, subfolder: str = "", overwrite: bool = False) -> str:
+        """上傳圖片到 ComfyUI 伺服器
+        
+        Args:
+            image_path: 本地圖片路徑
+            subfolder: 子資料夾名稱（可選）
+            overwrite: 是否覆蓋已存在的文件
+            
+        Returns:
+            上傳後的圖片文件名
+        """
+        import mimetypes
+        
+        # 獲取文件類型
+        mime_type, _ = mimetypes.guess_type(image_path)
+        if mime_type is None:
+            mime_type = 'image/png'
+        
+        # 讀取圖片文件
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+        
+        filename = os.path.basename(image_path)
+        
+        # 構建 multipart/form-data 請求
+        boundary = '----WebKitFormBoundary' + str(uuid.uuid4()).replace('-', '')
+        
+        # 構建請求體
+        body_parts = []
+        
+        # 添加 overwrite 參數
+        body_parts.append(f'--{boundary}\r\n'.encode())
+        body_parts.append(f'Content-Disposition: form-data; name="overwrite"\r\n\r\n'.encode())
+        body_parts.append(str(overwrite).lower().encode())
+        body_parts.append('\r\n'.encode())
+        
+        # 如果有 subfolder，添加 subfolder 參數
+        if subfolder:
+            body_parts.append(f'--{boundary}\r\n'.encode())
+            body_parts.append(f'Content-Disposition: form-data; name="subfolder"\r\n\r\n'.encode())
+            body_parts.append(subfolder.encode())
+            body_parts.append('\r\n'.encode())
+        
+        # 添加圖片文件
+        body_parts.append(f'--{boundary}\r\n'.encode())
+        body_parts.append(f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'.encode())
+        body_parts.append(f'Content-Type: {mime_type}\r\n\r\n'.encode())
+        body_parts.append(image_data)
+        body_parts.append(f'\r\n--{boundary}--\r\n'.encode())
+        
+        body = b''.join(body_parts)
+        
+        # 發送上傳請求
+        req = request.Request(
+            f"http://{self.server_address}/upload/image",
+            data=body,
+            headers={
+                'Content-Type': f'multipart/form-data; boundary={boundary}',
+            }
+        )
+        
+        try:
+            response = request.urlopen(req)
+            result = json.loads(response.read().decode('utf-8'))
+            uploaded_filename = result.get('name', filename)
+            print(f"✅ 圖片已上傳到 ComfyUI: {uploaded_filename}")
+            return uploaded_filename
+        except Exception as e:
+            # 如果上傳失敗，嘗試直接使用文件名（假設圖片已經在 ComfyUI 的 input 目錄）
+            print(f"⚠️ 圖片上傳失敗: {e}")
+            print(f"   嘗試直接使用文件名: {filename}")
+            print(f"   💡 提示：請確保圖片已手動複製到 ComfyUI 的 input 目錄")
+            return filename
+            
     def get_media_file(self, filename, subfolder, folder_type):
         """
         獲取媒體檔案（圖片、影片、GIF等）

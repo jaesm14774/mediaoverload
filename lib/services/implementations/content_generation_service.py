@@ -67,6 +67,7 @@ class ContentGenerationService(IContentGenerationService):
         """生成描述文字"""
         self.logger.info("開始生成描述")
         self.logger.info(f"採用圖片生成策略 : {config.image_system_prompt}")
+        self.logger.info(f"採用風格 : {config.style}")
         self.strategy.generate_description()
         descriptions = self.strategy.descriptions
         self.logger.info(f"描述生成完成，共 {len(descriptions)} 個描述")

@@ -15,7 +15,7 @@ class CharacterConfig:
     group_name: str = ''
     generate_prompt_method : str = 'arbitrary'
     image_system_prompt: str = 'stable_diffusion_prompt'
-    style: str = ''
+    style: str = ''  # 保留向後兼容，當 style_weights 未設定時使用
 
 class BaseCharacter(ABC):
     """角色基礎類別"""

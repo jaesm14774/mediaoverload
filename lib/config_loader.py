@@ -75,7 +75,14 @@ class ConfigLoader:
             image_system_prompt = ConfigLoader.process_weighted_choice(
                 generation_info['image_system_prompt_weights']
             )
-        
+
+        # 處理風格選擇
+        style = generation_info.get('style', '')
+        if 'style_weights' in generation_info:
+            style = ConfigLoader.process_weighted_choice(
+                generation_info['style_weights']
+            )
+
         # 處理生成類型選擇
         generation_type = generation_info.get('generation_type', 'text2img')
         if 'generation_type_weights' in generation_info:
@@ -99,7 +106,7 @@ class ConfigLoader:
             group_name=character_info.get('group_name', ''),
             generate_prompt_method=prompt_method,
             image_system_prompt=image_system_prompt,
-            style=generation_info.get('style', '')
+            style=style
         )
     
     @staticmethod
