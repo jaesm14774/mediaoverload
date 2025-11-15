@@ -1,76 +1,134 @@
-"""角色資料庫存取層"""
+"""Character repository for database access.
+
+This module provides database access for character information.
+CharacterRepository fetches character data from MySQL database with automatic retry logic.
+"""
 from typing import List, Optional, Dict, Any
 from abc import ABC, abstractmethod
 
 
 class ICharacterRepository(ABC):
-    """角色資料庫存取介面"""
-    
+    """Character database access interface.
+
+    Defines the contract for retrieving character data from storage.
+    Implementations handle the actual database interaction logic.
+    """
+
     @abstractmethod
     def get_characters_by_group(self, group_name: str, workflow_name: str) -> List[str]:
-        """根據群組獲取角色列表
-        
+        """Fetch character list for a group.
+
+        Retrieves all active characters belonging to a specific group that support
+        a given workflow type.
+
         Args:
-            group_name: 群組名稱
-            workflow_name: 工作流名稱
-            
+            group_name: Character group identifier (e.g., 'Kirby', 'Pokemon')
+            workflow_name: Workflow type identifier (currently unused in query)
+
         Returns:
-            角色名稱列表
+            List of character name strings (English names)
         """
         pass
-    
+
     @abstractmethod
     def get_random_character_from_group(self, group_name: str, workflow_name: str) -> Optional[str]:
-        """從群組中隨機獲取一個角色
-        
+        """Select random character from a group.
+
+        Retrieves all characters in the group, then randomly selects one.
+        Useful for variety in multi-character scenarios.
+
         Args:
-            group_name: 群組名稱
-            workflow_name: 工作流名稱
-            
+            group_name: Character group identifier
+            workflow_name: Workflow type identifier
+
         Returns:
-            隨機選擇的角色名稱，如果沒有則返回 None
+            Single character name string, or None if group is empty
         """
         pass
 
 
 class CharacterRepository(ICharacterRepository):
-    """角色資料庫存取實現"""
-    
+    """MySQL-based character database access.
+
+    Implements character retrieval from MySQL database with automatic
+    connection retry on failure. Queries the anime.anime_roles table.
+
+    Database schema expected:
+        anime.anime_roles:
+            - role_name_en: English character name
+            - group_name: Character group identifier
+            - status: Active flag (1 = active)
+            - weight: Selection weight (>0 for selectable characters)
+
+    Args:
+        db_connection: Database connection object with cursor attribute
+    """
+
     def __init__(self, db_connection):
+        """Initialize repository with database connection.
+
+        Args:
+            db_connection: Database connection object
+        """
         self.db_connection = db_connection
-    
+
     def get_characters_by_group(self, group_name: str, workflow_name: str) -> List[str]:
-        """根據群組獲取角色列表"""
+        """Fetch character list for a group with retry.
+
+        Queries database for active characters in the specified group.
+        Automatically retries up to 3 times on database errors, reconnecting
+        between attempts.
+
+        Args:
+            group_name: Character group identifier
+            workflow_name: Workflow type (currently unused in query)
+
+        Returns:
+            List of character English names
+
+        Raises:
+            Exception: Database error after 3 retry attempts
+        """
         max_retries = 3
         retry_count = 0
-        json_workflow_name = f'"{workflow_name}"'
         while retry_count < max_retries:
             try:
                 cursor = self.db_connection.cursor
                 query = """
-                    SELECT role_name_en 
+                    SELECT role_name_en
                     FROM anime.anime_roles
-                    WHERE group_name = %s AND status = 1 AND json_contains(workflow_list, %s) AND weight > 0
+                    WHERE group_name = %s AND status = 1 AND weight > 0
                 """.strip()
-                
-                cursor.execute(query, (group_name, json_workflow_name))
+
+                cursor.execute(query, (group_name,))
                 results = cursor.fetchall()
                 return [row[0] for row in results]
-                
+
             except Exception as e:
                 retry_count += 1
                 if retry_count == max_retries:
                     raise
-                
-                # 重新獲取連接
+
+                # Reconnect to database and retry
                 from lib.database import db_pool
                 self.db_connection = db_pool.get_connection('mysql')
                 continue
-    
+
     def get_random_character_from_group(self, group_name: str, workflow_name: str) -> Optional[str]:
-        """從群組中隨機獲取一個角色"""
+        """Select random character from a group.
+
+        Fetches all characters in the group using get_characters_by_group(),
+        then randomly selects one.
+
+        Args:
+            group_name: Character group identifier
+            workflow_name: Workflow type identifier
+
+        Returns:
+            Random character English name, or None if group has no characters
+        """
         import random
         characters = self.get_characters_by_group(group_name, workflow_name)
         if not characters:
             return None
-        return random.choice(characters) 
+        return random.choice(characters)
