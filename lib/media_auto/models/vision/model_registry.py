@@ -111,7 +111,6 @@ class OpenRouterModel(AIModelInterface):
     def get_random_free_text_model(self) -> str:
         """隨機選擇一個免費文本模型"""
         selected_model = random.choice(self.FREE_TEXT_MODELS)
-        print(f"隨機選擇一個免費文本模型: {selected_model}")
         return selected_model
     
     @classmethod

@@ -1,7 +1,7 @@
 {
   "45": {
     "inputs": {
-      "image": "PXL_20250501_025306601.jpg"
+      "image": "model2_lora_00003__kirby_d0_2 (1).png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -42,6 +42,25 @@
       "title": "negative_prompt"
     }
   },
+  "68": {
+    "inputs": {
+      "lora_name": "sdxl\\reiXL_NB11.safetensors",
+      "strength_model": 0.6000000000000001,
+      "strength_clip": 1.0000000000000002,
+      "model": [
+        "47:0",
+        0
+      ],
+      "clip": [
+        "47:0",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
   "47:0": {
     "inputs": {
       "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
@@ -51,42 +70,14 @@
       "title": "Load Checkpoint"
     }
   },
-  "47:2": {
-    "inputs": {
-      "text": [
-        "57",
-        0
-      ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
-      "clip": [
-        "47:0",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "positive prompt"
-    }
-  },
   "47:3": {
     "inputs": {
       "text": [
         "58",
         0
       ],
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
       "clip": [
-        "47:0",
+        "68",
         1
       ]
     },
@@ -95,16 +86,32 @@
       "title": "negative prompt"
     }
   },
+  "47:2": {
+    "inputs": {
+      "text": [
+        "57",
+        0
+      ],
+      "clip": [
+        "68",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
   "47:4": {
     "inputs": {
-      "seed": 344,
+      "seed": 360,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
-      "denoise": 1,
+      "denoise": 0.7000000000000002,
       "model": [
-        "47:0",
+        "68",
         0
       ],
       "positive": [

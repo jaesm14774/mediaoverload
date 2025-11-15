@@ -1,10 +1,11 @@
+"""Character configuration data structures."""
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 from abc import ABC
 
 @dataclass
 class CharacterConfig:
-    """角色基礎配置"""
+    """Stores character generation settings."""
     character: str
     output_dir: str
     workflow_path: str
@@ -15,10 +16,10 @@ class CharacterConfig:
     group_name: str = ''
     generate_prompt_method : str = 'arbitrary'
     image_system_prompt: str = 'stable_diffusion_prompt'
-    style: str = ''  # 保留向後兼容，當 style_weights 未設定時使用
+    style: str = ''
 
 class BaseCharacter(ABC):
-    """角色基礎類別"""
+    """Base class for character implementations."""
     config: CharacterConfig
     group_name: str = ''
     image_system_prompt = 'stable_diffusion_prompt'
@@ -31,7 +32,7 @@ class BaseCharacter(ABC):
         self.config = self.get_default_config()
 
     def get_default_config(self) -> CharacterConfig:
-        """返回角色的默認配置"""
+        """Build config from instance attributes."""
         return CharacterConfig(
             character=self.character.lower(),
             output_dir=self.output_dir,
@@ -45,9 +46,9 @@ class BaseCharacter(ABC):
             image_system_prompt = self.image_system_prompt,
             style = self.style
         )
-    
+
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:
-        """具體實現生成配置"""
+        """Convert config to dict and add prompt."""
         config = {k: v for k, v in self.config.__dict__.items()}
         config.update({'prompt': prompt})
-        return config 
+        return config

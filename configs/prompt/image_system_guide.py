@@ -515,14 +515,14 @@ fill_missing_details_system_prompt = """
 # SCENARIO: Brief/disconnected keywords -> Cohesive detail building -> A complete visual narrative that feels "alive" (<=120 words)
 
 ## Core Directives
-1.  **Concrete over Abstract (具體取代抽象):** Translate emotions and concepts ("sadness," "storm") into visible actions or elements ("head lowered," "dark clouds"). This is the foundation.
+1.  **Concrete over Abstract:** Translate emotions and concepts ("sadness," "storm") into visible actions or elements ("head lowered," "dark clouds"). This is the foundation.
 
-2.  **Vivid Cohesion (有生命力的凝聚力):** THIS IS THE MOST IMPORTANT RULE. Do not just list details. Create a *picture*, not a *checklist*.
+2.  **Vivid Cohesion:** THIS IS THE MOST IMPORTANT RULE. Do not just list details. Create a *picture*, not a *checklist*.
     * **Connect all elements:** Describe *how* light interacts with objects (e.g., "sunlight from the right *illuminates* his side and *casts* a long shadow").
     * **Show interaction:** Describe *how* the character relates to the environment (e.g., "sits upright *at* the desk," "hands gripping the cup").
     * **The result must feel like a single, frozen moment in a scene, not a pile of unrelated words.**
 
-3.  **Scene First (場景優先):** Focus on building a physically observable, grounded scene. Every word must be drawable.
+3.  **Scene First:** Focus on building a physically observable, grounded scene. Every word must be drawable.
 
 ## Pitfalls to Avoid (Critical)
 * **AVOID:** Poetic or metaphorical descriptions (e.g., "inky silhouette," "geometric shadows").
@@ -536,7 +536,6 @@ fill_missing_details_system_prompt = """
 
 ## Final Requirements
 * A single, cohesive description that feels like a living scene.
-* Strictly <= 120 words.
 * Language: English.
 
 """
@@ -813,4 +812,44 @@ sticker_prompt_system_prompt = """
 
 **你應該輸出的範例是：**
 `Sticker of a chubby blue chibi cat, expression of utter panic and despair, head exploding with frantic energy. It's sweating profusely, eyes are wide and scribbled, jaw is dropped with a torrent of tears flowing out like a waterfall. Accompanied by symbolic flair like floating question marks (?), scribbled stress lines all around, and tiny ghost-like souls leaving its body. Art style: chibi, kawaii, cute, vector art, bold outlines, flat colors, sticker design, high quality. Composition: centered, isolated on a clean white background, minimal.`
+""".strip()
+
+conceptual_logo_design_prompt = """
+# PURPOSE: Generate a precise prompt for creating a modern, minimalist logo or icon.
+# SCENARIO: User provides a brand/concept -> A structured prompt for generating clean, symbolic vector designs.
+
+## CORE MISSION
+Translate a brand identity or concept into a clear, concise visual design brief for an AI image generator. The focus is on symbolic meaning, minimalism, and scalability, not photorealism. The output should be suitable for creating vector-style graphics.
+
+## LOGO DESIGN PRINCIPLES
+- **Simplicity:** The design must be clean and easily recognizable at small sizes.
+- **Symbolism:** The mark should visually represent the core concept or brand values.
+- **Versatility:** The design should work in monochrome (black and white) as well as color.
+- **Memorability:** The final mark should be unique and impactful.
+
+## 3-PART DESIGN FRAMEWORK
+
+### 1. CORE CONCEPT & SYMBOLISM
+- **Brand/Idea:** What is the logo for? (e.g., "A coffee brand named 'Orbit'," "An app for meditation called 'Stillness'").
+- **Key Metaphor/Idea to Convey:** What is the central visual idea? (e.g., "Combining a coffee bean with a planetary orbit," "A water ripple merging with a sound wave"). This is the most critical part.
+- **Keywords:** (e.g., "Connection, technology, nature, speed, calm, growth").
+
+### 2. VISUAL STYLE & EXECUTION
+- **Style:** (e.g., "Minimalist line art," "Geometric abstraction," "Negative space design," "Organic and flowing," "Bold and chunky").
+- **Line Weight:** (e.g., "Uniform thin line weight," "Variable line weight," "No outlines, solid shapes only").
+- **Color Palette:** Specify the colors. For logos, simplicity is key. (e.g., "Monochromatic black," "A simple two-color palette of deep navy blue and soft coral," "Gradient of blues").
+
+### 3. COMPOSITION & FORMAT
+- **Construction:** Describe how the elements combine. (e.g., "A single, continuous line forming two shapes," "A circle enclosing a stylized mountain," "Two shapes interacting to create a third shape in the negative space").
+- **Final Output Type:** (e.g., "Clean vector logo," "App icon," "Graphic symbol").
+- **Presentation:** How should the final image be displayed? (e.g., "Presented on a plain white background," "Mocked up on a business card," "Displayed as an app icon on a screen").
+
+## OUTPUT FORMAT
+A single-line, comma-separated prompt that synthesizes the framework into a direct instruction for the image generator.
+
+## EXAMPLE
+**INPUT:** "A logo for a cybersecurity company called 'Aegis'"
+
+**OUTPUT:**
+Minimalist logo for a cybersecurity company 'Aegis', combining a stylized Greek shield with a digital network pattern, negative space design, constructed from bold, geometric shapes, uniform line weight, single continuous line, monochromatic deep blue on a clean white background, vector graphic, high resolution, presented centrally.
 """.strip()

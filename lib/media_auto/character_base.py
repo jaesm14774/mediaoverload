@@ -1,4 +1,4 @@
-"""新的角色基類 - 支援配置外部化"""
+"""Configurable character classes with YAML config support."""
 from abc import ABC
 from typing import Dict, Any, Optional
 from lib.media_auto.character_config import CharacterConfig, BaseCharacter
@@ -7,21 +7,16 @@ from lib.social_media import SocialMediaMixin
 
 
 class ConfigurableCharacter(ABC):
-    """可配置的角色基類"""
-    
+    """Character that loads config from YAML files."""
+
     def __init__(self, config_path: Optional[str] = None):
-        """初始化角色
-        
-        Args:
-            config_path: 配置檔案路徑，如果提供則從檔案載入配置
-        """
         if config_path:
-            # 從配置檔案載入
+            # Load from file
             config_dict = ConfigLoader.load_character_config(config_path)
             self.config = ConfigLoader.create_character_config(config_dict)
             self._social_media_config = ConfigLoader.get_social_media_config(config_dict)
-            
-            # 設定屬性以保持向後相容
+
+            # Mirror attributes for backward compatibility
             self.character = self.config.character
             self.output_dir = self.config.output_dir
             self.workflow_path = self.config.workflow_path
@@ -33,12 +28,12 @@ class ConfigurableCharacter(ABC):
             self.image_system_prompt = self.config.image_system_prompt
             self.additional_params = self.config.additional_params
         else:
-            # 使用子類定義的屬性
+            # Use subclass attributes
             self.config = self.get_default_config()
             self._social_media_config = {}
-    
+
     def get_default_config(self) -> CharacterConfig:
-        """返回角色的默認配置"""
+        """Build config from class attributes."""
         return CharacterConfig(
             character=getattr(self, 'character', '').lower(),
             output_dir=getattr(self, 'output_dir', '/app/output_media'),
@@ -52,34 +47,34 @@ class ConfigurableCharacter(ABC):
             image_system_prompt=getattr(self, 'image_system_prompt', 'stable_diffusion_prompt'),
             style=getattr(self, 'style', '')
         )
-    
+
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:
-        """具體實現生成配置"""
+        """Convert config to dict and add prompt."""
         config = {k: v for k, v in self.config.__dict__.items()}
         config.update({'prompt': prompt})
         return config
 
 
 class ConfigurableCharacterWithSocialMedia(ConfigurableCharacter, SocialMediaMixin):
-    """支援社群媒體功能的可配置角色"""
-    
+    """Character with YAML config and social media support."""
+
     def __init__(self, config_path: Optional[str] = None):
         ConfigurableCharacter.__init__(self, config_path)
         SocialMediaMixin.__init__(self)
-        
-        # 如果有社群媒體配置，自動註冊
+
+        # Auto-register platforms from config
         if self._social_media_config:
             self._register_platforms_from_config()
-    
+
     def _register_platforms_from_config(self):
-        """從配置註冊社群媒體平台"""
+        """Register social media platforms from config."""
         from lib.social_media import InstagramPlatform, TwitterPlatform
-        
+
         platform_mapping = {
             'instagram': InstagramPlatform,
             'twitter': TwitterPlatform
         }
-        
+
         platforms_to_register = {}
         for platform_name, platform_config in self._social_media_config.items():
             if platform_name in platform_mapping:
@@ -90,4 +85,4 @@ class ConfigurableCharacterWithSocialMedia(ConfigurableCharacter, SocialMediaMix
                     platform_config.get('prefix', self.character)
                 )
         if platforms_to_register:
-            self.register_social_media(platforms_to_register) 
+            self.register_social_media(platforms_to_register)
