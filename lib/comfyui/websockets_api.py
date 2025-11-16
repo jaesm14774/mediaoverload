@@ -11,11 +11,12 @@ from typing import Dict, List, Optional, Tuple
 from lib.comfyui.analyze import analyze_workflow
 
 class ComfyUICommunicator:
-    def __init__(self, host="host.docker.internal", port=8188, timeout=900):
-        self.host = host
-        self.port = port
+    def __init__(self, host=None, port=None, timeout=900):
+        # 從環境變數讀取，如果沒有則使用預設值
+        self.host = host or os.environ.get('COMFYUI_HOST', 'host.docker.internal')
+        self.port = port or int(os.environ.get('COMFYUI_PORT', '8188'))
         self.client_id = str(uuid.uuid4())
-        self.server_address = f"{host}:{port}"
+        self.server_address = f"{self.host}:{self.port}"
         self.timeout = timeout
         self.ws = None
 

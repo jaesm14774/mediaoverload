@@ -222,6 +222,84 @@ class ConfigBuilder:
         self._config['default_hashtags'] = hashtags
         return self
 
+    def with_keywords(self, keywords: List[str]) -> 'ConfigBuilder':
+        """設定關鍵字列表
+
+        Args:
+            keywords: 關鍵字列表，用於描述生成或搜尋
+
+        Returns:
+            self
+        """
+        self._config['keywords'] = keywords
+        return self
+
+    def with_video_workflow(self, workflow_path: str) -> 'ConfigBuilder':
+        """設定影片工作流路徑（便捷方法）
+
+        Args:
+            workflow_path: 影片工作流 JSON 檔案路徑
+
+        Returns:
+            self
+        """
+        self._config['workflow_path'] = workflow_path
+        self._config['generation_type'] = 'text2video'
+        return self
+
+    def with_secondary_character(self, character: str) -> 'ConfigBuilder':
+        """設定次要角色
+
+        Args:
+            character: 次要角色名稱
+
+        Returns:
+            self
+        """
+        self._config['secondary_character'] = character
+        return self
+
+    def with_extract_description(self, enabled: bool = True) -> 'ConfigBuilder':
+        """設定是否從圖片提取描述（用於 image2image）
+
+        Args:
+            enabled: 是否啟用
+
+        Returns:
+            self
+        """
+        self._config['extract_description'] = enabled
+        return self
+
+    def with_input_image(self, image_path: str) -> 'ConfigBuilder':
+        """設定輸入圖片路徑（用於 image2image）
+
+        Args:
+            image_path: 輸入圖片路徑
+
+        Returns:
+            self
+        """
+        self._config['input_image_path'] = image_path
+        self._config['generation_type'] = 'image2image'
+        return self
+
+    def with_denoise(self, denoise: float) -> 'ConfigBuilder':
+        """設定 denoise 權重（用於 image2image）
+
+        Args:
+            denoise: denoise 權重 (0.0 ~ 1.0)
+
+        Returns:
+            self
+        """
+        if 'additional_params' not in self._config:
+            self._config['additional_params'] = {}
+        if 'image' not in self._config['additional_params']:
+            self._config['additional_params']['image'] = {}
+        self._config['additional_params']['image']['denoise'] = denoise
+        return self
+
     def with_additional_params(self, **params) -> 'ConfigBuilder':
         """設定額外參數
 
