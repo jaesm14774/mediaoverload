@@ -1,12 +1,12 @@
 # Quick Draw - 快速圖片生成範例
 
-基於 mediaoverload 框架的模組化圖片生成工具，專為快速範例和測試設計。
+基於 mediaoverload 框架的彈性圖片生成工具，使用 **FlexibleGenerator** 提供簡單直覺的 API。
 
 ## ✨ 特點
 
 - **🎯 簡化流程** - 跳過耗時的圖文匹配分析和文章生成
 - **⚡ 快速執行** - 專注於圖片生成，適合人工審核
-- **🔄 模組化設計** - 每個使用案例獨立、易於維護
+- **🔄 彈性設計** - 使用 system_prompt + keywords 架構
 - **📦 完全相容** - 使用現有的 mediaoverload 基礎設施
 
 ## 🚀 快速開始
@@ -15,131 +15,176 @@
 
 ```bash
 # 在專案根目錄執行
-jupyter notebook examples/quick_draw_examples.ipynb
+jupyter notebook examples/flexible_generation_examples.ipynb
 ```
 
 Notebook 包含：
-- ✅ 完整的 6 種使用案例
+- ✅ 完整的範例和說明
 - ✅ 互動式環境
 - ✅ 自動顯示生成的圖片
-- ✅ 詳細的說明和註解
+- ✅ 多種風格和場景示範
 
-### 方式 2: Python 腳本
+### 方式 2: 在代碼中使用
 
-```bash
-python examples/quick_draw_example.py
-```
-
-### 方式 3: 在代碼中使用
-
-#### 1. 單角色圖片生成
+#### 基本圖片生成
 
 ```python
-from examples.quick_draw.use_cases import SingleCharacterUseCase
+import os
+from examples.quick_draw.helpers import FlexibleGenerator
 
-# 創建使用案例
-use_case = SingleCharacterUseCase()
+# Windows 環境需要設定 ComfyUI 連接
+os.environ['COMFYUI_HOST'] = '127.0.0.1'
 
-# 執行生成
-result = use_case.execute(
-    character='Kirby',
-    topic='peaceful sleeping',
-    style='minimalist style',
-    images_per_description=2
+# 初始化生成器
+generator = FlexibleGenerator()
+
+# 生成圖片
+result = generator.generate_images(
+    keywords=["cat", "cherry blossoms", "spring"],
+    system_prompt="stable_diffusion_prompt",
+    character="kirby",
+    style="soft lighting, peaceful atmosphere",
+    num_images=4
 )
 
 print(f"生成了 {len(result['media_files'])} 張圖片")
-print(f"圖片路徑: {result['media_files']}")
 ```
 
-### 2. 雙角色互動
+#### 不同風格範例
 
 ```python
-from examples.quick_draw.use_cases import CharacterInteractionUseCase
+# 1. 黑色幽默風格
+result = generator.generate_images(
+    keywords="sleeping peacefully",
+    system_prompt="black_humor_system_prompt",
+    character="kirby",
+    secondary_character="waddle dee",
+    style="minimalist style",
+    num_images=2
+)
 
-use_case = CharacterInteractionUseCase()
-result = use_case.execute(
-    main_character='Kirby',
-    secondary_character='Waddle Dee',
-    topic='friendship',
-    images_per_description=2
+# 2. 雙角色互動
+result = generator.generate_images(
+    keywords=["friendship", "playing together"],
+    system_prompt="two_character_interaction_generate_system_prompt",
+    character="kirby",
+    secondary_character="waddle dee",
+    style="warm and cozy",
+    num_images=2
+)
+
+# 3. 電影級別風格
+result = generator.generate_images(
+    keywords=["epic adventure", "heroic pose"],
+    system_prompt="cinematic_stable_diffusion_prompt",
+    character="kirby",
+    style="cinematic composition",
+    num_images=2
+)
+
+# 4. 佛性/靈性風格
+result = generator.generate_images(
+    keywords=["meditation", "enlightenment"],
+    system_prompt="buddhist_combined_image_system_prompt",
+    character="kirby",
+    style="spiritual atmosphere",
+    num_images=2
 )
 ```
 
-### 3. 基於新聞關鍵字
+#### 影片生成
 
 ```python
-from examples.quick_draw.use_cases import NewsBasedUseCase
-
-use_case = NewsBasedUseCase()
-result = use_case.execute(
-    character='Kirby',
-    news_count=3,  # 使用 3 條新聞
-    images_per_description=2
-)
-
-print(f"處理了 {result['total_news']} 條新聞")
-```
-
-### 4. 佛性/靈性風格
-
-```python
-from examples.quick_draw.use_cases import BuddhistStyleUseCase
-
-use_case = BuddhistStyleUseCase()
-result = use_case.execute(
-    character='Kirby',
-    spiritual_theme='meditation',
-    use_news=True,
-    images_per_description=2
+# 生成影片
+result = generator.generate_videos(
+    keywords=["flying", "stars", "night sky"],
+    system_prompt="stable_diffusion_prompt",
+    character="kirby",
+    style="smooth motion",
+    num_videos=2
 )
 ```
 
-### 5. 黑色幽默
+#### 批次生成
 
 ```python
-from examples.quick_draw.use_cases import BlackHumorUseCase
+# 批次生成不同主題
+prompts = [
+    {
+        "keywords": ["morning", "sunrise"],
+        "style": "bright and cheerful"
+    },
+    {
+        "keywords": ["night", "stars"],
+        "style": "peaceful and mystical"
+    }
+]
 
-use_case = BlackHumorUseCase()
-result = use_case.execute(
-    main_character='Kirby',
-    secondary_character='Waddle Dee',
-    images_per_description=2
+results = generator.batch_generate(
+    prompts=prompts,
+    media_type="image",
+    base_config={
+        "character": "kirby",
+        "system_prompt": "stable_diffusion_prompt",
+        "num_images": 2
+    }
 )
 ```
 
-### 6. 電影級別
+## 📋 可用的 System Prompts
 
-```python
-from examples.quick_draw.use_cases import CinematicUseCase
+FlexibleGenerator 的核心是 **system_prompt + keywords** 架構：
 
-use_case = CinematicUseCase()
-result = use_case.execute(
-    main_character='Kirby',
-    aspect_ratio='cinematic',  # 16:9 (1280x720)
-    use_news=True,
-    images_per_description=2
-)
-```
-
-## 📋 可用的使用案例
-
-| 使用案例 | 說明 | 適用場景 |
-|---------|------|---------|
-| `SingleCharacterUseCase` | 單角色圖片生成 | 為指定角色生成主題圖片 |
-| `CharacterInteractionUseCase` | 雙角色互動 | 生成兩個角色互動場景 |
-| `NewsBasedUseCase` | 基於新聞關鍵字 | 根據最新新聞生成相關圖片 |
-| `BuddhistStyleUseCase` | 佛性/靈性風格 | 融合宗教/靈性元素 |
-| `BlackHumorUseCase` | 黑色幽默 | 諷刺意味的黑色幽默圖片 |
-| `CinematicUseCase` | 電影級別 | 電影感的寬螢幕圖片 |
+| System Prompt | 說明 | 適用場景 |
+|---------------|------|---------|
+| `stable_diffusion_prompt` | 標準 Stable Diffusion 風格 | 通用圖片生成 |
+| `black_humor_system_prompt` | 黑色幽默 | 諷刺、反差效果 |
+| `buddhist_combined_image_system_prompt` | 佛性/靈性風格 | 禪意、靈性主題 |
+| `cinematic_stable_diffusion_prompt` | 電影級別 | 戲劇性、史詩感 |
+| `two_character_interaction_generate_system_prompt` | 雙角色互動 | 角色對話和互動 |
+| `warm_scene_description_system_prompt` | 溫馨場景 | 溫暖、治癒系 |
+| `unbelievable_world_system_prompt` | 不可思議的世界 | 超現實、奇幻 |
 
 ## 🔧 配置說明
 
 ### 環境需求
 
 1. 確保 `media_overload.env` 已正確配置
-2. MySQL 資料庫中有角色和新聞資料
+2. MySQL 資料庫中有角色資料
 3. ComfyUI 已啟動並可訪問
+
+### ComfyUI 連接設定
+
+本專案支援不同環境的 ComfyUI 連接配置：
+
+#### Windows/本機環境（如 Jupyter Notebook）
+
+在導入模組前設定環境變數：
+
+```python
+import os
+os.environ['COMFYUI_HOST'] = '127.0.0.1'
+os.environ['COMFYUI_PORT'] = '8188'
+```
+
+#### Docker 環境
+
+無需額外設定，預設使用 `host.docker.internal:8188`
+
+#### 自定義連接
+
+也可以在創建 ComfyUICommunicator 時手動指定：
+
+```python
+from lib.comfyui.websockets_api import ComfyUICommunicator
+
+communicator = ComfyUICommunicator(host='192.168.1.100', port=8188)
+```
+
+**配置優先順序**：
+1. 明確傳入的參數（`host`, `port`）
+2. 環境變數（`COMFYUI_HOST`, `COMFYUI_PORT`）
+3. 預設值（`host.docker.internal`, `8188`）
 
 ### 預設路徑
 
@@ -150,7 +195,7 @@ result = use_case.execute(
 ### 自定義路徑
 
 ```python
-use_case = SingleCharacterUseCase(
+generator = FlexibleGenerator(
     workflow_folder='your/workflow/path',
     output_folder='your/output/path',
     env_path='your/env/path'
@@ -159,7 +204,9 @@ use_case = SingleCharacterUseCase(
 
 ## ⚙️ 進階用法
 
-### 使用 ConfigBuilder
+### 使用 ConfigBuilder（底層 API）
+
+如果需要更細緻的控制，可以直接使用 ConfigBuilder：
 
 ```python
 from examples.quick_draw.helpers import ConfigBuilder
@@ -180,26 +227,30 @@ service = SimpleContentGenerationService()
 result = service.generate_content(config)
 ```
 
-### 批次生成
+### Image to Image 生成
 
 ```python
-# 批次生成多組互動圖片
-use_case = CharacterInteractionUseCase()
-results = use_case.execute_batch(
-    main_character='Kirby',
-    batch_size=5,
-    images_per_description=2
-)
+config = ConfigBuilder() \
+    .with_character('Kirby') \
+    .with_workflow('configs/workflow/nova-anime-xl.json') \
+    .with_input_image('path/to/input.png') \
+    .with_denoise(0.7) \
+    .with_prompt('transform into watercolor style') \
+    .with_image_system_prompt('stable_diffusion_prompt') \
+    .build()
+
+service = SimpleContentGenerationService()
+result = service.generate_content(config)
 ```
 
 ## 📊 返回值結構
 
-所有使用案例返回相同的結構：
+所有生成方法返回相同的結構：
 
 ```python
 {
     'descriptions': List[str],      # 生成的描述列表
-    'media_files': List[str],       # 生成的圖片路徑列表
+    'media_files': List[str],       # 生成的圖片/影片路徑列表
     'filter_results': [],           # 空列表（已跳過分析）
     'article_content': ''           # 空字串（已跳過文章生成）
 }
@@ -224,36 +275,41 @@ results = use_case.execute_batch(
 3. **快速迭代** - 專注於圖片生成，加快測試速度
 4. **靈活性** - 生成後可以手動決定後續處理
 
-## 📖 相關文檔
-
-- [架構說明](../../tmp/quick_draw/ARCHITECTURE.md)
-- [遷移指南](../../tmp/quick_draw/MIGRATION_GUIDE.md)
-- [專案總結](../../tmp/quick_draw/PROJECT_SUMMARY.md)
-
 ## 🐛 常見問題
 
 ### Q: 如何切換不同的工作流？
 
-A: 在 `execute()` 中指定 `workflow_name` 參數：
+A: 在生成時指定 `workflow` 參數：
 
 ```python
-result = use_case.execute(
+result = generator.generate_images(
+    keywords=["adventure"],
     character='Kirby',
-    workflow_name='flux_krea_dev',  # 使用不同的工作流
-    topic='adventure'
+    workflow='flux-krea-dev',  # 使用不同的工作流（不含 .json）
+    system_prompt='stable_diffusion_prompt'
 )
 ```
 
 ### Q: 如何調整圖片數量？
 
-A: 使用 `images_per_description` 參數：
+A: 使用 `num_images` 參數：
 
 ```python
-result = use_case.execute(
+result = generator.generate_images(
+    keywords=["peaceful"],
     character='Kirby',
-    images_per_description=5  # 每個描述生成 5 張圖片
+    num_images=10,  # 生成 10 張圖片
+    system_prompt='stable_diffusion_prompt'
 )
 ```
+
+### Q: 如何自定義 system_prompt？
+
+A: System prompts 定義在 `configs/prompt/image_system_guide.py` 中。您可以：
+
+1. 使用現有的 system_prompt
+2. 在該文件中添加新的 system_prompt
+3. 在生成時指定新的 system_prompt 名稱
 
 ### Q: 如何使用完整版的功能？
 
@@ -266,7 +322,45 @@ service = ContentGenerationService()
 result = service.generate_content(config)  # 包含完整分析和文章生成
 ```
 
+### Q: Windows 環境中無法連接 ComfyUI？
+
+A: 確保在導入模組前設定環境變數：
+
+```python
+import os
+os.environ['COMFYUI_HOST'] = '127.0.0.1'
+
+# 然後再導入
+from examples.quick_draw.helpers import FlexibleGenerator
+```
+
+## 📖 工具和輔助類
+
+### FlexibleGenerator
+
+核心生成器類，提供簡單的 API：
+
+- `generate_images()` - 生成圖片
+- `generate_videos()` - 生成影片
+- `batch_generate()` - 批次生成
+- `generate_from_config()` - 使用自定義配置生成
+
+### ConfigBuilder
+
+配置建構器，提供 Builder Pattern API：
+
+- `with_character()` - 設定角色
+- `with_prompt()` - 設定提示詞
+- `with_keywords()` - 設定關鍵字
+- `with_style()` - 設定風格
+- `with_workflow()` - 設定工作流
+- `with_image_system_prompt()` - 設定系統提示詞
+- `with_input_image()` - 設定輸入圖片（image2image）
+- `with_denoise()` - 設定降噪強度
+- 更多...
+
+詳細 API 請參考 [ConfigBuilder 原始碼](helpers/config_builder.py)
+
 ## 📝 授權
 
 MIT License
-
