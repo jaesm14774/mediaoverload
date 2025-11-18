@@ -1,5 +1,5 @@
 probability_settings:
-  base_probability: 0.2  # 基礎機率（每15小時3次）
+  base_probability: 0.3  # 基礎機率（每15小時3次）
   max_probability: 0.5    # 最大機率（每15小時7.5次）
   min_probability: 0.03334  # 最小機率（每15小時0.5次）
 
@@ -25,7 +25,7 @@ schedules:
     probability_settings:
       base_probability: 0.4
       max_probability: 0.8
-      min_probability: 0.25
+      min_probability: 0.3
   # unbelievable_world:
   #   character: "unbelievable_world"
   #   prompts:

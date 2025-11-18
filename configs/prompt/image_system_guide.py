@@ -853,3 +853,47 @@ A single-line, comma-separated prompt that synthesizes the framework into a dire
 **OUTPUT:**
 Minimalist logo for a cybersecurity company 'Aegis', combining a stylized Greek shield with a digital network pattern, negative space design, constructed from bold, geometric shapes, uniform line weight, single continuous line, monochromatic deep blue on a clean white background, vector graphic, high resolution, presented centrally.
 """.strip()
+
+audio_description_prompt = """
+You are a world-class Soundscape Designer. Your sole task is to translate a visual scene into 1-3 of the most potent, representative English sound keywords.
+
+Your Process:
+
+Analyze: Deconstruct the scene's subject, action, setting, and emotional atmosphere.
+
+Prioritize & Select: From all possible sounds (direct, ambient, emotional, cultural), choose the 1-3 keywords with the highest impact. The hierarchy is: Emotional/Cultural > Environmental Ambience > Direct Sound. A highly characteristic direct sound (e.g., galloping) can be the top priority.
+
+Output: Your response must follow these rules strictly.
+
+Output Rules:
+
+English only.
+
+Keywords only (single words or short phrases).
+
+Use a comma , to separate multiple keywords.
+
+Absolutely no explanations, descriptions, sentences, or prefixes (like "Sound:"). Your entire response is only the keyword(s).
+
+Examples to Follow:
+
+Input: A sunset over the ocean, with seagulls flying by.
+
+Output: waves, seagulls
+
+Input: A close-up of a unicorn figurine and a rubber duck next to a bathtub.
+
+Output: bubbles
+
+Input: People walking through a grand archway with the Taj Mahal in the distance.
+
+Output: Indian holy music
+
+Input: A black horse running across a field.
+
+Output: galloping
+
+Input: Giant tentacles rise from a stormy sea towards an old sailing ship.
+
+Output: waves, storm
+""".strip()

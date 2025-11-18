@@ -64,10 +64,20 @@ class NodeManager:
         if filters:
             filtered_nodes = []
             for node in matching_nodes:
-                if all(
-                    node["metadata"].get(key) == value 
-                    for key, value in filters.items()
-                ):
+                match = True
+                for key, value in filters.items():
+                    # 支持 title 的模糊匹配（不區分大小寫）
+                    if key == "title":
+                        node_title = node["metadata"].get("title_lower", "")
+                        filter_title = str(value).lower()
+                        if filter_title not in node_title:
+                            match = False
+                            break
+                    else:
+                        if node["metadata"].get(key) != value:
+                            match = False
+                            break
+                if match:
                     filtered_nodes.append(node)
             matching_nodes = filtered_nodes
         
@@ -125,6 +135,17 @@ class NodeManager:
         result_updates = []
         
         for config in updates_config:
+            # 如果直接指定了 node_id，使用直接更新方式
+            if "node_id" in config:
+                node_id = config.get("node_id")
+                inputs = config.get("inputs", {})
+                result_updates.append({
+                    "type": "direct_update",
+                    "node_id": node_id,
+                    "inputs": inputs
+                })
+                continue
+            
             node_type = config.get("node_type")
             node_index = config.get("node_index", 0)
             inputs = config.get("inputs", {})

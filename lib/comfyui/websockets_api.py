@@ -372,6 +372,12 @@ class ComfyUICommunicator:
                 current_text = node_data.get('_meta', {}).get('title', '').lower()
                 node_info["metadata"]["is_negative"] = 'negative' in current_text
             
+            # 為所有節點添加 title 到 metadata（用於通用識別）
+            title = node_data.get('_meta', {}).get('title', '')
+            if title:
+                node_info["metadata"]["title"] = title
+                node_info["metadata"]["title_lower"] = title.lower()
+            
             node_types[class_type].append(node_info)
             
         return node_types
@@ -447,6 +453,20 @@ class ComfyUICommunicator:
             
             # 應用更新
             for update in updates:
+                # 支持直接使用 node_id 更新
+                if update.get("type") == "direct_update":
+                    node_id = update.get("node_id")
+                    node_inputs = update.get("inputs", {})
+                    if node_id in workflow_copy:
+                        workflow_copy = self.update_node_inputs(
+                            workflow_copy,
+                            node_id,
+                            node_inputs
+                        )
+                    else:
+                        print(f"Warning: Node ID '{node_id}' not found in workflow")
+                    continue
+                
                 node_type = update.get("type")
                 node_index = update.get("node_index", 0)
                 node_inputs = update.get("inputs", {})

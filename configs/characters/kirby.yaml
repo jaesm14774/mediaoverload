@@ -21,10 +21,11 @@ generation:
   # Values are relative weights (don't need to sum to 1.0).
   # Set to 0 to disable a type.
   generation_type_weights:
-    text2img: 0.6          # Generate images directly from text (60% chance)
+    text2img: 0          # Generate images directly from text (50% chance)
     image2image: 0          # Transform existing images (disabled)
-    text2image2image: 0.4  # Two-stage: text→image→refined image (40% chance)
+    text2image2image: 0  # Two-stage: text→image→refined image (30% chance)
     text2video: 0          # Generate videos from text (disabled)
+    text2image2video: 1  # Multi-stage: text→image→video with audio (20% chance)
 
   # Workflow Path Configuration
   # Maps each generation type to its ComfyUI workflow JSON file.
@@ -34,6 +35,7 @@ generation:
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json   # Video generation with audio
     image2image: /app/configs/workflow/image_to_image.json    # Image transformation
     text2image2image: /app/configs/workflow/nova-anime-xl.json  # First stage workflow
+    text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json  # I2V workflow with audio
 
   # Quality Control
   # Minimum similarity score (0.0-1.0) between generated media and text description.
@@ -105,18 +107,34 @@ additional_params:
         inputs:
           value: 1024  # Set image resolution to 1024x1024
 
-    # Image-to-Image Strategy Parameters
-    # Used when generation_type is 'image2image'
-    images_per_input: 2  # Generate 2 variations per input image
-    denoise: 0.6         # Denoising strength (0.5-0.7, higher = more change)
+    # # Image-to-Image Strategy Parameters
+    # # Used when generation_type is 'image2image'
+    # images_per_input: 2  # Generate 2 variations per input image
+    # denoise: 0.6         # Denoising strength (0.5-0.7, higher = more change)
 
     # Text-to-Image-to-Image Two-Stage Strategy
     # Used when generation_type is 'text2image2image'
     first_stage:
-      images_per_description: 4  # First pass: create 4 base images per description
+      images_per_description: 3  # First pass: create 4 base images per description
 
     second_stage:
       images_per_input: 4  # Second pass: create 4 refined versions per base image
       denoise: 0.7         # Refinement strength (higher = more artistic liberty)
 
     i2i_workflow_path: /app/configs/workflow/image_to_image.json  # Second stage workflow
+    
+    # Text-to-Image-to-Video: First Stage (Text-to-Image) Parameters
+    # Used when generation_type is 'text2image2video'
+    # T2I workflow path for first stage (optional, defaults to text2img workflow)
+    t2i_workflow_path: /app/configs/workflow/nova-anime-xl.json
+
+  # Text-to-Image-to-Video Strategy Parameters
+  # Used when generation_type is 'text2image2video'
+  video:
+    # I2V workflow path (defaults to text2image2video workflow if not specified)
+    i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
+    videos_per_image: 2  # Generate 1 video per filtered image
+    
+    # Custom Node Updates for I2V workflow
+    # These updates are applied to the I2V workflow nodes
+    custom_node_updates: []

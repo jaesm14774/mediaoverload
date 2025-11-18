@@ -97,6 +97,47 @@ class VisionContentManager:
             result = result.split('</think>')[-1].strip()
         return result
     
+    @vision_api_retry(max_attempts=3)
+    def generate_audio_description(self, image_path: str, video_description: str = '', **kwargs) -> str:
+        """根據圖片和影片描述生成音頻描述
+        
+        Args:
+            image_path: 圖片路徑
+            video_description: 影片描述（可選）
+            **kwargs: 其他參數
+            
+        Returns:
+            音頻描述（1-3個關鍵字，用逗號分隔）
+        """
+        print(f"生成音頻描述，圖片: {image_path}, 影片描述: {video_description}")
+        
+        # 構建輸入內容
+        user_content = ""
+        if video_description:
+            user_content = f"Video description: {video_description}\n\nAnalyze the image and generate audio keywords."
+        else:
+            user_content = "Analyze the image and generate audio keywords."
+        
+        messages = [
+            {'role': 'system', 'content': self.prompts.get('audio_description_prompt', 'Generate 1-3 English sound keywords based on the image.')},
+            {'role': 'user', 'content': user_content}
+        ]
+        
+        result = self.vision_model.chat_completion(
+            messages=messages,
+            images=[image_path],
+            **kwargs
+        )
+        
+        # 清理結果，只保留關鍵字
+        result = result.strip()
+        # 移除可能的 "Sound:" 等前綴
+        if ':' in result:
+            result = result.split(':', 1)[-1].strip()
+        
+        print(f"音頻描述生成成功: {result}")
+        return result
+    
     def generate_seo_hashtags(self, description: str, **kwargs) -> str:
         """生成 SEO 優化的 hashtags"""
         messages = [
@@ -254,7 +295,8 @@ class VisionManagerBuilder:
             'sticker_prompt_system_prompt': sticker_prompt_system_prompt,
             'warm_scene_description_system_prompt': warm_scene_description_system_prompt,
             'cinematic_stable_diffusion_prompt': cinematic_stable_diffusion_prompt,
-            'conceptual_logo_design_prompt': conceptual_logo_design_prompt
+            'conceptual_logo_design_prompt': conceptual_logo_design_prompt,
+            'audio_description_prompt': audio_description_prompt
 
         }
     

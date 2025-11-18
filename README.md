@@ -47,8 +47,9 @@ MediaOverload automates content creation from start to finish:
 
 **Smart Content Generation**
 - Text-to-image, image-to-image, text-to-video workflows
+- Text-to-image-to-video workflow (使用者選擇圖片後生成含音頻的影片，不做 AI 篩選)
 - Multi-model support: Ollama, Gemini, OpenRouter
-- ComfyUI integration with multiple workflows (Flux, SDXL, etc.)
+- ComfyUI integration with multiple workflows (Flux, SDXL, Wan2.2, etc.)
 
 **Character System**
 - Each character has unique style, workflows, and social accounts
@@ -56,9 +57,9 @@ MediaOverload automates content creation from start to finish:
 - Two-character interaction scenes
 
 **Quality Control**
-- Vision model analyzes image-text matching
+- Vision model analyzes image-text matching (可選，Text2Image2Video 策略不使用)
 - Discord-based human review workflow
-- Automatic filtering by similarity threshold
+- Automatic filtering by similarity threshold (Text2Image2Video 策略改為使用者手動選擇)
 
 **Multi-Platform Publishing**
 - Instagram with automatic format conversion
@@ -119,6 +120,15 @@ Transform existing images with controllable denoising (0.5-0.7).
 **Text-to-Video**
 Generate videos with MMAudio sound effects.
 
+**Text→Image→Video (Multi-Stage)**
+1. Generate images from text (可選使用 nova-anime-xl workflow)
+2. Send all images to Discord for user review (不做 AI 篩選，節省成本)
+3. User selects images via Discord
+4. Generate video descriptions from selected images
+5. Generate audio descriptions from images + video descriptions
+6. Generate videos with audio using wan2.2_gguf_i2v workflow
+7. Upload to social media
+
 ---
 
 ## System Requirements
@@ -159,6 +169,18 @@ Generate videos with MMAudio sound effects.
 ---
 
 ## Recent Updates
+
+**v2.2.0**
+- **架構重構**：將業務邏輯從 `orchestration_service` 移回策略層，遵循單一職責原則
+- **Text2Image2Video 策略優化**：
+  - 移除 AI 圖片篩選步驟，改為透過 Discord 讓使用者手動選擇圖片
+  - 節省 AI 分析成本，提升使用者控制權
+  - 文章內容延遲生成：在影片生成後才生成文章內容（而非圖片階段）
+- **策略介面擴展**：
+  - 新增 `needs_user_review()` 方法：策略可指示是否需要使用者審核
+  - 新增 `get_review_items(max_items)` 方法：策略提供審核項目（處理 Discord 10 張限制）
+  - 新增 `continue_after_review(selected_indices)` 方法：策略處理使用者選擇後的後續流程
+  - 新增 `should_generate_article_now()` 方法：策略控制文章內容生成時機
 
 **v2.1.0**
 - OpenRouter integration with free models
