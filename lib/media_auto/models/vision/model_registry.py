@@ -85,13 +85,18 @@ class OpenRouterModel(AIModelInterface):
         "tngtech/deepseek-r1t2-chimera:free",
         "qwen/qwen3-235b-a22b:free",
         "minimax/minimax-m2:free",
-        "deepseek/deepseek-chat-v3.1:free"
+        "deepseek/deepseek-chat-v3.1:free",
+        "z-ai/glm-4.5-air:free",
+        "deepseek/deepseek-r1-0528:free",
+        # "openai/gpt-oss-20b:free",
+        "moonshotai/kimi-k2:free"
     ]
     
     FREE_VISION_MODELS = [
         "nvidia/nemotron-nano-12b-v2-vl:free",
         "qwen/qwen2.5-vl-32b-instruct:free",
-        "google/gemma-3-27b-it:free"
+        "google/gemma-3-27b-it:free",
+        "google/gemini-2.0-flash-exp:free"
     ]
     
     def __init__(self, config: ModelConfig):

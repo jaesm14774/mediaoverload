@@ -30,7 +30,7 @@ class ResponseView(View):
         self.user = None
         self.files = files
         self.content = content
-        self.selected_files = list(range(len(files)))
+        self.selected_files = []  # 預設為非勾選狀態，使用者檢核後才勾選
         self.message = None
         self.edit_done = asyncio.Event()
         self.is_editing = False

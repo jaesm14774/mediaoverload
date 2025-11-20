@@ -175,7 +175,7 @@ class ComfyUICommunicator:
                         max_value = data.get('max', 100)
                         if max_value > 0:
                             progress = (value / max_value) * 100
-                            print(f"  → 進度: {progress:.1f}% ({value}/{max_value})")
+                            # print(f"  → 進度: {progress:.1f}% ({value}/{max_value})")
                     
                     elif message_type == 'status':
                         # 顯示狀態信息

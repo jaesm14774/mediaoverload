@@ -226,6 +226,9 @@ class ContentGenerationService(IContentGenerationService):
             Truncates to fallback hashtags if exceeds 4000 characters.
         """
         self.logger.info("開始生成文章內容")
+        # 確保策略的 filter_results 已設置為最新的結果
+        if hasattr(self.strategy, 'filter_results'):
+            self.strategy.filter_results = filter_results
         self.strategy.generate_article_content()
 
         article_content = ""

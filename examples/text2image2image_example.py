@@ -47,15 +47,17 @@ def example_text2image2image_basic():
         image_system_prompt='stable_diffusion_prompt',
         similarity_threshold=0.9,  # 第一階段篩選閾值
         additional_params={
-            'image': {
-                'first_stage': {
-                    'images_per_description': 4  # 第一階段生成 4 張圖片
-                },
-                'second_stage': {
-                    'images_per_input': 1,  # 第二階段每個輸入生成 1 張
-                    'denoise': 0.6  # denoise 權重
-                },
-                'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'  # 第二階段工作流
+            'strategies': {
+                'text2image2image': {
+                    'first_stage': {
+                        'images_per_description': 4  # 第一階段生成 4 張圖片
+                    },
+                    'second_stage': {
+                        'images_per_input': 1,  # 第二階段每個輸入生成 1 張
+                        'denoise': 0.6,  # denoise 權重
+                        'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'  # 第二階段工作流
+                    }
+                }
             }
         }
     )
@@ -68,9 +70,9 @@ def example_text2image2image_basic():
     strategy.load_config(config)
     
     print(f"\n📝 提示詞: {config.prompt}")
-    print(f"📝 第一階段生成數量: {config.additional_params['image']['first_stage']['images_per_description']}")
+    print(f"📝 第一階段生成數量: {config.additional_params['strategies']['text2image2image']['first_stage']['images_per_description']}")
     print(f"📝 相似度閾值: {config.similarity_threshold}")
-    print(f"📝 第二階段 denoise: {config.additional_params['image']['second_stage']['denoise']}")
+    print(f"📝 第二階段 denoise: {config.additional_params['strategies']['text2image2image']['second_stage']['denoise']}")
     print(f"📂 輸出目錄: {config.output_dir}")
     
     # 生成描述
@@ -114,15 +116,17 @@ def example_text2image2image_custom_params():
         image_system_prompt='stable_diffusion_prompt',
         similarity_threshold=0.85,  # 較低的閾值，保留更多圖片
         additional_params={
-            'image': {
-                'first_stage': {
-                    'images_per_description': 6,  # 第一階段生成更多圖片
-                },
-                'second_stage': {
-                    'images_per_input': 2,  # 第二階段每個輸入生成 2 張
-                    'denoise': 0.55  # 較低的 denoise，更接近原圖
-                },
-                'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'
+            'strategies': {
+                'text2image2image': {
+                    'first_stage': {
+                        'images_per_description': 6,  # 第一階段生成更多圖片
+                    },
+                    'second_stage': {
+                        'images_per_input': 2,  # 第二階段每個輸入生成 2 張
+                        'denoise': 0.55,  # 較低的 denoise，更接近原圖
+                        'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'
+                    }
+                }
             }
         }
     )
@@ -134,10 +138,10 @@ def example_text2image2image_custom_params():
     strategy.load_config(config)
     
     print(f"\n📝 自定義參數:")
-    print(f"   - 第一階段生成: {config.additional_params['image']['first_stage']['images_per_description']} 張")
+    print(f"   - 第一階段生成: {config.additional_params['strategies']['text2image2image']['first_stage']['images_per_description']} 張")
     print(f"   - 相似度閾值: {config.similarity_threshold}")
-    print(f"   - 第二階段每個輸入: {config.additional_params['image']['second_stage']['images_per_input']} 張")
-    print(f"   - Denoise: {config.additional_params['image']['second_stage']['denoise']}")
+    print(f"   - 第二階段每個輸入: {config.additional_params['strategies']['text2image2image']['second_stage']['images_per_input']} 張")
+    print(f"   - Denoise: {config.additional_params['strategies']['text2image2image']['second_stage']['denoise']}")
     
     strategy.generate_description()
     strategy.generate_media()
@@ -172,15 +176,17 @@ def example_text2image2image_two_character():
         image_system_prompt='two_character_interaction_generate_system_prompt',  # 使用雙角色提示詞
         similarity_threshold=0.9,
         additional_params={
-            'image': {
-                'first_stage': {
-                    'images_per_description': 4
-                },
-                'second_stage': {
-                    'images_per_input': 1,
-                    'denoise': 0.6
-                },
-                'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'
+            'strategies': {
+                'text2image2image': {
+                    'first_stage': {
+                        'images_per_description': 4
+                    },
+                    'second_stage': {
+                        'images_per_input': 1,
+                        'denoise': 0.6,
+                        'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'
+                    }
+                }
             }
         }
     )

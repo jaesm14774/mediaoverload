@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": "Gooey's inky blue form glistens under soft diffused light, his gelatinous body quivering slightly as he faces Kirby across a low wooden table. Kirby leans forward on rounded pink feet, stubby arm extended toward Gooey with chopsticks pinching a single ramen noodle. Steam curls upward from the ceramic bowl between them, its milky broth catching the overhead illumination that casts perfect circular shadows beneath both characters.  The minimalist composition frames them against an infinite white plane, their spherical silhouettes creating stark contrast - Kirby's bubblegum curves smooth and matte against Gooey's glossy, dripping edges. Three elements anchor the scene: the black-lacquered chopsticks in Kirby's grip, the asymmetrical clay bowl's earthy orange glaze, and the trembling noodle strand bridging the gap between Kirby's determined squint and Gooey's lolling crimson tongue.  Gooey's entire body stretches toward the offering, viscous tendrils elongating across the table's pale surface while maintaining his central mass. Their spherical forms mirror each other at different scales - Kirby compact and focused, Gooey fluid and receptive - separated by precisely twelve inches of negative space that highlights the noodle's delicate arc. A single drop of broth falls from the suspended noodle, captured mid-descent toward Gooey's waiting tongue."
+      "value": " Sticker of a tiny, serious chibi Kirby piloting the legendary Dragoon machine, expression of fierce, anime-protagonist determination, with thick eyebrows furrowed and eyes burning with competitive fire. He is leaning forward aerodynamically, soaring through the air with majestic speed. Accompanied by symbolic flair like magnificent rainbow-colored contrails (🌈) streaming from the wings, jagged speed lines indicating supersonic velocity, and sparkling lens flares emphasizing the machine's legendary status. Art style: chibi, kawaii, cute, vector art, bold outlines, flat colors, sticker design, high quality. Composition: centered, isolated on a clean white background, minimal."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -28,14 +28,141 @@
   },
   "183": {
     "inputs": {
-      "value": "worst quality, bad anatomy, poorly drawn hands"
+      "value": "worst quality, worst quality, low quality, lowres, blurry, pixelated, distorted, jpeg artifacts, compression artifacts, bad art, ugly, cartoonish, blurry, out of focus, watermark, text, signature, logo, noisy, grainy, overexposed, oversaturated, monochrome, poorly drawn,  unclear details, multiple subjects, multiple people, group, crowd, many people, extra people, twins, sisters, brothers, clones, duplicates, replication, collage, grid view, split view, multiple angles"
     },
     "class_type": "PrimitiveString",
     "_meta": {
       "title": "negative prompt"
     }
   },
-  "237:0": {
+  "260:253": {
+    "inputs": {
+      "width": [
+        "171",
+        0
+      ],
+      "height": [
+        "172",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "260:255": {
+    "inputs": {
+      "text": [
+        "182",
+        0
+      ],
+      "clip": [
+        "260:254",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "260:256": {
+    "inputs": {
+      "text": [
+        "183",
+        0
+      ],
+      "clip": [
+        "260:254",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "260:257": {
+    "inputs": {
+      "seed": 162,
+      "steps": 25,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "260:254",
+        0
+      ],
+      "positive": [
+        "260:255",
+        0
+      ],
+      "negative": [
+        "260:256",
+        0
+      ],
+      "latent_image": [
+        "260:253",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "260:258": {
+    "inputs": {
+      "samples": [
+        "260:257",
+        0
+      ],
+      "vae": [
+        "260:252",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "260:259": {
+    "inputs": {
+      "filename_prefix": "model0",
+      "images": [
+        "260:258",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "260:254": {
+    "inputs": {
+      "lora_name": "sdxl\\reiXL_NB11.safetensors",
+      "strength_model": 0.8000000000000002,
+      "strength_clip": 0.8500000000000002,
+      "model": [
+        "260:252",
+        0
+      ],
+      "clip": [
+        "260:252",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "260:252": {
     "inputs": {
       "ckpt_name": "sdxl\\noobaiXLNAIXL_vPred10Version.safetensors"
     },
@@ -44,7 +171,7 @@
       "title": "Load Checkpoint"
     }
   },
-  "237:1": {
+  "269:262": {
     "inputs": {
       "width": [
         "171",
@@ -61,17 +188,17 @@
       "title": "Empty Latent Image"
     }
   },
-  "237:2": {
+  "269:263": {
     "inputs": {
       "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
+      "strength_model": 0.8000000000000002,
+      "strength_clip": 0.8500000000000002,
       "model": [
-        "237:0",
+        "269:261",
         0
       ],
       "clip": [
-        "237:0",
+        "269:261",
         1
       ]
     },
@@ -80,14 +207,14 @@
       "title": "Load LoRA"
     }
   },
-  "237:3": {
+  "269:264": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "237:2",
+        "269:263",
         1
       ]
     },
@@ -96,14 +223,14 @@
       "title": "positive prompt"
     }
   },
-  "237:4": {
+  "269:265": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "237:2",
+        "269:263",
         1
       ]
     },
@@ -112,28 +239,28 @@
       "title": "negative prompt"
     }
   },
-  "237:5": {
+  "269:266": {
     "inputs": {
-      "seed": 208,
+      "seed": 159,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "237:2",
+        "269:263",
         0
       ],
       "positive": [
-        "237:3",
+        "269:264",
         0
       ],
       "negative": [
-        "237:4",
+        "269:265",
         0
       ],
       "latent_image": [
-        "237:1",
+        "269:262",
         0
       ]
     },
@@ -142,14 +269,14 @@
       "title": "KSampler"
     }
   },
-  "237:6": {
+  "269:267": {
     "inputs": {
       "samples": [
-        "237:5",
+        "269:266",
         0
       ],
       "vae": [
-        "237:0",
+        "269:261",
         2
       ]
     },
@@ -158,11 +285,11 @@
       "title": "VAE Decode"
     }
   },
-  "237:7": {
+  "269:268": {
     "inputs": {
-      "filename_prefix": "model1_lora",
+      "filename_prefix": "model1",
       "images": [
-        "237:6",
+        "269:267",
         0
       ]
     },
@@ -171,16 +298,16 @@
       "title": "Save Image"
     }
   },
-  "240:0": {
+  "269:261": {
     "inputs": {
-      "ckpt_name": "sdxl\\waiNSFWIllustrious_v130.safetensors"
+      "ckpt_name": "sdxl\\waiIllustriousSDXL_v150.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
       "title": "Load Checkpoint"
     }
   },
-  "240:1": {
+  "272:262": {
     "inputs": {
       "width": [
         "171",
@@ -197,17 +324,17 @@
       "title": "Empty Latent Image"
     }
   },
-  "240:2": {
+  "272:263": {
     "inputs": {
       "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
+      "strength_model": 0.8000000000000002,
+      "strength_clip": 0.8500000000000002,
       "model": [
-        "240:0",
+        "272:261",
         0
       ],
       "clip": [
-        "240:0",
+        "272:261",
         1
       ]
     },
@@ -216,14 +343,14 @@
       "title": "Load LoRA"
     }
   },
-  "240:3": {
+  "272:264": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "240:2",
+        "272:263",
         1
       ]
     },
@@ -232,14 +359,14 @@
       "title": "positive prompt"
     }
   },
-  "240:4": {
+  "272:265": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "240:2",
+        "272:263",
         1
       ]
     },
@@ -248,28 +375,28 @@
       "title": "negative prompt"
     }
   },
-  "240:5": {
+  "272:266": {
     "inputs": {
-      "seed": 208,
+      "seed": 159,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "240:2",
+        "272:263",
         0
       ],
       "positive": [
-        "240:3",
+        "272:264",
         0
       ],
       "negative": [
-        "240:4",
+        "272:265",
         0
       ],
       "latent_image": [
-        "240:1",
+        "272:262",
         0
       ]
     },
@@ -278,14 +405,14 @@
       "title": "KSampler"
     }
   },
-  "240:6": {
+  "272:267": {
     "inputs": {
       "samples": [
-        "240:5",
+        "272:266",
         0
       ],
       "vae": [
-        "240:0",
+        "272:261",
         2
       ]
     },
@@ -294,20 +421,7 @@
       "title": "VAE Decode"
     }
   },
-  "240:7": {
-    "inputs": {
-      "filename_prefix": "model2_lora",
-      "images": [
-        "240:6",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
-  "241:0": {
+  "272:261": {
     "inputs": {
       "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
     },
@@ -316,125 +430,11 @@
       "title": "Load Checkpoint"
     }
   },
-  "241:1": {
+  "272:268": {
     "inputs": {
-      "width": [
-        "171",
-        0
-      ],
-      "height": [
-        "172",
-        0
-      ],
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
-  },
-  "241:2": {
-    "inputs": {
-      "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
-      "model": [
-        "241:0",
-        0
-      ],
-      "clip": [
-        "241:0",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "241:3": {
-    "inputs": {
-      "text": [
-        "182",
-        0
-      ],
-      "clip": [
-        "241:2",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "positive prompt"
-    }
-  },
-  "241:4": {
-    "inputs": {
-      "text": [
-        "183",
-        0
-      ],
-      "clip": [
-        "241:2",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "negative prompt"
-    }
-  },
-  "241:5": {
-    "inputs": {
-      "seed": 208,
-      "steps": 25,
-      "cfg": 8,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "241:2",
-        0
-      ],
-      "positive": [
-        "241:3",
-        0
-      ],
-      "negative": [
-        "241:4",
-        0
-      ],
-      "latent_image": [
-        "241:1",
-        0
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "241:6": {
-    "inputs": {
-      "samples": [
-        "241:5",
-        0
-      ],
-      "vae": [
-        "241:0",
-        2
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "241:7": {
-    "inputs": {
-      "filename_prefix": "model3_lora",
+      "filename_prefix": "model3",
       "images": [
-        "241:6",
+        "272:267",
         0
       ]
     },
