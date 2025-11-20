@@ -101,8 +101,12 @@ class ContentGenerationService(IContentGenerationService):
         similarity_threshold = config.get_all_attributes().get('similarity_threshold', 0.9)
         filter_results = self.analyze_media_text_match(media_files, descriptions, similarity_threshold)
 
-        # Generate social media caption
-        article_content = self.generate_article(config, filter_results)
+        # Generate social media caption（如果策略允許）
+        article_content = ''
+        if self.strategy.should_generate_article_now():
+            article_content = self.generate_article(config, filter_results)
+        else:
+            self.logger.info("策略延遲生成文章內容，將在後續階段生成")
 
         return {
             'descriptions': descriptions,
@@ -222,6 +226,9 @@ class ContentGenerationService(IContentGenerationService):
             Truncates to fallback hashtags if exceeds 4000 characters.
         """
         self.logger.info("開始生成文章內容")
+        # 確保策略的 filter_results 已設置為最新的結果
+        if hasattr(self.strategy, 'filter_results'):
+            self.strategy.filter_results = filter_results
         self.strategy.generate_article_content()
 
         article_content = ""

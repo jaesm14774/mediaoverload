@@ -36,9 +36,11 @@ def example_image2image_basic():
         output_dir='output_media/i2i_output',
         image_system_prompt='stable_diffusion_prompt',
         additional_params={
-            'image': {
-                'denoise': 0.6,  # denoise 權重 (0.5-0.7)
-                'images_per_input': 2  # 每個輸入圖片生成 2 張
+            'strategies': {
+                'image2image': {
+                    'denoise': 0.6,  # denoise 權重 (0.5-0.7)
+                    'images_per_input': 2  # 每個輸入圖片生成 2 張
+                }
             }
         }
     )
@@ -55,7 +57,7 @@ def example_image2image_basic():
     
     print(f"\n📝 輸入圖片: {config.input_image_path}")
     print(f"📝 提示詞: {config.prompt}")
-    print(f"📝 Denoise 權重: {config.additional_params['image']['denoise']}")
+    print(f"📝 Denoise 權重: {config.additional_params['strategies']['image2image']['denoise']}")
     print(f"📂 輸出目錄: {config.output_dir}")
     
     # 生成描述（可選）
@@ -99,9 +101,11 @@ def example_image2image_different_denoise():
             workflow_path='configs/workflow/example/image_to_image.json',
             output_dir=f'output_media/i2i_denoise_{denoise}',
             additional_params={
-                'image': {
-                    'denoise': denoise,
-                    'images_per_input': 1
+                'strategies': {
+                    'image2image': {
+                        'denoise': denoise,
+                        'images_per_input': 1
+                    }
                 }
             }
         )
@@ -137,9 +141,11 @@ def example_image2image_extract_description():
         output_dir='output_media/i2i_extracted',
         extract_description=True,  # 從圖片中提取描述
         additional_params={
-            'image': {
-                'denoise': 0.6,
-                'images_per_input': 1
+            'strategies': {
+                'image2image': {
+                    'denoise': 0.6,
+                    'images_per_input': 1
+                }
             }
         }
     )

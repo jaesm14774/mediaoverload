@@ -531,7 +531,7 @@ class TwitterPlatform(SocialMediaPlatform):
                 if status.processing_info:
                     state = status.processing_info.get('state', '')
                     progress = status.processing_info.get('progress_percent', 0)
-                    self.logger.info(f"影片處理狀態: {state}, 進度: {progress}%")
+                    self.logger.debug(f"影片處理狀態: {state}, 進度: {progress}%")
                     
                     if state == 'succeeded':
                         self.logger.info("影片處理成功")

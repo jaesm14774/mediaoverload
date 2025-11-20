@@ -14,6 +14,7 @@ class NodeManager:
         'sampler': {
             'priority': [
                 {'node_type': 'RandomNoise', 'input_key': 'noise_seed'},
+                {'node_type': 'KSamplerAdvanced', 'input_key': 'noise_seed'},  # wan2.2 使用 KSamplerAdvanced
                 {'node_type': 'KSampler', 'input_key': 'seed'},
                 {'node_type': 'MMAudioSampler', 'input_key': 'seed'}
             ]
@@ -64,10 +65,20 @@ class NodeManager:
         if filters:
             filtered_nodes = []
             for node in matching_nodes:
-                if all(
-                    node["metadata"].get(key) == value 
-                    for key, value in filters.items()
-                ):
+                match = True
+                for key, value in filters.items():
+                    # 支持 title 的模糊匹配（不區分大小寫）
+                    if key == "title":
+                        node_title = node["metadata"].get("title_lower", "")
+                        filter_title = str(value).lower()
+                        if filter_title not in node_title:
+                            match = False
+                            break
+                    else:
+                        if node["metadata"].get(key) != value:
+                            match = False
+                            break
+                if match:
                     filtered_nodes.append(node)
             matching_nodes = filtered_nodes
         
@@ -75,7 +86,7 @@ class NodeManager:
     
     @staticmethod
     def generate_updates(workflow: Dict[str, Any], updates_config: List[Dict[str, Any]] = None, 
-                        description: str = None, seed: int = None, **additional_params) -> List[Dict[str, Any]]:
+                        description: str = None, seed: int = None, use_noise_seed: bool = False, **additional_params) -> List[Dict[str, Any]]:
         """
         統一的節點更新生成方法
         
@@ -84,6 +95,7 @@ class NodeManager:
             updates_config (List[Dict]): 自定義更新配置列表
             description (str): 文字描述（用於內建文字策略）
             seed (int): 隨機種子值（用於內建採樣器策略）
+            use_noise_seed (bool): 是否使用 noise_seed 而不是 seed（用於 wan2.2 等工作流）
             additional_params: 其他額外參數
         
         Returns:
@@ -114,7 +126,7 @@ class NodeManager:
         # 處理內建採樣器策略
         if seed is not None:
             result_updates.extend(
-                NodeManager._generate_builtin_sampler_updates(workflow, seed)
+                NodeManager._generate_builtin_sampler_updates(workflow, seed, use_noise_seed=use_noise_seed)
             )
         
         return result_updates
@@ -125,6 +137,17 @@ class NodeManager:
         result_updates = []
         
         for config in updates_config:
+            # 如果直接指定了 node_id，使用直接更新方式
+            if "node_id" in config:
+                node_id = config.get("node_id")
+                inputs = config.get("inputs", {})
+                result_updates.append({
+                    "type": "direct_update",
+                    "node_id": node_id,
+                    "inputs": inputs
+                })
+                continue
+            
             node_type = config.get("node_type")
             node_index = config.get("node_index", 0)
             inputs = config.get("inputs", {})
@@ -186,31 +209,51 @@ class NodeManager:
         return []
     
     @staticmethod
-    def _generate_builtin_sampler_updates(workflow: Dict[str, Any], seed: int) -> List[Dict[str, Any]]:
+    def _generate_builtin_sampler_updates(workflow: Dict[str, Any], seed: int, use_noise_seed: bool = False) -> List[Dict[str, Any]]:
         """生成內建採樣器策略的更新配置
         
-        會檢查所有類型的採樣器節點，並更新所有找到的節點的 seed。
-        這樣可以確保在同一個工作流中有多種採樣器時，所有採樣器的 seed 都會被更新。
+        會檢查所有類型的採樣器節點，並更新所有找到的節點的 seed/noise_seed。
+        每個節點會使用不同的 seed（seed + node_index），確保生成的圖片都不同。
+        
+        Args:
+            workflow: 工作流配置
+            seed: 隨機種子值（基礎 seed）
+            use_noise_seed: 如果為 True，優先使用 noise_seed 類型的節點（如 KSamplerAdvanced）
         """
         strategy = NodeManager.BUILTIN_STRATEGIES['sampler']
         result_updates = []
         
-        for priority_config in strategy['priority']:
+        # 如果指定使用 noise_seed，優先處理 noise_seed 類型的節點
+        priority_order = strategy['priority']
+        if use_noise_seed:
+            # 重新排序，將 noise_seed 類型的節點放在前面
+            noise_seed_configs = [c for c in priority_order if c['input_key'] == 'noise_seed']
+            other_configs = [c for c in priority_order if c['input_key'] != 'noise_seed']
+            priority_order = noise_seed_configs + other_configs
+        
+        for priority_config in priority_order:
             node_type = priority_config['node_type']
             input_key = priority_config['input_key']
+            
+            # 如果指定使用 noise_seed，跳過 seed 類型的節點
+            if use_noise_seed and input_key == 'seed':
+                continue
             
             indices = NodeManager.get_node_indices(workflow, node_type)
             
             if indices:
-                # 將找到的更新加入結果列表，而不是立即返回
+                # 為每個節點使用不同的 seed（seed + node_index），確保生成的圖片都不同
                 result_updates.extend([
                     NodeManager.create_node_update(
                         node_type,
                         i,
-                        {input_key: seed}
+                        {input_key: seed + i}
                     )
                     for i in indices
                 ])
+                # 如果找到 noise_seed 類型的節點，優先使用它
+                if use_noise_seed and input_key == 'noise_seed':
+                    break
         
         # 如果都沒找到，顯示警告
         if not result_updates:
