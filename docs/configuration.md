@@ -1,12 +1,28 @@
 # Configuration Guide
 
-Complete guide to configuring characters, workflows, and generation strategies.
+This guide explains how to configure characters, workflows, and generation strategies for MediaOverload.
+
+## Table of Contents
+- [Character Configuration](#character-configuration)
+- [Generation Type Weights](#generation-type-weights)
+- [Workflow Configuration](#workflow-configuration)
+- [Prompt Generation Methods](#prompt-generation-methods)
+- [Image System Prompts](#image-system-prompts)
+- [Style Weights](#style-weights)
+- [Social Media Configuration](#social_media-configuration)
+- [Generation Parameters](#generation-parameters)
+- [Quality Control](#quality-control)
+- [Creating New Characters](#creating-new-characters)
+- [Character Groups](#character-groups)
+- [ComfyUI Workflow Customization](#comfyui-workflow-customization)
+- [Advanced Configuration](#advanced-configuration)
+- [Configuration Best Practices](#configuration-best-practices)
 
 ---
 
 ## Character Configuration
 
-Characters are the core of MediaOverload. Each character has a YAML config file in `configs/characters/`.
+**Characters are the core of MediaOverload.** Each character is defined by a YAML config file located in `configs/characters/`.
 
 ### Basic Structure
 
@@ -35,13 +51,13 @@ additional_params:
 
 ### Complete Example
 
-See [kirby.yaml](../configs/characters/kirby.yaml) for a fully documented example with inline comments.
+For a fully documented example with inline comments, see [kirby.yaml](../configs/characters/kirby.yaml).
 
 ---
 
 ## Generation Type Weights
 
-Controls which generation method to use. System randomly selects based on weights.
+**Weights control which generation method the system selects.** The system randomly chooses a method based on the provided weights.
 
 ```yaml
 generation_type_weights:
@@ -51,15 +67,15 @@ generation_type_weights:
   text2video: 0.1              # 10% - Text to video
 ```
 
-**Set to 0 to disable a type.**
-
-Weights are normalized automatically (don't need to sum to 1.0).
+**Key Points:**
+- **Set a weight to 0 to disable a type.**
+- Weights are automatically normalized; they do not need to sum to 1.0.
 
 ---
 
 ## Workflow Configuration
 
-Maps each generation type to its ComfyUI workflow JSON file.
+**Workflows map generation types to ComfyUI JSON files.**
 
 ```yaml
 workflows:
@@ -69,18 +85,18 @@ workflows:
   text2image2image: /app/configs/workflow/nova-anime-xl.json  # First stage
 ```
 
-**Available workflows:**
-- `nova-anime-xl.json` - Anime style (SDXL)
-- `flux_krea_dev.json` - Fast generation (Flux)
-- `flux_dev.json` - High quality (Flux)
-- `image_to_image.json` - Image transformation
-- `wan2.1_t2v_audio.json` - Video with audio
+**Available Workflows:**
+- `nova-anime-xl.json`: Anime style (SDXL).
+- `flux_krea_dev.json`: Fast generation (Flux).
+- `flux_dev.json`: High quality (Flux).
+- `image_to_image.json`: Image transformation.
+- `wan2.1_t2v_audio.json`: Video with audio.
 
 ---
 
 ## Prompt Generation Methods
 
-Controls how text prompts are created.
+**These methods control how text prompts are created.**
 
 ```yaml
 prompt_method_weights:
@@ -89,14 +105,14 @@ prompt_method_weights:
 ```
 
 **Methods:**
-- `arbitrary` - LLM generates creative prompts
-- `news` - Fetches news from database, LLM creates related scenes
+- `arbitrary`: LLM generates creative prompts.
+- `news`: System fetches news from the database, and the LLM creates related scenes.
 
 ---
 
 ## Image System Prompts
 
-Templates that guide the LLM to generate specific styles of descriptions.
+**System prompts guide the LLM to generate specific description styles.**
 
 ```yaml
 image_system_prompt_weights:
@@ -107,22 +123,22 @@ image_system_prompt_weights:
   sticker_prompt_system_prompt: 0.25              # Sticker/emoji style
 ```
 
-**Available prompts:**
-- `stable_diffusion_prompt` - Optimized for SDXL
-- `conceptual_logo_design_prompt` - Minimalist logos/icons
-- `two_character_interaction_generate_system_prompt` - Two characters interacting
-- `warm_scene_description_system_prompt` - Emotional/wholesome scenes
-- `sticker_prompt_system_prompt` - Chibi sticker expressions
-- `black_humor_system_prompt` - Dark comedy scenarios
-- `cinematic_stable_diffusion_prompt` - Film-quality cinematography
+**Available Prompts:**
+- `stable_diffusion_prompt`: Optimized for SDXL.
+- `conceptual_logo_design_prompt`: Minimalist logos/icons.
+- `two_character_interaction_generate_system_prompt`: Two characters interacting.
+- `warm_scene_description_system_prompt`: Emotional/wholesome scenes.
+- `sticker_prompt_system_prompt`: Chibi sticker expressions.
+- `black_humor_system_prompt`: Dark comedy scenarios.
+- `cinematic_stable_diffusion_prompt`: Film-quality cinematography.
 
-See [image_system_guide.py](../configs/prompt/image_system_guide.py) for all available prompts.
+For all available prompts, see [image_system_guide.py](../configs/prompt/image_system_guide.py).
 
 ---
 
 ## Style Weights
 
-Visual style guidance for image generation.
+**Style weights provide visual guidance for image generation.**
 
 ```yaml
 style_weights:
@@ -132,13 +148,15 @@ style_weights:
   "": 0.6  # Let LLM decide (60%)
 ```
 
-Empty string `""` means no style constraint - LLM chooses freely.
+**Note:** An empty string `""` means no style constraint, allowing the LLM to choose freely.
 
 ---
 
 ## Social Media Configuration
 
 ### Default Hashtags
+
+**Default hashtags are appended to all posts for the character.**
 
 ```yaml
 social_media:
@@ -148,9 +166,9 @@ social_media:
     - "#ai"
 ```
 
-Appended to all posts for this character.
-
 ### Platform Setup
+
+**Each platform requires credentials in a specified folder.**
 
 ```yaml
 platforms:
@@ -164,7 +182,7 @@ platforms:
     enabled: true
 ```
 
-Each platform needs credentials in the specified folder:
+**Credential Files:**
 - Instagram: `ig.env`
 - Twitter: `twitter.env`
 
@@ -187,7 +205,7 @@ additional_params:
 
 ### Image-to-Image Strategy
 
-Used when `generation_type` is `image2image`:
+**Use this when `generation_type` is `image2image`.**
 
 ```yaml
 additional_params:
@@ -196,14 +214,14 @@ additional_params:
     denoise: 0.6               # Denoising strength (0.5-0.7)
 ```
 
-**Denoise values:**
-- `0.5` - More similar to original
-- `0.6` - Balanced (recommended)
-- `0.7` - More creative freedom
+**Denoise Values:**
+- `0.5`: More similar to original.
+- `0.6`: Balanced (recommended).
+- `0.7`: More creative freedom.
 
 ### Text→Image→Image Two-Stage
 
-Used when `generation_type` is `text2image2image`:
+**Use this when `generation_type` is `text2image2image`.**
 
 ```yaml
 additional_params:
@@ -219,9 +237,9 @@ additional_params:
 ```
 
 **Process:**
-1. Generate 4 images from text (first_stage)
-2. AI selects best images based on similarity_threshold
-3. Refine selected images with image-to-image (second_stage)
+1. Generate 4 images from text (`first_stage`).
+2. AI selects best images based on `similarity_threshold`.
+3. Refine selected images with image-to-image (`second_stage`).
 
 ### Video Generation
 
@@ -245,16 +263,16 @@ additional_params:
 
 ### Similarity Threshold
 
+**The vision model scores image-text matching to filter low-quality results.**
+
 ```yaml
 similarity_threshold: 0.7  # 0.0-1.0
 ```
 
-Vision model scores image-text matching. Images below threshold are filtered out.
-
 **Guidelines:**
-- `0.5-0.6` - Loose (more results)
-- `0.7-0.8` - Balanced (recommended)
-- `0.9+` - Strict (fewer but higher quality)
+- `0.5-0.6`: Loose (more results).
+- `0.7-0.8`: Balanced (recommended).
+- `0.9+`: Strict (fewer but higher quality).
 
 ---
 
@@ -300,7 +318,7 @@ python run_media_interface.py \
 
 ## Character Groups
 
-Characters can belong to groups for dynamic selection.
+**Characters can belong to groups for dynamic selection.**
 
 ### Database Setup
 
@@ -320,23 +338,21 @@ character:
   group_name: Kirby  # System can randomly select from this group
 ```
 
-When `group_name` is set, system can randomly pick any character from that group in the database.
+**How it works:** When `group_name` is set, the system can randomly pick any character from that group in the database.
 
 ---
 
 ## ComfyUI Workflow Customization
 
 ### 1. Design Workflow
-
-- Open ComfyUI web interface
-- Design your node graph
-- Test with sample prompts
+- Open ComfyUI web interface.
+- Design your node graph.
+- Test with sample prompts.
 
 ### 2. Export Workflow
-
-- Click "Save (API Format)"
-- Save as JSON file
-- Place in `configs/workflow/`
+- Click "Save (API Format)".
+- Save as JSON file.
+- Place in `configs/workflow/`.
 
 ### 3. Reference in Config
 
@@ -347,7 +363,7 @@ workflows:
 
 ### 4. Parameter Overrides
 
-Override specific node parameters:
+**Override specific node parameters directly in the config.**
 
 ```yaml
 custom_node_updates:
@@ -367,7 +383,7 @@ custom_node_updates:
 
 ### Multiple AI Model Providers
 
-System automatically rotates between configured providers:
+**The system automatically rotates between configured providers.**
 
 ```env
 # .env file
@@ -378,7 +394,7 @@ OPEN_ROUTER_TOKEN=your_openrouter_key
 
 ### News-Based Prompts
 
-Requires news table in database:
+**This feature requires a `news` table in the database.**
 
 ```sql
 CREATE TABLE news (
@@ -390,42 +406,30 @@ CREATE TABLE news (
 );
 ```
 
-System fetches recent news and generates character-related scenes.
+**How it works:** The system fetches recent news and generates character-related scenes based on current events.
 
 ---
 
 ## Configuration Best Practices
 
-**Start Simple**
-- Use `text2img` only at first
-- Add complexity after testing works
-
-**Test Weights**
-- Set all weights to 0 except one for testing
-- Gradually enable more options
-
-**Monitor Quality**
-- Start with high similarity_threshold (0.8+)
-- Lower if too many images filtered out
-
-**Manage Costs**
-- Use Ollama for local/free generation
-- OpenRouter for occasional cloud use
-- Gemini for vision analysis only
+- **Start Simple:** Use `text2img` only at first. Add complexity after testing works.
+- **Test Weights:** Set all weights to 0 except one for testing. Gradually enable more options.
+- **Monitor Quality:** Start with a high `similarity_threshold` (0.8+). Lower it if too many images are filtered out.
+- **Manage Costs:** Use Ollama for local/free generation, OpenRouter for occasional cloud use, and Gemini for vision analysis only.
 
 ---
 
 ## Example Configurations
 
-See `configs/characters/` for complete examples:
+**See `configs/characters/` for complete examples.**
 
-- `kirby.yaml` - Balanced configuration with multiple styles
-- Check for other character examples in the directory
+- `kirby.yaml`: Balanced configuration with multiple styles.
+- Check for other character examples in the directory.
 
 ---
 
 ## Next Steps
 
-- [Installation Guide](installation.md) - Setup environment
-- [Architecture Overview](architecture.md) - System design
-- [Troubleshooting](troubleshooting.md) - Common issues
+- [Installation Guide](installation.md): Setup environment.
+- [Architecture Overview](architecture.md): System design.
+- [Troubleshooting](troubleshooting.md): Common issues.

@@ -1,6 +1,6 @@
 from typing import Dict, Type
 from lib.media_auto.strategies.base_strategy import ContentStrategy
-from lib.media_auto.strategies.generate_strategies import (
+from lib.media_auto.strategies import (
     Text2ImageStrategy,
     Image2ImageStrategy,
     Text2Image2ImageStrategy,

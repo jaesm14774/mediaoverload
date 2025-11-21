@@ -1,29 +1,21 @@
-"""YAML configuration loader with weighted random selection."""
 import os
 import yaml
 import numpy as np
-from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from typing import Dict, Any
 from lib.media_auto.character_config import CharacterConfig
 
 
 class ConfigLoader:
-    """Load and process character configuration from YAML files."""
-
     @staticmethod
     def load_character_config(config_path: str) -> Dict[str, Any]:
-        """Load YAML config file."""
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"配置檔案不存在: {config_path}")
+            raise FileNotFoundError(f"Config file not found: {config_path}")
 
         with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-
-        return config
+            return yaml.safe_load(f)
 
     @staticmethod
     def process_weighted_choice(weights: Dict[str, float]) -> str:
-        """Select random option based on weights (auto-normalized)."""
         choices = list(weights.keys())
         probabilities = list(weights.values())
 
@@ -35,12 +27,10 @@ class ConfigLoader:
 
     @staticmethod
     def create_character_config(config_dict: Dict[str, Any]) -> CharacterConfig:
-        """Build CharacterConfig from YAML dict with weighted choices."""
         character_info = config_dict.get('character', {})
         generation_info = config_dict.get('generation', {})
         social_media_info = config_dict.get('social_media', {})
 
-        # Process weighted choices
         prompt_method = 'arbitrary'
         if 'prompt_method_weights' in generation_info:
             prompt_method = ConfigLoader.process_weighted_choice(
@@ -65,7 +55,6 @@ class ConfigLoader:
                 generation_info['generation_type_weights']
             )
 
-        # Select workflow based on generation type
         workflow_path = generation_info.get('workflow_path', '')
         if 'workflows' in generation_info and generation_type in generation_info['workflows']:
             workflow_path = generation_info['workflows'][generation_type]
@@ -86,7 +75,6 @@ class ConfigLoader:
 
     @staticmethod
     def get_social_media_config(config_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract enabled social media platform configs."""
         social_media_info = config_dict.get('social_media', {})
         platforms = social_media_info.get('platforms', {})
 

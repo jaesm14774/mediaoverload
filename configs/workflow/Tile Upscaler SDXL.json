@@ -1,0 +1,368 @@
+{
+  "2": {
+    "inputs": {
+      "rows": 2,
+      "cols": 2,
+      "overlap": 0,
+      "overlap_x": 128,
+      "overlap_y": 128,
+      "image": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "ImageTile+",
+    "_meta": {
+      "title": "🔧 Image Tile"
+    }
+  },
+  "37": {
+    "inputs": {
+      "overlap_x": [
+        "2",
+        3
+      ],
+      "overlap_y": [
+        "2",
+        4
+      ],
+      "rows": 2,
+      "cols": 2,
+      "tiles": [
+        "401",
+        0
+      ]
+    },
+    "class_type": "ImageUntile+",
+    "_meta": {
+      "title": "🔧 Image Untile"
+    }
+  },
+  "47": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 2.0000000000000004,
+      "image": [
+        "225",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "224": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_axfte_00001_.png&type=temp&subfolder=&rand=0.9536979791103201"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_axfte_00002_.png&type=temp&subfolder=&rand=0.6535195702298144"
+          }
+        ]
+      },
+      "image_a": [
+        "407",
+        0
+      ],
+      "image_b": [
+        "225",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Image Comparer (rgthree)"
+    }
+  },
+  "225": {
+    "inputs": {
+      "image": "model3_00003_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "395": {
+    "inputs": {
+      "ckpt_name": "sdxl\\noobaiXLNAIXL_vPred10Version.safetensors",
+      "vae_name": "Baked VAE",
+      "clip_skip": -2,
+      "lora_name": "sdxl\\sdxl_lightning_8step_lora.safetensors",
+      "lora_model_strength": 1,
+      "lora_clip_strength": 1,
+      "resolution": "512 x 512",
+      "empty_latent_width": 512,
+      "empty_latent_height": 512,
+      "positive": "detailed, high detail, natural texture, realistic pores, realistic skin, perfect hands, perfect feet",
+      "negative": "blurry, lowres, jpeg artifacts, bad skin, waxy skin, plastic skin, watermark, text",
+      "batch_size": 1
+    },
+    "class_type": "easy comfyLoader",
+    "_meta": {
+      "title": "EasyLoader (Comfy)"
+    }
+  },
+  "397": {
+    "inputs": {
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 0.6000000000000001,
+      "image_output": "Hide",
+      "link_id": 0,
+      "save_prefix": "ComfyUI",
+      "seed": 1,
+      "pipe": [
+        "398",
+        0
+      ],
+      "image": [
+        "417",
+        0
+      ]
+    },
+    "class_type": "easy fullkSampler",
+    "_meta": {
+      "title": "EasyKSampler (Full)"
+    }
+  },
+  "398": {
+    "inputs": {
+      "control_net_name": "sdxl\\xinsir_controlnet-tile-sdxl-1.0.safetensors",
+      "strength": 0.5000000000000001,
+      "scale_soft_weights": 1,
+      "pipe": [
+        "395",
+        0
+      ],
+      "image": [
+        "417",
+        0
+      ]
+    },
+    "class_type": "easy controlnetLoader",
+    "_meta": {
+      "title": "EasyControlnet"
+    }
+  },
+  "401": {
+    "inputs": {
+      "image": [
+        "397",
+        1
+      ]
+    },
+    "class_type": "ImageListToBatch+",
+    "_meta": {
+      "title": "🔧 Image List To Batch"
+    }
+  },
+  "405": {
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "406": {
+    "inputs": {
+      "iterations": 3,
+      "kernel_size": 3,
+      "images": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "Image Lucy Sharpen",
+    "_meta": {
+      "title": "Image Lucy Sharpen"
+    }
+  },
+  "407": {
+    "inputs": {
+      "iterations": 3,
+      "kernel_size": 3,
+      "images": [
+        "408",
+        0
+      ]
+    },
+    "class_type": "Image Lucy Sharpen",
+    "_meta": {
+      "title": "Image Lucy Sharpen"
+    }
+  },
+  "408": {
+    "inputs": {
+      "overlap_x": [
+        "413",
+        3
+      ],
+      "overlap_y": [
+        "413",
+        4
+      ],
+      "rows": 4,
+      "cols": 4,
+      "tiles": [
+        "409",
+        0
+      ]
+    },
+    "class_type": "ImageUntile+",
+    "_meta": {
+      "title": "🔧 Image Untile"
+    }
+  },
+  "409": {
+    "inputs": {
+      "image": [
+        "410",
+        1
+      ]
+    },
+    "class_type": "ImageListToBatch+",
+    "_meta": {
+      "title": "🔧 Image List To Batch"
+    }
+  },
+  "410": {
+    "inputs": {
+      "steps": 4,
+      "cfg": 2,
+      "sampler_name": "euler",
+      "scheduler": "ddim_uniform",
+      "denoise": 0.5000000000000001,
+      "image_output": "Hide",
+      "link_id": 0,
+      "save_prefix": "ComfyUI",
+      "seed": 1,
+      "pipe": [
+        "411",
+        0
+      ],
+      "image": [
+        "418",
+        0
+      ]
+    },
+    "class_type": "easy fullkSampler",
+    "_meta": {
+      "title": "EasyKSampler (Full)"
+    }
+  },
+  "411": {
+    "inputs": {
+      "control_net_name": "sdxl\\xinsir_controlnet-tile-sdxl-1.0.safetensors",
+      "strength": 0.7000000000000002,
+      "scale_soft_weights": 1,
+      "pipe": [
+        "395",
+        0
+      ],
+      "image": [
+        "418",
+        0
+      ]
+    },
+    "class_type": "easy controlnetLoader",
+    "_meta": {
+      "title": "EasyControlnet"
+    }
+  },
+  "412": {
+    "inputs": {
+      "images": [
+        "418",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "413": {
+    "inputs": {
+      "rows": 4,
+      "cols": 4,
+      "overlap": 0,
+      "overlap_x": 128,
+      "overlap_y": 128,
+      "image": [
+        "414",
+        0
+      ]
+    },
+    "class_type": "ImageTile+",
+    "_meta": {
+      "title": "🔧 Image Tile"
+    }
+  },
+  "414": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 2.0000000000000004,
+      "image": [
+        "406",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "416": {
+    "inputs": {
+      "filename_prefix": "upscale",
+      "images": [
+        "407",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "417": {
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "ImpactImageBatchToImageList",
+    "_meta": {
+      "title": "Image Batch to Image List"
+    }
+  },
+  "418": {
+    "inputs": {
+      "image": [
+        "413",
+        0
+      ]
+    },
+    "class_type": "ImpactImageBatchToImageList",
+    "_meta": {
+      "title": "Image Batch to Image List"
+    }
+  }
+}
