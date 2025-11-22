@@ -20,11 +20,11 @@ class Text2VideoStrategy(BaseGenerationStrategy):
                 .with_text_model('ollama', model_name='gemma3:4b') \
                 .build()
 
-    def set_vision_provider(self, provider: str = 'openrouter'):
+    def set_vision_provider(self, provider: str = 'gemini'):
         """設置視覺模型提供者
 
         Args:
-            provider: 'ollama' 或 'openrouter'
+            provider: 'ollama', 'gemini', 或 'openrouter'
         """
         if self.external_vision_manager:
             print(f"警告：正在使用外部傳入的 VisionManager，無法切換提供者到 {provider}")
@@ -32,6 +32,8 @@ class Text2VideoStrategy(BaseGenerationStrategy):
 
         if provider == 'ollama':
             self.current_vision_manager = self.ollama_vision_manager
+        elif provider == 'gemini':
+            self.current_vision_manager = self.gemini_vision_manager
         elif provider == 'openrouter':
             self.current_vision_manager = self.openrouter_vision_manager
         else:

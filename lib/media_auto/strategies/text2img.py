@@ -136,18 +136,13 @@ class Text2ImageStrategy(BaseGenerationStrategy):
         return self
 
     def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
-        """分析生成的圖片 - 隨機選擇分析模型"""
+        """分析生成的圖片 - 預設使用 Gemini，保留 OpenRouter 作為備選"""
         media_paths = glob.glob(f'{self.config.output_dir}/*')
 
-        # 隨機選擇分析管理器：Gemini 或 OpenRouter
-        available_managers = [self.gemini_vision_manager, self.openrouter_vision_manager]
-        selected_manager = np.random.choice(available_managers, p=[0.5, 0.5])
-
-        # 輸出所選擇的模型類型
-        if selected_manager == self.gemini_vision_manager:
-            print("使用 Gemini 進行圖像相似度分析")
-        else:
-            print("使用 OpenRouter 隨機模型進行圖像相似度分析")
+        # 預設使用 Gemini（更穩定且便宜），但保留 OpenRouter 作為備選
+        # 如果需要使用 OpenRouter，可以通過 set_vision_provider('openrouter') 切換
+        selected_manager = self.gemini_vision_manager
+        print("使用 Gemini 進行圖像相似度分析")
 
         self.filter_results = selected_manager.analyze_media_text_match(
             media_paths=media_paths,

@@ -56,6 +56,7 @@ MediaOverload automates content creation from start to finish:
 ### Smart Content Generation
 - **Multi-Format Workflows**: Text-to-image, image-to-image, and text-to-video.
 - **Text-to-Image-to-Video**: User selects an image to generate a video with audio (no AI filtering).
+- **Image Upscaling**: Optional SDXL-based upscaling workflow for enhanced image quality (configurable via environment variables).
 - **Multi-Model Support**: Integrates with Ollama, Gemini, and OpenRouter.
 - **ComfyUI Integration**: Supports multiple workflows (Flux, SDXL, Wan2.2, etc.).
 
@@ -120,8 +121,9 @@ generation:
     1. **Generate Images**: Uses specific "minimal" style; no character interactions.
     2. **Generate Article**: Created immediately after image generation.
     3. **User Review**: Images sent to Discord; user manually selects the best ones.
-    4. **Video Generation**: Selected images are converted to video with audio (unique seeds).
-    5. **Publish**: Uploads the final video to social media.
+    4. **Image Upscaling** (Optional): Selected images are upscaled using SDXL workflow if enabled.
+    5. **Video Generation**: Selected (and optionally upscaled) images are converted to video with audio (unique seeds).
+    6. **Publish**: Uploads the final video to social media.
 
 ---
 
@@ -160,6 +162,13 @@ generation:
 ---
 
 ## Recent Updates
+
+### v2.6.0 (Image Upscaling Support)
+- **Upscale Workflow Integration**: Added optional SDXL-based image upscaling workflow.
+  - **Text2Img Flow**: Images are upscaled after Discord review, before publishing to social media.
+  - **Text2Img2Video Flow**: Images are upscaled after Discord review, before video generation.
+  - **Character Config Control**: Enable/disable per character via `enable_upscale` in character YAML config.
+  - **Configurable Workflow**: Set custom upscale workflow path per character via `upscale_workflow_path` in config.
 
 ### v2.5.0 (Architecture Refactor)
 - **Modular Refactoring**:

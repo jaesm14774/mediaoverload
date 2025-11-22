@@ -88,7 +88,7 @@ class OpenRouterModel(AIModelInterface):
         "deepseek/deepseek-chat-v3.1:free",
         "z-ai/glm-4.5-air:free",
         "deepseek/deepseek-r1-0528:free",
-        # "openai/gpt-oss-20b:free",
+        "x-ai/grok-4.1-fast:free",
         "moonshotai/kimi-k2:free"
     ]
     
@@ -127,16 +127,16 @@ class OpenRouterModel(AIModelInterface):
     def chat_completion(self,
                        messages: List[dict],
                        images: Optional[List[str]] = None,
-                       max_retries: int = 7,
-                       initial_retry_delay: float = 2,
+                       max_retries: int = 10,
+                       initial_retry_delay: float = 5,
                        **kwargs) -> str:
         """使用 OpenRouter API 進行聊天完成（含增強的重試機制）
 
         Args:
             messages: 訊息列表
             images: 圖片列表（可選）
-            max_retries: 最大重試次數（預設 7 次）
-            initial_retry_delay: 初始重試間隔秒數（預設 2 秒）
+            max_retries: 最大重試次數（預設 10 次）
+            initial_retry_delay: 初始重試間隔秒數（預設 5 秒）
             **kwargs: 其他參數
         """
         # 處理圖片輸入 - 將圖片轉換為 base64

@@ -13,6 +13,7 @@ examples/
 ├── batch_generation_example.py        # 批次生成範例
 ├── image2image_example.py             # Image to Image 範例
 ├── text2image2image_example.py        # Text2Image2Image 範例
+├── social_media_example.py            # 社群媒體發布範例
 └── quick_draw/                        # Quick Draw 模組
     ├── README.md                      # Quick Draw 詳細說明
     └── helpers/                       # 輔助工具
@@ -172,20 +173,6 @@ config = ConfigBuilder() \
 
 **主要方法**:
 - `with_character()` - 設定角色
-- `with_prompt()` - 設定提示詞/關鍵字
-- `with_keywords()` - 設定關鍵字列表
-- `with_style()` - 設定風格
-- `with_workflow()` - 設定工作流
-- `with_image_system_prompt()` - 設定系統提示詞
-- `with_input_image()` - 設定輸入圖片（image2image）
-- `with_denoise()` - 設定降噪強度
-- 更多...
-
-## 🆚 範例版 vs 完整版
-
-| 功能 | 範例版 (Quick Draw) | 完整版 |
-|------|-------------------|--------|
-| 描述生成 | ✅ | ✅ |
 | 圖片/視頻生成 | ✅ | ✅ |
 | 圖文匹配分析 | ❌ | ✅ |
 | 文章內容生成 | ❌ | ✅ |

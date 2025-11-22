@@ -63,10 +63,10 @@ class BaseGenerationStrategy(ContentStrategy):
             .build()
         self.ollama_switcher = ModelSwitcher(self.ollama_vision_manager)
 
-        # 預設使用 OpenRouter
-        self.current_vision_manager = self.openrouter_vision_manager
+        # 預設使用 Gemini（更穩定且便宜）
+        self.current_vision_manager = self.gemini_vision_manager
 
-    def set_vision_provider(self, provider: str = 'openrouter'):
+    def set_vision_provider(self, provider: str = 'gemini'):
         """設置視覺模型提供者
 
         Args:
@@ -102,12 +102,17 @@ class BaseGenerationStrategy(ContentStrategy):
             合併後的配置字典（策略專用參數覆蓋 general 參數）
         """
         additional_params = getattr(self.config, 'additional_params', {})
-        general_params = additional_params.get('general', {})
-        strategies = additional_params.get('strategies', {})
-        strategy_config = strategies.get(strategy_type, {})
+        # 確保 additional_params 是字典類型
+        if not isinstance(additional_params, dict):
+            print(f"⚠️ additional_params 不是字典類型: {type(additional_params)}, 使用空字典")
+            additional_params = {}
+        
+        general_params = additional_params.get('general', {}) or {}
+        strategies = additional_params.get('strategies', {}) or {}
+        strategy_config = strategies.get(strategy_type, {}) or {}
         
         if stage:
-            stage_config = strategy_config.get(stage, {})
+            stage_config = strategy_config.get(stage, {}) or {}
             # 合併：general -> strategy -> stage（後者覆蓋前者）
             return {**general_params, **strategy_config, **stage_config}
         else:
@@ -259,6 +264,117 @@ class BaseGenerationStrategy(ContentStrategy):
             print(f"⚠️ 圖片上傳失敗: {e}")
             print(f"   嘗試直接使用文件名: {os.path.basename(image_path)}")
             return os.path.basename(image_path)
+
+    def upscale_images(self, image_paths: List[str], output_dir: str, workflow_path: str = None) -> List[str]:
+        """使用 upscale workflow 放大圖片
+        
+        Args:
+            image_paths: 要放大的圖片路徑列表
+            output_dir: 輸出路徑
+            workflow_path: upscale workflow 路徑（可選，預設從配置讀取）
+            
+        Returns:
+            放大後的圖片路徑列表
+        """
+        import glob
+        
+        # 從配置中獲取 upscale 設置（支援策略特定配置覆蓋）
+        strategy_type = self.__class__.__name__.replace('Strategy', '').lower()
+        # 將類名映射到配置中的策略類型名稱
+        if strategy_type == 'text2image2video':
+            strategy_type = 'text2image2video'
+        elif strategy_type == 'text2image2image':
+            strategy_type = 'text2image2image'
+        elif strategy_type == 'text2image':
+            strategy_type = 'text2img'
+        elif strategy_type == 'image2image':
+            strategy_type = 'image2image'
+        
+        # 獲取策略配置（策略特定配置會覆蓋 general 配置）
+        strategy_config = self._get_strategy_config(strategy_type)
+        
+        # 調試輸出：顯示讀取到的配置
+        print(f"🔍 策略類型: {strategy_type}")
+        print(f"🔍 enable_upscale 配置值: {strategy_config.get('enable_upscale', '未找到')}")
+        print(f"🔍 upscale_workflow_path 配置值: {strategy_config.get('upscale_workflow_path', '未找到')}")
+        
+        # 檢查是否啟用 upscale
+        enable_upscale = strategy_config.get('enable_upscale', False)
+        if not enable_upscale:
+            print("⚠️ Upscale 功能未啟用，跳過放大流程")
+            return image_paths
+        
+        # 獲取 workflow 路徑
+        if not workflow_path:
+            workflow_path = strategy_config.get('upscale_workflow_path', 'configs/workflow/Tile Upscaler SDXL.json')
+        
+        if not os.path.exists(workflow_path):
+            print(f"⚠️ Upscale workflow 不存在: {workflow_path}，跳過放大流程")
+            return image_paths
+        
+        print(f"\n{'=' * 60}")
+        print(f"開始放大 {len(image_paths)} 張圖片")
+        print(f"{'=' * 60}")
+        
+        # 載入 workflow
+        upscale_workflow = self._load_workflow(workflow_path)
+        
+        # 確保 WebSocket 連接存在
+        if not self.communicator or not self.communicator.ws or not self.communicator.ws.connected:
+            self.communicator = ComfyUICommunicator()
+            self.communicator.connect_websocket()
+            print("已建立 WebSocket 連接")
+        
+        upscaled_paths = []
+        upscale_output_dir = os.path.join(output_dir, 'upscaled')
+        os.makedirs(upscale_output_dir, exist_ok=True)
+        
+        try:
+            for idx, image_path in enumerate(image_paths):
+                print(f"\n[{idx+1}/{len(image_paths)}] 放大圖片: {os.path.basename(image_path)}")
+                
+                # 上傳圖片到 ComfyUI
+                image_filename = self._upload_image_to_comfyui(image_path)
+                
+                # 準備更新：更新 LoadImage 節點（節點 225）載入圖片
+                # 必須使用 "type": "direct_update" 格式，才能讓 process_workflow 正確識別並應用更新
+                updates = [
+                    {
+                        "type": "direct_update",
+                        "node_id": "225",
+                        "inputs": {"image": image_filename}
+                    }
+                ]
+                
+                # 處理 workflow
+                is_last_image = (idx == len(image_paths) - 1)
+                success, saved_files = self.communicator.process_workflow(
+                    workflow=upscale_workflow,
+                    updates=updates,
+                    output_path=upscale_output_dir,
+                    file_name=f"upscaled_{idx}",
+                    auto_close=False
+                )
+                
+                if success and saved_files:
+                    # 找到最新生成的圖片（通常是放大後的圖片）
+                    upscaled_image = saved_files[-1] if saved_files else None
+                    if upscaled_image and os.path.exists(upscaled_image):
+                        upscaled_paths.append(upscaled_image)
+                        print(f"✅ 圖片已放大: {os.path.basename(upscaled_image)}")
+                    else:
+                        print(f"⚠️ 無法找到放大後的圖片，使用原始圖片")
+                        upscaled_paths.append(image_path)
+                else:
+                    print(f"⚠️ 放大失敗，使用原始圖片")
+                    upscaled_paths.append(image_path)
+        
+        finally:
+            # 不關閉 WebSocket，讓後續流程繼續使用
+            pass
+        
+        print(f"\n✅ 完成放大流程，共處理 {len(upscaled_paths)} 張圖片")
+        return upscaled_paths
 
     def prevent_hashtag_count_too_more(self, hashtag_text):
         """防止 hashtag 數量過多"""

@@ -111,20 +111,38 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
             print("警告：無法獲取選擇的圖片路徑")
             return False
         
-        # 找到這些圖片在原始 first_stage_images 中的索引
+        # 找到這些圖片在 first_stage_images 中的索引
+        # 注意：如果圖片已經被放大，first_stage_images 中可能包含放大後的圖片路徑
+        # 我們需要嘗試匹配原始路徑或放大後的路徑
         original_indices = []
         for img_path in selected_image_paths:
+            found = False
+            # 先嘗試直接匹配
             try:
                 idx = self.first_stage_images.index(img_path)
                 original_indices.append(idx)
+                found = True
             except ValueError:
+                # 如果直接匹配失敗，可能是因為圖片已經被放大
+                # 嘗試通過文件名匹配（不包含路徑）
+                img_basename = os.path.basename(img_path)
+                for idx, first_stage_img in enumerate(self.first_stage_images):
+                    first_stage_basename = os.path.basename(first_stage_img)
+                    # 檢查文件名是否相似（可能是放大後的版本）
+                    if img_basename in first_stage_basename or first_stage_basename in img_basename:
+                        original_indices.append(idx)
+                        found = True
+                        print(f"通過文件名匹配找到圖片: {img_path} -> {first_stage_img}")
+                        break
+            
+            if not found:
                 print(f"警告：無法找到圖片路徑對應的索引: {img_path}")
         
         if not original_indices:
             print("警告：無法找到選擇的圖片對應的索引")
             return False
         
-        # 生成影片
+        # 生成影片（使用 first_stage_images 中的圖片，可能是放大後的）
         print(f"開始使用 {len(original_indices)} 張使用者選擇的圖片生成影片")
         self.generate_videos_from_selected_images(original_indices)
         self._videos_generated = True

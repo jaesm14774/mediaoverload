@@ -103,6 +103,10 @@ additional_params:
     videos_per_image: 1  # Generate 1 video per image
     denoise: 0.6  # Denoising strength (0.5-0.7, higher = more change)
     
+    # Image Upscaling Configuration
+    enable_upscale: true  # Enable/disable image upscaling after Discord review
+    upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json  # Path to upscale workflow
+    
     # Custom Node Updates (通用)
     custom_node_updates:
       - node_type: "PrimitiveInt"

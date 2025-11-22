@@ -166,10 +166,10 @@ class Image2ImageStrategy(BaseGenerationStrategy):
             self.filter_results = []
             return self
 
-        # 隨機選擇分析模型
-        import numpy as np
-        available_managers = [self.gemini_vision_manager, self.openrouter_vision_manager]
-        selected_manager = np.random.choice(available_managers, p=[0.5, 0.5])
+        # 預設使用 Gemini（更穩定且便宜），但保留 OpenRouter 作為備選
+        # 如果需要使用 OpenRouter，可以通過 set_vision_provider('openrouter') 切換
+        selected_manager = self.gemini_vision_manager
+        print("使用 Gemini 進行圖像相似度分析")
 
         self.filter_results = selected_manager.analyze_media_text_match(
             media_paths=image_paths,

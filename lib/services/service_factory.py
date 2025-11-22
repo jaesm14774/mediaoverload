@@ -41,7 +41,7 @@ class ServiceFactory:
         
         # VisionManager 實例
         self._vision_manager = None
-        self._vision_provider = 'openrouter'  # 默認使用 openrouter
+        self._vision_provider = 'gemini'  # 默認使用 gemini
         self._text_provider = 'openrouter'
         self._use_random_models = True
         self._vision_model_name = None
@@ -60,8 +60,8 @@ class ServiceFactory:
         )
         self.mysql_conn = db_pool.get_connection('mysql')
     
-    def configure_vision_manager(self, vision_provider: str = 'openrouter', 
-                                text_provider: str = 'openrouter', 
+    def configure_vision_manager(self, vision_provider: str = 'gemini', 
+                                text_provider: str = 'gemini', 
                                 use_random_models: bool = True,
                                 vision_model_name: str = None,
                                 text_model_name: str = None):

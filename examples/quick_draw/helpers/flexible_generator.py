@@ -326,6 +326,105 @@ class FlexibleGenerator:
 
         return result
 
+    def generate_text2image2video(self,
+                                 keywords: Union[str, List[str]],
+                                 system_prompt: str = 'stable_diffusion_prompt',
+                                 character: Optional[str] = None,
+                                 style: str = '',
+                                 num_images: int = 1,
+                                 num_videos_per_image: int = 1,
+                                 t2i_workflow: Optional[str] = None,
+                                 i2v_workflow: Optional[str] = None,
+                                 output_subdir: Optional[str] = None,
+                                 **kwargs) -> Dict[str, Any]:
+        """生成 Text2Image2Video (文生圖 -> 圖生影片)
+        
+        Args:
+            keywords: 關鍵字（字串或列表）
+            system_prompt: 系統提示詞名稱
+            character: 角色名稱
+            style: 風格描述
+            num_images: 第一階段生成的圖片數量
+            num_videos_per_image: 第二階段每張圖片生成的影片數量
+            t2i_workflow: 文生圖工作流名稱 (預設使用 default_image_workflow)
+            i2v_workflow: 圖生影片工作流名稱 (預設使用 wan2.2_gguf_i2v_audio)
+            output_subdir: 輸出子目錄
+            **kwargs: 其他參數
+            
+        Returns:
+            包含生成結果的字典
+        """
+        # 轉換 keywords 為字串
+        if isinstance(keywords, list):
+            keywords_str = ', '.join(keywords)
+        else:
+            keywords_str = keywords
+            
+        # 確定工作流
+        t2i_workflow_name = t2i_workflow or self.default_image_workflow
+        t2i_workflow_path = self._load_workflow_path(t2i_workflow_name)
+        
+        i2v_workflow_name = i2v_workflow or 'wan2.2_gguf_i2v_audio'
+        i2v_workflow_path = self._load_workflow_path(i2v_workflow_name)
+        
+        # 確定輸出目錄
+        output_dir = self.output_folder
+        if output_subdir:
+            output_dir = os.path.join(output_dir, output_subdir)
+            os.makedirs(output_dir, exist_ok=True)
+            
+        # 構建策略參數
+        additional_params = {
+            'strategies': {
+                'text2image2video': {
+                    'first_stage': {
+                        'images_per_description': num_images,
+                        't2i_workflow_path': t2i_workflow_path,
+                        'style': style,
+                        'image_system_prompt': system_prompt
+                    },
+                    'video': {
+                        'videos_per_image': num_videos_per_image,
+                        'i2v_workflow_path': i2v_workflow_path
+                    }
+                }
+            }
+        }
+        
+        # 建立配置
+        builder = ConfigBuilder() \
+            .with_workflow(t2i_workflow_path) \
+            .with_output_dir(output_dir) \
+            .with_prompt(keywords_str) \
+            .with_generation_type('text2image2video') \
+            .with_image_system_prompt(system_prompt) \
+            .with_additional_params(**additional_params)
+            
+        if character:
+            builder.with_character(character)
+            
+        # 添加額外參數
+        for key, value in kwargs.items():
+            if hasattr(builder, f'with_{key}'):
+                getattr(builder, f'with_{key}')(value)
+                
+        config = builder.build()
+        
+        # 執行生成
+        if self.verbose:
+            print(f"\n🎬 開始 Text2Image2Video 生成...")
+            print(f"🔖 Keywords: {keywords_str}")
+            print(f"📝 System Prompt: {system_prompt}")
+            print(f"📊 圖片數量: {num_images}, 影片/圖: {num_videos_per_image}")
+            
+        result = self.content_service.generate_content(config)
+        
+        if self.verbose:
+            print(f"✅ 完成！生成了 {len(result['media_files'])} 個影片")
+            print(f"📂 保存位置: {output_dir}/videos")
+            
+        return result
+
     def batch_generate(self,
                       prompts: List[Dict[str, Any]],
                       media_type: str = 'image',
