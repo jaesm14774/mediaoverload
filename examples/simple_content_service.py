@@ -107,6 +107,32 @@ class SimpleContentGenerationService:
             
             self.logger.info(f"視頻生成完成，共生成 {len(media_files)} 個視頻")
             return media_files
+        elif generation_type == 'text2image2video':
+            self.logger.info("開始 Text2Image2Video 生成流程")
+            
+            # 1. 第一階段：生成圖片
+            self.strategy.generate_media()
+            
+            # 2. 自動選擇所有圖片進行第二階段（影片生成）
+            if hasattr(self.strategy, 'first_stage_images') and self.strategy.first_stage_images:
+                self.logger.info(f"自動選擇所有 {len(self.strategy.first_stage_images)} 張圖片進行影片生成")
+                
+                # 創建索引列表 [0, 1, 2, ...]
+                indices = list(range(len(self.strategy.first_stage_images)))
+                
+                # 繼續生成影片
+                if hasattr(self.strategy, 'continue_after_review'):
+                    self.strategy.continue_after_review(indices)
+            
+            # 3. 收集生成的影片
+            video_output_dir = f"{config.output_dir}/videos"
+            video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
+            media_files = []
+            for ext in video_extensions:
+                media_files.extend(glob.glob(f'{video_output_dir}/{ext}'))
+            
+            self.logger.info(f"影片生成完成，共生成 {len(media_files)} 個影片")
+            return media_files
         else:
             self.logger.info("開始生成圖片")
             self.strategy.generate_media()

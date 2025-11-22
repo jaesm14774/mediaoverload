@@ -1,17 +1,13 @@
-"""Configurable character classes with YAML config support."""
 from abc import ABC
 from typing import Dict, Any, Optional
-from lib.media_auto.character_config import CharacterConfig, BaseCharacter
+from lib.media_auto.character_config import CharacterConfig
 from lib.config_loader import ConfigLoader
 from lib.social_media import SocialMediaMixin
 
 
 class ConfigurableCharacter(ABC):
-    """Character that loads config from YAML files."""
-
     def __init__(self, config_path: Optional[str] = None):
         if config_path:
-            # Load from file
             config_dict = ConfigLoader.load_character_config(config_path)
             self.config = ConfigLoader.create_character_config(config_dict)
             self._social_media_config = ConfigLoader.get_social_media_config(config_dict)
@@ -28,12 +24,10 @@ class ConfigurableCharacter(ABC):
             self.image_system_prompt = self.config.image_system_prompt
             self.additional_params = self.config.additional_params
         else:
-            # Use subclass attributes
             self.config = self.get_default_config()
             self._social_media_config = {}
 
     def get_default_config(self) -> CharacterConfig:
-        """Build config from class attributes."""
         return CharacterConfig(
             character=getattr(self, 'character', '').lower(),
             output_dir=getattr(self, 'output_dir', '/app/output_media'),
@@ -49,25 +43,20 @@ class ConfigurableCharacter(ABC):
         )
 
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:
-        """Convert config to dict and add prompt."""
         config = {k: v for k, v in self.config.__dict__.items()}
         config.update({'prompt': prompt})
         return config
 
 
 class ConfigurableCharacterWithSocialMedia(ConfigurableCharacter, SocialMediaMixin):
-    """Character with YAML config and social media support."""
-
     def __init__(self, config_path: Optional[str] = None):
         ConfigurableCharacter.__init__(self, config_path)
         SocialMediaMixin.__init__(self)
 
-        # Auto-register platforms from config
         if self._social_media_config:
             self._register_platforms_from_config()
 
     def _register_platforms_from_config(self):
-        """Register social media platforms from config."""
         from lib.social_media import InstagramPlatform, TwitterPlatform
 
         platform_mapping = {

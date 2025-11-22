@@ -176,14 +176,29 @@ def example_minimal():
 
     generator = FlexibleGenerator()
 
-    # 最簡單的使用方式
-    result = generator.generate_images(
-        prompt="A happy cat playing in the garden"
-    )
-
     print(f"\n✅ 生成了 {len(result['media_files'])} 張圖片")
 
     return result
+
+
+def example_text2image2video():
+    """範例 8: Text2Image2Video 生成"""
+    print("\n" + "="*60)
+    print("範例 8: Text2Image2Video 生成")
+    print("="*60)
+    
+    generator = FlexibleGenerator()
+    
+    # 生成影片
+    result = generator.generate_text2image2video(
+        keywords=["cinematic shot", "dramatic lighting", "slow motion"],
+        character="kirby",
+        style="movie style",
+        num_images=1,
+        num_videos_per_image=1
+    )
+    
+    print(f"\n生成了 {len(result['media_files'])} 個影片")
 
 
 def main():
@@ -192,29 +207,30 @@ def main():
     print("彈性生成範例")
     print("使用 FlexibleGenerator 輕鬆生成圖片和影片")
     print("="*60)
-
+    
     examples = {
         '1': ('簡單的圖片生成', example_simple_image_generation),
         '2': ('帶風格的圖片生成', example_styled_generation),
         '3': ('雙角色互動圖片生成', example_two_character_generation),
-        '4': ('影片生成', example_video_generation),
+        '4': ('影片生成 (Text2Video)', example_video_generation),
         '5': ('使用自訂工作流', example_custom_workflow),
         '6': ('結合 ConfigBuilder（進階）', example_with_configbuilder),
         '7': ('最簡化使用', example_minimal),
+        '8': ('Text2Image2Video 生成', example_text2image2video),
     }
-
+    
     print("\n請選擇要運行的範例:")
     for key, (name, _) in examples.items():
         print(f"  {key}. {name}")
     print("  a. 運行所有範例")
     print("  q. 退出")
-
-    choice = input("\n請輸入選項 (1-7/a/q): ").strip().lower()
-
+    
+    choice = input("\n請輸入選項 (1-8/a/q): ").strip().lower()
+    
     if choice == 'q':
         print("\n👋 再見！")
         return
-
+    
     try:
         if choice == 'a':
             # 運行所有範例
@@ -232,16 +248,11 @@ def main():
         else:
             print("\n❌ 無效的選項")
             return
-
+        
         print("\n" + "="*60)
         print("✅ 範例執行完成！")
         print("="*60)
-        print("\n💡 提示：")
-        print("   - 所有生成的檔案保存在 output_media/ 目錄")
-        print("   - 可以使用 output_subdir 參數來組織不同的生成結果")
-        print("   - 支援自訂 workflow、style、keywords 等參數")
-        print("   - 查看 FLEXIBLE_USAGE.md 了解更多用法")
-
+        
     except KeyboardInterrupt:
         print("\n\n⚠️ 用戶中斷執行")
     except Exception as e:

@@ -1,28 +1,43 @@
 # MediaOverload
 
-AI-powered automated content generation and multi-platform publishing system.
+**AI-powered automated content generation and multi-platform publishing system.**
 
-Generates diverse media content (images/videos) from text prompts using LLMs and ComfyUI, with automated social media publishing to Instagram and Twitter.
+MediaOverload generates diverse media content (images/videos) from text prompts using LLMs and ComfyUI, and automatically publishes them to Instagram and Twitter.
+
+## Table of Contents
+- [Quick Start](#quick-start)
+- [Core Features](#core-features)
+- [Documentation](#documentation)
+- [Key Concepts](#key-concepts)
+- [System Requirements](#system-requirements)
+- [Development](#development)
+- [Recent Updates](#recent-updates)
+- [Project Structure](#project-structure)
+- [Support](#support)
 
 ---
 
 ## Quick Start
 
 **Fastest way to test:**
+
 ```bash
-# Clone and setup
+# 1. Clone and setup
 git clone https://github.com/your-repo/mediaoverload.git
 cd mediaoverload
 cp media_overload.env.example media_overload.env
 
-# Start services
+# 2. Start services
 docker-compose up --build -d
 
-# Generate content
+# 3. Generate content
 python run_media_interface.py --character kirby --prompt "Kirby eating ramen"
 ```
 
 **Try examples first:**
+
+The examples skip time-consuming analysis steps, making them perfect for testing.
+
 ```bash
 # Interactive notebook (recommended)
 jupyter notebook examples/quick_draw_examples.ipynb
@@ -31,62 +46,54 @@ jupyter notebook examples/quick_draw_examples.ipynb
 python examples/quick_draw_example.py
 ```
 
-Examples skip time-consuming analysis steps - perfect for testing.
-
 ---
 
-## What It Does
+## Core Features
 
 MediaOverload automates content creation from start to finish:
+**Input** → **Process** → **Output**
 
-**Input** → Text prompt or news keyword
-**Process** → AI generates descriptions → Creates images/videos → Analyzes quality
-**Output** → Discord review → Auto-publish to Instagram/Twitter
+### Smart Content Generation
+- **Multi-Format Workflows**: Text-to-image, image-to-image, and text-to-video.
+- **Text-to-Image-to-Video**: User selects an image to generate a video with audio (no AI filtering).
+- **Image Upscaling**: Optional SDXL-based upscaling workflow for enhanced image quality (configurable via environment variables).
+- **Multi-Model Support**: Integrates with Ollama, Gemini, and OpenRouter.
+- **ComfyUI Integration**: Supports multiple workflows (Flux, SDXL, Wan2.2, etc.).
 
-### Core Features
+### Character System
+- **Unique Personas**: Each character has its own style, workflows, and social accounts.
+- **Group Selection**: Randomly select characters from defined groups.
+- **Interactions**: Generate scenes with two characters interacting.
 
-**Smart Content Generation**
-- Text-to-image, image-to-image, text-to-video workflows
-- Text-to-image-to-video workflow (使用者選擇圖片後生成含音頻的影片，不做 AI 篩選)
-- Multi-model support: Ollama, Gemini, OpenRouter
-- ComfyUI integration with multiple workflows (Flux, SDXL, Wan2.2, etc.)
+### Quality Control
+- **Vision Analysis**: AI analyzes image-text matching (optional).
+- **Human Review**: Discord-based workflow for manual approval.
+- **Smart Filtering**: Automatic filtering by similarity threshold (manual selection for video strategies).
 
-**Character System**
-- Each character has unique style, workflows, and social accounts
-- Group-based random character selection
-- Two-character interaction scenes
-
-**Quality Control**
-- Vision model analyzes image-text matching (可選，Text2Image2Video 策略不使用)
-- Discord-based human review workflow
-- Automatic filtering by similarity threshold (Text2Image2Video 策略改為使用者手動選擇)
-
-**Multi-Platform Publishing**
-- Instagram with automatic format conversion
-- Twitter with API v2 support
-- Extensible platform architecture
+### Multi-Platform Publishing
+- **Instagram**: Automatic format conversion and publishing.
+- **Twitter/X**: Full support via API v2.
+- **Extensible**: Easy to add new platforms.
 
 ---
 
 ## Documentation
 
 **Getting Started**
-- [Installation Guide](docs/installation.md) - Setup dependencies and services
-- [Configuration Guide](docs/configuration.md) - Character configs and credentials
-- [Quick Examples](examples/README.md) - 6 ready-to-run use cases
+- [Installation Guide](docs/installation.md): Setup dependencies and services.
+- [Configuration Guide](docs/configuration.md): Character configs and credentials.
+- [Quick Examples](examples/README.md): 6 ready-to-run use cases.
 
 **Deep Dive**
-- [Architecture Overview](docs/architecture.md) - System design and workflows
-- [API Reference](docs/api.md) - Service interfaces and methods
-- [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
+- [Architecture Overview](docs/architecture.md): System design and workflows.
+- [Troubleshooting](docs/troubleshooting.md): Common issues and solutions.
 
 ---
 
 ## Key Concepts
 
 ### Character Configuration
-
-Characters drive content generation. Each has a YAML config:
+Characters drive content generation. Each is defined by a YAML config:
 
 ```yaml
 character:
@@ -106,121 +113,74 @@ generation:
 
 ### Generation Strategies
 
-**Text-to-Image**
-Direct text → image generation using ComfyUI workflows.
-
-**Image-to-Image**
-Transform existing images with controllable denoising (0.5-0.7).
-
-**Text→Image→Image (Two-Stage)**
-1. Generate multiple images from text
-2. AI selects best matches
-3. Refine selected images with image-to-image
-
-**Text-to-Video**
-Generate videos with MMAudio sound effects.
-
-**Text→Image→Video (Multi-Stage)**
-1. Generate images from text (使用策略專用配置：固定 minimal, simple background style，不接受雙角色互動)
-2. Generate article content based on images + descriptions (在第一階段圖片生成後立即生成)
-3. Send all images to Discord for user review (預設為非勾選狀態，使用者檢核後才勾選)
-4. User selects images via Discord
-5. Generate video descriptions from selected images
-6. Generate audio descriptions from images + video descriptions
-7. Generate videos with audio using wan2.2_gguf_i2v workflow (每個影片使用不同的 seed)
-8. Upload to social media
+- **Text-to-Image**: Direct text → image generation using ComfyUI.
+- **Image-to-Image**: Transform existing images with controllable denoising (0.5-0.7).
+- **Text→Image→Image (Two-Stage)**: Generate base images, filter by quality, then refine the best matches.
+- **Text-to-Video**: Generate videos with MMAudio sound effects.
+- **Text→Image→Video (Multi-Stage)**:
+    1. **Generate Images**: Uses specific "minimal" style; no character interactions.
+    2. **Generate Article**: Created immediately after image generation.
+    3. **User Review**: Images sent to Discord; user manually selects the best ones.
+    4. **Image Upscaling** (Optional): Selected images are upscaled using SDXL workflow if enabled.
+    5. **Video Generation**: Selected (and optionally upscaled) images are converted to video with audio (unique seeds).
+    6. **Publish**: Uploads the final video to social media.
 
 ---
 
 ## System Requirements
 
 **Required Services**
-- ComfyUI (port 8188) - Image/video generation
-- Ollama or cloud LLM - Text generation and analysis
-- MySQL/PostgreSQL - Character and news data
-- Discord - Review workflow
-
-**Optional Services**
-- Google Gemini API - Alternative LLM
-- OpenRouter API - Access to free models
+- **ComfyUI** (port 8188): Image/video generation.
+- **Ollama** or **Cloud LLM**: Text generation and analysis.
+- **MySQL/PostgreSQL**: Character and news data.
+- **Discord**: Review workflow.
 
 **Resources**
-- GPU with 8GB+ VRAM recommended for video generation
-- Storage for generated media and logs
+- **GPU**: 8GB+ VRAM recommended (essential for video).
+- **Storage**: Sufficient space for generated media and logs.
 
 ---
 
 ## Development
 
-**Add New Character**
-1. Create `configs/characters/{name}.yaml`
-2. Setup `configs/social_media/credentials/{name}/`
-3. Configure platforms in YAML
+### Add New Character
+1. Create `configs/characters/{name}.yaml`.
+2. Setup `configs/social_media/credentials/{name}/`.
+3. Configure platforms in the YAML file.
 
-**Add New Platform**
-1. Implement platform class in `lib/social_media.py`
-2. Register in `PublishingService`
-3. Update character configs
+### Add New Platform
+1. Implement the platform class in `lib/social_media/{platform}.py` (inheriting from `SocialMediaPlatform`).
+2. Register it in `PublishingService`.
+3. Update character configs.
+4. Export the new class in `lib/social_media/__init__.py`.
 
-**Custom ComfyUI Workflow**
-1. Design workflow in ComfyUI
-2. Export as JSON to `configs/workflow/`
-3. Reference in character config
+### Custom ComfyUI Workflow
+1. Design the workflow in ComfyUI.
+2. Export as JSON to `configs/workflow/`.
+3. Reference the file in your character config.
 
 ---
 
 ## Recent Updates
 
-**v2.4.0** (Workflow 檢查)
-- **nova-anime-xl.json workflow 變更檢查**：
-  - ✅ 節點 ID 改變（237/240/241 → 260/269/272）不影響功能，系統使用動態節點查找
-  - ✅ 結構改變（新增 LoraLoader 節點、LoRA 強度調整）不影響 text2img 功能
-  - ⚠️ **重要發現**：workflow 包含三個獨立的生成流程，每次執行會生成 3 張圖片
-    - 流程 1: noobaiXLNAIXL_vPred10Version + reiXL_NB11 LoRA (model0)
-    - 流程 2: noobaiXLNAIXL_vPred10Version + reiXL_NB11 LoRA (model1)
-    - 流程 3: novaAnimeXL_ilV60 + reiXL_NB11 LoRA (model3)
-  - 📊 **影響**：如果 `images_per_description` 設為 8，實際會生成 8 × 3 = 24 張圖片
-  - 💡 **建議**：如需單一圖片輸出，考慮修改 workflow 只保留一個生成流程，或調整 `images_per_description` 配置
+### v2.6.0 (Image Upscaling Support)
+- **Upscale Workflow Integration**: Added optional SDXL-based image upscaling workflow.
+  - **Text2Img Flow**: Images are upscaled after Discord review, before publishing to social media.
+  - **Text2Img2Video Flow**: Images are upscaled after Discord review, before video generation.
+  - **Character Config Control**: Enable/disable per character via `enable_upscale` in character YAML config.
+  - **Configurable Workflow**: Set custom upscale workflow path per character via `upscale_workflow_path` in config.
 
-**v2.3.2**
-- **文章內容生成優化**：
-  - 限制生成文章內容時最多使用3張圖片（而非全部圖片）
-  - 減少 API 調用成本，提升生成效率
-  - 適用於所有生成策略（Text2Image、Image2Image、Text2Image2Video 等）
+### v2.5.0 (Architecture Refactor)
+- **Modular Refactoring**:
+    - Split `generate_strategies.py` into a dedicated package: `lib/media_auto/strategies/`.
+    - Split `social_media.py` into a dedicated package: `lib/social_media/`.
+    - Implemented `InstagramPlatform` and `TwitterPlatform` as separate classes.
+- **Improved Maintainability**: Cleaner code structure and better separation of concerns.
 
-**v2.3.1**
-- **Text2Image2Video 策略修復**：
-  - 修復影片生成後未生成基於影片的文章內容的問題
-  - 修復影片審核時使用錯誤文章內容的問題（現在使用基於影片的內容）
-  - 修復發布時未使用正確文章內容的問題（優先使用基於影片的內容）
-  - 確保在影片生成後，會重新生成基於影片的文章內容並發送到 Discord 和社群媒體
-
-**v2.3.0**
-- **Text2Image2Video 策略優化**：
-  - 在第一階段圖片生成後立即生成發文內文（使用圖 + 描述）
-  - Discord 選擇預設為非勾選狀態，使用者檢核後才勾選可用圖片
-  - 修正影片生成 seed 問題，確保每個影片使用不同的 seed
-  - 支援策略專用配置：text2image2video 的 text2image 階段可設定固定 style 為 "minimalism style with pure background"
-  - 強制不使用雙角色互動系統提示詞，確保背景乾淨簡單
-
-**v2.2.0**
-- **架構重構**：將業務邏輯從 `orchestration_service` 移回策略層，遵循單一職責原則
-- **Text2Image2Video 策略優化**：
-  - 移除 AI 圖片篩選步驟，改為透過 Discord 讓使用者手動選擇圖片
-  - 節省 AI 分析成本，提升使用者控制權
-  - 文章內容延遲生成：在影片生成後才生成文章內容（而非圖片階段）
-- **策略介面擴展**：
-  - 新增 `needs_user_review()` 方法：策略可指示是否需要使用者審核
-  - 新增 `get_review_items(max_items)` 方法：策略提供審核項目（處理 Discord 10 張限制）
-  - 新增 `continue_after_review(selected_indices)` 方法：策略處理使用者選擇後的後續流程
-  - 新增 `should_generate_article_now()` 方法：策略控制文章內容生成時機
-
-**v2.1.0**
-- OpenRouter integration with free models
-- Two-character interaction system
-- New prompt templates (spiritual, dark humor, cinematic)
-- Text→Image→Image two-stage generation
-- Improved vision model analysis
+### v2.3.0 - v2.4.0 (Video & Workflow Optimization)
+- **Text2Image2Video**: Optimized workflow with immediate article generation and manual Discord selection.
+- **Workflow Checks**: Enhanced validation for ComfyUI workflows (e.g., detecting multi-image outputs).
+- **Cost Reduction**: Optimized article generation to use fewer images for context.
 
 ---
 
@@ -237,19 +197,9 @@ mediaoverload/
 
 ---
 
-## License
-
-MIT License - see [LICENSE](LICENSE)
-
----
-
 ## Support
 
-- **Documentation**: See `docs/` folder
-- **Examples**: Run `examples/quick_draw_example.py`
-- **Issues**: GitHub Issues
-- **Discord**: Review bot setup in installation guide
-
----
-
-**Note:** This README provides a high-level overview. See `docs/` for detailed guides on installation, configuration, and troubleshooting.
+- **Documentation**: Check the `docs/` folder.
+- **Examples**: Run `examples/quick_draw_example.py`.
+- **Issues**: Submit via GitHub Issues.
+- **Discord**: Ensure your review bot is set up correctly (see Installation Guide).

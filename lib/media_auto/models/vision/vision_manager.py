@@ -303,6 +303,18 @@ class VisionManagerBuilder:
     def with_vision_model(self, model_type: str, **config):
         """設置視覺模型"""
         self.vision_model_type = model_type
+        # 如果切換了模型類型，重置配置為該類型的預設值
+        if model_type == 'gemini':
+            self.vision_config = {'model_name': 'gemini-flash-lite-latest', 'temperature': 0.3}
+        elif model_type == 'ollama':
+            self.vision_config = {'model_name': 'llava:13b', 'temperature': 0.3}
+        elif model_type == 'openrouter':
+            self.vision_config = {'temperature': 0.3}  # model_name 將由隨機選擇或明確指定
+        else:
+            # 未知類型，重置為基本配置
+            self.vision_config = {'temperature': 0.3}
+        
+        # 更新提供的配置
         if config:
             self.vision_config.update(config)
         return self
@@ -310,6 +322,18 @@ class VisionManagerBuilder:
     def with_text_model(self, model_type: str, **config):
         """設置文本模型"""
         self.text_model_type = model_type
+        # 如果切換了模型類型，重置配置為該類型的預設值
+        if model_type == 'gemini':
+            self.text_config = {'model_name': 'gemini-flash-lite-latest', 'temperature': 0.3}
+        elif model_type == 'ollama':
+            self.text_config = {'model_name': 'llama3.2:latest', 'temperature': 0.3}
+        elif model_type == 'openrouter':
+            self.text_config = {'temperature': 0.3}  # model_name 將由隨機選擇或明確指定
+        else:
+            # 未知類型，重置為基本配置
+            self.text_config = {'temperature': 0.3}
+        
+        # 更新提供的配置
         if config:
             self.text_config.update(config)
         return self
