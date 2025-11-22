@@ -21,11 +21,11 @@ generation:
   # Values are relative weights (don't need to sum to 1.0).
   # Set to 0 to disable a type.
   generation_type_weights:
-    text2img: 0
+    text2img: 0.3
     image2image: 0 
     text2image2image: 0 
     text2video: 0          
-    text2image2video: 1 
+    text2image2video: 0.7 
 
   # Workflow Path Configuration
   # Maps each generation type to its ComfyUI workflow JSON file.
@@ -97,7 +97,7 @@ additional_params:
 
   # General Parameters (所有策略共用，可被策略專用參數覆蓋)
   general:
-    images_per_description: 8  # Generate 8 images per text description
+    images_per_description: 4  # Generate 8 images per text description
     images_per_input: 2  # Generate 2 variations per input image
     videos_per_description: 2  # Generate 2 videos per description
     videos_per_image: 1  # Generate 1 video per image
@@ -117,7 +117,7 @@ additional_params:
   strategies:
     # Text-to-Image Strategy
     text2img:
-      images_per_description: 8
+      images_per_description: 6
       custom_node_updates:
         - node_type: "PrimitiveInt"
           inputs:
@@ -125,7 +125,7 @@ additional_params:
 
     # Image-to-Image Strategy
     image2image:
-      images_per_input: 2
+      images_per_input: 3
       denoise: 0.6
 
     # Text-to-Image-to-Image Two-Stage Strategy
@@ -144,9 +144,9 @@ additional_params:
         style: "minimalism style with pure background"  # 固定 minimal style
         
         image_system_prompt_weights:
-          stable_diffusion_prompt: 0.5
+          stable_diffusion_prompt: 0.3
           warm_scene_description_system_prompt: 0.3
-          sticker_prompt_system_prompt: 0.2
+          sticker_prompt_system_prompt: 0.4
         
         images_per_description: 3
         t2i_workflow_path: /app/configs/workflow/nova-anime-xl.json
