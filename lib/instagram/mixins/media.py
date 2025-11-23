@@ -31,6 +31,32 @@ class MediaMixin:
 
     _medias_cache = {}  # pk -> object
 
+    def location_build(self, location: Location) -> dict:
+        """
+        Build location dictionary for API
+
+        Parameters
+        ----------
+        location: Location
+            Location object
+
+        Returns
+        -------
+        dict
+            Location dictionary
+        """
+        if not location:
+            return None
+        return {
+            "name": location.name,
+            "lat": location.lat,
+            "lng": location.lng,
+            "address": location.address,
+            "external_source": location.external_id_source,
+            "external_id": location.external_id,
+            "facebook_places_id": location.external_id,
+        }
+
     def media_id(self, media_pk: str) -> str:
         """
         Get full media id

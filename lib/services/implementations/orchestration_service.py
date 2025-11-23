@@ -1,6 +1,5 @@
 """協調服務實現 - 新的 ContentProcessor"""
 import os
-import re
 import time
 import shutil
 import numpy as np
@@ -63,7 +62,7 @@ class OrchestrationService(IOrchestrationService):
                     character.config.character = dynamic_character.lower()
                     self.logger.info(f"從群組 {character.group_name} 中選擇角色: {dynamic_character}")
             
-            # 步驟 2: 生成提示詞
+            # 步驟 2: 生成提示詞（包含特殊調整邏輯，如 waddledee）
             if not prompt:
                 prompt = self.prompt_service.generate_prompt(
                     character=character.character,
@@ -71,10 +70,6 @@ class OrchestrationService(IOrchestrationService):
                     temperature=temperature,
                     character_config=character.config
                 )
-            
-            # 特例處理 waddledee
-            if re.sub(string=prompt.lower(), pattern='\s', repl='').find('waddledee') != -1:
-                prompt = re.sub(string=prompt, pattern='waddledee|Waddledee', repl='waddle dee')
             
             self.logger.info(f"開始處理提示詞: {prompt}")
             
@@ -117,49 +112,9 @@ class OrchestrationService(IOrchestrationService):
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_approved'}
                 
-                # 步驟 6.5: Upscale 圖片（如果啟用且是 text2imgtovideo）
-                # 對於 text2imgtovideo，在生成影片前先放大圖片
-                strategy_type = strategy.__class__.__name__
-                if strategy_type == 'Text2Image2VideoStrategy':
-                    # 獲取選擇的圖片路徑
-                    selected_image_paths = [review_items[i]['media_path'] for i in selected_indices if i < len(review_items)]
-                    
-                    # 檢查是否為圖片（而非影片）
-                    image_extensions = ['.png', '.jpg', '.jpeg', '.webp']
-                    selected_images = [p for p in selected_image_paths if any(p.lower().endswith(ext) for ext in image_extensions)]
-                    
-                    if selected_images:
-                        self.logger.info(f'開始放大 {len(selected_images)} 張圖片（text2imgtovideo 流程）')
-                        
-                        # 執行 upscale（workflow 路徑會從 config 中讀取）
-                        upscaled_paths = strategy.upscale_images(
-                            image_paths=selected_images,
-                            output_dir=config_dict['output_dir']
-                        )
-                        
-                        # 更新策略中的 first_stage_images 為放大後的圖片
-                        if hasattr(strategy, 'first_stage_images'):
-                            # 建立映射：原始圖片 -> 放大後的圖片
-                            image_mapping = dict(zip(selected_images, upscaled_paths))
-                            
-                            # 保存原始圖片路徑（如果還沒有保存）
-                            if not hasattr(strategy, 'original_images') or not strategy.original_images:
-                                strategy.original_images = strategy.first_stage_images.copy()
-                            
-                            # 更新 first_stage_images 中的路徑
-                            updated_first_stage_images = []
-                            for img_path in strategy.first_stage_images:
-                                if img_path in image_mapping:
-                                    updated_first_stage_images.append(image_mapping[img_path])
-                                else:
-                                    updated_first_stage_images.append(img_path)
-                            strategy.first_stage_images = updated_first_stage_images
-                            
-                            self.logger.info(f'已更新策略中的圖片路徑為放大後的版本，原始圖片路徑已保存')
-                
-                # 步驟 6.6: 繼續執行後續階段（策略會處理）
-                if not strategy.continue_after_review(selected_indices):
-                    self.logger.warning('策略無法繼續執行後續階段')
+                # 步驟 6.5: 處理使用者審核結果（策略會處理後續階段，包括 upscale 等）
+                if not strategy.handle_review_result(selected_indices, config_dict['output_dir']):
+                    self.logger.warning('策略無法處理審核結果')
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'failed_to_continue'}
                 
@@ -278,42 +233,21 @@ class OrchestrationService(IOrchestrationService):
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_approved'}
             
-            # 步驟 7: Upscale 圖片（如果啟用且是 text2img）
-            # 對於 text2img，在處理圖片前先放大
-            strategy_type = strategy.__class__.__name__
-            if strategy_type == 'Text2ImageStrategy':
-                # 獲取選擇的圖片路徑
-                selected_image_paths = [selected_result[i]['media_path'] for i in selected_indices if i < len(selected_result)]
-                if not selected_image_paths:
-                    selected_image_paths = [row['media_path'] for row in selected_result]
-                
-                # 檢查是否為圖片（而非影片）
-                image_extensions = ['.png', '.jpg', '.jpeg', '.webp']
-                selected_images = [p for p in selected_image_paths if any(p.lower().endswith(ext) for ext in image_extensions)]
-                
-                if selected_images:
-                    self.logger.info(f'開始放大 {len(selected_images)} 張圖片（text2img 流程）')
-                    
-                    # 執行 upscale（workflow 路徑會從 config 中讀取）
-                    upscaled_paths = strategy.upscale_images(
-                        image_paths=selected_images,
-                        output_dir=config_dict['output_dir']
-                    )
-                    
-                    # 使用放大後的圖片路徑
-                    selected_media_paths = upscaled_paths + [p for p in selected_image_paths if p not in selected_images]
-                else:
-                    selected_media_paths = selected_image_paths
-            else:
-                # 其他策略（如 text2imgtovideo 的影片）不需要 upscale
-                selected_media_paths = [selected_result[i]['media_path'] for i in selected_indices if i < len(selected_result)]
-                if not selected_media_paths:
-                    # 如果索引超出範圍，直接使用所有結果
-                    selected_media_paths = [row['media_path'] for row in selected_result]
+            # 步驟 7: 獲取選擇的媒體路徑
+            selected_media_paths = [selected_result[i]['media_path'] for i in selected_indices if i < len(selected_result)]
+            if not selected_media_paths:
+                # 如果索引超出範圍，直接使用所有結果
+                selected_media_paths = [row['media_path'] for row in selected_result]
             
-            # 步驟 7.5: 處理圖片(影片)
+            # 步驟 7.5: 後處理媒體（策略會處理，例如：放大圖片）
+            processed_media_paths = strategy.post_process_media(
+                selected_media_paths,
+                config_dict['output_dir']
+            )
+            
+            # 步驟 7.6: 處理圖片(影片)（格式轉換等）
             processed_media_paths = self.publishing_service.process_media(
-                selected_media_paths, 
+                processed_media_paths, 
                 config_dict['output_dir']
             )
             

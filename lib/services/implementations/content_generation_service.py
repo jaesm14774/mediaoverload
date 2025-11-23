@@ -75,7 +75,8 @@ class ContentGenerationService(IContentGenerationService):
             character_repository=self.character_repository,
             vision_manager=self.vision_manager
         )
-        self.logger.info(f"使用策略: {generation_type}")
+        strategy_name = getattr(self.strategy, 'name', None) or self.strategy.__class__.__name__
+        self.logger.info(f"使用策略: {strategy_name}")
 
         # Load configuration into strategy
         self.strategy.load_config(config)
@@ -141,7 +142,7 @@ class ContentGenerationService(IContentGenerationService):
         """Create media files from descriptions.
 
         Generates images or videos based on configuration. Media type determined
-        by generation_type field ('text2img' creates images, 'text2video' creates videos).
+        by the strategy implementation.
 
         Args:
             config: Generation configuration
@@ -149,29 +150,21 @@ class ContentGenerationService(IContentGenerationService):
         Returns:
             List of generated media file paths (PNG for images, MP4/GIF for videos)
         """
-        generation_type = config.get_all_attributes().get('generation_type', 'text2img')
+        self.logger.info("開始生成媒體")
+        self.strategy.generate_media()
 
-        if generation_type in ['text2video', 't2v']:
-            self.logger.info("開始生成視頻")
-            self.strategy.generate_media()
+        # Collect media files (both images and videos)
+        image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.webp']
+        video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
+        media_files = []
+        
+        for ext in image_extensions + video_extensions:
+            media_files.extend(glob.glob(f'{config.output_dir}/{ext}'))
+            # Also check subdirectories (e.g., first_stage, videos)
+            media_files.extend(glob.glob(f'{config.output_dir}/*/{ext}'))
 
-            # Collect video files
-            video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
-            media_files = []
-            for ext in video_extensions:
-                media_files.extend(glob.glob(f'{config.output_dir}/{ext}'))
-
-            self.logger.info(f"視頻生成完成，共生成 {len(media_files)} 個視頻")
-            return media_files
-        else:
-            self.logger.info("開始生成圖片")
-            self.strategy.generate_media()
-
-            # Collect image files
-            images = glob.glob(f'{config.output_dir}/*png')
-
-            self.logger.info(f"圖片生成完成，共生成 {len(images)} 張圖片")
-            return images
+        self.logger.info(f"媒體生成完成，共生成 {len(media_files)} 個媒體文件")
+        return media_files
 
     def analyze_media_text_match(self,
                                images: List[str],
@@ -191,23 +184,14 @@ class ContentGenerationService(IContentGenerationService):
             List of dictionaries with media paths and similarity scores.
             Only includes media meeting the similarity threshold.
         """
-        generation_type = self.strategy.config.get_all_attributes().get('generation_type', 'text2img')
-
-        if generation_type in ['text2video', 't2v']:
-            self.logger.info("開始分析視頻內容")
-        else:
-            self.logger.info("開始分析圖文匹配度")
-
+        self.logger.info("開始分析媒體內容匹配度")
         self.strategy.analyze_media_text_match(similarity_threshold)
 
         filter_results = []
         if hasattr(self.strategy, 'filter_results'):
             filter_results = self.strategy.filter_results
 
-        if generation_type in ['text2video', 't2v']:
-            self.logger.info(f"視頻內容分析完成，篩選出 {len(filter_results)} 個視頻")
-        else:
-            self.logger.info(f"圖文匹配分析完成，篩選出 {len(filter_results)} 張圖片")
+        self.logger.info(f"媒體內容分析完成，篩選出 {len(filter_results)} 個媒體文件")
 
         return filter_results
 

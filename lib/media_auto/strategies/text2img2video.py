@@ -97,7 +97,14 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
         return review_items
     
     def continue_after_review(self, selected_indices: List[int]) -> bool:
-        """在使用者審核後繼續執行後續階段 - 生成影片"""
+        """在使用者審核後繼續執行後續階段 - 生成影片
+        
+        此方法保留以保持向後兼容性，實際邏輯委託給 handle_review_result
+        """
+        return self.handle_review_result(selected_indices, self.config.output_dir)
+    
+    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+        """處理使用者審核結果 - 先放大圖片，然後生成影片"""
         if not selected_indices:
             print("警告：沒有選擇任何圖片")
             return False
@@ -113,8 +120,6 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
             return False
         
         # 找到這些圖片在 first_stage_images 中的索引
-        # 注意：如果圖片已經被放大，first_stage_images 中可能包含放大後的圖片路徑
-        # 我們需要嘗試匹配原始路徑或放大後的路徑
         original_indices = []
         for img_path in selected_image_paths:
             found = False
@@ -143,12 +148,56 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
             print("警告：無法找到選擇的圖片對應的索引")
             return False
         
+        # 先放大選擇的圖片（在生成影片前）
+        selected_images = [self.first_stage_images[i] for i in original_indices if i < len(self.first_stage_images)]
+        if selected_images:
+            print(f"開始放大 {len(selected_images)} 張圖片（text2imgtovideo 流程）")
+            # 直接調用 upscale_images，因為這是在生成影片前的特殊處理
+            upscaled_paths = self.upscale_images(selected_images, output_dir)
+            
+            # 更新策略中的 first_stage_images 為放大後的圖片
+            if hasattr(self, 'first_stage_images'):
+                # 建立映射：原始圖片 -> 放大後的圖片
+                image_mapping = dict(zip(selected_images, upscaled_paths))
+                
+                # 保存原始圖片路徑（如果還沒有保存）
+                if not hasattr(self, 'original_images') or not self.original_images:
+                    self.original_images = self.first_stage_images.copy()
+                
+                # 更新 first_stage_images 中的路徑
+                updated_first_stage_images = []
+                for img_path in self.first_stage_images:
+                    if img_path in image_mapping:
+                        updated_first_stage_images.append(image_mapping[img_path])
+                    else:
+                        updated_first_stage_images.append(img_path)
+                self.first_stage_images = updated_first_stage_images
+                
+                print(f'已更新策略中的圖片路徑為放大後的版本，原始圖片路徑已保存')
+        
         # 生成影片（使用 first_stage_images 中的圖片，可能是放大後的）
         print(f"開始使用 {len(original_indices)} 張使用者選擇的圖片生成影片")
         self.generate_videos_from_selected_images(original_indices)
         self._videos_generated = True
         self._videos_reviewed = False  # 影片生成後需要審核
         return True
+    
+    def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
+        """後處理媒體文件
+        
+        對於 text2img2video，圖片已經在 handle_review_result 中處理過了（放大），
+        所以這裡不需要再做任何處理，直接返回原始路徑
+        
+        Args:
+            media_paths: 媒體文件路徑列表
+            output_dir: 輸出路徑
+            
+        Returns:
+            處理後的媒體文件路徑列表（對於 text2img2video，直接返回原始路徑）
+        """
+        # 對於 text2img2video，圖片已經在 handle_review_result 中處理過了
+        # 這裡不需要再做任何處理
+        return media_paths
     
     def should_generate_article_now(self) -> bool:
         """判斷是否應該現在生成文章內容 - 應該在影片生成後才生成"""

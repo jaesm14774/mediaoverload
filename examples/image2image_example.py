@@ -18,6 +18,10 @@ sys.path.insert(0, str(project_root))
 from lib.media_auto.strategies.base_strategy import GenerationConfig
 from lib.media_auto.factory.strategy_factory import StrategyFactory
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('media_overload.env')
 
 
 def example_image2image_basic():
