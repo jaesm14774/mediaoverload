@@ -94,3 +94,33 @@ class ContentStrategy(ABC):
             bool: 如果應該現在生成文章內容返回 True，否則返回 False
         """
         return True
+    
+    def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
+        """後處理媒體文件（例如：放大圖片）
+        
+        預設不做任何處理，直接返回原始路徑
+        子類可以覆寫此方法來實現特定的後處理邏輯（例如：圖片放大）
+        
+        Args:
+            media_paths: 媒體文件路徑列表
+            output_dir: 輸出路徑
+            
+        Returns:
+            處理後的媒體文件路徑列表
+        """
+        return media_paths
+    
+    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+        """處理使用者審核結果
+        
+        預設返回 False（不需要後續操作），子類可以覆寫此方法來執行後續階段
+        例如：Text2Image2Video 在使用者選擇圖片後需要生成影片
+        
+        Args:
+            selected_indices: 使用者選擇的項目索引列表（相對於 get_review_items 返回的列表）
+            output_dir: 輸出路徑
+            
+        Returns:
+            bool: 如果成功處理返回 True，否則返回 False
+        """
+        return False

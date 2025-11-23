@@ -11,6 +11,8 @@ from typing import Dict, Union
 from uuid import uuid4
 
 import requests
+import nacl.public
+import nacl.encoding
 from pydantic import ValidationError
 
 from lib.instagram import config
@@ -308,6 +310,30 @@ class LoginMixin(PreLoginFlowMixin, PostLoginFlowMixin):
         self.user_agent = None
         self.settings = None
 
+    def get_public_key(self):
+        """
+        Get public key for password encryption
+        """
+        resp = self.public.get("https://www.instagram.com/data/shared_data/")
+        json_data = resp.json()
+        key = json_data["encryption"]["key_id"]
+        pub_key = json_data["encryption"]["public_key"]
+        expiry = json_data["encryption"].get("expiry")
+        return key, pub_key, expiry
+
+    def password_encrypt(self, password):
+        """
+        Encrypt password
+        """
+        key_id, pub_key, expiry = self.get_public_key()
+        timestamp = str(int(time.time()))
+        key = nacl.public.PublicKey(pub_key, nacl.encoding.HexEncoder)
+        sealed_box = nacl.public.SealedBox(key)
+        encrypted = sealed_box.encrypt(password.encode("utf-8"))
+        encrypted_password = base64.b64encode(encrypted).decode("utf-8")
+        return f"#PWD_INSTAGRAM_BROWSER:10:{timestamp}:{encrypted_password}"
+
+
     def init(self) -> bool:
         """
         Initialize Login helpers
@@ -402,9 +428,13 @@ class LoginMixin(PreLoginFlowMixin, PostLoginFlowMixin):
         bool
             A boolean value
         """
+        if self.user_id and not relogin:
+            return True  # already login
+
         if username and password:
             self.username = username
             self.password = password
+        
         if self.username is None or self.password is None:
             raise BadCredentials("Both username and password must be provided.")
 
@@ -415,17 +445,10 @@ class LoginMixin(PreLoginFlowMixin, PostLoginFlowMixin):
             if self.relogin_attempt > 1:
                 raise ReloginAttemptExceeded()
             self.relogin_attempt += 1
-        # if self.user_id and self.last_login:
-        #     if time.time() - self.last_login < 60 * 60 * 24:
-        #        return True  # already login
-        if self.user_id and not relogin:
-            return True  # already login
         try:
             self.pre_login_flow()
         except (PleaseWaitFewMinutes, ClientThrottledError):
             self.logger.warning("Ignore 429: Continue login")
-            # The instagram application ignores this error
-            # and continues to log in (repeat this behavior)
         enc_password = self.password_encrypt(self.password)
         data = {
             "jazoest": generate_jazoest(self.phone_id),

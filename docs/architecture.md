@@ -240,7 +240,7 @@ Used for news-based prompt generation.
 - **Webhooks**: One-way channel for status notifications and error logs.
 
 ### Social Media
-- **Instagram**: Uses `instagrapi` (unofficial API) for photo/video uploads.
+- **Instagram**: Uses custom `lib/instagram` module for photo/video uploads and story sharing.
 - **Twitter/X**: Uses official API v2 for tweeting text and media.
 
 ---

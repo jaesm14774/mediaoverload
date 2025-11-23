@@ -21,11 +21,11 @@ generation:
   # Values are relative weights (don't need to sum to 1.0).
   # Set to 0 to disable a type.
   generation_type_weights:
-    text2img: 0.3
+    text2img: 1
     image2image: 0 
     text2image2image: 0 
     text2video: 0          
-    text2image2video: 0.7 
+    text2image2video: 0 
 
   # Workflow Path Configuration
   # Maps each generation type to its ComfyUI workflow JSON file.

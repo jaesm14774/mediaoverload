@@ -22,6 +22,10 @@ from lib.media_auto.strategies.base_strategy import GenerationConfig
 from lib.media_auto.factory.strategy_factory import StrategyFactory
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('media_overload.env')
 
 
 def example_text2image2image_basic():

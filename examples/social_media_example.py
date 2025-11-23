@@ -11,6 +11,10 @@ from lib.social_media import (
     InstagramPlatform, 
     TwitterPlatform
 )
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('media_overload.env')
 
 def main():
     print("🚀 Social Media Manager Example")

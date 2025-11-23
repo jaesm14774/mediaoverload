@@ -1,6 +1,7 @@
 """提示詞生成服務實現"""
 import os
 import random
+import re
 from typing import Optional
 import datetime
 from lib.services.interfaces.prompt_service import IPromptService
@@ -49,6 +50,10 @@ class PromptService(IPromptService):
             raise ValueError(f"未知的生成方法: {method}")
         
         self.logger.info(f'生成的提示詞: {prompt}')
+        
+        # 處理特殊角色名稱調整（例如：waddledee -> waddle dee）
+        prompt = self._process_prompt_adjustments(prompt)
+        
         return prompt.lower()
     
     def generate_by_arbitrary(self, character: str, temperature: float = 1.0) -> str:
@@ -155,4 +160,22 @@ class PromptService(IPromptService):
         except Exception as e:
             self.logger.error(f"獲取 Secondary Role 時發生錯誤: {e}")
         
-        return None 
+        return None
+    
+    def _process_prompt_adjustments(self, prompt: str) -> str:
+        """處理提示詞的特殊調整
+        
+        例如：將 "waddledee" 調整為 "waddle dee"
+        
+        Args:
+            prompt: 原始提示詞
+            
+        Returns:
+            調整後的提示詞
+        """
+        # 特例處理 waddledee
+        if re.sub(string=prompt.lower(), pattern=r'\s', repl='').find('waddledee') != -1:
+            prompt = re.sub(string=prompt, pattern=r'waddledee|Waddledee', repl='waddle dee')
+            self.logger.info("已將提示詞中的 'waddledee' 調整為 'waddle dee'")
+        
+        return prompt 

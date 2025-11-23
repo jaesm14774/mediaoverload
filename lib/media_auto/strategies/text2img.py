@@ -1,6 +1,6 @@
 import time
 import random
-from typing import Dict, Any
+from typing import Dict, Any, List
 import numpy as np
 import glob
 
@@ -152,3 +152,31 @@ class Text2ImageStrategy(BaseGenerationStrategy):
             temperature=0.3
         )
         return self
+    
+    def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
+        """後處理媒體文件 - 放大圖片
+        
+        Args:
+            media_paths: 媒體文件路徑列表
+            output_dir: 輸出路徑
+            
+        Returns:
+            處理後的媒體文件路徑列表（放大後的圖片路徑）
+        """
+        # 檢查是否為圖片（而非影片）
+        image_extensions = ['.png', '.jpg', '.jpeg', '.webp']
+        selected_images = [p for p in media_paths if any(p.lower().endswith(ext) for ext in image_extensions)]
+        
+        if not selected_images:
+            return media_paths
+        
+        # 執行 upscale
+        upscaled_paths = self.upscale_images(
+            image_paths=selected_images,
+            output_dir=output_dir
+        )
+        
+        # 合併放大後的圖片和其他媒體文件（如影片）
+        processed_paths = upscaled_paths + [p for p in media_paths if p not in selected_images]
+        
+        return processed_paths

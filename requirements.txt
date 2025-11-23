@@ -39,3 +39,5 @@ typing-extensions>=4.9.0
 # Google generative ai
 google
 google-genai
+moviepy>=1.0.3
+pynacl
