@@ -16,7 +16,7 @@ class ReviewService(IReviewService):
     async def review_content(self,
                            text: str,
                            media_paths: List[str],
-                           timeout: int = 3600) -> Tuple[bool, str, Optional[str], Optional[List[int]]]:
+                           timeout: int = 4000) -> Tuple[bool, str, Optional[str], Optional[List[int]]]:
         """審核內容"""
         if not self.discord_token or not self.discord_channel_id:
             raise ValueError("Discord 設定未配置，請先調用 configure_discord")
