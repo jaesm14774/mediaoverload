@@ -142,6 +142,10 @@ class OrchestrationService(IOrchestrationService):
                             # 建立映射：原始圖片 -> 放大後的圖片
                             image_mapping = dict(zip(selected_images, upscaled_paths))
                             
+                            # 保存原始圖片路徑（如果還沒有保存）
+                            if not hasattr(strategy, 'original_images') or not strategy.original_images:
+                                strategy.original_images = strategy.first_stage_images.copy()
+                            
                             # 更新 first_stage_images 中的路徑
                             updated_first_stage_images = []
                             for img_path in strategy.first_stage_images:
@@ -151,7 +155,7 @@ class OrchestrationService(IOrchestrationService):
                                     updated_first_stage_images.append(img_path)
                             strategy.first_stage_images = updated_first_stage_images
                             
-                            self.logger.info(f'已更新策略中的圖片路徑為放大後的版本')
+                            self.logger.info(f'已更新策略中的圖片路徑為放大後的版本，原始圖片路徑已保存')
                 
                 # 步驟 6.6: 繼續執行後續階段（策略會處理）
                 if not strategy.continue_after_review(selected_indices):

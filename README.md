@@ -203,3 +203,9 @@ mediaoverload/
 - **Examples**: Run `examples/quick_draw_example.py`.
 - **Issues**: Submit via GitHub Issues.
 - **Discord**: Ensure your review bot is set up correctly (see Installation Guide).
+
+---
+
+## Credits
+
+- **Instagram Integration**: The Instagram functionality in this project (`lib/instagram`) is derived from the excellent [instagrapi](https://github.com/subzeroid/instagrapi) library. We have extracted and adapted specific components (login, upload, story) to suit our lightweight needs while maintaining the robust core logic of the original project.

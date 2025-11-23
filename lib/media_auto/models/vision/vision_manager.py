@@ -18,7 +18,7 @@ class VisionContentManager:
         self.text_model = text_model
         self.prompts = prompts_config
     
-    @vision_api_retry(max_attempts=3)
+    @vision_api_retry(max_attempts=5)
     def extract_image_content(self, image_path: str, **kwargs) -> str:
         """分析已有圖片並提取內容描述"""
         print(f"提取圖片內容 {image_path}...")

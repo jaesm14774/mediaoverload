@@ -4,8 +4,8 @@ import functools
 from typing import Callable, Any, Optional, Union, Tuple, Type
 
 
-def retry(max_attempts: int = 3,
-          delay: float = 2.0,
+def retry(max_attempts: int = 5,
+          delay: float = 10.0,
           backoff_factor: float = 1.5,
           exceptions: Union[Type[Exception], Tuple[Type[Exception], ...]] = Exception,
           on_retry: Optional[Callable[[int, Exception], None]] = None,
@@ -81,14 +81,25 @@ def network_retry(max_attempts: int = 5):
 def vision_api_retry(max_attempts: int = 10):
     """Pre-configured retry for vision API calls with detailed logging."""
     def custom_on_retry(attempt: int, exception: Exception):
-        print(f"視覺 API 第 {attempt} 次嘗試失敗: {str(exception)}")
-        delay_time = 2.0 * (1.5 ** (attempt - 1))
+        # 檢查是否為 Google API 超時錯誤
+        exception_type = type(exception).__name__
+        exception_msg = str(exception)
+        
+        if 'DeadlineExceeded' in exception_type or 'Deadline' in exception_msg or '504' in exception_msg:
+            print(f"⚠️  視覺 API 請求超時（第 {attempt} 次嘗試）: {exception_msg}")
+            print(f"   這可能是因為圖片處理需要較長時間，將增加等待時間後重試...")
+            # 對於超時錯誤，使用更長的延遲時間
+            delay_time = 5.0 * (1.5 ** (attempt - 1))  # 從 5 秒開始，而不是 2 秒
+        else:
+            print(f"視覺 API 第 {attempt} 次嘗試失敗: {exception_msg}")
+            delay_time = 2.0 * (1.5 ** (attempt - 1))
+        
         print(f"等待 {delay_time:.1f} 秒後重試...")
 
     return retry(
         max_attempts=max_attempts,
-        delay=2.0,
-        backoff_factor=1.5,
-        exceptions=Exception,
+        delay=10.0,
+        backoff_factor=3,
+        exceptions=Exception,  # 捕獲所有異常，包括 DeadlineExceeded
         on_retry=custom_on_retry
     )

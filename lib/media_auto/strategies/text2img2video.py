@@ -23,7 +23,8 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
 
     def __init__(self, character_repository=None, vision_manager=None):
         super().__init__(character_repository, vision_manager)
-        self.first_stage_images: List[str] = []  # 第一階段生成的圖片路徑
+        self.first_stage_images: List[str] = []  # 第一階段生成的圖片路徑（可能是 upscale 後的）
+        self.original_images: List[str] = []  # 原始圖片路徑（用於 extract_image_content 和生成文章內容）
         self.video_descriptions: Dict[str, str] = {}  # 圖片路徑 -> 影片描述
         self.audio_descriptions: Dict[str, str] = {}  # 圖片路徑 -> 音頻描述
         self._videos_generated = False  # 標記影片是否已生成
@@ -278,6 +279,7 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
             
             # 保存所有圖片路徑（不做 AI 篩選，等待使用者選擇）
             self.first_stage_images = sorted(image_paths)  # 排序以確保順序一致
+            self.original_images = sorted(image_paths).copy()  # 保存原始圖片路徑
             print(f"第一階段共生成 {len(self.first_stage_images)} 張圖片，將透過 Discord 供使用者審核選擇")
             
             # 在第一階段圖片生成後，立即生成發文內文（使用圖 + 描述）
@@ -286,9 +288,10 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
             print("=" * 60)
             
             # 為每張圖片提取內容並生成描述（最多3張）
+            # 使用原始圖片路徑，避免 upscale 後的圖片太大無法傳輸
             image_descriptions = []
-            limited_images = self.first_stage_images[:3]  # 限制最多3張圖片
-            print(f"將使用前 {len(limited_images)} 張圖片來生成文章內容（共 {len(self.first_stage_images)} 張）")
+            limited_images = self.original_images[:3] if self.original_images else self.first_stage_images[:3]  # 限制最多3張圖片，優先使用原始圖片
+            print(f"將使用前 {len(limited_images)} 張原始圖片來生成文章內容（共 {len(self.first_stage_images)} 張）")
             for img_path in limited_images:
                 image_content = self.current_vision_manager.extract_image_content(img_path)
                 image_descriptions.append({
@@ -333,8 +336,16 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
         
         print(f"使用者選擇了 {len(selected_images)} 張圖片，開始生成影片...")
         
-        # 更新 first_stage_images 為選擇的圖片
+        # 更新 first_stage_images 為選擇的圖片（可能是 upscale 後的）
         self.first_stage_images = selected_images
+        
+        # 同步更新 original_images 為對應的原始圖片
+        if self.original_images:
+            selected_original_images = [self.original_images[i] for i in selected_image_indices if i < len(self.original_images)]
+            self.original_images = selected_original_images
+        else:
+            # 如果 original_images 不存在，使用 first_stage_images（可能是原始圖片）
+            self.original_images = selected_images.copy()
         
         start_time = time.time()
         
@@ -343,10 +354,12 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
         print("第二階段：生成影片描述")
         print("=" * 60)
         
-        for img_path in self.first_stage_images:
+        for idx, img_path in enumerate(self.first_stage_images):
             print(f"為圖片生成影片描述: {img_path}")
-            # 從圖片中提取內容描述
-            image_content = self.current_vision_manager.extract_image_content(img_path)
+            # 使用原始圖片路徑來提取內容，避免 upscale 後的圖片太大無法傳輸
+            original_img_path = self.original_images[idx] if idx < len(self.original_images) else img_path
+            # 從圖片中提取內容描述（使用原始圖片）
+            image_content = self.current_vision_manager.extract_image_content(original_img_path)
             # 生成影片描述
             video_description = self.current_vision_manager.generate_video_prompts(
                 user_input=image_content,
@@ -360,11 +373,13 @@ class Text2Image2VideoStrategy(BaseGenerationStrategy):
         print("第三階段：生成音頻描述")
         print("=" * 60)
         
-        for img_path in self.first_stage_images:
+        for idx, img_path in enumerate(self.first_stage_images):
             print(f"為圖片生成音頻描述: {img_path}")
+            # 使用原始圖片路徑來生成音頻描述，避免 upscale 後的圖片太大無法傳輸
+            original_img_path = self.original_images[idx] if idx < len(self.original_images) else img_path
             video_desc = self.video_descriptions.get(img_path, '')
             audio_description = self.current_vision_manager.generate_audio_description(
-                image_path=img_path,
+                image_path=original_img_path,  # 使用原始圖片
                 video_description=video_desc
             )
             self.audio_descriptions[img_path] = audio_description
