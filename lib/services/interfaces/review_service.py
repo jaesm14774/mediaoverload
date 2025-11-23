@@ -13,7 +13,7 @@ class IReviewService(ABC):
     async def review_content(self,
                            text: str,
                            media_paths: List[str],
-                           timeout: int = 3600) -> Tuple[bool, str, Optional[str], Optional[List[int]]]:
+                           timeout: int = 4000) -> Tuple[bool, str, Optional[str], Optional[List[int]]]:
         """審核內容
         
         Args:

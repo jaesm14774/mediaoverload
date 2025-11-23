@@ -107,7 +107,7 @@ class OrchestrationService(IOrchestrationService):
                 review_result = await self.review_service.review_content(
                     text=review_text,
                     media_paths=[item['media_path'] for item in review_items],
-                    timeout=3600
+                    timeout=4000
                 )
                 
                 approval_result, user, edited_content, selected_indices = review_result
@@ -201,7 +201,7 @@ class OrchestrationService(IOrchestrationService):
                     review_result = await self.review_service.review_content(
                         text=review_text,
                         media_paths=[item['media_path'] for item in review_items],
-                        timeout=3600
+                        timeout=4000
                     )
                     
                     approval_result, user, edited_content, selected_indices = review_result
@@ -268,7 +268,7 @@ class OrchestrationService(IOrchestrationService):
                 review_result = await self.review_service.review_content(
                     text=content_result['article_content'],
                     media_paths=[row['media_path'] for row in selected_result],
-                    timeout=3600
+                    timeout=4000
                 )
                 
                 approval_result, user, edited_content, selected_indices = review_result
