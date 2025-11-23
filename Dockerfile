@@ -34,12 +34,5 @@ COPY . .
 # 安裝 Python 依賴
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 將你本地修復好的 instagrapi 原始碼複製到 image 中
-COPY ./instagrapi /app/instagrapi
-
-# 設置環境變數
-ENV PYTHONPATH=/app
-RUN pip install ./instagrapi
-
 # 運行排程器
 CMD ["python", "scheduler/scheduler.py"]

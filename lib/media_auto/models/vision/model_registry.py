@@ -8,6 +8,8 @@ import json
 import random
 import time
 import logging
+from google import genai
+from google.genai import types
 
 class OllamaModel(AIModelInterface):
     """Ollama 模型實現"""
@@ -37,11 +39,12 @@ class GeminiModel(AIModelInterface):
     """Gemini 模型實現"""
     def __init__(self, config: ModelConfig):
         self.config = config
-        import google.generativeai as genai
-        self.genai = genai
         # 這裡需要設置你的 API 金鑰
         load_dotenv(f'media_overload.env')
-        genai.configure(api_key=os.environ['gemini_api_token'])
+        self.client = genai.Client(
+            api_key=os.environ['gemini_api_token'],
+            http_options=types.HttpOptions(timeout=300000) # timeout is in milliseconds
+        )
 
     def chat_completion(self, 
                        messages: List[dict],
@@ -50,13 +53,18 @@ class GeminiModel(AIModelInterface):
         # 將 role-based messages 轉換為純文本
         combined_prompt = self._combine_messages(messages)
         
-        model = self.genai.GenerativeModel(self.config.model_name)
         if images:
             # 處理圖片輸入
             image_parts = [self._load_image(img_path) for img_path in images]
-            response = model.generate_content([combined_prompt, *image_parts])
+            response = self.client.models.generate_content(
+                model=self.config.model_name,
+                contents=[combined_prompt, *image_parts]
+            )
         else:
-            response = model.generate_content(combined_prompt)
+            response = self.client.models.generate_content(
+                model=self.config.model_name,
+                contents=combined_prompt
+            )
             
         return response.text
     

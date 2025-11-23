@@ -33,11 +33,11 @@ class InstagramPlatform(SocialMediaPlatform):
                 self.logger.error(error_msg)
                 raise ValueError(error_msg)
             
-            # 嘗試導入 instagrapi
+            # 嘗試導入 lib.instagram
             try:
-                from instagrapi import Client
+                from lib.instagram import Client
             except ImportError:
-                error_msg = "請安裝 instagrapi 套件: pip install instagrapi"
+                error_msg = "請確保 lib.instagram 模組存在"
                 self.logger.error(error_msg)
                 raise ImportError(error_msg)
             
@@ -148,6 +148,43 @@ class InstagramPlatform(SocialMediaPlatform):
                 
         except Exception as e:
             error_msg = f"Instagram 上傳失敗: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return False
+
+    def share_story(self, post: MediaPost) -> bool:
+        """分享 Story 到 Instagram"""
+        try:
+            if not self.client:
+                error_msg = "Instagram 客戶端未初始化，請先進行認證"
+                self.logger.error(error_msg)
+                return False
+
+            if not post.media_paths:
+                self.logger.warning("沒有媒體文件可供上傳 Story")
+                return False
+
+            valid_media_paths = [path for path in post.media_paths if os.path.exists(path)]
+            if not valid_media_paths:
+                self.logger.error("所有媒體文件都不存在")
+                return False
+
+            success_count = 0
+            for media_path in valid_media_paths:
+                try:
+                    if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
+                        self.logger.info(f"正在上傳影片 Story: {media_path}")
+                        self.client.video_upload_to_story(media_path, caption=post.caption)
+                    else:
+                        self.logger.info(f"正在上傳圖片 Story: {media_path}")
+                        self.client.photo_upload_to_story(media_path, caption=post.caption)
+                    success_count += 1
+                except Exception as e:
+                    self.logger.error(f"上傳 Story 失敗 ({media_path}): {str(e)}")
+            
+            return success_count > 0
+
+        except Exception as e:
+            error_msg = f"Instagram Story 上傳失敗: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             return False
     
