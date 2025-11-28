@@ -41,6 +41,9 @@ class ResponseView(View):
             self.edit_done.set()
         self.result = "accept"
         self.user = interaction.user
+        # 如果用戶直接點擊接受且沒有選擇任何項目，則接受所有項目
+        if not self.selected_files:
+            self.selected_files = list(range(len(self.files)))
         await interaction.response.defer()
         self.stop()
 

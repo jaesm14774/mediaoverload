@@ -1,119 +1,96 @@
-# Kirby Character Configuration
+# Kirby Long-Form Video Character Configuration
 # =================================================================
-# Configuration file for Kirby character media generation and social media posting.
-# Defines generation types, workflows, prompts, styles, and platform settings.
+# Extended configuration with long-form video generation support
+# Based on kirby.yaml with added text2longvideo strategy
 
 # Character Identity
 # -----------------------------------------------------------------
-# Basic character identification settings
 character:
-  name: kirby  # Character identifier (lowercase, used for file naming)
-  group_name: Kirby  # Character group (for multi-character scenarios)
+  name: kirby_longvideo  # Character identifier
+  group_name: Kirby  # Character group
 
 # Generation Settings
 # -----------------------------------------------------------------
-# Controls media generation behavior, types, and quality thresholds
 generation:
-  output_dir: /app/output_media  # Directory where generated media files are saved
+  output_dir: /app/output_media
 
   # Generation Type Weights
-  # Probability distribution for selecting generation method.
-  # Values are relative weights (don't need to sum to 1.0).
-  # Set to 0 to disable a type.
+  # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 1
-    image2image: 0 
-    text2image2image: 0 
-    text2video: 0          
-    text2image2video: 0 
+    text2img: 0
+    text2video: 0
+    text2image2video: 0
+    text2longvideo: 1  # ✨ New: Long-form video generation
+    image2image: 0
+    text2image2image: 0
 
   # Workflow Path Configuration
-  # Maps each generation type to its ComfyUI workflow JSON file.
-  # Workflows define the node graph for generation.
   workflows:
-    text2img: /app/configs/workflow/nova-anime-xl.json         # Standard image generation
-    text2video: /app/configs/workflow/wan2.1_t2v_audio.json   # Video generation with audio
-    image2image: /app/configs/workflow/image_to_image.json    # Image transformation
-    text2image2image: /app/configs/workflow/nova-anime-xl.json  # First stage workflow
-    text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json  # I2V workflow with audio
+    text2img: /app/configs/workflow/nova-anime-xl.json
+    text2video: /app/configs/workflow/wan2.1_t2v_audio.json
+    text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
+    # text2longvideo workflows defined in strategies section below
 
   # Quality Control
-  # Minimum similarity score (0.0-1.0) between generated media and text description.
-  # Media below this threshold is filtered out.
   similarity_threshold: 0.7
 
   # Prompt Generation Method Weights
-  # Controls how text prompts are created.
   prompt_method_weights:
-    arbitrary: 0.1  # Random creative scenarios (10% chance)
-    news: 0.9       # Based on news articles (90% chance)
+    arbitrary: 0.2  # More creative freedom for long videos
+    news: 0.8
 
   # Image System Prompt Weights
-  # Templates for formatting prompts to image generation models.
-  # Each template optimizes for different visual styles or outcomes.
   image_system_prompt_weights:
-    conceptual_logo_design_prompt: 0.1
-    stable_diffusion_prompt: 0.25
-    two_character_interaction_generate_system_prompt: 0.2
-    warm_scene_description_system_prompt: 0.2
-    sticker_prompt_system_prompt: 0.25
+    stable_diffusion_prompt: 0.3
+    warm_scene_description_system_prompt: 0.3
+    sticker_prompt_system_prompt: 0.4
 
   # Visual Style Weights
-  # Artistic style guidance for image generation.
-  # Empty string ("") allows the model to choose freely.
   style_weights:
     "minimalism style with pure background": 0.2
-    "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.2
-    "watercolor painting style with pure background": 0.10
-    "sketch-like illustration with minimalist approach": 0.10
-    "": 0.4  # No style guidance - LLM decides (40% chance)
+    "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.3
+    "watercolor painting style with pure background": 0.1
+    "": 0.4
 
 # Social Media Configuration
 # -----------------------------------------------------------------
-# Settings for automated posting to social platforms
 social_media:
-  # Default hashtags appended to all posts
   default_hashtags:
-    - カービィ       # Japanese: Kirby
-    - 星のカービィ   # Japanese: Kirby of the Stars
-
-  # Platform-Specific Settings
-  # Each platform can be enabled/disabled and configured independently
+    - カービィ
+    - 星のカービィ
+  
   platforms:
     instagram:
-      config_folder_path: /app/configs/social_media/credentials/kirby  # Credentials directory
-      enabled: true  # Enable Instagram posting
-
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      enabled: true
+    
     twitter:
       config_folder_path: /app/configs/social_media/credentials/kirby
-      prefix: ""  # Text prefix for tweets (optional)
-      enabled: true  # Enable Twitter posting
+      prefix: ""
+      enabled: true
 
 # Additional Generation Parameters
 # -----------------------------------------------------------------
-# Advanced settings controlling generation behavior and output quality
 additional_params:
-  is_negative: false  # Whether to use negative prompts (currently unused)
+  is_negative: false
 
-  # General Parameters (所有策略共用，可被策略專用參數覆蓋)
+  # General Parameters (shared across all strategies)
   general:
-    images_per_description: 4  # Generate 8 images per text description
-    images_per_input: 2  # Generate 2 variations per input image
-    videos_per_description: 2  # Generate 2 videos per description
-    videos_per_image: 1  # Generate 1 video per image
-    denoise: 0.6  # Denoising strength (0.5-0.7, higher = more change)
+    images_per_description: 4
+    images_per_input: 2
+    videos_per_description: 2
+    videos_per_image: 1
+    denoise: 0.6
     
-    # Image Upscaling Configuration
-    enable_upscale: true  # Enable/disable image upscaling after Discord review
-    upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json  # Path to upscale workflow
+    enable_upscale: true
+    upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json
     
-    # Custom Node Updates (通用)
     custom_node_updates:
       - node_type: "PrimitiveInt"
         inputs:
-          value: 1280  # Set image resolution to 1280x1280
+          value: 1280
 
-  # Strategy-Specific Parameters (覆蓋 general 參數)
+  # Strategy-Specific Parameters
   strategies:
     # Text-to-Image Strategy
     text2img:
@@ -123,37 +100,59 @@ additional_params:
           inputs:
             value: 1280
 
-    # Image-to-Image Strategy
-    image2image:
-      images_per_input: 3
-      denoise: 0.6
-
-    # Text-to-Image-to-Image Two-Stage Strategy
-    text2image2image:
-      first_stage:
-        images_per_description: 3
-      second_stage:
-        images_per_input: 4
-        denoise: 0.7
-      i2i_workflow_path: /app/configs/workflow/image_to_image.json
-
-    # Text-to-Image-to-Video Multi-Stage Strategy
+    # Text-to-Image-to-Video Strategy
     text2image2video:
-      # First Stage: Text-to-Image (固定使用 minimal style，不接受雙角色互動)
       first_stage:
-        style: "minimalism style with pure background"  # 固定 minimal style
-        
+        style: "minimalism style with pure background"
         image_system_prompt_weights:
           stable_diffusion_prompt: 0.3
           warm_scene_description_system_prompt: 0.3
           sticker_prompt_system_prompt: 0.4
-        
         images_per_description: 3
         t2i_workflow_path: /app/configs/workflow/nova-anime-xl.json
       
-      # Video Stage: Image-to-Video (使用 noise_seed)
       video:
         i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
         videos_per_image: 2
-        use_noise_seed: true  # wan2.2 使用 noise_seed 而不是 seed
+        use_noise_seed: true
         custom_node_updates: []
+
+    # ✨ NEW: Text-to-Long-Form-Video Strategy
+    # =================================================================
+    # Multi-segment video generation with frame continuity
+    text2longvideo:
+      # Long-video specific configuration
+      longvideo_config:
+        segment_count: 5              # Number of video segments (e.g., 5 segments × 5 seconds = 25 second video)
+        segment_duration: 5           # Duration per segment in seconds
+        use_tts: true                 # Enable TTS narration
+        tts_voice: "en-US-AriaNeural"  # Edge-TTS voice (English female)
+        # Available voices:
+        # English: en-US-AriaNeural, en-US-GuyNeural, en-GB-SoniaNeural
+        # Chinese: zh-CN-XiaoxiaoNeural, zh-TW-HsiaoChenNeural
+        # Japanese: ja-JP-NanamiNeural
+        tts_rate: "+0%"               # Speech rate: -50% to +50%
+        fps: 16                       # Video frame rate
+
+      # First Stage: Generate first-frame candidates (Text-to-Image)
+      # User will select best candidate via Discord
+      first_stage:
+        workflow_path: /app/configs/workflow/nova-anime-xl.json
+        batch_size: 3
+        style: "minimalism style with pure background"
+        
+        image_system_prompt_weights:
+          stable_diffusion_prompt: 0.3
+          warm_scene_description_system_prompt: 0.4
+          sticker_prompt_system_prompt: 0.3
+        
+        custom_node_updates:
+          - node_type: "PrimitiveInt"
+            inputs:
+              value: 1024  # Resolution for first frame
+
+      # Video Generation: Sequential Image-to-Video for each segment
+      # Each segment uses last frame of previous segment as input
+      video_generation:
+        workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
+        use_noise_seed: true

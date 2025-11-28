@@ -5,7 +5,8 @@ from lib.media_auto.strategies import (
     Image2ImageStrategy,
     Text2Image2ImageStrategy,
     Text2VideoStrategy,
-    Text2Image2VideoStrategy
+    Text2Image2VideoStrategy,
+    Text2LongVideoStrategy
 )
 
 class StrategyFactory:
@@ -26,7 +27,10 @@ class StrategyFactory:
         't2v': Text2VideoStrategy,
         # 文生圖 -> 圖生影片策略
         'text2image2video': Text2Image2VideoStrategy,
-        't2i2v': Text2Image2VideoStrategy
+        't2i2v': Text2Image2VideoStrategy,
+        # 文生長片策略
+        'text2longvideo': Text2LongVideoStrategy,
+        't2lv': Text2LongVideoStrategy
     }
     
     @classmethod
@@ -36,13 +40,7 @@ class StrategyFactory:
         if not strategy_class:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
         
-        # 支持依賴注入，避免循環導入
-        if strategy_class in [Text2ImageStrategy, Text2Image2ImageStrategy, Text2VideoStrategy, Text2Image2VideoStrategy]:
-            return strategy_class(character_repository=character_repository, vision_manager=vision_manager)
-        elif strategy_class == Image2ImageStrategy:
-            return strategy_class(character_repository=character_repository, vision_manager=vision_manager)
-        else:
-            return strategy_class()
+        return strategy_class(character_repository=character_repository, vision_manager=vision_manager)
     
     @classmethod
     def register_strategy(cls, strategy_type: str, strategy_class: Type[ContentStrategy]):

@@ -161,6 +161,11 @@ class OrchestrationService(IOrchestrationService):
                     
                     approval_result, user, edited_content, selected_indices = review_result
                     
+                    # 如果用戶選擇接受但沒有選擇任何項目，則接受所有項目
+                    if approval_result == "accept" and not selected_indices:
+                        selected_indices = list(range(len(review_items)))
+                        self.logger.info(f'用戶選擇接受所有項目，共 {len(selected_indices)} 個')
+                    
                     if not selected_indices:
                         self.logger.warning('沒有任何項目被用戶選中！')
                         self.cleanup(config_dict['output_dir'])
@@ -227,6 +232,11 @@ class OrchestrationService(IOrchestrationService):
                 )
                 
                 approval_result, user, edited_content, selected_indices = review_result
+                
+                # 如果用戶選擇接受但沒有選擇任何項目，則接受所有項目
+                if approval_result == "accept" and not selected_indices:
+                    selected_indices = list(range(len(selected_result)))
+                    self.logger.info(f'用戶選擇接受所有項目，共 {len(selected_indices)} 個')
                 
                 if not selected_indices:
                     self.logger.warning('沒有任何生成的圖片(影片)被用戶選中！')

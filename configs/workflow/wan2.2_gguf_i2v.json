@@ -1,0 +1,458 @@
+{
+  "2": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 2,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "50",
+        0
+      ],
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "10",
+        1
+      ],
+      "latent_image": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 855895852634698,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 2,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "49",
+        0
+      ],
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "10",
+        1
+      ],
+      "latent_image": [
+        "10",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走. talk. talking. speak. speaking. open mouth. mouth movement. opening mouth, nails, hand watch, bracelet, wrist accessory, human hands\n",
+      "clip": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "vae_name": "wan\\wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "8": {
+    "inputs": {
+      "shift": 8.000000000000002,
+      "model": [
+        "67",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "9": {
+    "inputs": {
+      "shift": 8,
+      "model": [
+        "68",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "10": {
+    "inputs": {
+      "width": [
+        "82",
+        1
+      ],
+      "height": [
+        "82",
+        2
+      ],
+      "length": [
+        "71",
+        0
+      ],
+      "batch_size": 1,
+      "positive": [
+        "13",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "vae": [
+        "7",
+        0
+      ],
+      "start_image": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "WanImageToVideo",
+    "_meta": {
+      "title": "WanImageToVideo"
+    }
+  },
+  "13": {
+    "inputs": {
+      "text": [
+        "70",
+        0
+      ],
+      "clip": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "14": {
+    "inputs": {
+      "image": "model1_lora_00001__kirby_d0_0 (1).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "21": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "22": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "29": {
+    "inputs": {
+      "unet_name": "wan\\Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "30": {
+    "inputs": {
+      "unet_name": "wan\\Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "44": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "lora_1": {
+        "on": true,
+        "lora": "wan\\wan2.2_high_noise_model.safetensors",
+        "strength": 1.45
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "29",
+        0
+      ],
+      "clip": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "LoRA - FIRST SAMPLER"
+    }
+  },
+  "45": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "lora_1": {
+        "on": true,
+        "lora": "wan\\wan2.2_low_noise_model.safetensors",
+        "strength": 1.2
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "30",
+        0
+      ],
+      "clip": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "LoRA - SECOND SAMPLER"
+    }
+  },
+  "49": {
+    "inputs": {
+      "self_structural": 1,
+      "self_temporal": 1,
+      "cross_structural": 1,
+      "cross_temporal": 1,
+      "model": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "UNetTemporalAttentionMultiply",
+    "_meta": {
+      "title": "TemporalAttention"
+    }
+  },
+  "50": {
+    "inputs": {
+      "self_structural": 1,
+      "self_temporal": 1,
+      "cross_structural": 1,
+      "cross_temporal": 1,
+      "model": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "UNetTemporalAttentionMultiply",
+    "_meta": {
+      "title": "TemporalAttention"
+    }
+  },
+  "60": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "cuda:0"
+    },
+    "class_type": "CLIPLoaderMultiGPU",
+    "_meta": {
+      "title": "CLIPLoaderMultiGPU"
+    }
+  },
+  "67": {
+    "inputs": {
+      "nag_scale": 11,
+      "nag_alpha": 0.25,
+      "nag_tau": 2.3730000000000007,
+      "input_type": "default",
+      "model": [
+        "21",
+        0
+      ],
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "WanVideoNAG",
+    "_meta": {
+      "title": "NAG High"
+    }
+  },
+  "68": {
+    "inputs": {
+      "nag_scale": 11,
+      "nag_alpha": 0.25,
+      "nag_tau": 2.3730000000000007,
+      "input_type": "default",
+      "model": [
+        "22",
+        0
+      ],
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "WanVideoNAG",
+    "_meta": {
+      "title": "NAG Low"
+    }
+  },
+  "70": {
+    "inputs": {
+      "value": "A bright pink Kirby sits happily before a steaming bowl of ramen, clumsily gripping oversized chopsticks. With a look of pure joy, he manages to lift a massive tangle of noodles and slurps them all down in one go, his eyes closing in utter bliss. He lets out a contented sigh, a tiny drop of soup on his cheek, before flashing a big, satisfied smile."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "71": {
+    "inputs": {
+      "value": 101
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "total_frame"
+    }
+  },
+  "72": {
+    "inputs": {
+      "value": 16
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "frame_rate"
+    }
+  },
+  "81": {
+    "inputs": {
+      "samples": [
+        "2",
+        0
+      ],
+      "vae": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "82": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "upscale_method": "lanczos",
+      "keep_proportion": "stretch",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu",
+      "image": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "88": {
+    "inputs": {
+      "frame_rate": [
+        "72",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "wan2.2_i2v",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "81",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "95": {
+    "inputs": {
+      "options": "Intermediate",
+      "filenames": [
+        "88",
+        0
+      ]
+    },
+    "class_type": "VHS_PruneOutputs",
+    "_meta": {
+      "title": "Prune Outputs 🎥🅥🅗🅢"
+    }
+  }
+}

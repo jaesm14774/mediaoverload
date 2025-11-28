@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# 安裝系統依賴
+# 安裝系統依賴 (包含 ffmpeg)
 RUN apt-get update && apt-get install -y \
     gcc \
     tzdata \
@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     unixodbc-dev \
     curl \
     gnupg2 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 安裝 MSSQL ODBC 驅動程式
