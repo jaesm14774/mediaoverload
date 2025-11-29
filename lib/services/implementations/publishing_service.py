@@ -1,4 +1,5 @@
 """發布服務實現"""
+import os
 import re
 from typing import List, Dict, Any, Optional
 from lib.services.interfaces.publishing_service import IPublishingService
@@ -18,15 +19,43 @@ class PublishingService(IPublishingService):
         """處理圖片（格式轉換等）"""
         self.logger.info("開始圖片處理")
         
-        # 使用 ImageProcessor 處理圖片
-        image_processor = ImageProcessor(output_dir)
-        image_processor.main_process()
+        # 使用 ImageConverter 直接處理傳入的圖片列表
+        from utils.image import ImageConverter
+        converter = ImageConverter(quality=95)
         
-        # 將圖片路徑轉換為 jpg 格式
         processed_paths = []
         for media_path in media_paths:
-            processed_path = re.sub(string=media_path, pattern=r'\.png|\.jpeg', repl='.jpg')
-            processed_paths.append(processed_path)
+            # 檢查文件是否存在
+            if not os.path.exists(media_path):
+                self.logger.warning(f"媒體文件不存在，跳過: {media_path}")
+                continue
+            
+            # 如果是影片，直接添加到列表
+            if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
+                processed_paths.append(media_path)
+                self.logger.info(f"影片文件: {media_path}")
+                continue
+            
+            # 如果已經是 jpg，直接添加
+            if media_path.lower().endswith('.jpg'):
+                processed_paths.append(media_path)
+                self.logger.info(f"圖片已是 JPG 格式: {media_path}")
+                continue
+            
+            # 轉換為 jpg
+            converted_path = converter.convert_to_jpg(media_path, output_dir=None)
+            if converted_path and os.path.exists(converted_path):
+                processed_paths.append(converted_path)
+                self.logger.info(f"圖片轉換成功: {converted_path}")
+                # 刪除原始文件（如果不是 jpg）
+                try:
+                    os.remove(media_path)
+                    self.logger.debug(f"已刪除原始文件: {media_path}")
+                except Exception as e:
+                    self.logger.warning(f"無法刪除原始文件 {media_path}: {e}")
+            else:
+                self.logger.warning(f"圖片轉換失敗，使用原始文件: {media_path}")
+                processed_paths.append(media_path)
         
         self.logger.info(f"圖片處理完成，共處理 {len(processed_paths)} 張圖片")
         return processed_paths

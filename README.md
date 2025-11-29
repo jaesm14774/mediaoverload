@@ -163,6 +163,12 @@ generation:
 
 ## Recent Updates
 
+### v2.6.1 (Upscale Path Processing Fix)
+- **修復 Bug**: 修正了 upscale 後的圖片無法上傳到社群媒體的問題。
+  - **問題**: `PublishingService.process_media` 只掃描根目錄，無法處理 `upscaled/` 子目錄中的圖片。
+  - **解決方案**: 改為直接處理傳入的圖片路徑列表，不再依賴目錄掃描。
+  - **影響範圍**: 所有使用 upscale 功能的策略（text2img, text2image2video）。
+
 ### v2.6.0 (Image Upscaling Support)
 - **Upscale Workflow Integration**: Added optional SDXL-based image upscaling workflow.
   - **Text2Img Flow**: Images are upscaled after Discord review, before publishing to social media.
