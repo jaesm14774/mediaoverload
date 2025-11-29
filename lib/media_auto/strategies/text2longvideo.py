@@ -1,24 +1,3 @@
-"""Text to Long-Form Video Strategy
-
-Long-form video generation workflow:
-1. Generate first segment description via LLM (OpenRouter)
-2. Generate first image candidates from first segment description
-3. User reviews and selects the first image (Discord)
-4. Sequential video segment generation (iterative):
-   - Generate video for segment N using its description
-   - Extract last frame of segment N
-   - Analyze last frame and generate description for segment N+1 via LLM
-   - Use last frame as conditioning for segment N+1
-   - Repeat until all segments are generated
-5. Generate TTS narration for all segments
-6. Concatenate all video segments
-7. Merge audio with video
-
-This strategy follows the Pixelle-Video philosophy of iterative segment-based generation.
-Each segment's description is generated dynamically based on the actual last frame of the previous segment,
-ensuring visual continuity and story progression that adapts to the actual generated content.
-"""
-
 import os
 import time
 import json
@@ -29,7 +8,7 @@ import logging
 
 from lib.comfyui.websockets_api import ComfyUICommunicator
 from .generation_base import BaseGenerationStrategy
-
+from lib.services.implementations.ffmpeg_service import FFmpegService
 
 class Text2LongVideoStrategy(BaseGenerationStrategy):
     """
@@ -71,15 +50,11 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
             vision_manager: External vision manager (optional)
         """
         super().__init__(character_repository, vision_manager)
-        
-        # Ensure vision manager is available
+
         if not hasattr(self, 'current_vision_manager'):
              self._initialize_vision_managers()
         
         self.logger = logging.getLogger(__name__)
-        
-        # Lazy import to avoid circular dependency
-        from lib.services.implementations.ffmpeg_service import FFmpegService
         
         # Initialize services
         self.ffmpeg_service = FFmpegService()
@@ -95,6 +70,9 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
         self.video_segments = []          # Generated video segment paths
         self.narration_audio = []         # Generated TTS audio paths
         self.final_video_path = None      # Final concatenated video
+
+        self.communicator = ComfyUICommunicator()
+        self.communicator.connect_websocket()
         
         self.logger.info("Text2LongVideoStrategy initialized")
     
@@ -653,10 +631,6 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
             self.logger.info(f"Applied first stage style: {style}")
             print(f"[Text2LongVideo] Applied first stage style: {style}")
         
-        # Generate images
-        self.communicator = ComfyUICommunicator()
-        self.communicator.connect_websocket()
-        
         try:
             import random
             self.first_stage_images = []
@@ -718,8 +692,6 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
             raise FileNotFoundError(f"Video workflow not found: {workflow_path}")
         
         workflow_json = self._load_workflow(workflow_path)
-        self.communicator = ComfyUICommunicator()
-        self.communicator.connect_websocket()
         
         # Create segments directory
         segments_dir = os.path.join(output_dir, 'segments')
@@ -732,97 +704,86 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
         if not self.script_segments:
             raise RuntimeError("No script segments available. Call generate_description() first.")
         
-        try:
-            # Generate segments iteratively
-            for i in range(segment_count):
-                segment_num = i + 1
-                segment_start_time = time.time()
+        # Generate segments iteratively
+        for i in range(segment_count):
+            segment_num = i + 1
+            segment_start_time = time.time()
+            
+            # Get main character name for logging
+            main_character = getattr(self.config, 'character', '')
+            
+            self.logger.info(f"=" * 80)
+            print(f"[Text2LongVideo] {'=' * 80}")
+            self.logger.info(f"開始生成 Segment {segment_num}/{segment_count}")
+            print(f"[Text2LongVideo] 開始生成 Segment {segment_num}/{segment_count}")
+            if main_character:
+                self.logger.info(f"主角: {main_character}")
+                print(f"[Text2LongVideo] 主角: {main_character}")
+            self.logger.info(f"=" * 80)
+            print(f"[Text2LongVideo] {'=' * 80}")
+            
+            # Get current segment (should exist for first segment, generated for subsequent ones)
+            if i < len(self.script_segments):
+                segment = self.script_segments[i]
+                self.logger.info(f"Segment {segment_num} 描述:")
+                print(f"[Text2LongVideo] Segment {segment_num} 描述:")
+                self.logger.info(f"  - 旁白: {segment['narration']}")
+                print(f"[Text2LongVideo]   - 旁白: {segment['narration']}")
+                self.logger.info(f"  - 視覺: {segment['visual']}")
+                print(f"[Text2LongVideo]   - 視覺: {segment['visual']}")
+            else:
+                # This shouldn't happen if logic is correct, but handle it
+                raise RuntimeError(f"Segment {segment_num} description not found")
+            
+            # Generate video segment
+            self.logger.info(f"Segment {segment_num}: 開始生成影片...")
+            print(f"[Text2LongVideo] Segment {segment_num}: 開始生成影片...")
+            video_path = self._generate_single_video_segment(
+                workflow_json=workflow_json,
+                current_frame=current_frame,
+                segment=segment,
+                segment_num=segment_num,
+                segments_dir=segments_dir
+            )
+            
+            segment_duration = time.time() - segment_start_time
+            self.video_segments.append(video_path)
+            self.logger.info(f"✅ Segment {segment_num} 生成完成!")
+            print(f"[Text2LongVideo] ✅ Segment {segment_num} 生成完成!")
+            self.logger.info(f"  - 影片路徑: {video_path}")
+            print(f"[Text2LongVideo]   - 影片路徑: {video_path}")
+            self.logger.info(f"  - 生成耗時: {segment_duration:.2f} 秒")
+            print(f"[Text2LongVideo]   - 生成耗時: {segment_duration:.2f} 秒")
+            
+            # Extract last frame and generate next segment description (except for last segment)
+            if segment_num < segment_count:
+                frame_path = os.path.join(segments_dir, f'segment_{segment_num}_last_frame.png')
+                self.ffmpeg_service.extract_last_frame(video_path, frame_path)
+                current_frame = frame_path
                 
-                # Get main character name for logging
-                main_character = getattr(self.config, 'character', '')
-                
-                self.logger.info(f"=" * 80)
-                print(f"[Text2LongVideo] {'=' * 80}")
-                self.logger.info(f"開始生成 Segment {segment_num}/{segment_count}")
-                print(f"[Text2LongVideo] 開始生成 Segment {segment_num}/{segment_count}")
-                if main_character:
-                    self.logger.info(f"主角: {main_character}")
-                    print(f"[Text2LongVideo] 主角: {main_character}")
-                self.logger.info(f"=" * 80)
-                print(f"[Text2LongVideo] {'=' * 80}")
-                
-                # Get current segment (should exist for first segment, generated for subsequent ones)
-                if i < len(self.script_segments):
-                    segment = self.script_segments[i]
-                    self.logger.info(f"Segment {segment_num} 描述:")
-                    print(f"[Text2LongVideo] Segment {segment_num} 描述:")
-                    self.logger.info(f"  - 旁白: {segment['narration']}")
-                    print(f"[Text2LongVideo]   - 旁白: {segment['narration']}")
-                    self.logger.info(f"  - 視覺: {segment['visual']}")
-                    print(f"[Text2LongVideo]   - 視覺: {segment['visual']}")
-                else:
-                    # This shouldn't happen if logic is correct, but handle it
-                    raise RuntimeError(f"Segment {segment_num} description not found")
-                
-                try:
-                    # Generate video segment
-                    self.logger.info(f"Segment {segment_num}: 開始生成影片...")
-                    print(f"[Text2LongVideo] Segment {segment_num}: 開始生成影片...")
-                    video_path = self._generate_single_video_segment(
-                        workflow_json=workflow_json,
-                        current_frame=current_frame,
-                        segment=segment,
-                        segment_num=segment_num,
-                        segments_dir=segments_dir
-                    )
-                    
-                    segment_duration = time.time() - segment_start_time
-                    self.video_segments.append(video_path)
-                    self.logger.info(f"✅ Segment {segment_num} 生成完成!")
-                    print(f"[Text2LongVideo] ✅ Segment {segment_num} 生成完成!")
-                    self.logger.info(f"  - 影片路徑: {video_path}")
-                    print(f"[Text2LongVideo]   - 影片路徑: {video_path}")
-                    self.logger.info(f"  - 生成耗時: {segment_duration:.2f} 秒")
-                    print(f"[Text2LongVideo]   - 生成耗時: {segment_duration:.2f} 秒")
-                    
-                    # Extract last frame and generate next segment description (except for last segment)
-                    if segment_num < segment_count:
-                        frame_path = os.path.join(segments_dir, f'segment_{segment_num}_last_frame.png')
-                        self.ffmpeg_service.extract_last_frame(video_path, frame_path)
-                        current_frame = frame_path
-                        
-                        # Generate next segment description based on last frame
-                        next_segment_start_time = time.time()
-                        next_segment = self._generate_next_segment_description(frame_path, i)
-                        next_segment_duration = time.time() - next_segment_start_time
-                        self.script_segments.append(next_segment)
-                        self.logger.info(f"✅ Segment {segment_num + 1} 描述生成完成!")
-                        print(f"[Text2LongVideo] ✅ Segment {segment_num + 1} 描述生成完成!")
-                        self.logger.info(f"  - 旁白: {next_segment['narration']}")
-                        print(f"[Text2LongVideo]   - 旁白: {next_segment['narration']}")
-                        self.logger.info(f"  - 視覺: {next_segment['visual']}")
-                        print(f"[Text2LongVideo]   - 視覺: {next_segment['visual']}")
-                        self.logger.info(f"  - 描述生成耗時: {next_segment_duration:.2f} 秒")
-                        print(f"[Text2LongVideo]   - 描述生成耗時: {next_segment_duration:.2f} 秒")
-                    else:
-                        self.logger.info(f"Segment {segment_num} 是最後一個 segment，無需生成下一個描述")
-                        print(f"[Text2LongVideo] Segment {segment_num} 是最後一個 segment，無需生成下一個描述")
-                    
-                    total_duration = time.time() - segment_start_time
-                    self.logger.info(f"Segment {segment_num} 總耗時: {total_duration:.2f} 秒")
-                    print(f"[Text2LongVideo] Segment {segment_num} 總耗時: {total_duration:.2f} 秒")
-                    self.logger.info(f"=" * 80)
-                    print(f"[Text2LongVideo] {'=' * 80}")
-                    
-                except Exception as e:
-                    error_msg = f"❌ Segment {segment_num} 生成失敗: {e}"
-                    self.logger.error(error_msg, exc_info=True)
-                    print(f"[Text2LongVideo] {error_msg}")
-                    return False
-        finally:
-            if self.communicator and self.communicator.ws:
-                self.communicator.ws.close()
-        
+                # Generate next segment description based on last frame
+                next_segment_start_time = time.time()
+                next_segment = self._generate_next_segment_description(frame_path, i)
+                next_segment_duration = time.time() - next_segment_start_time
+                self.script_segments.append(next_segment)
+                self.logger.info(f"✅ Segment {segment_num + 1} 描述生成完成!")
+                print(f"[Text2LongVideo] ✅ Segment {segment_num + 1} 描述生成完成!")
+                self.logger.info(f"  - 旁白: {next_segment['narration']}")
+                print(f"[Text2LongVideo]   - 旁白: {next_segment['narration']}")
+                self.logger.info(f"  - 視覺: {next_segment['visual']}")
+                print(f"[Text2LongVideo]   - 視覺: {next_segment['visual']}")
+                self.logger.info(f"  - 描述生成耗時: {next_segment_duration:.2f} 秒")
+                print(f"[Text2LongVideo]   - 描述生成耗時: {next_segment_duration:.2f} 秒")
+            else:
+                self.logger.info(f"Segment {segment_num} 是最後一個 segment，無需生成下一個描述")
+                print(f"[Text2LongVideo] Segment {segment_num} 是最後一個 segment，無需生成下一個描述")
+            
+            total_duration = time.time() - segment_start_time
+            self.logger.info(f"Segment {segment_num} 總耗時: {total_duration:.2f} 秒")
+            print(f"[Text2LongVideo] Segment {segment_num} 總耗時: {total_duration:.2f} 秒")
+            self.logger.info(f"=" * 80)
+            print(f"[Text2LongVideo] {'=' * 80}")
+    
         self.logger.info(f"=" * 80)
         print(f"[Text2LongVideo] {'=' * 80}")
         self.logger.info(f"✅ 所有 {len(self.video_segments)} 個 segments 生成成功!")
@@ -993,7 +954,7 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
             self.logger.info("Merging narration with video")
             
             try:
-                # Concatenate audio using FFmpeg service (handles re-encoding to fix duration issues)
+                combined_audio = os.path.join(output_dir, 'combined_narration.mp3')
                 self.ffmpeg_service.concat_audio(
                     self.narration_audio,
                     combined_audio
@@ -1132,17 +1093,18 @@ class Text2LongVideoStrategy(BaseGenerationStrategy):
         
         system_prompt = """你是一個專業的社群媒體內容創作者。為這個影片創建一個吸引人的社群媒體貼文。
 
-要求：
-- 使用繁體中文
-- 內容要生動有趣，能夠吸引觀眾
-- 包含相關的主題標籤（hashtags）
-- 長度適中，適合社群媒體發布
-- 可以包含表情符號來增加吸引力"""
-        
+        要求：
+        - 使用繁體中文
+        - 內容要生動有趣，能夠吸引觀眾
+        - 包含相關的主題標籤（hashtags）
+        - 長度適中，適合社群媒體發布
+        - 可以包含表情符號來增加吸引力"""
+                
         user_prompt = f"""影片旁白內容摘要：
-{summary}
+        {summary}
 
-請為這個影片創建一個吸引人的社群媒體貼文，包含主題標籤。"""
+        請為這個影片創建一個吸引人的社群媒體貼文，包含主題標籤。
+        """
         
         messages = [
             {
