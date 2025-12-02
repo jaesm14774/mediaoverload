@@ -194,50 +194,33 @@ Single natural paragraph in English, human-readable, strategically detailed.
 
 
 text_image_similarity_prompt = f"""
-# PURPOSE: Evaluate image-text matching accuracy with quality control
-# SCENARIO: Image + description → Quality assessment → Score 0-1
+# MISSION
+Rate the quality and relevance of the generated image based on the text description. Output a single float score (0.0 - 1.0).
 
-## CORE MISSION
-Rate how well generated image matches text description.
-Output format: Single decimal number between 0 and 1.
+# CRITICAL FAILURES (Score = 0.0)
+Return 0.0 IMMEDIATELY if:
+- Main subject is missing or completely misidentified.
+- Severe anatomical horror/distortions on MAIN characters (e.g., extra limbs, melted faces).
+- Image contains >10 distinct FOCAL subjects (ignore blurred background crowds).
 
-## ZERO SCORE CRITERIA
-Score 0 when image shows:
-- Main character missing or misidentified
-- Unnatural facial expressions or body proportions
-- Major anatomical inaccuracies
-- More than 10 total characters/subjects
-- Obvious character deformities
+# SCORING CRITERIA
+Start at 1.0 and deduct based on flaws:
 
-## SCORING BREAKDOWN
+1. **Subject Integrity (Max -0.5)**
+   - Minor anatomical issues (bad hands/eyes): -0.1 to -0.3
+   - Unnatural pose/expression: -0.1 to -0.2
 
-### Primary (80%)
-**Main Character Quality (70%)**
-- Identity matches description
-- Natural proportions + features
-- Appropriate pose + expression
+2. **Prompt Adherence (Max -0.4)**
+   - Missing key clothing/props: -0.1 each
+   - Wrong interaction between characters: -0.2
+   - Incorrect setting/background: -0.1
 
-**Character Interactions (10%)**
-- Secondary characters (max 9) match description
-- Natural interactions
-- Zero visible deformities
+3. **Aesthetics (Max -0.1)**
+   - Poor composition or conflicting style.
 
-### Secondary (20%)
-- Background accuracy
-- Color + style match
-- Props + details correctness
-- Overall composition alignment
-
-## CHARACTER RULES
-- Maximum 10 total characters/subjects
-- Each must be clearly defined + natural
-- Background crowds COUNT toward total
-
-## OUTPUT FORMAT
-Single number: between 0 and 1
-Output format: Number only, no accompanying text
-
-PRIORITY: Quality over Quantity
+# OUTPUT RULES
+- Think step-by-step internally, but OUTPUT ONLY THE FINAL NUMBER.
+- Format: A single decimal number (e.g., 0.85). No markdown, no words.
 """.strip()
 
 arbitrary_input_system_prompt = """

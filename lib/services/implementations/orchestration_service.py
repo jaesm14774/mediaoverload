@@ -95,9 +95,72 @@ class OrchestrationService(IOrchestrationService):
             
             strategy = self.content_service.strategy
             
-            # 步驟 5: 檢查是否需要使用者審核
+            # 步驟 5: Discord 人工審核流程（所有策略都需要）
+            # 所有策略都必須實現 needs_user_review() 返回 True，並提供 get_review_items()
+            if not strategy.needs_user_review():
+                self.logger.error('策略未實現 needs_user_review() 或返回 False，所有策略都必須進行 Discord 審核')
+                self.cleanup(config_dict['output_dir'])
+                return {'status': 'strategy_must_review'}
+            
+            self.logger.info('開始 Discord 人工審核流程，準備審核項目')
+            
+            # 獲取需要審核的項目（策略會處理 Discord 10 張限制）
+            review_items = strategy.get_review_items(max_items=10)
+            
+            if not review_items:
+                self.logger.warning('沒有需要審核的項目')
+                self.cleanup(config_dict['output_dir'])
+                return {'status': 'no_media_selected'}
+            
+            # 準備審核文字（如果還沒有生成文章內容，使用預設文字）
+            review_text = content_result.get('article_content', '請選擇要使用的圖片')
+            
+            # 步驟 6: Discord 人工審核內容
+            review_result = await self.review_service.review_content(
+                text=review_text,
+                media_paths=[item['media_path'] for item in review_items],
+                timeout=4000
+            )
+            
+            approval_result, user, edited_content, selected_indices = review_result
+            
+            if not selected_indices:
+                self.logger.warning('沒有任何項目被用戶選中！')
+                self.cleanup(config_dict['output_dir'])
+                return {'status': 'no_media_approved'}
+            
+            # 步驟 6.5: 處理使用者審核結果（策略會處理後續階段，包括 upscale 等）
+            if not strategy.handle_review_result(selected_indices, config_dict['output_dir']):
+                self.logger.warning('策略無法處理審核結果')
+                self.cleanup(config_dict['output_dir'])
+                return {'status': 'failed_to_continue'}
+            
+            # 根據使用者選擇的索引，從 review_items 中提取選中的項目
+            selected_result = [review_items[i] for i in selected_indices if i < len(review_items)]
+            selected_result_already_filtered = True
+            
+            # 重新分析結果（獲取最終的媒體）
+            similarity_threshold = config_dict.get('similarity_threshold', 0.9)
+            final_filter_results = self.content_service.analyze_media_text_match(
+                images=[],
+                descriptions=content_result['descriptions'],
+                similarity_threshold=similarity_threshold
+            )
+            
+            # 更新 content_result
+            content_result['filter_results'] = final_filter_results
+            
+            # 檢查是否需要再次審核（例如：影片生成後）
             if strategy.needs_user_review():
-                self.logger.info('策略需要使用者審核，準備審核項目')
+                self.logger.info('策略需要再次使用者審核（影片生成後），準備審核項目')
+                
+                # 在影片審核前，先重新生成基於影片的文章內容
+                # 如果策略允許現在生成文章內容，則重新生成
+                if strategy.should_generate_article_now():
+                    self.logger.info('重新生成基於影片的文章內容')
+                    article_content = self.content_service.generate_article(config, final_filter_results)
+                    content_result['article_content'] = article_content
+                    self.logger.info(f'已生成文章內容（基於影片）: {article_content[:100]}...' if len(article_content) > 100 else f'已生成文章內容（基於影片）: {article_content}')
                 
                 # 獲取需要審核的項目（策略會處理 Discord 10 張限制）
                 review_items = strategy.get_review_items(max_items=10)
@@ -107,10 +170,10 @@ class OrchestrationService(IOrchestrationService):
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_selected'}
                 
-                # 準備審核文字（如果還沒有生成文章內容，使用預設文字）
-                review_text = content_result.get('article_content', '請選擇要使用的圖片')
+                # 準備審核文字（使用新生成的基於影片的文章內容）
+                review_text = content_result.get('article_content', '請選擇要使用的影片')
                 
-                # 步驟 6: 審核內容
+                # 步驟 6.6: 再次審核內容（影片）
                 review_result = await self.review_service.review_content(
                     text=review_text,
                     media_paths=[item['media_path'] for item in review_items],
@@ -119,147 +182,75 @@ class OrchestrationService(IOrchestrationService):
                 
                 approval_result, user, edited_content, selected_indices = review_result
                 
+                # 如果用戶選擇接受但沒有選擇任何項目，則接受所有項目
+                if approval_result == "accept" and not selected_indices:
+                    selected_indices = list(range(len(review_items)))
+                    self.logger.info(f'用戶選擇接受所有項目，共 {len(selected_indices)} 個')
+                
                 if not selected_indices:
                     self.logger.warning('沒有任何項目被用戶選中！')
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_approved'}
                 
-                # 步驟 6.5: 處理使用者審核結果（策略會處理後續階段，包括 upscale 等）
-                if not strategy.handle_review_result(selected_indices, config_dict['output_dir']):
-                    self.logger.warning('策略無法處理審核結果')
-                    self.cleanup(config_dict['output_dir'])
-                    return {'status': 'failed_to_continue'}
+                # 標記影片已審核
+                if hasattr(strategy, '_videos_reviewed'):
+                    strategy._videos_reviewed = True
                 
-                # 重新分析結果（獲取最終的媒體）
-                similarity_threshold = config_dict.get('similarity_threshold', 0.9)
-                final_filter_results = self.content_service.analyze_media_text_match(
-                    images=[],
-                    descriptions=content_result['descriptions'],
-                    similarity_threshold=similarity_threshold
-                )
-                
-                # 更新 content_result
+                # 更新最終結果為使用者選擇的影片
+                selected_result = [review_items[i] for i in selected_indices if i < len(review_items)]
+                final_filter_results = selected_result
                 content_result['filter_results'] = final_filter_results
                 
-                # 檢查是否需要再次審核（例如：影片生成後）
-                if strategy.needs_user_review():
-                    self.logger.info('策略需要再次使用者審核（影片生成後），準備審核項目')
-                    
-                    # 在影片審核前，先重新生成基於影片的文章內容
-                    # 如果策略允許現在生成文章內容，則重新生成
-                    if strategy.should_generate_article_now():
-                        self.logger.info('重新生成基於影片的文章內容')
+                # 標記已從 review_items 過濾，不需要再用 selected_indices 索引
+                selected_result_already_filtered = True
+                
+                # 如果使用者在審核時編輯了內容，使用編輯後的內容；否則使用新生成的文章內容
+                if edited_content and edited_content.strip():
+                    content_result['article_content'] = edited_content
+                    self.logger.info('使用使用者編輯後的文章內容')
+                else:
+                    # 確保使用新生成的基於影片的文章內容
+                    if not content_result.get('article_content') or not content_result['article_content'].strip():
+                        # 如果還是沒有文章內容，重新生成
+                        article_content = self.content_service.generate_article(config, final_filter_results)
+                        content_result['article_content'] = article_content
+                        self.logger.info(f'已重新生成文章內容（基於影片）: {article_content[:100]}...' if len(article_content) > 100 else f'已重新生成文章內容（基於影片）: {article_content}')
+            else:
+                # 如果不需要再次審核，但策略允許現在生成文章內容，則生成
+                if strategy.should_generate_article_now():
+                    current_article_content = content_result.get('article_content', '')
+                    # 如果當前文章內容是基於圖片的，重新生成基於影片的
+                    if not current_article_content or current_article_content.strip() == '':
                         article_content = self.content_service.generate_article(config, final_filter_results)
                         content_result['article_content'] = article_content
                         self.logger.info(f'已生成文章內容（基於影片）: {article_content[:100]}...' if len(article_content) > 100 else f'已生成文章內容（基於影片）: {article_content}')
-                    
-                    # 獲取需要審核的項目（策略會處理 Discord 10 張限制）
-                    review_items = strategy.get_review_items(max_items=10)
-                    
-                    if not review_items:
-                        self.logger.warning('沒有需要審核的項目')
-                        self.cleanup(config_dict['output_dir'])
-                        return {'status': 'no_media_selected'}
-                    
-                    # 準備審核文字（使用新生成的基於影片的文章內容）
-                    review_text = content_result.get('article_content', '請選擇要使用的影片')
-                    
-                    # 步驟 6.6: 再次審核內容（影片）
-                    review_result = await self.review_service.review_content(
-                        text=review_text,
-                        media_paths=[item['media_path'] for item in review_items],
-                        timeout=4000
-                    )
-                    
-                    approval_result, user, edited_content, selected_indices = review_result
-                    
-                    # 如果用戶選擇接受但沒有選擇任何項目，則接受所有項目
-                    if approval_result == "accept" and not selected_indices:
-                        selected_indices = list(range(len(review_items)))
-                        self.logger.info(f'用戶選擇接受所有項目，共 {len(selected_indices)} 個')
-                    
-                    if not selected_indices:
-                        self.logger.warning('沒有任何項目被用戶選中！')
-                        self.cleanup(config_dict['output_dir'])
-                        return {'status': 'no_media_approved'}
-                    
-                    # 標記影片已審核
-                    if hasattr(strategy, '_videos_reviewed'):
-                        strategy._videos_reviewed = True
-                    
-                    # 更新最終結果為使用者選擇的影片
-                    selected_result = [review_items[i] for i in selected_indices if i < len(review_items)]
-                    final_filter_results = selected_result
-                    content_result['filter_results'] = final_filter_results
-                    
-                    # 如果使用者在審核時編輯了內容，使用編輯後的內容；否則使用新生成的文章內容
-                    if edited_content and edited_content.strip():
-                        content_result['article_content'] = edited_content
-                        self.logger.info('使用使用者編輯後的文章內容')
                     else:
-                        # 確保使用新生成的基於影片的文章內容
-                        if not content_result.get('article_content') or not content_result['article_content'].strip():
-                            # 如果還是沒有文章內容，重新生成
-                            article_content = self.content_service.generate_article(config, final_filter_results)
-                            content_result['article_content'] = article_content
-                            self.logger.info(f'已重新生成文章內容（基於影片）: {article_content[:100]}...' if len(article_content) > 100 else f'已重新生成文章內容（基於影片）: {article_content}')
-                else:
-                    # 如果不需要再次審核，但策略允許現在生成文章內容，則生成
-                    if strategy.should_generate_article_now():
-                        current_article_content = content_result.get('article_content', '')
-                        # 如果當前文章內容是基於圖片的，重新生成基於影片的
-                        if not current_article_content or current_article_content.strip() == '':
-                            article_content = self.content_service.generate_article(config, final_filter_results)
-                            content_result['article_content'] = article_content
-                            self.logger.info(f'已生成文章內容（基於影片）: {article_content[:100]}...' if len(article_content) > 100 else f'已生成文章內容（基於影片）: {article_content}')
-                        else:
-                            # 即使有內容，也重新生成基於影片的內容（覆蓋基於圖片的內容）
-                            article_content = self.content_service.generate_article(config, final_filter_results)
-                            content_result['article_content'] = article_content
-                            self.logger.info(f'已重新生成文章內容（基於影片，覆蓋原有內容）: {article_content[:100]}...' if len(article_content) > 100 else f'已重新生成文章內容（基於影片，覆蓋原有內容）: {article_content}')
+                        # 即使有內容，也重新生成基於影片的內容（覆蓋基於圖片的內容）
+                        article_content = self.content_service.generate_article(config, final_filter_results)
+                        content_result['article_content'] = article_content
+                        self.logger.info(f'已重新生成文章內容（基於影片，覆蓋原有內容）: {article_content[:100]}...' if len(article_content) > 100 else f'已重新生成文章內容（基於影片，覆蓋原有內容）: {article_content}')
                 
-                # 使用所有最終結果（因為使用者已經選擇過）
+                # 如果不需要再次審核，selected_result 尚未設置，需要從 final_filter_results 設置
+                # 注意：final_filter_results 是重新分析後的結果，不是根據用戶選擇過濾的
+                # 但由於不需要再次審核，我們使用所有 final_filter_results
                 if 'selected_result' not in locals():
                     selected_result = final_filter_results
                     selected_indices = list(range(len(final_filter_results)))
-                
-            else:
-                # 不需要使用者審核的流程（原有邏輯）
-                if len(content_result['filter_results']) == 0:
-                    self.logger.warning('沒有任何生成的圖片(影片)被 LLM 分析選中！')
-                    self.cleanup(config_dict['output_dir'])
-                    return {'status': 'no_media_selected'}
-                
-                # 準備審核（如果圖片超過 6 張，隨機選擇 6 張）
-                selected_result = (content_result['filter_results'] 
-                                 if len(content_result['filter_results']) <= 6 
-                                 else np.random.choice(content_result['filter_results'], size=6, replace=False).tolist())
-                self.logger.info(f"選擇了 {len(selected_result)} 張圖片(影片)進行審核")
-                
-                # 步驟 6: 審核內容
-                review_result = await self.review_service.review_content(
-                    text=content_result['article_content'],
-                    media_paths=[row['media_path'] for row in selected_result],
-                    timeout=4000
-                )
-                
-                approval_result, user, edited_content, selected_indices = review_result
-                
-                # 如果用戶選擇接受但沒有選擇任何項目，則接受所有項目
-                if approval_result == "accept" and not selected_indices:
-                    selected_indices = list(range(len(selected_result)))
-                    self.logger.info(f'用戶選擇接受所有項目，共 {len(selected_indices)} 個')
-                
-                if not selected_indices:
-                    self.logger.warning('沒有任何生成的圖片(影片)被用戶選中！')
-                    self.cleanup(config_dict['output_dir'])
-                    return {'status': 'no_media_approved'}
+                    selected_result_already_filtered = True
             
             # 步驟 7: 獲取選擇的媒體路徑
-            selected_media_paths = [selected_result[i]['media_path'] for i in selected_indices if i < len(selected_result)]
-            if not selected_media_paths:
-                # 如果索引超出範圍，直接使用所有結果
+            if selected_result_already_filtered:
+                # selected_result 已經根據 selected_indices 過濾過，直接提取媒體路徑
                 selected_media_paths = [row['media_path'] for row in selected_result]
+                self.logger.info(f"從已過濾的結果中提取 {len(selected_media_paths)} 個媒體路徑")
+            else:
+                # selected_result 尚未過濾，需要用 selected_indices 索引
+                selected_media_paths = [selected_result[i]['media_path'] for i in selected_indices if i < len(selected_result)]
+                self.logger.info(f"使用索引 {selected_indices} 從 {len(selected_result)} 個項目中選擇 {len(selected_media_paths)} 個媒體路徑")
+                if not selected_media_paths:
+                    # 如果索引超出範圍，直接使用所有結果
+                    selected_media_paths = [row['media_path'] for row in selected_result]
+                    self.logger.warning("索引超出範圍，使用所有結果")
             
             # 步驟 7.5: 後處理媒體（策略會處理，例如：放大圖片）
             processed_media_paths = strategy.post_process_media(

@@ -163,13 +163,6 @@ class Text2Image2VideoStrategy(ContentStrategy):
 
     def _generate_videos_from_images(self, image_paths: List[str], output_dir: str):
         print(f"開始使用 {len(image_paths)} 張圖片生成影片")
-        
-        # Upscale first
-        # Simplified: assume we upscale all selected
-        # In real implementation, we would call upscale logic here
-        # For brevity, I'll skip explicit upscale call or assume MediaGenerator handles it if configured
-        # But original code did explicit upscale.
-        
         # Generate descriptions
         for img_path in image_paths:
             content = self.vision_manager.extract_image_content(img_path)

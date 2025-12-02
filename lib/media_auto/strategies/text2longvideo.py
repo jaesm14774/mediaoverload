@@ -41,6 +41,7 @@ class Text2LongVideoStrategy(ContentStrategy):
         self.generated_media_paths: List[str] = []
         self.article_content: str = ""
         self.vision_manager = vision_manager  # Store for article content generation
+        self._final_video_generated = False  # 標記最終影片是否已生成
         
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -205,7 +206,12 @@ class Text2LongVideoStrategy(ContentStrategy):
             self.article_content = f"#{character} #AI #video #text2longvideo" if character else "#AI #video #text2longvideo"
 
     def needs_user_review(self) -> bool:
-        # If we have candidates, we need review
+        """檢查是否需要使用者審核
+        
+        需要審核的情況：
+        1. 候選圖片已生成（選擇第一幀）
+        2. 最終影片已生成（選擇最終要發布的影片）
+        """
         return len(self.generated_media_paths) > 0
 
     def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
@@ -456,10 +462,37 @@ class Text2LongVideoStrategy(ContentStrategy):
         
         # Update generated_media_paths with final merged video (single file)
         self.generated_media_paths = [final_video]
+        self._final_video_generated = True
         self.logger.info(f"所有 {segment_count} 個段落已生成並合併完成，最終影片: {final_video}")
         
         # Generate article content based on all segments
         self._generate_final_article_content()
 
+    def analyze_media_text_match(self, similarity_threshold):
+        """分析媒體與文本的匹配度
+        
+        如果最終影片已生成，返回最終影片的 filter_results
+        否則返回空列表（因為候選圖片階段不需要分析）
+        """
+        if self._final_video_generated and self.generated_media_paths:
+            # 最終影片已生成，返回最終影片的 filter_results
+            self.filter_results = []
+            for video_path in self.generated_media_paths:
+                # 使用第一個段落的視覺描述作為描述
+                description = ''
+                if self.script_segments:
+                    description = self.script_segments[0].get('visual', '')
+                
+                self.filter_results.append({
+                    'media_path': video_path,
+                    'description': description,
+                    'similarity': 1.0  # 最終影片直接使用 1.0
+                })
+        else:
+            # 候選圖片階段，不需要分析（直接使用 generated_media_paths）
+            self.filter_results = []
+        
+        return self
+    
     def should_generate_article_now(self) -> bool:
         return True

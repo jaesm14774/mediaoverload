@@ -141,6 +141,30 @@ class Text2VideoStrategy(ContentStrategy):
                 })
         return self
 
+    def needs_user_review(self) -> bool:
+        """檢查是否需要使用者審核
+        
+        當有 filter_results 時，需要使用者審核選擇最終要發布的影片
+        """
+        return hasattr(self, 'filter_results') and len(self.filter_results) > 0
+    
+    def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
+        """獲取需要審核的項目
+        
+        返回 filter_results 中的項目，最多 max_items 個
+        """
+        if hasattr(self, 'filter_results') and self.filter_results:
+            return self.filter_results[:max_items]
+        return []
+    
+    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+        """處理使用者審核結果
+        
+        對於 Text2VideoStrategy，審核後不需要特殊處理
+        返回 True 表示成功處理
+        """
+        return True
+    
     def generate_article_content(self):
         # 使用基類的完整實現
         return super().generate_article_content()

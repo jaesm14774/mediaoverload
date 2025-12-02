@@ -1,230 +1,440 @@
-# MediaOverload
+# MediaOverload 策略執行流程說明
 
-**AI-powered automated content generation and multi-platform publishing system.**
+## 整體架構
 
-MediaOverload generates diverse media content (images/videos) from text prompts using LLMs and ComfyUI, and automatically publishes them to Instagram and Twitter.
+系統採用策略模式（Strategy Pattern），每個策略都繼承自 `ContentStrategy` 基類，實現以下核心方法：
+- `generate_description()` - 生成描述/提示詞
+- `generate_media()` - 生成媒體（圖片/影片）
+- `analyze_media_text_match()` - 分析媒體與文本匹配度（LLM 自動分析）
+- `needs_user_review()` - 是否需要使用者審核
+- `get_review_items()` - 獲取需要審核的項目
+- `handle_review_result()` - 處理審核結果
+- `should_generate_article_now()` - 是否現在生成文章內容
 
-## Table of Contents
-- [Quick Start](#quick-start)
-- [Core Features](#core-features)
-- [Documentation](#documentation)
-- [Key Concepts](#key-concepts)
-- [System Requirements](#system-requirements)
-- [Development](#development)
-- [Recent Updates](#recent-updates)
-- [Project Structure](#project-structure)
-- [Support](#support)
+## 重要定義
 
----
+### 審核（Review）的定義
 
-## Quick Start
+**審核 = 上傳媒體到 Discord，讓使用者人工選擇要使用的媒體**
 
-**Fastest way to test:**
+審核流程：
+1. 系統將媒體文件（圖片/影片）上傳到 Discord 頻道
+2. 使用者透過 Discord 介面查看媒體
+3. 使用者選擇要使用的媒體（透過 Discord 反應或指令）
+4. 系統接收使用者的選擇，繼續後續流程
 
-```bash
-# 1. Clone and setup
-git clone https://github.com/your-repo/mediaoverload.git
-cd mediaoverload
-cp media_overload.env.example media_overload.env
+**注意**：
+- 審核是**人工審核**，不是自動選擇
+- 審核發生在**發布到社群媒體之前**
+- 審核可以讓使用者編輯文章內容
+- 審核可以選擇多個媒體（最多 10 個，符合 Discord API 限制）
 
-# 2. Start services
-docker-compose up --build -d
+**與 LLM 分析的區別**：
+- `analyze_media_text_match()` - LLM 自動分析媒體與文本匹配度，用於**初步篩選**
+- `review_content()` - 人工審核，用於**最終確認**要發布的媒體
 
-# 3. Generate content
-python run_media_interface.py --character kirby --prompt "Kirby eating ramen"
-```
+## 執行流程（OrchestrationService）
 
-**Try examples first:**
+### 主要流程步驟
 
-The examples skip time-consuming analysis steps, making them perfect for testing.
-
-```bash
-# Interactive notebook (recommended)
-jupyter notebook examples/quick_draw_examples.ipynb
-
-# Or run Python script
-python examples/quick_draw_example.py
-```
-
----
-
-## Core Features
-
-MediaOverload automates content creation from start to finish:
-**Input** → **Process** → **Output**
-
-### Smart Content Generation
-- **Multi-Format Workflows**: Text-to-image, image-to-image, and text-to-video.
-- **Text-to-Image-to-Video**: User selects an image to generate a video with audio (no AI filtering).
-- **Image Upscaling**: Optional SDXL-based upscaling workflow for enhanced image quality (configurable via environment variables).
-- **Multi-Model Support**: Integrates with Ollama, Gemini, and OpenRouter.
-- **ComfyUI Integration**: Supports multiple workflows (Flux, SDXL, Wan2.2, etc.).
-
-### Character System
-- **Unique Personas**: Each character has its own style, workflows, and social accounts.
-- **Group Selection**: Randomly select characters from defined groups.
-- **Interactions**: Generate scenes with two characters interacting.
-
-### Quality Control
-- **Vision Analysis**: AI analyzes image-text matching (optional).
-- **Human Review**: Discord-based workflow for manual approval.
-- **Smart Filtering**: Automatic filtering by similarity threshold (manual selection for video strategies).
-
-### Multi-Platform Publishing
-- **Instagram**: Automatic format conversion and publishing.
-- **Twitter/X**: Full support via API v2.
-- **Extensible**: Easy to add new platforms.
+1. **角色選擇** - 從群組中隨機選擇角色（特殊情況：Kirby 群組的長影片直接使用 kirby）
+2. **生成提示詞** - 使用 PromptService 生成初始提示詞
+3. **準備配置** - 創建 GenerationConfig
+4. **生成內容（第一階段）** - 調用 ContentGenerationService.generate_content()
+5. **檢查是否需要審核** - 調用 strategy.needs_user_review()
+6. **Discord 人工審核流程**（如果需要）
+   - 獲取需要審核的媒體項目（最多 10 個，符合 Discord API 限制）
+   - **上傳媒體到 Discord 頻道**，讓使用者查看
+   - **使用者透過 Discord 選擇**要使用的媒體
+   - **使用者可以編輯文章內容**（可選）
+   - 系統接收使用者的選擇（`selected_indices`）
+   - 處理審核結果（調用 strategy.handle_review_result()）
+   - 重新分析結果（獲取最終的媒體）
+   - 檢查是否需要再次審核（例如：影片生成後）
+7. **後處理媒體** - 調用 strategy.post_process_media()（例如：圖片放大）
+8. **處理媒體格式** - 轉換格式等
+9. **發布到社群媒體** - Instagram、Twitter 等
+10. **發送通知**
+11. **清理資源**
 
 ---
 
-## Documentation
+## 各策略詳細流程
 
-**Getting Started**
-- [Installation Guide](docs/installation.md): Setup dependencies and services.
-- [Configuration Guide](docs/configuration.md): Character configs and credentials.
-- [Quick Examples](examples/README.md): 6 ready-to-run use cases.
+### 1. Text2ImageStrategy（文字生成圖片）
 
-**Deep Dive**
-- [Architecture Overview](docs/architecture.md): System design and workflows.
-- [Troubleshooting](docs/troubleshooting.md): Common issues and solutions.
-
----
-
-## Key Concepts
-
-### Character Configuration
-Characters drive content generation. Each is defined by a YAML config:
-
-```yaml
-character:
-  name: kirby
-  group_name: Kirby
-
-generation:
-  generation_type_weights:
-    text2img: 0.6        # 60% probability
-    text2image2image: 0.4  # 40% two-stage generation
-
-  workflows:
-    text2img: /app/configs/workflow/nova-anime-xl.json
-
-  similarity_threshold: 0.7  # Quality filter
-```
-
-### Generation Strategies
-
-- **Text-to-Image**: Direct text → image generation using ComfyUI.
-- **Image-to-Image**: Transform existing images with controllable denoising (0.5-0.7).
-- **Text→Image→Image (Two-Stage)**: Generate base images, filter by quality, then refine the best matches.
-- **Text-to-Video**: Generate videos with MMAudio sound effects.
-- **Text→Image→Video (Multi-Stage)**:
-    1. **Generate Images**: Uses specific "minimal" style; no character interactions.
-    2. **Generate Article**: Created immediately after image generation.
-    3. **User Review**: Images sent to Discord; user manually selects the best ones.
-    4. **Image Upscaling** (Optional): Selected images are upscaled using SDXL workflow if enabled.
-    5. **Video Generation**: Selected (and optionally upscaled) images are converted to video with audio (unique seeds).
-    6. **Publish**: Uploads the final video to social media.
-
----
-
-## System Requirements
-
-**Required Services**
-- **ComfyUI** (port 8188): Image/video generation.
-- **Ollama** or **Cloud LLM**: Text generation and analysis.
-- **MySQL/PostgreSQL**: Character and news data.
-- **Discord**: Review workflow.
-
-**Resources**
-- **GPU**: 8GB+ VRAM recommended (essential for video).
-- **Storage**: Sufficient space for generated media and logs.
-
----
-
-## Development
-
-### Add New Character
-1. Create `configs/characters/{name}.yaml`.
-2. Setup `configs/social_media/credentials/{name}/`.
-3. Configure platforms in the YAML file.
-
-### Add New Platform
-1. Implement the platform class in `lib/social_media/{platform}.py` (inheriting from `SocialMediaPlatform`).
-2. Register it in `PublishingService`.
-3. Update character configs.
-4. Export the new class in `lib/social_media/__init__.py`.
-
-### Custom ComfyUI Workflow
-1. Design the workflow in ComfyUI.
-2. Export as JSON to `configs/workflow/`.
-3. Reference the file in your character config.
-
----
-
-## Recent Updates
-
-### v2.7.1 (Long Video Character Selection Fix)
-- **長影片角色選擇優化**: 修正長影片模式下 Kirby 群組的角色選擇邏輯。
-  - **問題**: 長影片生成時，Kirby 群組會隨機選擇角色，導致其他角色無法維持一致性。
-  - **解決方案**: 當生成類型為 `text2longvideo` 且群組為 `Kirby` 時，直接使用 `kirby` 角色，不進行隨機選擇。
-  - **影響範圍**: 所有使用 `text2longvideo` 策略且群組為 `Kirby` 的角色配置。
-
-### v2.7.0 (Strategy Refactoring)
-- **Architecture Overhaul**:
-    - Transitioned from inheritance-based to **composition-based architecture** for all strategies.
-    - Introduced dedicated services: `ScriptGenerator` (LLM logic) and `MediaGenerator` (ComfyUI interaction).
-    - Eliminated "God Class" anti-patterns by decoupling `BaseGenerationStrategy`.
-    - Refactored all strategies (`Text2LongVideo`, `Text2Image`, `Text2Video`, etc.) for better maintainability and extensibility.
-
-### v2.6.1 (Upscale Path Processing Fix)
-- **修復 Bug**: 修正了 upscale 後的圖片無法上傳到社群媒體的問題。
-  - **問題**: `PublishingService.process_media` 只掃描根目錄，無法處理 `upscaled/` 子目錄中的圖片。
-  - **解決方案**: 改為直接處理傳入的圖片路徑列表，不再依賴目錄掃描。
-  - **影響範圍**: 所有使用 upscale 功能的策略（text2img, text2image2video）。
-
-### v2.6.0 (Image Upscaling Support)
-- **Upscale Workflow Integration**: Added optional SDXL-based image upscaling workflow.
-  - **Text2Img Flow**: Images are upscaled after Discord review, before publishing to social media.
-  - **Text2Img2Video Flow**: Images are upscaled after Discord review, before video generation.
-  - **Character Config Control**: Enable/disable per character via `enable_upscale` in character YAML config.
-  - **Configurable Workflow**: Set custom upscale workflow path per character via `upscale_workflow_path` in config.
-
-### v2.5.0 (Architecture Refactor)
-- **Modular Refactoring**:
-    - Split `generate_strategies.py` into a dedicated package: `lib/media_auto/strategies/`.
-    - Split `social_media.py` into a dedicated package: `lib/social_media/`.
-    - Implemented `InstagramPlatform` and `TwitterPlatform` as separate classes.
-- **Improved Maintainability**: Cleaner code structure and better separation of concerns.
-
-### v2.3.0 - v2.4.0 (Video & Workflow Optimization)
-- **Text2Image2Video**: Optimized workflow with immediate article generation and manual Discord selection.
-- **Workflow Checks**: Enhanced validation for ComfyUI workflows (e.g., detecting multi-image outputs).
-- **Cost Reduction**: Optimized article generation to use fewer images for context.
-
----
-
-## Project Structure
+#### 執行流程
 
 ```
-mediaoverload/
-├── configs/           # Character and workflow configs
-├── lib/              # Core services and strategies
-├── examples/         # Ready-to-run examples
-├── scheduler/        # Automated scheduling
-└── docs/            # Detailed documentation
+generate_description()
+  ↓
+  使用 VisionManager 生成圖片描述（支援雙角色互動）
+  ↓
+generate_media()
+  ↓
+  根據描述生成多張圖片（預設每個描述 4 張）
+  ↓
+analyze_media_text_match()
+  ↓
+  使用 VisionManager 分析圖片與描述的匹配度
+  ↓
+generate_article_content()
+  ↓
+  基於 filter_results 生成文章內容（hashtags）
 ```
 
+#### 特點
+- **需要使用者審核**（`needs_user_review()` 返回 True，當有 filter_results 時）
+- 使用者選擇最終要發布的圖片
+- 支援圖片放大（`post_process_media()` 可選）
+- 直接生成文章內容
+
+#### 配置參數
+- `images_per_description`: 每個描述生成幾張圖片（預設 4）
+- `enable_upscale`: 是否啟用圖片放大
+- `upscale_workflow_path`: 放大工作流路徑
+
 ---
 
-## Support
+### 2. Text2Image2ImageStrategy（文字→圖片→圖片）
 
-- **Documentation**: Check the `docs/` folder.
-- **Examples**: Run `examples/quick_draw_example.py`.
-- **Issues**: Submit via GitHub Issues.
-- **Discord**: Ensure your review bot is set up correctly (see Installation Guide).
+#### 執行流程
+
+```
+generate_description()
+  ↓
+  生成第一階段圖片描述
+  ↓
+generate_media()
+  ↓
+【第一階段：Text to Image】
+  生成多張候選圖片（預設每個描述 4 張）
+  ↓
+  使用 VisionManager 篩選最佳圖片（similarity_threshold=0.0）
+  ↓
+【第二階段：Image to Image】
+  對每張選中的圖片進行 I2I 處理（預設每張 1 個變體）
+  ↓
+analyze_media_text_match()
+  ↓
+  分析第二階段生成的圖片
+  ↓
+generate_article_content()
+  ↓
+  生成文章內容
+```
+
+#### 特點
+- **需要使用者審核**（`needs_user_review()` 返回 True，當有 filter_results 時）
+- 使用者選擇最終要發布的圖片
+- 兩階段生成：先 T2I，再 I2I 精煉
+- 自動篩選最佳圖片進入第二階段
+
+#### 配置參數
+- `first_stage.images_per_description`: 第一階段每個描述生成幾張（預設 4）
+- `second_stage.images_per_input`: 第二階段每張輸入圖片生成幾個變體（預設 1）
 
 ---
 
-## Credits
+### 3. Text2Image2VideoStrategy（文字→圖片→影片）
 
-- **Instagram Integration**: The Instagram functionality in this project (`lib/instagram`) is derived from the excellent [instagrapi](https://github.com/subzeroid/instagrapi) library. We have extracted and adapted specific components (login, upload, story) to suit our lightweight needs while maintaining the robust core logic of the original project.
+#### 執行流程
+
+```
+generate_description()
+  ↓
+  生成圖片描述
+  ↓
+generate_media()
+  ↓
+【第一階段：Text to Image】
+  生成多張候選圖片（預設每個描述 4 張）
+  ↓
+needs_user_review() → True（圖片已生成，影片未生成）
+  ↓
+【Discord 審核：選擇圖片】
+  ↓
+handle_review_result()
+  ↓
+【第二階段：Image to Video】
+  對每張選中的圖片：
+    1. 提取圖片內容
+    2. 生成影片描述
+    3. 生成音訊描述
+    4. 使用 I2V workflow 生成影片（預設每張圖片 1 個影片）
+  ↓
+needs_user_review() → True（影片已生成，未審核）
+  ↓
+【Discord 審核：選擇影片】
+  ↓
+handle_review_result()
+  ↓
+analyze_media_text_match()
+  ↓
+  分析影片文件（使用影片描述）
+  ↓
+should_generate_article_now() → True（影片已生成）
+  ↓
+generate_article_content()
+  ↓
+  基於影片描述生成文章內容
+```
+
+#### 特點
+- **需要兩次使用者審核**
+  1. 第一次：選擇要生成影片的圖片
+  2. 第二次：選擇最終要發布的影片
+- 延遲生成文章內容（直到影片生成後）
+- 自動生成影片描述和音訊描述
+
+#### 狀態管理
+- `_videos_generated`: 標記影片是否已生成
+- `_videos_reviewed`: 標記影片是否已審核
+- `video_descriptions`: 儲存每張圖片對應的影片描述
+- `audio_descriptions`: 儲存每張圖片對應的音訊描述
+
+#### 配置參數
+- `first_stage.images_per_description`: 第一階段每個描述生成幾張圖片（預設 4）
+- `video.videos_per_image`: 每張圖片生成幾個影片（預設 1）
+- `video.i2v_workflow_path`: I2V 工作流路徑
+
+---
+
+### 4. Text2VideoStrategy（文字生成影片）
+
+#### 執行流程
+
+```
+generate_description()
+  ↓
+  兩階段描述生成：
+    1. 生成角色描述
+    2. 基於角色描述生成影片描述
+  ↓
+generate_media()
+  ↓
+  直接生成影片（預設每個描述 2 個影片）
+  ↓
+analyze_media_text_match()
+  ↓
+  簡化分析：返回所有影片（similarity=1.0）
+  ↓
+generate_article_content()
+  ↓
+  生成文章內容
+```
+
+#### 特點
+- **需要使用者審核**（`needs_user_review()` 返回 True，當有 filter_results 時）
+- 使用者選擇最終要發布的影片
+- 直接從文字生成影片（不經過圖片階段）
+- 兩階段描述生成：先角色描述，再影片描述
+
+#### 配置參數
+- `videos_per_description`: 每個描述生成幾個影片（預設 2）
+
+---
+
+### 5. Text2LongVideoStrategy（文字生成長影片）
+
+#### 執行流程
+
+```
+generate_description()
+  ↓
+  生成第一個段落的腳本（包含視覺描述和旁白）
+  ↓
+generate_media()
+  ↓
+  生成第一個段落的候選圖片（預設 3 張）
+  ↓
+needs_user_review() → True
+  ↓
+【Discord 審核：選擇第一幀圖片】
+  ↓
+handle_review_result()
+  ↓
+_generate_full_video_loop()
+  ↓
+【循環生成多個段落】
+  對每個段落（預設 5 個段落）：
+    1. 如果不是第一段，基於上一段最後一幀生成腳本
+    2. 上傳當前幀圖片
+    3. 使用 I2V 生成該段落的影片
+    4. 從影片提取最後一幀作為下一段的輸入
+  ↓
+【後處理】
+  1. 合併所有段落影片為一個完整影片
+  2. 如果啟用 TTS：
+     - 為每個段落生成 TTS 音訊
+     - 合併所有音訊
+     - 將音訊與影片合併
+  ↓
+_generate_final_article_content()
+  ↓
+  基於所有段落的腳本生成最終文章內容
+```
+
+#### 特點
+- **需要兩次使用者審核**
+  1. 第一次：選擇第一幀候選圖片
+  2. 第二次：選擇最終要發布的影片
+- 多段落生成：每個段落基於上一段的最後一幀
+- 支援 TTS 旁白
+- 自動合併段落為完整影片
+
+#### 狀態管理
+- `script_segments`: 儲存所有段落的腳本
+- `generated_media_paths`: 儲存生成的媒體路徑（最終為合併後的影片）
+
+#### 配置參數
+- `longvideo_config.segment_count`: 段落數量（預設 5）
+- `longvideo_config.segment_duration`: 每個段落時長（預設 5 秒）
+- `longvideo_config.use_tts`: 是否使用 TTS（預設 True）
+- `longvideo_config.tts_voice`: TTS 語音（預設 'en-US-AriaNeural'）
+- `first_stage.batch_size`: 第一幀候選圖片數量（預設 3）
+
+---
+
+## 審核流程詳解
+
+### 審核觸發條件
+
+策略通過 `needs_user_review()` 方法決定是否需要**上傳到 Discord 讓使用者選擇**：
+
+1. **Text2ImageStrategy**
+   - `len(filter_results) > 0`（有 LLM 分析結果時，需要人工審核確認）
+
+2. **Text2Image2ImageStrategy**
+   - `len(filter_results) > 0`（有 LLM 分析結果時，需要人工審核確認）
+
+3. **Text2VideoStrategy**
+   - `len(filter_results) > 0`（有 LLM 分析結果時，需要人工審核確認）
+
+4. **Text2Image2VideoStrategy**
+   - 第一次：`len(first_stage_images) > 0 and not _videos_generated`（圖片已生成，需要選擇要生成影片的圖片）
+   - 第二次：`_videos_generated and not _videos_reviewed`（影片已生成，需要選擇最終要發布的影片）
+
+5. **Text2LongVideoStrategy**
+   - 第一次：`len(generated_media_paths) > 0`（候選圖片已生成，需要選擇第一幀）
+   - 第二次：`len(generated_media_paths) > 0`（最終影片已生成，需要選擇最終要發布的影片）
+
+### 審核項目獲取
+
+`get_review_items(max_items=10)` 方法返回需要**上傳到 Discord** 的媒體項目：
+- **限制**：最多 10 個項目（符合 Discord API 限制）
+- **格式**：`[{'media_path': '...', 'similarity': ...}, ...]`
+- **用途**：這些媒體會被上傳到 Discord，讓使用者選擇
+
+### 審核結果處理
+
+`handle_review_result(selected_indices, output_dir)` 方法處理**使用者在 Discord 中的選擇**：
+- `selected_indices`: 使用者在 Discord 中選擇的索引列表（相對於 `get_review_items()` 返回的列表）
+- 根據策略不同，可能觸發：
+  - 生成影片（Text2Image2VideoStrategy）
+  - 生成後續段落（Text2LongVideoStrategy）
+  - 圖片放大（Text2ImageStrategy，如果啟用）
+  - 或者直接使用選擇的媒體進行後續處理
+
+### 審核後的媒體路徑提取
+
+**重要**：在 `orchestration_service.py` 中，媒體路徑提取邏輯：
+
+1. **如果 `selected_result_already_filtered = True`**
+   - `selected_result` 已經根據 `selected_indices` 過濾過
+   - 直接從 `selected_result` 提取所有媒體路徑
+
+2. **如果 `selected_result_already_filtered = False`**
+   - `selected_result` 尚未過濾
+   - 使用 `selected_indices` 索引 `selected_result` 來提取媒體路徑
+
+這確保了無論審核流程如何，都能正確提取使用者選擇的媒體。
+
+---
+
+## 文章內容生成時機
+
+### 立即生成（`should_generate_article_now() = True`）
+
+- **Text2ImageStrategy** - 審核後立即生成
+- **Text2Image2ImageStrategy** - 審核後立即生成
+- **Text2VideoStrategy** - 審核後立即生成
+- **Text2LongVideoStrategy** - 最終影片生成後立即生成
+
+### 延遲生成（`should_generate_article_now() = False`）
+
+- **Text2Image2VideoStrategy**
+  - 在圖片階段：不生成文章內容
+  - 在影片生成後：生成基於影片描述的文章內容
+
+---
+
+## 後處理媒體
+
+### 圖片放大（Upscale）
+
+**Text2ImageStrategy** 支援可選的圖片放大：
+- 配置：`enable_upscale = True`
+- 工作流：`upscale_workflow_path`
+- 處理：對每張選中的圖片進行放大處理
+
+### 其他策略
+
+- **Text2Image2ImageStrategy**: 無後處理
+- **Text2Image2VideoStrategy**: 無後處理
+- **Text2VideoStrategy**: 無後處理
+- **Text2LongVideoStrategy**: 無後處理（影片合併在策略內部完成）
+
+---
+
+## 配置參數優先級
+
+配置參數的合併順序（優先級從高到低）：
+
+1. **階段特定配置**（例如：`strategies.text2image2video.first_stage`）
+2. **策略特定配置**（例如：`strategies.text2image2video`）
+3. **通用配置**（`general`）
+4. **Config 屬性**（`config.xxx`）
+5. **預設值**
+
+這確保了更細粒度的配置可以覆蓋更通用的配置。
+
+---
+
+## 常見問題
+
+### Q: 什麼是「審核」？
+
+A: **審核 = 上傳媒體到 Discord，讓使用者人工選擇要使用的媒體**。這不是自動選擇或 LLM 分析，而是人工審核流程，確保最終發布的內容都經過使用者確認。
+
+### Q: 為什麼所有策略都需要審核？
+
+A: 為了確保最終發布到社群媒體的內容都經過使用者確認。每個策略在生成媒體後，都會**上傳到 Discord 讓使用者選擇**最終要發布的內容。
+
+### Q: 為什麼 Text2Image2VideoStrategy 需要兩次審核？
+
+A: 因為它分為兩個階段：
+1. 第一階段生成多張候選圖片，使用者選擇要生成影片的圖片
+2. 第二階段生成影片後，使用者選擇最終要發布的影片
+
+### Q: 為什麼 Text2LongVideoStrategy 需要兩次審核？
+
+A: 因為它分為兩個階段：
+1. 第一階段生成候選圖片，使用者選擇第一幀圖片
+2. 第二階段生成完整影片後，使用者選擇最終要發布的影片
+
+### Q: 審核時選擇的索引是如何使用的？
+
+A: `selected_indices` 是相對於 `get_review_items()` 返回列表的索引。在 `handle_review_result()` 中，策略會將這些索引映射到實際的媒體路徑。
+
+### Q: 為什麼有些策略延遲生成文章內容？
+
+A: 因為文章內容應該基於最終的媒體（例如：影片）生成，而不是中間產物（例如：圖片）。Text2Image2VideoStrategy 在影片生成後才生成文章內容，確保內容與最終媒體匹配。
+
+### Q: 如何確保審核後正確提取媒體路徑？
+
+A: 使用 `selected_result_already_filtered` 標記來區分兩種情況：
+- 如果已過濾：直接從 `selected_result` 提取
+- 如果未過濾：使用 `selected_indices` 索引 `selected_result`
+
+這確保了無論審核流程如何，都能正確提取使用者選擇的媒體。
