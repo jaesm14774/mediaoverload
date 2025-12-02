@@ -197,11 +197,6 @@ class ComfyUICommunicator:
                             raise Exception(f"工作流執行錯誤 - 節點: {error_node}, 類型: {error_type}, 消息: {error_message}")
                             
             except websocket.WebSocketTimeoutException:
-                # 接收超時，檢查是否長時間沒有收到消息
-                time_since_last_message = time.time() - last_message_time
-                if time_since_last_message > 60:  # 60 秒沒有收到任何消息
-                    print(f"⚠ 警告: 已經 {time_since_last_message:.1f} 秒沒有收到消息了...")
-                # 繼續等待
                 continue
                 
             except json.JSONDecodeError as e:

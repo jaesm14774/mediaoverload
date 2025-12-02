@@ -17,33 +17,34 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 0
+    text2img: 0.2
     text2video: 0
-    text2image2video: 0
-    text2longvideo: 1  # ✨ New: Long-form video generation
+    text2image2video: 0.4
+    text2longvideo: 0.3
     image2image: 0
-    text2image2image: 0
+    text2image2image: 0.1
 
   # Workflow Path Configuration
   workflows:
     text2img: /app/configs/workflow/nova-anime-xl.json
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
     text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
-    # text2longvideo workflows defined in strategies section below
+    image2image: /app/configs/workflow/image_to_image.json
 
   # Quality Control
-  similarity_threshold: 0.7
+  similarity_threshold: 0.5
 
   # Prompt Generation Method Weights
   prompt_method_weights:
-    arbitrary: 0.2  # More creative freedom for long videos
-    news: 0.8
+    arbitrary: 0.1
+    news: 0.9
 
   # Image System Prompt Weights
   image_system_prompt_weights:
     stable_diffusion_prompt: 0.3
     warm_scene_description_system_prompt: 0.3
     sticker_prompt_system_prompt: 0.4
+    two_character_interaction_generate_system_prompt: 0.3
 
   # Visual Style Weights
   style_weights:
@@ -84,11 +85,7 @@ additional_params:
     
     enable_upscale: true
     upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json
-    
-    custom_node_updates:
-      - node_type: "PrimitiveInt"
-        inputs:
-          value: 1280
+    custom_node_updates: []
 
   # Strategy-Specific Parameters
   strategies:
@@ -98,7 +95,17 @@ additional_params:
       custom_node_updates:
         - node_type: "PrimitiveInt"
           inputs:
-            value: 1280
+            value: 1024
+
+    # Text-to-Image-to-Image Strategy
+    text2image2image:
+      first_stage:
+        images_per_description: 4
+        workflow_path: /app/configs/workflow/nova-anime-xl.json
+      second_stage:
+        images_per_input: 1
+        workflow_path: /app/configs/workflow/image_to_image.json
+        denoise: 0.7
 
     # Text-to-Image-to-Video Strategy
     text2image2video:
@@ -156,3 +163,4 @@ additional_params:
       video_generation:
         workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
         use_noise_seed: true
+

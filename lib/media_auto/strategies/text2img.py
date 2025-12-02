@@ -1,182 +1,231 @@
 import time
 import random
-from typing import Dict, Any, List
-import numpy as np
 import glob
+import os
+import numpy as np
+from typing import Dict, Any, List, Optional
 
+from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
+from lib.media_auto.services.media_generator import MediaGenerator
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
-from lib.media_auto.models.vision.model_switcher import ModelSwitcher
-from lib.comfyui.websockets_api import ComfyUICommunicator
-from .generation_base import BaseGenerationStrategy
+from lib.comfyui.node_manager import NodeManager
 
-class Text2ImageStrategy(BaseGenerationStrategy):
+class Text2ImageStrategy(ContentStrategy):
     """
-    文生圖策略
-    實驗顯示 ollama 在判斷 文圖匹配時，不論是llama3.2-vision 或是 llava 都沒有達到期望
-    改成google 大幅 增加準確性
+    Text-to-Image generation strategy.
+    Refactored to use composition.
     """
 
     def __init__(self, character_repository=None, vision_manager=None):
-        super().__init__(character_repository, vision_manager)
-
-        # Text2Image 專用的額外管理器
-        if not self.external_vision_manager:
-            self.ollama_vision_manager = VisionManagerBuilder() \
-                .with_vision_model('ollama', model_name='llava:13b') \
-                .with_text_model('ollama', model_name='llama3.2:latest') \
+        self.character_repository = character_repository
+        
+        if vision_manager is None:
+            # Default to Gemini as per original code
+            vision_manager = VisionManagerBuilder() \
+                .with_vision_model('gemini', model_name='gemini-flash-lite-latest') \
+                .with_text_model('gemini', model_name='gemini-flash-lite-latest') \
                 .build()
-            self.ollama_switcher = ModelSwitcher(self.ollama_vision_manager)
+        self.vision_manager = vision_manager
+        
+        self.media_generator = MediaGenerator()
+        self.node_manager = NodeManager()
+        
+        self.config = None
+        self.descriptions: List[str] = []
+        self.filter_results: List[Dict[str, Any]] = []
+
+    def load_config(self, config: GenerationConfig):
+        self.config = config
 
     def generate_description(self):
-        """描述生成"""
+        """Generates image descriptions/prompts."""
         start_time = time.time()
-
-        # 獲取策略專用配置
+        
+        # Get strategy config with proper merging
         image_config = self._get_strategy_config('text2img')
         
-        # 獲取 style 和 image_system_prompt
-        style = image_config.get('style') or getattr(self.config, 'style', '')
+        # Get style: image_config -> config.style
+        style = self._get_config_value(image_config, 'style', '')
+        image_system_prompt = self._get_system_prompt(image_config)
         
-        image_system_prompt_weights = image_config.get('image_system_prompt_weights')
-        
-        # 如果有權重配置，使用權重選擇
-        if image_system_prompt_weights:
-            image_system_prompt = self._process_weighted_choice(image_system_prompt_weights)
-        else:
-            image_system_prompt = image_config.get('image_system_prompt') or getattr(self.config, 'image_system_prompt', 'stable_diffusion_prompt')
-
         prompt = self.config.prompt
-        # 只有當 style 不為空時才加上 style: 前綴
         if style and style.strip():
-            prompt = f"""{prompt}\nstyle: {style}""".strip()
-
-        # 如果有指定角色，且 prompt 中不包含角色信息，則加入角色
+            prompt = f"{prompt}\nstyle: {style}".strip()
+            
+        # Add character info if needed
         if self.config.character:
-            character_lower = self.config.character.lower()
-            prompt_lower = prompt.lower()
-            # 檢查 prompt 中是否已包含角色名稱或 "main character" 等關鍵字
-            if character_lower not in prompt_lower and "main character" not in prompt_lower:
+            char_lower = self.config.character.lower()
+            if char_lower not in prompt.lower() and "main character" not in prompt.lower():
                 prompt = f"Main character: {self.config.character}\n{prompt}"
-                print(f"已自動加入主角色到 prompt: {self.config.character}")
 
-        # 檢查是否使用雙角色互動系統提示詞
-        if image_system_prompt == 'two_character_interaction_generate_system_prompt':
-            # 使用雙角色互動生成邏輯
-            descriptions = self._generate_two_character_interaction_description(prompt, style)
-        else:
-            # 使用原有的生成邏輯
-            descriptions = self.current_vision_manager.generate_image_prompts(prompt, image_system_prompt)
-        
-        print('All generated descriptions : ', descriptions)
+        try:
+            # 檢查是否使用雙角色互動系統提示詞
+            if image_system_prompt == 'two_character_interaction_generate_system_prompt':
+                descriptions = self._generate_two_character_interaction_description(prompt, style)
+            else:
+                descriptions = self.vision_manager.generate_image_prompts(prompt, image_system_prompt)
+            
+            # 確保 descriptions 不為空
+            if not descriptions or not descriptions.strip():
+                print('⚠️  警告：API 返回空描述，使用原始 prompt 作為回退')
+                descriptions = prompt
+        except Exception as e:
+            print(f'⚠️  警告：生成描述時發生錯誤: {e}')
+            print(f'   使用原始 prompt 作為回退: {prompt}')
+            descriptions = prompt
+            
+        # Filter descriptions based on character name (simple check)
         if self.config.character:
-            character = self.config.character.lower()
-            self.descriptions = [descriptions] if descriptions.replace(' ', '').lower().find(character) != -1 or descriptions.lower().find(character) != -1 else []
+            char = self.config.character.lower()
+            if descriptions and char in descriptions.lower():
+                self.descriptions = [descriptions]
+            else:
+                # 如果字符檢查失敗，仍然使用描述（而不是設為空）
+                # 因為字符名稱可能以不同形式出現
+                print(f'⚠️  警告：描述中未找到角色名稱 "{self.config.character}"，但仍使用該描述')
+                self.descriptions = [descriptions] if descriptions else [prompt]
+        else:
+             self.descriptions = [descriptions] if descriptions else [prompt]
 
-        print(f'Image descriptions : {self.descriptions}\n')
-        print(f'生成描述花費 : {time.time() - start_time}')
+        print(f'Image descriptions : {self.descriptions}')
+        print(f'生成描述花費 : {time.time() - start_time:.2f} 秒')
         return self
-        
+
+    def _get_system_prompt(self, image_config):
+        weights = image_config.get('image_system_prompt_weights')
+        if weights:
+            # Simple weighted choice
+            choices = list(weights.keys())
+            probs = list(weights.values())
+            total = sum(probs)
+            probs = [p/total for p in probs]
+            return np.random.choice(choices, p=probs)
+        return self._get_config_value(image_config, 'image_system_prompt', 'stable_diffusion_prompt')
+
     def generate_media(self):
         start_time = time.time()
-        workflow = self._load_workflow(self.config.workflow_path)
-        self.communicator = ComfyUICommunicator()
         
-        try:
-            # 建立 WebSocket 連接（僅一次）
-            self.communicator.connect_websocket()
-            print("已建立 WebSocket 連接，開始批次生成圖片")
-            
-            # 獲取策略專用配置
-            image_config = self._get_strategy_config('text2img')
-            
-            images_per_description = image_config.get('images_per_description', 4)
-            
-            total_images = len(self.descriptions) * images_per_description
-            current_image = 0
-            
-            for idx, description in enumerate(self.descriptions):
-                seed_start = random.randint(1, 999999999999)
-                for i in range(images_per_description):
-                    current_image += 1
-                    print(f'\n[{current_image}/{total_images}] 為描述 {idx+1}/{len(self.descriptions)}，生成第 {i+1}/{images_per_description} 張圖片')
-                    
-                    # 獲取自定義節點更新配置
-                    custom_updates = image_config.get('custom_node_updates', [])
-                    
-                    # 合併配置參數
-                    merged_params = {**self.config.additional_params, **image_config}
-                    
-                    # 使用統一的更新方法（自動處理衝突檢查）
-                    updates = self.node_manager.generate_updates(
-                        workflow=workflow,
-                        updates_config=custom_updates,
-                        description=description,
-                        seed=seed_start + i,
-                        **merged_params
-                    )
-                    
-                    # 處理工作流，但不自動關閉 WebSocket（auto_close=False）
-                    # 只有在最後一張圖片時才關閉（通過 finally 處理）
-                    is_last_image = (idx == len(self.descriptions) - 1 and i == images_per_description - 1)
-                    self.communicator.process_workflow(
-                        workflow=workflow,
-                        updates=updates,
-                        output_path=f"{self.config.output_dir}",
-                        file_name=f"{self.config.character}_d{idx}_{i}",
-                        auto_close=False  # 不自動關閉，保持連接以供下次使用
-                    )
-                    
-        finally:
-            # 確保在所有圖片生成完成後關閉 WebSocket
-            if self.communicator and self.communicator.ws and self.communicator.ws.connected:
-                print("\n所有圖片生成完成，關閉 WebSocket 連接")
-                self.communicator.ws.close()
+        # Get strategy config with proper merging
+        image_config = self._get_strategy_config('text2img')
+        
+        # Get workflow path: image_config.workflow_path -> config.workflow_path -> default
+        workflow_path = image_config.get('workflow_path') or getattr(self.config, 'workflow_path', 'configs/workflow/txt2img.json')
+        # Get images_per_description: image_config -> general -> default
+        images_per_desc = image_config.get('images_per_description', 4)
+        output_dir = getattr(self.config, 'output_dir', 'output')
+        
+        for idx, description in enumerate(self.descriptions):
+            for i in range(images_per_desc):
+                seed = random.randint(1, 999999999999)
                 
-        print(f'\n✅ 生成圖片總耗時: {time.time() - start_time:.2f} 秒')
+                import json
+                with open(workflow_path, 'r', encoding='utf-8') as f:
+                    workflow = json.load(f)
+                
+                # Merge additional_params with image_config for node_manager
+                merged_params = self._merge_node_manager_params(image_config)
+                updates = self.node_manager.generate_updates(
+                    workflow=workflow,
+                    updates_config=image_config.get('custom_node_updates', []),
+                    description=description,
+                    seed=seed,
+                    **merged_params
+                )
+                
+                self.media_generator.generate(
+                    workflow_path=workflow_path,
+                    updates=updates,
+                    output_dir=output_dir,
+                    file_prefix=f"{getattr(self.config, 'character', 'char')}_d{idx}_{i}"
+                )
+                
+        print(f'✅ 生成圖片總耗時: {time.time() - start_time:.2f} 秒')
         return self
 
-    def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
-        """分析生成的圖片 - 預設使用 Gemini，保留 OpenRouter 作為備選"""
-        media_paths = glob.glob(f'{self.config.output_dir}/*')
-
-        # 預設使用 Gemini（更穩定且便宜），但保留 OpenRouter 作為備選
-        # 如果需要使用 OpenRouter，可以通過 set_vision_provider('openrouter') 切換
-        selected_manager = self.gemini_vision_manager
-        print("使用 Gemini 進行圖像相似度分析")
-
-        self.filter_results = selected_manager.analyze_media_text_match(
-            media_paths=media_paths,
-            descriptions=self.descriptions,
-            main_character=self.config.character,
-            similarity_threshold=similarity_threshold,
-            temperature=0.3
-        )
-        return self
-    
-    def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
-        """後處理媒體文件 - 放大圖片
+    def analyze_media_text_match(self, similarity_threshold):
+        """分析媒體與文本的匹配度
         
         Args:
-            media_paths: 媒體文件路徑列表
-            output_dir: 輸出路徑
-            
-        Returns:
-            處理後的媒體文件路徑列表（放大後的圖片路徑）
+            similarity_threshold: 相似度閾值（0.0-1.0）
         """
-        # 檢查是否為圖片（而非影片）
-        image_extensions = ['.png', '.jpg', '.jpeg', '.webp']
-        selected_images = [p for p in media_paths if any(p.lower().endswith(ext) for ext in image_extensions)]
+        output_dir = getattr(self.config, 'output_dir', 'output')
         
-        if not selected_images:
-            return media_paths
+        # 遞歸搜索所有圖片文件（包括子目錄）
+        media_paths = []
+        for ext in ['*.png', '*.jpg', '*.jpeg', '*.webp']:
+            pattern = os.path.join(output_dir, '**', ext)
+            found = glob.glob(pattern, recursive=True)
+            media_paths.extend(found)
         
-        # 執行 upscale
-        upscaled_paths = self.upscale_images(
-            image_paths=selected_images,
-            output_dir=output_dir
+        # 過濾出實際存在的圖片文件並去重
+        media_paths = list(set([
+            p for p in media_paths 
+            if os.path.isfile(p) and any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])
+        ]))
+        
+        # 按文件名排序，確保順序一致
+        media_paths.sort()
+        
+        print(f'找到 {len(media_paths)} 個媒體文件進行分析')
+        if len(media_paths) == 0:
+            print(f'⚠️  警告：在 {output_dir} 中沒有找到任何圖片文件')
+            self.filter_results = []
+            return self
+        
+        # 確保有 descriptions
+        if not self.descriptions:
+            print(f'⚠️  警告：沒有描述可用於分析')
+            self.filter_results = []
+            return self
+        
+        print(f'使用 {len(self.descriptions)} 個描述進行匹配分析')
+        print(f'相似度閾值: {similarity_threshold}')
+        
+        self.filter_results = self.vision_manager.analyze_media_text_match(
+            media_paths=media_paths,
+            descriptions=self.descriptions,
+            main_character=getattr(self.config, 'character', ''),
+            similarity_threshold=similarity_threshold
         )
+        return self
+
+    def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
+        image_config = self._get_strategy_config('text2img')
         
-        # 合併放大後的圖片和其他媒體文件（如影片）
-        processed_paths = upscaled_paths + [p for p in media_paths if p not in selected_images]
+        # Check config for upscale: image_config -> general
+        enable_upscale = image_config.get('enable_upscale', False)
+        if not enable_upscale:
+            return media_paths
+            
+        # Get upscale workflow path: image_config -> general -> default
+        upscale_workflow = image_config.get('upscale_workflow_path', 'configs/workflow/Tile Upscaler SDXL.json')
+        upscaled_paths = []
         
-        return processed_paths
+        for path in media_paths:
+            if not any(path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg']):
+                upscaled_paths.append(path)
+                continue
+                
+            # Upload image first
+            filename = self.media_generator.upload_image(path)
+            
+            # Update workflow
+            updates = [{
+                "type": "direct_update",
+                "node_id": "225", # Assuming fixed node ID for loader in this specific workflow
+                "inputs": {"image": filename}
+            }]
+            
+            generated = self.media_generator.generate(
+                workflow_path=upscale_workflow,
+                updates=updates,
+                output_dir=os.path.join(output_dir, 'upscaled'),
+                file_prefix=f"upscaled_{os.path.basename(path)}"
+            )
+            upscaled_paths.extend(generated)
+            
+        return upscaled_paths
+
+    def generate_article_content(self):
+        # 使用基類的完整實現
+        return super().generate_article_content()

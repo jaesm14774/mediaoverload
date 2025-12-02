@@ -36,7 +36,7 @@ def example_image2image_basic():
         character='kirby',
         prompt='A beautiful sunset scene with vibrant colors',  # 可選：提示詞
         input_image_path='output_media/1.png',  # ⚠️ 請替換為實際存在的圖片路徑
-        workflow_path='configs/workflow/example/image_to_image.json',
+        workflow_path='configs/workflow/image_to_image.json',
         output_dir='output_media/i2i_output',
         image_system_prompt='stable_diffusion_prompt',
         additional_params={
@@ -102,7 +102,7 @@ def example_image2image_different_denoise():
             character='kirby',
             prompt='Enhanced version with more details',
             input_image_path=input_image,
-            workflow_path='configs/workflow/example/image_to_image.json',
+            workflow_path='configs/workflow/image_to_image.json',
             output_dir=f'output_media/i2i_denoise_{denoise}',
             additional_params={
                 'strategies': {
@@ -141,7 +141,7 @@ def example_image2image_extract_description():
         generation_type='image2image',
         character='kirby',
         input_image_path=input_image,
-        workflow_path='configs/workflow/example/image_to_image.json',
+        workflow_path='configs/workflow/image_to_image.json',
         output_dir='output_media/i2i_extracted',
         extract_description=True,  # 從圖片中提取描述
         additional_params={

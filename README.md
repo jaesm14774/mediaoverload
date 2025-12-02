@@ -163,6 +163,19 @@ generation:
 
 ## Recent Updates
 
+### v2.7.1 (Long Video Character Selection Fix)
+- **長影片角色選擇優化**: 修正長影片模式下 Kirby 群組的角色選擇邏輯。
+  - **問題**: 長影片生成時，Kirby 群組會隨機選擇角色，導致其他角色無法維持一致性。
+  - **解決方案**: 當生成類型為 `text2longvideo` 且群組為 `Kirby` 時，直接使用 `kirby` 角色，不進行隨機選擇。
+  - **影響範圍**: 所有使用 `text2longvideo` 策略且群組為 `Kirby` 的角色配置。
+
+### v2.7.0 (Strategy Refactoring)
+- **Architecture Overhaul**:
+    - Transitioned from inheritance-based to **composition-based architecture** for all strategies.
+    - Introduced dedicated services: `ScriptGenerator` (LLM logic) and `MediaGenerator` (ComfyUI interaction).
+    - Eliminated "God Class" anti-patterns by decoupling `BaseGenerationStrategy`.
+    - Refactored all strategies (`Text2LongVideo`, `Text2Image`, `Text2Video`, etc.) for better maintainability and extensibility.
+
 ### v2.6.1 (Upscale Path Processing Fix)
 - **修復 Bug**: 修正了 upscale 後的圖片無法上傳到社群媒體的問題。
   - **問題**: `PublishingService.process_media` 只掃描根目錄，無法處理 `upscaled/` 子目錄中的圖片。

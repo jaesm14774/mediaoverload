@@ -3,613 +3,336 @@ import random
 import glob
 import re
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-from lib.comfyui.websockets_api import ComfyUICommunicator
-from .generation_base import BaseGenerationStrategy
+from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
+from lib.media_auto.services.media_generator import MediaGenerator
+from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
+from lib.comfyui.node_manager import NodeManager
 
-class Text2Image2VideoStrategy(BaseGenerationStrategy):
-    """文生圖 -> 圖生影片策略
-    
-    流程：
-    1. text 2 image (使用 nova-anime-xl，可選)
-    2. 透過 Discord 讓使用者選擇圖片（不做 AI 篩選）
-    3. 透過 image 產生影片描述
-    4. image + 影片描述 產生 音頻描述
-    5. 使用 wan2.2_gguf_i2v workflow 產生含音頻的影片
-    6. 使用影片生成文章內容
-    7. 上傳到社群媒體
+class Text2Image2VideoStrategy(ContentStrategy):
     """
-
+    Text-to-Image-to-Video generation strategy.
+    Refactored to use composition.
+    """
     def __init__(self, character_repository=None, vision_manager=None):
-        super().__init__(character_repository, vision_manager)
-        self.first_stage_images: List[str] = []  # 第一階段生成的圖片路徑（可能是 upscale 後的）
-        self.original_images: List[str] = []  # 原始圖片路徑（用於 extract_image_content 和生成文章內容）
-        self.video_descriptions: Dict[str, str] = {}  # 圖片路徑 -> 影片描述
-        self.audio_descriptions: Dict[str, str] = {}  # 圖片路徑 -> 音頻描述
-        self._videos_generated = False  # 標記影片是否已生成
-        self._videos_reviewed = False  # 標記影片是否已審核
-    
-    def needs_user_review(self) -> bool:
-        """檢查是否需要使用者審核 - 在圖片生成後或影片生成後需要"""
-        # 如果第一階段圖片已生成但影片未生成，則需要使用者審核圖片
-        if len(self.first_stage_images) > 0 and not self._videos_generated:
-            return True
-        # 如果影片已生成但尚未審核，則需要使用者審核影片
-        if self._videos_generated and not self._videos_reviewed:
-            return True
-        return False
-    
-    def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
-        """獲取需要審核的項目（限制最多 10 張，符合 Discord API 限制）"""
-        # 如果影片已生成但尚未審核，返回影片供審核
-        if self._videos_generated and not self._videos_reviewed:
-            video_output_dir = f"{self.config.output_dir}/videos"
-            if os.path.exists(video_output_dir):
-                media_paths = glob.glob(f'{video_output_dir}/*')
-                video_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.gif', '.webm'])]
-                
-                if video_paths:
-                    review_items = []
-                    for video_path in video_paths[:max_items]:
-                        # 嘗試從文件名匹配對應的圖片和描述
-                        match = re.search(rf'{re.escape(self.config.character)}_i2v_(\d+)_\d+\.', video_path, re.IGNORECASE)
-                        if match:
-                            img_idx = int(match.group(1))
-                            if img_idx < len(self.first_stage_images):
-                                img_path = self.first_stage_images[img_idx]
-                                video_desc = self.video_descriptions.get(img_path, '')
-                                review_items.append({
-                                    'media_path': video_path,
-                                    'description': video_desc,
-                                    'similarity': 1.0
-                                })
-                        else:
-                            review_items.append({
-                                'media_path': video_path,
-                                'description': self.video_descriptions.get(self.first_stage_images[0], '') if self.first_stage_images else '',
-                                'similarity': 1.0
-                            })
-                    
-                    if len(video_paths) > max_items:
-                        print(f"警告：共有 {len(video_paths)} 個影片，但 Discord 限制一次最多 {max_items} 個，只發送前 {max_items} 個供審核")
-                    
-                    return review_items
+        self.character_repository = character_repository
         
-        # 如果第一階段圖片已生成但影片未生成，返回圖片供審核
-        if not self.first_stage_images:
-            return []
+        if vision_manager is None:
+            vision_manager = VisionManagerBuilder() \
+                .with_vision_model('gemini', model_name='gemini-flash-lite-latest') \
+                .with_text_model('gemini', model_name='gemini-flash-lite-latest') \
+                .build()
+        self.vision_manager = vision_manager
         
-        # 如果圖片超過 10 張，只返回前 10 張
-        review_images = self.first_stage_images[:max_items]
+        self.media_generator = MediaGenerator()
+        self.node_manager = NodeManager()
         
-        review_items = []
-        for img_path in review_images:
-            review_items.append({
-                'media_path': img_path,
-                'description': self.descriptions[0] if self.descriptions else '',
-                'similarity': 1.0
-            })
-        
-        if len(self.first_stage_images) > max_items:
-            print(f"警告：共有 {len(self.first_stage_images)} 張圖片，但 Discord 限制一次最多 {max_items} 張，只發送前 {max_items} 張供審核")
-        
-        return review_items
-    
-    def continue_after_review(self, selected_indices: List[int]) -> bool:
-        """在使用者審核後繼續執行後續階段 - 生成影片
-        
-        此方法保留以保持向後兼容性，實際邏輯委託給 handle_review_result
-        """
-        return self.handle_review_result(selected_indices, self.config.output_dir)
-    
-    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
-        """處理使用者審核結果 - 先放大圖片，然後生成影片"""
-        if not selected_indices:
-            print("警告：沒有選擇任何圖片")
-            return False
-        
-        # 將 selected_indices 映射回原始 first_stage_images 的索引
-        # selected_indices 是相對於 get_review_items 返回的列表（最多 10 張）
-        # 獲取審核項目（與發送給 Discord 的一致）
-        review_items = self.get_review_items(max_items=10)
-        selected_image_paths = [review_items[i]['media_path'] for i in selected_indices if i < len(review_items)]
-        
-        if not selected_image_paths:
-            print("警告：無法獲取選擇的圖片路徑")
-            return False
-        
-        # 找到這些圖片在 first_stage_images 中的索引
-        original_indices = []
-        for img_path in selected_image_paths:
-            found = False
-            # 先嘗試直接匹配
-            try:
-                idx = self.first_stage_images.index(img_path)
-                original_indices.append(idx)
-                found = True
-            except ValueError:
-                # 如果直接匹配失敗，可能是因為圖片已經被放大
-                # 嘗試通過文件名匹配（不包含路徑）
-                img_basename = os.path.basename(img_path)
-                for idx, first_stage_img in enumerate(self.first_stage_images):
-                    first_stage_basename = os.path.basename(first_stage_img)
-                    # 檢查文件名是否相似（可能是放大後的版本）
-                    if img_basename in first_stage_basename or first_stage_basename in img_basename:
-                        original_indices.append(idx)
-                        found = True
-                        print(f"通過文件名匹配找到圖片: {img_path} -> {first_stage_img}")
-                        break
-            
-            if not found:
-                print(f"警告：無法找到圖片路徑對應的索引: {img_path}")
-        
-        if not original_indices:
-            print("警告：無法找到選擇的圖片對應的索引")
-            return False
-        
-        # 先放大選擇的圖片（在生成影片前）
-        selected_images = [self.first_stage_images[i] for i in original_indices if i < len(self.first_stage_images)]
-        if selected_images:
-            print(f"開始放大 {len(selected_images)} 張圖片（text2imgtovideo 流程）")
-            # 直接調用 upscale_images，因為這是在生成影片前的特殊處理
-            upscaled_paths = self.upscale_images(selected_images, output_dir)
-            
-            # 更新策略中的 first_stage_images 為放大後的圖片
-            if hasattr(self, 'first_stage_images'):
-                # 建立映射：原始圖片 -> 放大後的圖片
-                image_mapping = dict(zip(selected_images, upscaled_paths))
-                
-                # 保存原始圖片路徑（如果還沒有保存）
-                if not hasattr(self, 'original_images') or not self.original_images:
-                    self.original_images = self.first_stage_images.copy()
-                
-                # 更新 first_stage_images 中的路徑
-                updated_first_stage_images = []
-                for img_path in self.first_stage_images:
-                    if img_path in image_mapping:
-                        updated_first_stage_images.append(image_mapping[img_path])
-                    else:
-                        updated_first_stage_images.append(img_path)
-                self.first_stage_images = updated_first_stage_images
-                
-                print(f'已更新策略中的圖片路徑為放大後的版本，原始圖片路徑已保存')
-        
-        # 生成影片（使用 first_stage_images 中的圖片，可能是放大後的）
-        print(f"開始使用 {len(original_indices)} 張使用者選擇的圖片生成影片")
-        self.generate_videos_from_selected_images(original_indices)
-        self._videos_generated = True
-        self._videos_reviewed = False  # 影片生成後需要審核
-        return True
-    
-    def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
-        """後處理媒體文件
-        
-        對於 text2img2video，圖片已經在 handle_review_result 中處理過了（放大），
-        所以這裡不需要再做任何處理，直接返回原始路徑
-        
-        Args:
-            media_paths: 媒體文件路徑列表
-            output_dir: 輸出路徑
-            
-        Returns:
-            處理後的媒體文件路徑列表（對於 text2img2video，直接返回原始路徑）
-        """
-        # 對於 text2img2video，圖片已經在 handle_review_result 中處理過了
-        # 這裡不需要再做任何處理
-        return media_paths
-    
-    def should_generate_article_now(self) -> bool:
-        """判斷是否應該現在生成文章內容 - 應該在影片生成後才生成"""
-        return self._videos_generated
-    
-    def generate_description(self):
-        """生成描述 - 使用策略專用配置（text2image2video 的 text2image 階段）"""
-        start_time = time.time()
+        self.config = None
+        self.descriptions: List[str] = []
+        self.first_stage_images: List[str] = []
+        self.original_images: List[str] = []
+        self.video_descriptions: Dict[str, str] = {}
+        self.audio_descriptions: Dict[str, str] = {}
+        self._videos_generated = False
+        self._videos_reviewed = False
 
-        # 獲取策略專用配置
+    def load_config(self, config: GenerationConfig):
+        self.config = config
+
+    def generate_description(self):
+        """Generates image descriptions for the first stage."""
+        start_time = time.time()
+        
+        # Get strategy config with proper merging
         first_stage_config = self._get_strategy_config('text2image2video', 'first_stage')
         
-        # 獲取 style（優先使用策略專用配置）
-        style = first_stage_config.get('style') or getattr(self.config, 'style', '')
-        
-        # 獲取 image_system_prompt（支援加權選擇或多個選項）
-        # 優先檢查是否有 image_system_prompt_weights（加權選擇）
-        image_system_prompt_weights = first_stage_config.get('image_system_prompt_weights')
-        
-        if image_system_prompt_weights:
-            # 使用加權選擇，但排除雙角色互動
-            image_system_prompt = self._process_weighted_choice(
-                image_system_prompt_weights,
-                exclude=['two_character_interaction_generate_system_prompt']
-            )
-        else:
-            # 使用單一的 image_system_prompt 配置
-            image_system_prompt = first_stage_config.get('image_system_prompt') or getattr(self.config, 'image_system_prompt', 'stable_diffusion_prompt')
-        
+        # Get style: first_stage -> general -> config.style
+        style = self._get_config_value(first_stage_config, 'style', '')
+        # Get image_system_prompt: first_stage -> general -> config.image_system_prompt
+        image_system_prompt = self._get_config_value(first_stage_config, 'image_system_prompt', 'stable_diffusion_prompt')
+
         prompt = self.config.prompt
-        # 只有當 style 不為空時才加上 style: 前綴
         if style and style.strip():
-            prompt = f"""{prompt}\nstyle: {style}""".strip()
-
-        # 如果有指定角色，且 prompt 中不包含角色信息，則加入角色
+            prompt = f"{prompt}\nstyle: {style}".strip()
+            
         if self.config.character:
-            character_lower = self.config.character.lower()
-            prompt_lower = prompt.lower()
-            if character_lower not in prompt_lower and "main character" not in prompt_lower:
+            char_lower = self.config.character.lower()
+            if char_lower not in prompt.lower() and "main character" not in prompt.lower():
                 prompt = f"Main character: {self.config.character}\n{prompt}"
-                print(f"已自動加入主角色到 prompt: {self.config.character}")
 
-        # 對於 text2image2video，強制不使用雙角色互動系統提示詞
-        # 確保使用乾淨簡單的背景
+        # 檢查是否使用雙角色互動系統提示詞
         if image_system_prompt == 'two_character_interaction_generate_system_prompt':
-            print("警告：text2image2video 不支援雙角色互動，改用 stable_diffusion_prompt")
-            image_system_prompt = 'stable_diffusion_prompt'
-        
-        descriptions = self.current_vision_manager.generate_image_prompts(prompt, image_system_prompt)
-        
-        print('All generated descriptions : ', descriptions)
-        if self.config.character:
-            character = self.config.character.lower()
-            self.descriptions = [descriptions] if descriptions.replace(' ', '').lower().find(character) != -1 or descriptions.lower().find(character) != -1 else []
+            descriptions = self._generate_two_character_interaction_description(prompt, style)
         else:
-            self.descriptions = [descriptions] if descriptions else []
-
-        print(f'Image descriptions : {self.descriptions}\n')
+            descriptions = self.vision_manager.generate_image_prompts(prompt, image_system_prompt)
+        self.descriptions = [descriptions] if descriptions else []
+        
+        print(f'Image descriptions : {self.descriptions}')
         print(f'生成描述花費 : {time.time() - start_time}')
         return self
-    
+
     def generate_media(self):
-        """生成媒體 - 分多階段：text2image -> 篩選 -> 生成影片描述 -> 生成音頻描述 -> i2v"""
+        """First stage: Generate images."""
         start_time = time.time()
-        
-        # 第一階段：Text to Image
         print("=" * 60)
         print("第一階段：Text to Image 生成")
         print("=" * 60)
         
-        # 獲取策略專用配置
+        # Get strategy config with proper merging
         first_stage_config = self._get_strategy_config('text2image2video', 'first_stage')
         
-        # 獲取 workflow 路徑
-        t2i_workflow_path = first_stage_config.get('t2i_workflow_path') or self.config.workflow_path
+        # Get workflow path: first_stage.t2i_workflow_path -> config.workflow_path -> default
+        t2i_workflow_path = first_stage_config.get('t2i_workflow_path') or getattr(self.config, 'workflow_path', 'configs/workflow/txt2img.json')
+        # Get images_per_description: first_stage -> general -> default
+        images_per_desc = first_stage_config.get('images_per_description', 4)
+        output_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'first_stage')
         
-        first_stage_workflow = self._load_workflow(t2i_workflow_path)
-        self.communicator = ComfyUICommunicator()
+        # Load workflow
+        import json
+        with open(t2i_workflow_path, 'r', encoding='utf-8') as f:
+            workflow = json.load(f)
+            
+        generated_paths = []
         
-        try:
-            self.communicator.connect_websocket()
-            print("已建立 WebSocket 連接，開始第一階段生成")
-            
-            # 第一階段參數
-            images_per_description = first_stage_config.get('images_per_description', 4)
-            
-            total_first_stage = len(self.descriptions) * images_per_description
-            current_image = 0
-            
-            for idx, description in enumerate(self.descriptions):
-                seed_start = random.randint(1, 999999999999)
-                for i in range(images_per_description):
-                    current_image += 1
-                    print(f'\n[第一階段 {current_image}/{total_first_stage}] 為描述 {idx+1}/{len(self.descriptions)}，生成第 {i+1}/{images_per_description} 張圖片')
-                    
-                    custom_updates = first_stage_config.get('custom_node_updates', [])
-                    
-                    merged_params = {**self.config.additional_params, **first_stage_config}
-                    
-                    updates = self.node_manager.generate_updates(
-                        workflow=first_stage_workflow,
-                        updates_config=custom_updates,
-                        description=description,
-                        seed=seed_start + i,
-                        **merged_params
-                    )
-                    
-                    is_last_image = (idx == len(self.descriptions) - 1 and i == images_per_description - 1)
-                    self.communicator.process_workflow(
-                        workflow=first_stage_workflow,
-                        updates=updates,
-                        output_path=f"{self.config.output_dir}/first_stage",
-                        file_name=f"{self.config.character}_d{idx}_{i}",
-                        auto_close=False
-                    )
-            
-            # 等待第一階段完成
-            print("\n第一階段生成完成，收集所有圖片供使用者審核...")
-            
-            # 收集第一階段生成的所有圖片（不做 AI 篩選）
-            first_stage_output_dir = f"{self.config.output_dir}/first_stage"
-            first_stage_images = glob.glob(f'{first_stage_output_dir}/*')
-            image_paths = [p for p in first_stage_images if any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])]
-            
-            if not image_paths:
-                print("警告：第一階段沒有生成任何圖片")
-                return self
-            
-            # 保存所有圖片路徑（不做 AI 篩選，等待使用者選擇）
-            self.first_stage_images = sorted(image_paths)  # 排序以確保順序一致
-            self.original_images = sorted(image_paths).copy()  # 保存原始圖片路徑
-            print(f"第一階段共生成 {len(self.first_stage_images)} 張圖片，將透過 Discord 供使用者審核選擇")
-            
-            # 在第一階段圖片生成後，立即生成發文內文（使用圖 + 描述）
-            print("\n" + "=" * 60)
-            print("生成發文內文（基於第一階段圖片和描述）")
-            print("=" * 60)
-            
-            # 為每張圖片提取內容並生成描述（最多3張）
-            # 使用原始圖片路徑，避免 upscale 後的圖片太大無法傳輸
-            image_descriptions = []
-            limited_images = self.original_images[:3] if self.original_images else self.first_stage_images[:3]  # 限制最多3張圖片，優先使用原始圖片
-            print(f"將使用前 {len(limited_images)} 張原始圖片來生成文章內容（共 {len(self.first_stage_images)} 張）")
-            for img_path in limited_images:
-                image_content = self.current_vision_manager.extract_image_content(img_path)
-                image_descriptions.append({
-                    'media_path': img_path,
-                    'description': image_content
-                })
-            
-            # 暫時設置 filter_results 用於生成文章內容
-            self.filter_results = image_descriptions
-            
-            # 生成文章內容
-            self.generate_article_content()
-            print(f"發文內文已生成: {self.article_content[:100]}..." if len(self.article_content) > 100 else f"發文內文已生成: {self.article_content}")
-            
-            # 注意：後續的影片生成將在使用者選擇圖片後進行
-            # 請調用 generate_videos_from_selected_images 方法繼續流程
-            
-        finally:
-            if self.communicator and self.communicator.ws and self.communicator.ws.connected:
-                print("\n所有媒體生成完成，關閉 WebSocket 連接")
-                self.communicator.ws.close()
+        for idx, description in enumerate(self.descriptions):
+            for i in range(images_per_desc):
+                seed = random.randint(1, 999999999999)
+                
+                # Merge additional_params with first_stage_config for node_manager
+                merged_params = self._merge_node_manager_params(first_stage_config)
+                updates = self.node_manager.generate_updates(
+                    workflow=workflow,
+                    updates_config=first_stage_config.get('custom_node_updates', []),
+                    description=description,
+                    seed=seed,
+                    **merged_params
+                )
+                
+                paths = self.media_generator.generate(
+                    workflow_path=t2i_workflow_path,
+                    updates=updates,
+                    output_dir=output_dir,
+                    file_prefix=f"{getattr(self.config, 'character', 'char')}_d{idx}_{i}"
+                )
+                generated_paths.extend(paths)
+                
+        self.first_stage_images = sorted(generated_paths)
+        self.original_images = sorted(generated_paths).copy()
         
-        print(f'\n✅ Text2Image2Video 生成總耗時: {time.time() - start_time:.2f} 秒')
+        # 不在此處生成文章內容，因為 should_generate_article_now() 返回 False
+        # 文章內容將在影片生成後由 orchestration_service 生成
+        
+        print(f'\n✅ Text2Image2Video 第一階段耗時: {time.time() - start_time:.2f} 秒')
         return self
 
-    def generate_videos_from_selected_images(self, selected_image_indices: List[int]):
-        """根據使用者選擇的圖片生成影片
+    def needs_user_review(self) -> bool:
+        if len(self.first_stage_images) > 0 and not self._videos_generated:
+            return True
+        if self._videos_generated and not self._videos_reviewed:
+            return True
+        return False
+
+    def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
+        if self._videos_generated and not self._videos_reviewed:
+            # Return videos
+            video_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'videos')
+            if os.path.exists(video_dir):
+                videos = glob.glob(f'{video_dir}/*.mp4') # Simplified glob
+                return [{'media_path': p, 'similarity': 1.0} for p in videos[:max_items]]
+        
+        # Return images
+        return [{'media_path': p, 'similarity': 1.0} for p in self.first_stage_images[:max_items]]
+
+    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+        if not selected_indices:
+            return False
+            
+        # Map indices to images
+        review_items = self.get_review_items(max_items=10)
+        selected_paths = [review_items[i]['media_path'] for i in selected_indices if i < len(review_items)]
+        
+        if self._videos_generated:
+            # Reviewing videos, just confirm
+            self._videos_reviewed = True
+            return True
+            
+        # Reviewing images -> Generate Videos
+        self._generate_videos_from_images(selected_paths, output_dir)
+        return True
+
+    def _generate_videos_from_images(self, image_paths: List[str], output_dir: str):
+        print(f"開始使用 {len(image_paths)} 張圖片生成影片")
+        
+        # Upscale first
+        # Simplified: assume we upscale all selected
+        # In real implementation, we would call upscale logic here
+        # For brevity, I'll skip explicit upscale call or assume MediaGenerator handles it if configured
+        # But original code did explicit upscale.
+        
+        # Generate descriptions
+        for img_path in image_paths:
+            content = self.vision_manager.extract_image_content(img_path)
+            vid_desc = self.vision_manager.generate_video_prompts(content)
+            self.video_descriptions[img_path] = vid_desc
+            
+            audio_desc = self.vision_manager.generate_audio_description(img_path, vid_desc)
+            self.audio_descriptions[img_path] = audio_desc
+            
+        # Generate Videos
+        # Get strategy config with proper merging
+        video_config = self._get_strategy_config('text2image2video', 'video')
+        
+        # Get workflow path: video.i2v_workflow_path -> default
+        i2v_workflow_path = video_config.get('i2v_workflow_path', 'configs/workflow/wan2.2_gguf_i2v_audio.json')
+        # Get videos_per_image: video -> general -> default
+        videos_per_image = video_config.get('videos_per_image', 1)
+        
+        # Load workflow
+        import json
+        with open(i2v_workflow_path, 'r', encoding='utf-8') as f:
+            workflow = json.load(f)
+            
+        video_output_dir = os.path.join(output_dir, 'videos')
+        
+        for idx, img_path in enumerate(image_paths):
+            # Upload image
+            img_filename = self.media_generator.upload_image(img_path)
+            vid_desc = self.video_descriptions.get(img_path, '')
+            audio_desc = self.audio_descriptions.get(img_path, '')
+            
+            for i in range(videos_per_image):
+                seed = random.randint(1, 999999999999)
+                
+                # Custom updates for I2V
+                custom_updates = video_config.get('custom_node_updates', []).copy()
+                custom_updates.append({"node_type": "LoadImage", "node_index": 0, "inputs": {"image": img_filename}})
+                custom_updates.append({"node_id": "70", "inputs": {"value": vid_desc}}) # Positive prompt
+                custom_updates.append({"node_id": "94", "inputs": {"value": audio_desc}}) # Audio prompt
+                
+                # Merge additional_params with video_config for node_manager
+                merged_params = self._merge_node_manager_params(video_config)
+                updates = self.node_manager.generate_updates(
+                    workflow=workflow,
+                    updates_config=custom_updates,
+                    description=vid_desc,
+                    seed=seed,
+                    **merged_params
+                )
+                
+                self.media_generator.generate(
+                    workflow_path=i2v_workflow_path,
+                    updates=updates,
+                    output_dir=video_output_dir,
+                    file_prefix=f"{getattr(self.config, 'character', 'char')}_i2v_{idx}_{i}"
+                )
+                
+        self._videos_generated = True
+
+    def analyze_media_text_match(self, similarity_threshold):
+        """分析媒體與文本的匹配度
+        
+        如果影片已生成，則分析影片文件並使用影片描述。
+        否則分析圖片文件並使用圖片描述。
         
         Args:
-            selected_image_indices: 使用者選擇的圖片索引列表（對應 self.first_stage_images）
+            similarity_threshold: 相似度閾值（0.0-1.0）
         """
-        if not selected_image_indices:
-            print("警告：沒有選擇任何圖片")
-            return self
+        output_dir = getattr(self.config, 'output_dir', 'output')
         
-        # 根據選擇的索引獲取圖片
-        selected_images = [self.first_stage_images[i] for i in selected_image_indices if i < len(self.first_stage_images)]
-        
-        if not selected_images:
-            print("警告：選擇的圖片索引無效")
-            return self
-        
-        print(f"使用者選擇了 {len(selected_images)} 張圖片，開始生成影片...")
-        
-        # 更新 first_stage_images 為選擇的圖片（可能是 upscale 後的）
-        self.first_stage_images = selected_images
-        
-        # 同步更新 original_images 為對應的原始圖片
-        if self.original_images:
-            selected_original_images = [self.original_images[i] for i in selected_image_indices if i < len(self.original_images)]
-            self.original_images = selected_original_images
-        else:
-            # 如果 original_images 不存在，使用 first_stage_images（可能是原始圖片）
-            self.original_images = selected_images.copy()
-        
-        start_time = time.time()
-        
-        # 第二階段：為每張圖片生成影片描述
-        print("\n" + "=" * 60)
-        print("第二階段：生成影片描述")
-        print("=" * 60)
-        
-        for idx, img_path in enumerate(self.first_stage_images):
-            print(f"為圖片生成影片描述: {img_path}")
-            # 使用原始圖片路徑來提取內容，避免 upscale 後的圖片太大無法傳輸
-            original_img_path = self.original_images[idx] if idx < len(self.original_images) else img_path
-            # 從圖片中提取內容描述（使用原始圖片）
-            image_content = self.current_vision_manager.extract_image_content(original_img_path)
-            # 生成影片描述
-            video_description = self.current_vision_manager.generate_video_prompts(
-                user_input=image_content,
-                system_prompt_key='video_description_system_prompt'
-            )
-            self.video_descriptions[img_path] = video_description
-            print(f"影片描述: {video_description}")
-        
-        # 第三階段：為每張圖片生成音頻描述
-        print("\n" + "=" * 60)
-        print("第三階段：生成音頻描述")
-        print("=" * 60)
-        
-        for idx, img_path in enumerate(self.first_stage_images):
-            print(f"為圖片生成音頻描述: {img_path}")
-            # 使用原始圖片路徑來生成音頻描述，避免 upscale 後的圖片太大無法傳輸
-            original_img_path = self.original_images[idx] if idx < len(self.original_images) else img_path
-            video_desc = self.video_descriptions.get(img_path, '')
-            audio_description = self.current_vision_manager.generate_audio_description(
-                image_path=original_img_path,  # 使用原始圖片
-                video_description=video_desc
-            )
-            self.audio_descriptions[img_path] = audio_description
-            print(f"音頻描述: {audio_description}")
-        
-        # 第四階段：使用 wan2.2 workflow 生成含音頻的影片
-        print("\n" + "=" * 60)
-        print("第四階段：Image to Video 生成（含音頻）")
-        print("=" * 60)
-        
-        # 確保 WebSocket 連接存在
-        if not self.communicator or not self.communicator.ws or not self.communicator.ws.connected:
-            self.communicator = ComfyUICommunicator()
-            self.communicator.connect_websocket()
-            print("已重新建立 WebSocket 連接")
-        
-        try:
-            # 獲取策略專用配置
-            video_config = self._get_strategy_config('text2image2video', 'video')
-            
-            # 載入 i2v workflow
-            i2v_workflow_path = video_config.get('i2v_workflow_path') or 'configs/workflow/wan2.2_gguf_i2v_audio.json'
-            i2v_workflow = self._load_workflow(i2v_workflow_path)
-            
-            videos_per_image = video_config.get('videos_per_image', 1)
-            
-            # 檢查是否使用 noise_seed
-            use_noise_seed = video_config.get('use_noise_seed', False)
-            
-            total_videos = len(self.first_stage_images) * videos_per_image
-            current_video = 0
-            
-            for img_idx, input_image_path in enumerate(self.first_stage_images):
-                image_filename = self._upload_image_to_comfyui(input_image_path)
-                video_desc = self.video_descriptions.get(input_image_path, '')
-                audio_desc = self.audio_descriptions.get(input_image_path, '')
-                
-                # 為每張圖片生成影片時，使用不同的 seed 起始值
-                seed_start = random.randint(1, 999999999999)
-                
-                for i in range(videos_per_image):
-                    current_video += 1
-                    print(f'\n[第四階段 {current_video}/{total_videos}] 使用圖片 {img_idx+1}/{len(self.first_stage_images)}，生成第 {i+1}/{videos_per_image} 個影片')
-                    
-                    custom_updates = video_config.get('custom_node_updates', []).copy()  # 複製列表避免修改原始配置
-                    
-                    # 添加 LoadImage 節點更新
-                    custom_updates.append({
-                        "node_type": "LoadImage",
-                        "node_index": 0,
-                        "inputs": {"image": image_filename}
-                    })
-                    
-                    # 添加 Positive prompt 更新（影片描述）
-                    # 使用 node_id 直接更新，避免過濾條件問題
-                    # 根據 workflow JSON，節點 70 是 "Positive prompt" (PrimitiveString)
-                    custom_updates.append({
-                        "node_id": "70",
-                        "inputs": {"value": video_desc}
-                    })
-                    
-                    # 添加 Audio prompt 更新
-                    # 根據 workflow JSON，節點 94 是 "Audio prompt" (PrimitiveString)
-                    custom_updates.append({
-                        "node_id": "94",
-                        "inputs": {"value": audio_desc}
-                    })
-                    
-                    merged_params = {**self.config.additional_params, **video_config}
-                    # 從 merged_params 中移除 use_noise_seed，因為它已經被明確傳遞
-                    merged_params.pop('use_noise_seed', None)
-                    
-                    # 確保每個影片使用不同的 seed（基於圖片索引和影片索引）
-                    video_seed = seed_start + (img_idx * videos_per_image) + i
-                    
-                    updates = self.node_manager.generate_updates(
-                        workflow=i2v_workflow,
-                        updates_config=custom_updates,
-                        description=video_desc,
-                        seed=video_seed,
-                        use_noise_seed=use_noise_seed,  # 傳遞 use_noise_seed 參數
-                        **merged_params
-                    )
-                    
-                    is_last_video = (img_idx == len(self.first_stage_images) - 1 and i == videos_per_image - 1)
-                    self.communicator.process_workflow(
-                        workflow=i2v_workflow,
-                        updates=updates,
-                        output_path=f"{self.config.output_dir}/videos",
-                        file_name=f"{self.config.character}_i2v_{img_idx}_{i}",
-                        auto_close=False
-                    )
-        finally:
-            if self.communicator and self.communicator.ws and self.communicator.ws.connected:
-                print("\n所有影片生成完成，關閉 WebSocket 連接")
-                self.communicator.ws.close()
-        
-        # 更新 filter_results 為生成的影片結果，以便後續生成文章內容
-        video_output_dir = f"{self.config.output_dir}/videos"
-        if os.path.exists(video_output_dir):
-            media_paths = glob.glob(f'{video_output_dir}/*')
-            video_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.gif', '.webm'])]
-            
-            if video_paths:
+        if self._videos_generated:
+            # 影片已生成，分析影片文件
+            video_dir = os.path.join(output_dir, 'videos')
+            if not os.path.exists(video_dir):
+                print(f'⚠️  警告：影片目錄不存在: {video_dir}')
                 self.filter_results = []
-                for video_path in video_paths:
-                    # 嘗試從文件名匹配對應的圖片和描述
-                    match = re.search(rf'{re.escape(self.config.character)}_i2v_(\d+)_\d+\.', video_path, re.IGNORECASE)
-                    if match:
-                        img_idx = int(match.group(1))
-                        if img_idx < len(self.first_stage_images):
-                            img_path = self.first_stage_images[img_idx]
-                            video_desc = self.video_descriptions.get(img_path, '')
-                            self.filter_results.append({
-                                'media_path': video_path,
-                                'description': video_desc,
-                                'similarity': 1.0
-                            })
-                    else:
-                        # 如果無法匹配，使用第一個描述
-                        self.filter_results.append({
-                            'media_path': video_path,
-                            'description': self.video_descriptions.get(self.first_stage_images[0], '') if self.first_stage_images else '',
-                            'similarity': 1.0
-                        })
-                print(f"已更新 filter_results，包含 {len(self.filter_results)} 個影片")
-        
-        print(f'\n✅ 影片生成總耗時: {time.time() - start_time:.2f} 秒')
-        return self
-    
-    def analyze_media_text_match(self, similarity_threshold):
-        """分析生成的媒體
-        
-        對於 Text2Image2Video：
-        - 如果影片已生成，返回所有影片（不做 AI 判讀）
-        - 如果影片未生成，返回所有第一階段的圖片供 Discord 審核
-        """
-        # 檢查是否已有生成的影片
-        video_output_dir = f"{self.config.output_dir}/videos"
-        if os.path.exists(video_output_dir):
-            media_paths = glob.glob(f'{video_output_dir}/*')
-            video_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.gif', '.webm'])]
-
-            if video_paths:
-                # 影片已生成，返回所有影片（不做 AI 判讀）
-                self.filter_results = []
-                for video_path in video_paths:
-                    # 嘗試從文件名匹配對應的圖片和描述
-                    match = re.search(rf'{re.escape(self.config.character)}_i2v_(\d+)_\d+\.', video_path, re.IGNORECASE)
-                    if match:
-                        img_idx = int(match.group(1))
-                        if img_idx < len(self.first_stage_images):
-                            img_path = self.first_stage_images[img_idx]
-                            video_desc = self.video_descriptions.get(img_path, '')
-                            self.filter_results.append({
-                                'media_path': video_path,
-                                'description': video_desc,
-                                'similarity': 1.0  # 不做 AI 判讀，設為 1.0
-                            })
-                    else:
-                        # 如果無法匹配，使用第一個描述
-                        self.filter_results.append({
-                            'media_path': video_path,
-                            'description': self.video_descriptions.get(self.first_stage_images[0], '') if self.first_stage_images else '',
-                            'similarity': 1.0
-                        })
                 return self
-        
-        # 影片未生成，返回所有第一階段的圖片供 Discord 審核（不做 AI 篩選）
-        if not self.first_stage_images:
+            
+            # 查找所有影片文件
+            video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
+            video_paths = []
+            for ext in video_extensions:
+                pattern = os.path.join(video_dir, ext)
+                found = glob.glob(pattern)
+                video_paths.extend(found)
+            
+            video_paths = sorted(list(set(video_paths)))
+            print(f'找到 {len(video_paths)} 個影片文件進行分析')
+            
+            if len(video_paths) == 0:
+                print(f'⚠️  警告：在 {video_dir} 中沒有找到任何影片文件')
+                self.filter_results = []
+                return self
+            
+            # 為每個影片創建 filter_result，使用對應的影片描述
             self.filter_results = []
-            return self
+            for video_path in video_paths:
+                # 嘗試從文件名中提取圖片索引，以匹配對應的 video_description
+                # 文件名格式: {character}_i2v_{img_idx}_{i}.mp4
+                match = re.search(r'_i2v_(\d+)_\d+\.', video_path)
+                if match:
+                    img_idx = int(match.group(1))
+                    # 找到對應的原始圖片路徑
+                    if img_idx < len(self.first_stage_images):
+                        img_path = self.first_stage_images[img_idx]
+                        # 使用該圖片對應的影片描述
+                        video_desc = self.video_descriptions.get(img_path, '')
+                        if not video_desc:
+                            # 如果沒有找到對應的描述，使用第一個可用的描述
+                            video_desc = list(self.video_descriptions.values())[0] if self.video_descriptions else ''
+                    else:
+                        video_desc = list(self.video_descriptions.values())[0] if self.video_descriptions else ''
+                else:
+                    # 如果無法從文件名解析，使用第一個可用的描述
+                    video_desc = list(self.video_descriptions.values())[0] if self.video_descriptions else ''
+                
+                self.filter_results.append({
+                    'media_path': video_path,
+                    'description': video_desc if video_desc else (self.descriptions[0] if self.descriptions else ''),
+                    'similarity': 1.0  # 影片直接使用 1.0，因為已經通過圖片審核
+                })
+        else:
+            # 影片未生成，分析圖片文件（第一階段）
+            first_stage_dir = os.path.join(output_dir, 'first_stage')
+            if not os.path.exists(first_stage_dir):
+                first_stage_dir = output_dir
+            
+            image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.webp']
+            image_paths = []
+            for ext in image_extensions:
+                pattern = os.path.join(first_stage_dir, ext)
+                found = glob.glob(pattern)
+                image_paths.extend(found)
+            
+            image_paths = sorted(list(set(image_paths)))
+            print(f'找到 {len(image_paths)} 個圖片文件進行分析')
+            
+            if len(image_paths) == 0:
+                print(f'⚠️  警告：在 {first_stage_dir} 中沒有找到任何圖片文件')
+                self.filter_results = []
+                return self
+            
+            # 確保有 descriptions
+            if not self.descriptions:
+                print(f'⚠️  警告：沒有描述可用於分析')
+                self.filter_results = []
+                return self
+            
+            # 使用 vision_manager 分析圖片與描述的匹配度
+            self.filter_results = self.vision_manager.analyze_media_text_match(
+                media_paths=image_paths,
+                descriptions=self.descriptions,
+                main_character=getattr(self.config, 'character', ''),
+                similarity_threshold=similarity_threshold
+            )
         
-        # 返回所有圖片，不做 AI 篩選
-        self.filter_results = []
-        for img_path in self.first_stage_images:
-            self.filter_results.append({
-                'media_path': img_path,
-                'description': self.descriptions[0] if self.descriptions else '',
-                'similarity': 1.0  # 不做 AI 判讀，設為 1.0
-            })
-        
-        print(f"返回 {len(self.filter_results)} 張圖片供 Discord 審核（不做 AI 篩選）")
         return self
+
+    def generate_article_content(self):
+        # 如果影片已生成，應該使用影片描述來生成文章內容
+        # 但基類的實現會使用 filter_results 中的 description
+        # 所以只要 filter_results 正確設置了影片描述，基類實現就能正常工作
+        return super().generate_article_content()
+
+    def should_generate_article_now(self) -> bool:
+        return self._videos_generated

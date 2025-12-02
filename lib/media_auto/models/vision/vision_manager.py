@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 import re
+import os
 import time
 from lib.media_auto.models.interfaces.ai_model import AIModelInterface, ModelConfig
 from lib.media_auto.models.vision.model_registry import ModelRegistry
@@ -40,7 +41,11 @@ class VisionContentManager:
                                     image_path: str, 
                                     main_character: str = '',
                                     **kwargs) -> str:
-        """分析已有圖片並提取內容描述"""
+        """分析圖片與文本描述的相似度
+        
+        返回 LLM 的原始響應字符串，需要後續解析為數值。
+        響應格式可能多樣，例如："0.85", "相似度: 0.85", "0.85/1.0", "85%" 等。
+        """
         print(f"分析圖片 {image_path}...")
         messages = [
             {
@@ -61,7 +66,8 @@ class VisionContentManager:
         print(f"圖片 {image_path} 分析成功")
         return result
     
-    def generate_image_prompts(self, user_input: str, system_prompt_key: str = 'stable_diffusion_prompt', **kwargs) -> List[str]:
+    @vision_api_retry(max_attempts=5)
+    def generate_image_prompts(self, user_input: str, system_prompt_key: str = 'stable_diffusion_prompt', **kwargs) -> str:
         """根據用戶輸入生成圖片描述提示詞"""
         
         actual_key_to_use = system_prompt_key
@@ -75,6 +81,8 @@ class VisionContentManager:
             {'role': 'user', 'content': user_input}
         ]
         result = self.text_model.chat_completion(messages=messages, **kwargs)
+        if not result or not result.strip():
+            raise ValueError("API 返回空結果")
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
         return result
@@ -222,29 +230,43 @@ class VisionContentManager:
         start_time = time.time()
         total_results = []
         
+        logger = setup_logger('mediaoverload')
+        
         for media_path in media_paths:
             print(f'進行文圖匹配程度判斷中 : {media_path}\n')
+            logger.debug(f'分析文件: {media_path}')
 
-            # 嘗試匹配第一階段的文件名格式: {character}_d{idx}_{i}
-            match = re.search(rf'{re.escape(main_character)}_d(\d+)_\d+\.', media_path, re.IGNORECASE)
-
-            # 如果第一階段匹配失敗，嘗試匹配第二階段的文件名格式: {character}_i2i_{img_idx}_{i}
+            # 嘗試匹配第一階段的文件名格式: {anything}_d{idx}_{i}
+            # 使用更靈活的模式，不依賴角色名稱的精確匹配
+            match = re.search(r'_d(\d+)_\d+\.', media_path, re.IGNORECASE)
+            
+            # 如果第一階段匹配失敗，嘗試匹配第二階段的文件名格式: {anything}_i2i_{idx}_{i}
             if not match:
-                match = re.search(rf'{re.escape(main_character)}_i2i_(\d+)_\d+\.', media_path, re.IGNORECASE)
-
+                match = re.search(r'_i2i_(\d+)_\d+\.', media_path, re.IGNORECASE)
+            
+            # 如果都匹配失敗，嘗試匹配影片格式: {anything}_i2v_{idx}_{i}
+            if not match:
+                match = re.search(r'_i2v_(\d+)_\d+\.', media_path, re.IGNORECASE)
+            
+            # 如果都匹配失敗，嘗試匹配影片格式: {anything}_video_d{idx}_{i}
+            if not match:
+                match = re.search(r'_video_d(\d+)_\d+\.', media_path, re.IGNORECASE)
+            
             # 如果都匹配失敗，跳過這個文件
             if not match:
+                logger.warning(f'⚠️  警告：無法從文件名解析描述索引: {media_path}')
                 print(f'⚠️  警告：無法從文件名解析描述索引: {media_path}')
                 continue
 
             desc_index = int(match.group(1))
 
             # 確保索引在有效範圍內
+            # 如果索引超出範圍，使用第一個描述（適用於單一描述對應多張圖片的情況）
             if desc_index >= len(descriptions):
-                print(f'⚠️  警告：描述索引 {desc_index} 超出範圍（共有 {len(descriptions)} 個描述）')
-                continue
+                logger.debug(f'描述索引 {desc_index} 超出範圍（共有 {len(descriptions)} 個描述），使用第一個描述')
+                desc_index = 0
 
-            similarity = self.analyze_image_text_similarity(
+            similarity_raw = self.analyze_image_text_similarity(
                 text=descriptions[desc_index],
                 image_path=media_path,
                 main_character=main_character,
@@ -254,21 +276,93 @@ class VisionContentManager:
             total_results.append({
                 'media_path': media_path,
                 'description': descriptions[desc_index],
-                'similarity': similarity
+                'similarity': similarity_raw  # 原始字符串響應
             })
             time.sleep(3)  # google free tier rate limit
-
+        
+        logger = setup_logger('mediaoverload')
+        logger.info(f'開始解析 {len(total_results)} 個相似度分析結果')
+        
         # 過濾結果
         filter_results = []
         for row in total_results:
             try:
-                similarity = float(row['similarity'].strip())
-                if similarity >= similarity_threshold:
-                    filter_results.append(row)
-            except:
+                similarity_str = str(row['similarity']).strip()
+                logger.debug(f'原始相似度響應: {similarity_str[:100]}')
+                
+                # 從字符串中提取數字（處理 LLM 可能返回的各種格式）
+                # 例如："0.85", "相似度: 0.85", "0.85分", "0.85/1.0", "0.85/1", "85%" 等
+                # 優先嘗試提取 0-1 之間的小數
+                similarity_value = None
+                
+                # 策略1: 直接匹配 0-1 之間的小數（包括 0.0, 1.0, 0, 1）
+                match = re.search(r'\b(0(?:\.\d+)?|1(?:\.0+)?|0\.\d+|1\.0)\b', similarity_str)
+                if match:
+                    similarity_value = float(match.group())
+                else:
+                    # 策略2: 匹配百分比格式（如 "85%" -> 0.85）
+                    percent_match = re.search(r'(\d+(?:\.\d+)?)\s*%', similarity_str, re.IGNORECASE)
+                    if percent_match:
+                        similarity_value = float(percent_match.group(1)) / 100.0
+                    else:
+                        # 策略3: 匹配分數格式（如 "0.85/1.0" 或 "85/100"）
+                        fraction_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)', similarity_str)
+                        if fraction_match:
+                            numerator = float(fraction_match.group(1))
+                            denominator = float(fraction_match.group(2))
+                            if denominator > 0:
+                                similarity_value = numerator / denominator
+                        else:
+                            # 策略4: 提取任何數字並判斷是否在合理範圍內
+                            number_match = re.search(r'(\d+(?:\.\d+)?)', similarity_str)
+                            if number_match:
+                                num = float(number_match.group(1))
+                                # 如果數字在 0-100 範圍內，可能是百分比
+                                if 0 <= num <= 100:
+                                    similarity_value = num / 100.0
+                                # 如果數字在 0-1 範圍內，直接使用
+                                elif 0 <= num <= 1:
+                                    similarity_value = num
+                
+                if similarity_value is not None:
+                    # 確保分數在 0-1 範圍內
+                    similarity_value = max(0.0, min(1.0, similarity_value))
+                    
+                    # 更新 row 中的 similarity 為數字
+                    row['similarity'] = similarity_value
+                    
+                    logger.info(f'圖片 {os.path.basename(row["media_path"])} 相似度: {similarity_value:.3f} (閾值: {similarity_threshold:.3f})')
+                    
+                    if similarity_value >= similarity_threshold:
+                        filter_results.append(row)
+                        logger.info(f'  ✅ 通過篩選')
+                    else:
+                        logger.info(f'  ❌ 未通過篩選（低於閾值 {similarity_threshold:.3f}）')
+                else:
+                    logger.warning(f'⚠️  無法從響應中提取相似度分數: {similarity_str[:100]}...')
+                    # 如果無法解析，記錄原始響應以便調試
+                    row['similarity_raw'] = similarity_str
+                    row['similarity'] = None
+                    continue
+            except Exception as e:
+                logger.error(f'⚠️  解析相似度分數時發生錯誤: {e}, 響應: {str(row.get("similarity", ""))[:100]}...')
+                import traceback
+                logger.error(traceback.format_exc())
                 continue
                 
-        print(f'分析圖文匹配程度 花費 : {time.time() - start_time}')
+        logger.info(f'分析圖文匹配程度完成，共分析 {len(total_results)} 張圖片，篩選出 {len(filter_results)} 張（閾值: {similarity_threshold:.3f}）')
+        logger.info(f'分析圖文匹配程度 花費 : {time.time() - start_time:.2f} 秒')
+        
+        # 如果沒有通過篩選的結果，記錄所有相似度分數以便調試
+        if len(filter_results) == 0 and len(total_results) > 0:
+            logger.warning('⚠️  沒有任何圖片通過相似度篩選，以下是所有相似度分數：')
+            for row in total_results:
+                similarity_val = row.get('similarity')
+                if isinstance(similarity_val, (int, float)):
+                    logger.warning(f'  {os.path.basename(row["media_path"])}: {similarity_val:.3f}')
+                else:
+                    logger.warning(f'  {os.path.basename(row["media_path"])}: 無法解析 ({str(similarity_val)[:50]})')
+        
         return filter_results
 
 class VisionManagerBuilder:

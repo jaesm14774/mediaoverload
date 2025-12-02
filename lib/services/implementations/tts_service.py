@@ -2,6 +2,7 @@
 import asyncio
 import os
 import tempfile
+import concurrent.futures
 from typing import Optional, List
 from pathlib import Path
 import logging
@@ -146,6 +147,7 @@ class TTSService:
         Synchronous wrapper for generate_speech.
         
         Use this if you need to call TTS from non-async code.
+        Handles both cases: when called from sync context and when called from async context.
         
         Args:
             text: Text to convert to speech
@@ -156,9 +158,33 @@ class TTSService:
         Returns:
             Path to generated audio file
         """
-        return asyncio.run(
-            self.generate_speech(text, output_path, voice, rate)
-        )
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_running_loop()
+            # If we're in an async context, we need to use a different approach
+            # We'll create a new event loop in a thread
+            
+            def run_in_thread():
+                # Create a new event loop for this thread
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        self.generate_speech(text, output_path, voice, rate)
+                    )
+                finally:
+                    new_loop.close()
+            
+            # Run in a separate thread
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_in_thread)
+                return future.result()
+                
+        except RuntimeError:
+            # No running event loop, we can use asyncio.run()
+            return asyncio.run(
+                self.generate_speech(text, output_path, voice, rate)
+            )
     
     async def generate_multiple_speeches(
         self,

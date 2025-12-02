@@ -52,15 +52,27 @@ class OrchestrationService(IOrchestrationService):
         try:
             # 步驟 1: 處理角色選擇
             if character.group_name and self.character_repository:
-                workflow_name = os.path.splitext(os.path.basename(character.workflow_path))[0]
-                dynamic_character = self.character_repository.get_random_character_from_group(
-                    character.group_name, 
-                    workflow_name
-                )
-                if dynamic_character:
-                    character.character = dynamic_character.lower()
-                    character.config.character = dynamic_character.lower()
-                    self.logger.info(f"從群組 {character.group_name} 中選擇角色: {dynamic_character}")
+                # 特殊處理：長影片且群組為 Kirby 時，直接使用 kirby 而不是隨機選擇
+                generation_type = getattr(character.config, 'generation_type', '')
+                is_kirby_group = character.group_name.lower() == 'kirby'
+                is_longvideo = generation_type.lower() == 'text2longvideo'
+                
+                if is_kirby_group and is_longvideo:
+                    # 直接使用 kirby，不隨機選擇
+                    character.character = 'kirby'
+                    character.config.character = 'kirby'
+                    self.logger.info(f"長影片模式：群組 {character.group_name} 直接使用角色 kirby（不隨機選擇）")
+                else:
+                    # 其他情況：從群組中隨機選擇
+                    workflow_name = os.path.splitext(os.path.basename(character.workflow_path))[0]
+                    dynamic_character = self.character_repository.get_random_character_from_group(
+                        character.group_name, 
+                        workflow_name
+                    )
+                    if dynamic_character:
+                        character.character = dynamic_character.lower()
+                        character.config.character = dynamic_character.lower()
+                        self.logger.info(f"從群組 {character.group_name} 中選擇角色: {dynamic_character}")
             
             # 步驟 2: 生成提示詞（包含特殊調整邏輯，如 waddledee）
             if not prompt:

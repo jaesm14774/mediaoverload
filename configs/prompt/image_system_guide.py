@@ -95,7 +95,9 @@ Line 2: 30 single-word hashtags separated by spaces
 INPUT: "Sunset beach photo with dog"
 OUTPUT:
 🌅🐕🏖️✨
-#sunset #beach #dog #golden #ocean #wave #coast #sand #夕陽 #海灘 #犬 #黃昏 #horizon #calm #nature #peaceful #shoreline #freedom #warmth #summer #ビーチ #adventure #solitude #tranquil #glow #silhouette #serenity #escape #dusk #companion
+#sunset #beach #dog #golden #ocean #wave #coast #sand #夕陽 #海灘 #犬 #黃昏 #horizon #calm #nature 
+#peaceful #shoreline #freedom #warmth #summer #ビーチ #adventure #solitude #tranquil 
+#glow #silhouette #serenity #escape #dusk #companion
 
 """.strip()
 
@@ -209,18 +211,18 @@ Score 0 when image shows:
 
 ## SCORING BREAKDOWN
 
-### Primary (70%)
-**Main Character Quality (40%)**
+### Primary (80%)
+**Main Character Quality (70%)**
 - Identity matches description
 - Natural proportions + features
 - Appropriate pose + expression
 
-**Character Interactions (30%)**
+**Character Interactions (10%)**
 - Secondary characters (max 9) match description
 - Natural interactions
 - Zero visible deformities
 
-### Secondary (30%)
+### Secondary (20%)
 - Background accuracy
 - Color + style match
 - Props + details correctness
@@ -232,7 +234,7 @@ Score 0 when image shows:
 - Background crowds COUNT toward total
 
 ## OUTPUT FORMAT
-Single number: 0 between 1
+Single number: between 0 and 1
 Output format: Number only, no accompanying text
 
 PRIORITY: Quality over Quantity
