@@ -197,11 +197,6 @@ class ComfyUICommunicator:
                             raise Exception(f"工作流執行錯誤 - 節點: {error_node}, 類型: {error_type}, 消息: {error_message}")
                             
             except websocket.WebSocketTimeoutException:
-                # 接收超時，檢查是否長時間沒有收到消息
-                time_since_last_message = time.time() - last_message_time
-                if time_since_last_message > 60:  # 60 秒沒有收到任何消息
-                    print(f"⚠ 警告: 已經 {time_since_last_message:.1f} 秒沒有收到消息了...")
-                # 繼續等待
                 continue
                 
             except json.JSONDecodeError as e:
@@ -278,6 +273,7 @@ class ComfyUICommunicator:
         """
         儲存執行結果並返回儲存的檔案列表
         支援圖片和影片的儲存
+        只保存 output 類型的文件，過濾掉 temp 類型（PreviewImage 等節點的臨時輸出）
         """
         try:
             # 獲取歷史記錄
@@ -287,6 +283,10 @@ class ComfyUICommunicator:
             def process_media_files(media_list: List[Dict], default_extension: str = None):
                 """處理媒體文件的通用函數"""
                 for media in media_list:
+                    # 只保存 output 類型，跳過 temp 類型（PreviewImage 節點）
+                    if media.get('type') == 'temp':
+                        continue
+                    
                     # 獲取媒體數據
                     media_data = self.get_media_file(
                         media['filename'],

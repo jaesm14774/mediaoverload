@@ -2,73 +2,54 @@ import time
 import random
 import glob
 import os
-from typing import Dict, Any
+from typing import List, Dict, Any, Optional
 
-from lib.comfyui.websockets_api import ComfyUICommunicator
-from .generation_base import BaseGenerationStrategy
+from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
+from lib.media_auto.services.media_generator import MediaGenerator
+from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
+from lib.comfyui.node_manager import NodeManager
 
-class Image2ImageStrategy(BaseGenerationStrategy):
-    """圖生圖策略
-    
-    直接對現有圖片進行 image to image 生成。
-    需要提供 input_image_path 配置。
+class Image2ImageStrategy(ContentStrategy):
     """
-
+    Image-to-Image generation strategy.
+    Refactored to use composition.
+    """
     def __init__(self, character_repository=None, vision_manager=None):
-        super().__init__(character_repository, vision_manager)
-        self.input_images: list = []  # 存儲輸入圖片路徑
-    
-    def generate_description(self):
-        """生成描述 - 可選：從圖片中提取或使用提供的 prompt"""
-        start_time = time.time()
+        self.character_repository = character_repository
+        
+        if vision_manager is None:
+            vision_manager = VisionManagerBuilder() \
+                .with_vision_model('gemini', model_name='gemini-flash-lite-latest') \
+                .with_text_model('gemini', model_name='gemini-flash-lite-latest') \
+                .build()
+        self.vision_manager = vision_manager
+        
+        self.media_generator = MediaGenerator()
+        self.node_manager = NodeManager()
+        
+        self.config = None
+        self.descriptions: List[str] = []
+        self.input_images: List[str] = []
+        self.filter_results: List[Dict[str, Any]] = []
 
-        # 獲取策略專用配置
+    def load_config(self, config: GenerationConfig):
+        self.config = config
+
+    def generate_description(self):
+        """Generates or extracts description."""
+        start_time = time.time()
+        
+        # Get strategy config with proper merging
         i2i_config = self._get_strategy_config('image2image')
         
-        # 檢查是否需要從圖片中提取描述
         extract_description = getattr(self.config, 'extract_description', False)
         input_image_path = getattr(self.config, 'input_image_path', None)
         
-        if extract_description and input_image_path:
-            # 從圖片中提取描述
-            print(f"正在從圖片中提取描述: {input_image_path}")
-            image_content = self.current_vision_manager.extract_image_content(input_image_path)
-            
-            # 獲取 image_system_prompt
-            image_system_prompt = i2i_config.get('image_system_prompt') or getattr(self.config, 'image_system_prompt', 'stable_diffusion_prompt')
-            
-            # 使用提取的內容生成描述
-            descriptions = self.current_vision_manager.generate_image_prompts(image_content, image_system_prompt)
-            self.descriptions = [descriptions] if descriptions else []
-        else:
-            # 使用提供的 prompt
-            prompt = self.config.prompt or ''
-            
-            # 獲取 style
-            style = i2i_config.get('style') or getattr(self.config, 'style', '')
-            if style and style.strip():
-                prompt = f"""{prompt}\nstyle: {style}""".strip()
-            
-            # 如果有指定角色，且 prompt 中不包含角色信息，則加入角色
-            if self.config.character:
-                character_lower = self.config.character.lower()
-                prompt_lower = prompt.lower()
-                if character_lower not in prompt_lower and "main character" not in prompt_lower:
-                    prompt = f"Main character: {self.config.character}\n{prompt}"
-                    print(f"已自動加入主角色到 prompt: {self.config.character}")
-            
-            # 如果沒有 prompt，使用預設描述
-            if not prompt:
-                prompt = "Enhance and improve the image with more details"
-            
-            self.descriptions = [prompt]
-        
-        # 收集輸入圖片
+        # Collect input images
         if input_image_path:
             if os.path.isfile(input_image_path):
                 self.input_images = [input_image_path]
             elif os.path.isdir(input_image_path):
-                # 如果是目錄，收集所有圖片
                 image_paths = glob.glob(f'{input_image_path}/*')
                 self.input_images = [p for p in image_paths if any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])]
             else:
@@ -77,105 +58,105 @@ class Image2ImageStrategy(BaseGenerationStrategy):
         else:
             print("警告：未提供 input_image_path")
             self.input_images = []
-        
+            
+        if extract_description and self.input_images:
+            # Extract from first image
+            print(f"正在從圖片中提取描述: {self.input_images[0]}")
+            image_content = self.vision_manager.extract_image_content(self.input_images[0])
+            
+            # Get image_system_prompt: i2i_config -> general -> config.image_system_prompt
+            image_system_prompt = self._get_config_value(i2i_config, 'image_system_prompt', 'stable_diffusion_prompt')
+            # 注意：img2img 從圖片提取內容，不適合使用雙角色互動
+            descriptions = self.vision_manager.generate_image_prompts(image_content, image_system_prompt)
+            self.descriptions = [descriptions] if descriptions else []
+        else:
+            prompt = self.config.prompt or ''
+            # Get style: i2i_config -> general -> config.style
+            style = self._get_config_value(i2i_config, 'style', '')
+            if style and style.strip():
+                prompt = f"{prompt}\nstyle: {style}".strip()
+                
+            if self.config.character:
+                char_lower = self.config.character.lower()
+                if char_lower not in prompt.lower() and "main character" not in prompt.lower():
+                    prompt = f"Main character: {self.config.character}\n{prompt}"
+            
+            if not prompt:
+                prompt = "Enhance and improve the image with more details"
+                
+            self.descriptions = [prompt]
+            
         print(f'Image descriptions : {self.descriptions}')
-        print(f'Input images : {len(self.input_images)} 張')
         print(f'生成描述花費 : {time.time() - start_time}')
         return self
-    
+
     def generate_media(self):
-        """生成媒體 - Image to Image"""
+        """Generates media using I2I."""
         start_time = time.time()
         
         if not self.input_images:
             print("警告：沒有輸入圖片可供生成")
             return self
         
-        # 獲取策略專用配置
+        # Get strategy config with proper merging
         i2i_config = self._get_strategy_config('image2image')
         
-        # 載入 workflow
-        workflow_path = i2i_config.get('workflow_path') or self.config.workflow_path
-        workflow = self._load_workflow(workflow_path)
-        self.communicator = ComfyUICommunicator()
+        # Get workflow path: i2i_config.workflow_path -> config.workflow_path -> default
+        workflow_path = i2i_config.get('workflow_path') or getattr(self.config, 'workflow_path', 'configs/workflow/flux_dev_i2i.json')
+        output_dir = getattr(self.config, 'output_dir', 'output')
+        # Get images_per_input: i2i_config -> general -> default
+        images_per_input = i2i_config.get('images_per_input', 1)
         
-        try:
-            self.communicator.connect_websocket()
-            print("已建立 WebSocket 連接，開始 Image to Image 生成")
+        # Load workflow
+        import json
+        with open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow = json.load(f)
             
-            # 獲取配置參數
-            images_per_input = i2i_config.get('images_per_input', 1)
+        for img_idx, input_image_path in enumerate(self.input_images):
+            image_filename = self.media_generator.upload_image(input_image_path)
             
-            total_images = len(self.input_images) * images_per_input
-            current_image = 0
+            desc_index = img_idx % len(self.descriptions) if self.descriptions else 0
+            description = self.descriptions[desc_index] if self.descriptions else ''
             
-            for img_idx, input_image_path in enumerate(self.input_images):
-                # 上傳圖片到 ComfyUI
-                image_filename = self._upload_image_to_comfyui(input_image_path)
+            for i in range(images_per_input):
+                seed = random.randint(1, 999999999999)
                 
-                # 獲取對應的描述（如果有多個描述，循環使用）
-                desc_index = img_idx % len(self.descriptions) if self.descriptions else 0
-                description = self.descriptions[desc_index] if self.descriptions else ''
+                custom_updates = i2i_config.get('custom_node_updates', []).copy()
+                custom_updates.append({"node_type": "LoadImage", "node_index": 0, "inputs": {"image": image_filename}})
                 
-                for i in range(images_per_input):
-                    current_image += 1
-                    print(f'\n[{current_image}/{total_images}] 使用圖片 {img_idx+1}/{len(self.input_images)}，生成第 {i+1}/{images_per_input} 張圖片')
-                    
-                    custom_updates = i2i_config.get('custom_node_updates', []).copy()
-                    
-                    # 添加 LoadImage 節點更新
-                    custom_updates.append({
-                        "node_type": "LoadImage",
-                        "node_index": 0,
-                        "inputs": {"image": image_filename}
-                    })
-                    
-                    merged_params = {**self.config.additional_params, **i2i_config}
-                    
-                    updates = self.node_manager.generate_updates(
-                        workflow=workflow,
-                        updates_config=custom_updates,
-                        description=description,
-                        seed=random.randint(1, 999999999999) + i,
-                        **merged_params
-                    )
-                    
-                    is_last_image = (img_idx == len(self.input_images) - 1 and i == images_per_input - 1)
-                    self.communicator.process_workflow(
-                        workflow=workflow,
-                        updates=updates,
-                        output_path=f"{self.config.output_dir}",
-                        file_name=f"{self.config.character}_i2i_{img_idx}_{i}",
-                        auto_close=False
-                    )
-            
-        finally:
-            if self.communicator and self.communicator.ws and self.communicator.ws.connected:
-                print("\n所有圖片生成完成，關閉 WebSocket 連接")
-                self.communicator.ws.close()
-        
+                # Merge additional_params with i2i_config for node_manager
+                merged_params = self._merge_node_manager_params(i2i_config)
+                updates = self.node_manager.generate_updates(
+                    workflow=workflow,
+                    updates_config=custom_updates,
+                    description=description,
+                    seed=seed,
+                    **merged_params
+                )
+                
+                self.media_generator.generate(
+                    workflow_path=workflow_path,
+                    updates=updates,
+                    output_dir=output_dir,
+                    file_prefix=f"{getattr(self.config, 'character', 'char')}_i2i_{img_idx}_{i}"
+                )
+                
         print(f'\n✅ Image to Image 生成總耗時: {time.time() - start_time:.2f} 秒')
         return self
 
-    def analyze_media_text_match(self, similarity_threshold) -> Dict[str, Any]:
-        """分析生成的圖片與描述的匹配度"""
-        media_paths = glob.glob(f'{self.config.output_dir}/*')
+    def analyze_media_text_match(self, similarity_threshold):
+        output_dir = getattr(self.config, 'output_dir', 'output')
+        media_paths = glob.glob(f'{output_dir}/*')
         image_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])]
-
-        if not image_paths:
-            self.filter_results = []
-            return self
-
-        # 預設使用 Gemini（更穩定且便宜），但保留 OpenRouter 作為備選
-        # 如果需要使用 OpenRouter，可以通過 set_vision_provider('openrouter') 切換
-        selected_manager = self.gemini_vision_manager
-        print("使用 Gemini 進行圖像相似度分析")
-
-        self.filter_results = selected_manager.analyze_media_text_match(
+        
+        self.filter_results = self.vision_manager.analyze_media_text_match(
             media_paths=image_paths,
             descriptions=self.descriptions,
-            main_character=self.config.character,
-            similarity_threshold=similarity_threshold,
-            temperature=0.3
+            main_character=getattr(self.config, 'character', ''),
+            similarity_threshold=similarity_threshold
         )
         return self
+
+    def generate_article_content(self):
+        # 使用基類的完整實現
+        return super().generate_article_content()

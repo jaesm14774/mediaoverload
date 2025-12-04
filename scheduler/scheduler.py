@@ -198,8 +198,7 @@ class MediaScheduler:
         """清理閒置的資料庫連接"""
         try:
             from lib.database import db_pool
-            db_pool.cleanup_idle_connections(max_idle_time=1800)  # 30分鐘未使用的連接會被清理
-            self.logger.info("已清理閒置的資料庫連接")
+            db_pool.cleanup_idle_connections(max_idle_time=1800)
         except Exception as e:
             self.logger.error(f"清理閒置連接時發生錯誤: {str(e)}")
 

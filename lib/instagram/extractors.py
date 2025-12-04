@@ -80,6 +80,17 @@ def extract_media_v1(data):
     media["sponsor_tags"] = [tag["sponsor"] for tag in media.get("sponsor_tags") or []]
     media["play_count"] = media.get("play_count", 0)
     media["coauthor_producers"] = media.get("coauthor_producers", [])
+    # Fix: Ensure audio_filter_infos is a list, not None
+    if "clips_metadata" in media and media["clips_metadata"]:
+        clips_metadata = media["clips_metadata"]
+        if "original_sound_info" in clips_metadata and clips_metadata["original_sound_info"]:
+            original_sound_info = clips_metadata["original_sound_info"]
+            if "audio_filter_infos" in original_sound_info and original_sound_info["audio_filter_infos"] is None:
+                original_sound_info["audio_filter_infos"] = []
+            if "audio_parts" in original_sound_info and original_sound_info["audio_parts"] is None:
+                original_sound_info["audio_parts"] = []
+            if "audio_parts_by_filter" in original_sound_info and original_sound_info["audio_parts_by_filter"] is None:
+                original_sound_info["audio_parts_by_filter"] = []
     return Media(
         caption_text=(media.get("caption") or {}).get("text", ""),
         resources=[

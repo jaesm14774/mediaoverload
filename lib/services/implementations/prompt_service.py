@@ -176,6 +176,5 @@ class PromptService(IPromptService):
         # 特例處理 waddledee
         if re.sub(string=prompt.lower(), pattern=r'\s', repl='').find('waddledee') != -1:
             prompt = re.sub(string=prompt, pattern=r'waddledee|Waddledee', repl='waddle dee')
-            self.logger.info("已將提示詞中的 'waddledee' 調整為 'waddle dee'")
         
         return prompt 

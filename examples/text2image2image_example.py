@@ -59,7 +59,7 @@ def example_text2image2image_basic():
                     'second_stage': {
                         'images_per_input': 1,  # 第二階段每個輸入生成 1 張
                         'denoise': 0.6,  # denoise 權重
-                        'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'  # 第二階段工作流
+                        'workflow_path': 'configs/workflow/image_to_image.json'  # 第二階段工作流
                     }
                 }
             }
@@ -128,7 +128,7 @@ def example_text2image2image_custom_params():
                     'second_stage': {
                         'images_per_input': 2,  # 第二階段每個輸入生成 2 張
                         'denoise': 0.55,  # 較低的 denoise，更接近原圖
-                        'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'
+                        'workflow_path': 'configs/workflow/image_to_image.json'
                     }
                 }
             }
@@ -188,7 +188,7 @@ def example_text2image2image_two_character():
                     'second_stage': {
                         'images_per_input': 1,
                         'denoise': 0.6,
-                        'i2i_workflow_path': 'configs/workflow/example/image_to_image.json'
+                        'workflow_path': 'configs/workflow/image_to_image.json'
                     }
                 }
             }

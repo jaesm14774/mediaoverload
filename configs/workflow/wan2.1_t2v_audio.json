@@ -1,7 +1,7 @@
 {
   "3": {
     "inputs": {
-      "seed": 24,
+      "seed": 29,
       "steps": 8,
       "cfg": 1,
       "sampler_name": "euler",
@@ -31,13 +31,10 @@
   },
   "6": {
     "inputs": {
-      "text": "獅子在噁台上搖滾狂歡，搖滾派對風格",
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
+      "text": [
+        "78",
+        0
+      ],
       "clip": [
         "51",
         1
@@ -50,13 +47,7 @@
   },
   "7": {
     "inputs": {
-      "text": "Overly bright and washed-out colors, static composition, blurry details, presence of subtitles, [stylistic] style, artwork/painting, still image, overall gray tone, worst quality, low quality, JPEG compression artifacts, ugly, deformed, extra fingers, poorly drawn hands, poorly drawn face, distorted, disfigured, misshapen limbs, fused fingers, static scene, cluttered background, three legs, crowded background, walking in reverse.",
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走. talk. talking. speak. speaking. open mouth. mouth movement. opening mouth, nails, hand watch, bracelet, wrist accessory, human hands\n",
       "clip": [
         "51",
         1
@@ -170,151 +161,6 @@
       "title": "width"
     }
   },
-  "55": {
-    "inputs": {
-      "vae_model": "mmaudio_vae_44k_fp16.safetensors",
-      "synchformer_model": "mmaudio_synchformer_fp16.safetensors",
-      "clip_model": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
-      "mode": "44k",
-      "precision": "fp16",
-      "force_reload": false
-    },
-    "class_type": "MMAudioFeatureUtilsLoader",
-    "_meta": {
-      "title": "MMAudio FeatureUtilsLoader"
-    }
-  },
-  "57": {
-    "inputs": {
-      "query": "You are a world-class Soundscape Designer. Your sole task is to translate a visual scene into 1-3 of the most potent, representative English sound keywords.\n\nYour Process:\n\nAnalyze: Deconstruct the scene's subject, action, setting, and emotional atmosphere.\n\nPrioritize & Select: From all possible sounds (direct, ambient, emotional, cultural), choose the 1-3 keywords with the highest impact. The hierarchy is: Emotional/Cultural > Environmental Ambience > Direct Sound. A highly characteristic direct sound (e.g., galloping) can be the top priority.\n\nOutput: Your response must follow these rules strictly.\n\nOutput Rules:\n\nEnglish only.\n\nKeywords only (single words or short phrases).\n\nUse a comma , to separate multiple keywords.\n\nAbsolutely no explanations, descriptions, sentences, or prefixes (like \"Sound:\"). Your entire response is only the keyword(s).\n\nExamples to Follow:\n\nInput: A sunset over the ocean, with seagulls flying by.\n\nOutput: waves, seagulls\n\nInput: A close-up of a unicorn figurine and a rubber duck next to a bathtub.\n\nOutput: bubbles\n\nInput: People walking through a grand archway with the Taj Mahal in the distance.\n\nOutput: Indian holy music\n\nInput: A black horse running across a field.\n\nOutput: galloping\n\nInput: Giant tentacles rise from a stormy sea towards an old sailing ship.\n\nOutput: waves, storm",
-      "debug": "enable",
-      "url": "http://127.0.0.1:11434",
-      "model": "gemma:7b",
-      "keep_alive": 5,
-      "format": "text",
-      "seed": 394931732,
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          false
-        ]
-      },
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "OllamaVision",
-    "_meta": {
-      "title": "Ollama Vision"
-    }
-  },
-  "58": {
-    "inputs": {
-      "duration": [
-        "70",
-        0
-      ],
-      "steps": 25,
-      "cfg": 4.5,
-      "seed": 104,
-      "prompt": [
-        "57",
-        0
-      ],
-      "negative_prompt": "",
-      "mask_away_clip": false,
-      "force_offload": true,
-      "speak_and_recognation": {
-        "__value__": [
-          false,
-          true
-        ]
-      },
-      "mmaudio_model": [
-        "63",
-        0
-      ],
-      "feature_utils": [
-        "55",
-        0
-      ],
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "MMAudioSampler",
-    "_meta": {
-      "title": "MMAudio Sampler"
-    }
-  },
-  "59": {
-    "inputs": {
-      "text_0": "[No response provided as the visual scene was not included in the prompt.]",
-      "text": [
-        "57",
-        0
-      ]
-    },
-    "class_type": "ShowText|pysssss",
-    "_meta": {
-      "title": "Show Text 🐍"
-    }
-  },
-  "60": {
-    "inputs": {
-      "frame_rate": [
-        "69",
-        0
-      ],
-      "loop_count": 0,
-      "filename_prefix": "wan2.1_t2v_mmaudio",
-      "format": "video/h264-mp4",
-      "pix_fmt": "yuv420p",
-      "crf": 19,
-      "save_metadata": true,
-      "trim_to_audio": false,
-      "pingpong": false,
-      "save_output": true,
-      "images": [
-        "8",
-        0
-      ],
-      "audio": [
-        "58",
-        0
-      ]
-    },
-    "class_type": "VHS_VideoCombine",
-    "_meta": {
-      "title": "Video Combine 🎥🅥🅗🅢"
-    }
-  },
-  "61": {
-    "inputs": {
-      "audioUI": "",
-      "audio": [
-        "58",
-        0
-      ]
-    },
-    "class_type": "PreviewAudio",
-    "_meta": {
-      "title": "PreviewAudio"
-    }
-  },
-  "63": {
-    "inputs": {
-      "mmaudio_model": "mmaudio_large_44k_v2_fp16.safetensors",
-      "base_precision": "fp16",
-      "force_reload": false
-    },
-    "class_type": "MMAudioModelLoader",
-    "_meta": {
-      "title": "MMAudio ModelLoader"
-    }
-  },
   "68": {
     "inputs": {
       "value": 97
@@ -333,7 +179,18 @@
       "title": "frame_rate"
     }
   },
-  "70": {
+  "71": {
+    "inputs": {
+      "mmaudio_model": "mmaudio_large_44k_v2_fp16.safetensors",
+      "base_precision": "fp16",
+      "device": "cpu"
+    },
+    "class_type": "MMAudioModelLoaderMultiGPU",
+    "_meta": {
+      "title": "MMAudioModelLoaderMultiGPU"
+    }
+  },
+  "72": {
     "inputs": {
       "input1": [
         "68",
@@ -347,6 +204,112 @@
     "class_type": "DivideNode",
     "_meta": {
       "title": "video_duration"
+    }
+  },
+  "73": {
+    "inputs": {
+      "vae_model": "mmaudio_vae_44k_fp16.safetensors",
+      "synchformer_model": "mmaudio_synchformer_fp16.safetensors",
+      "clip_model": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+      "mode": "44k",
+      "precision": "fp16",
+      "device": "cpu"
+    },
+    "class_type": "MMAudioFeatureUtilsLoaderMultiGPU",
+    "_meta": {
+      "title": "MMAudioFeatureUtilsLoaderMultiGPU"
+    }
+  },
+  "74": {
+    "inputs": {
+      "duration": [
+        "72",
+        0
+      ],
+      "steps": 25,
+      "cfg": 4.5,
+      "seed": 37,
+      "prompt": [
+        "77",
+        0
+      ],
+      "negative_prompt": "",
+      "mask_away_clip": false,
+      "force_offload": true,
+      "device": "cuda:0",
+      "mmaudio_model": [
+        "71",
+        0
+      ],
+      "feature_utils": [
+        "73",
+        0
+      ],
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "MMAudioSamplerMultiGPU",
+    "_meta": {
+      "title": "MMAudioSamplerMultiGPU"
+    }
+  },
+  "75": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "wan2.2_t2v_audio",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "8",
+        0
+      ],
+      "audio": [
+        "74",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "76": {
+    "inputs": {
+      "options": "Intermediate",
+      "filenames": [
+        "75",
+        0
+      ]
+    },
+    "class_type": "VHS_PruneOutputs",
+    "_meta": {
+      "title": "Prune Outputs 🎥🅥🅗🅢"
+    }
+  },
+  "77": {
+    "inputs": {
+      "value": "motorcycle, wild boar voice"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Audio prompt"
+    }
+  },
+  "78": {
+    "inputs": {
+      "value": "午後的山路上，機車引擎聲在彎道間回盪。一頭壯碩的山豬突然從路邊灌木竄出，黑褐色的毛被風掀起，沉重的蹄子在柏油路上急促敲擊。牠鼻息粗重、眼睛死盯著前方的機車——像是認定了那就是牠的目標。  騎士慌忙加速，尾燈在陽光下晃動，後視鏡裡只見那頭山豬越追越近，短小的尾巴瘋狂地甩著。落葉和碎石在山豬後方被踢得四散，整條山路瞬間變成一場緊張又荒謬的追逐賽。"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Positive prompt"
     }
   }
 }

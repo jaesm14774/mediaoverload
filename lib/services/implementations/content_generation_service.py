@@ -99,7 +99,9 @@ class ContentGenerationService(IContentGenerationService):
         media_files = self.generate_media(config)
 
         # Analyze and filter by quality
-        similarity_threshold = config.get_all_attributes().get('similarity_threshold', 0.9)
+        # 優先從 config 中獲取 similarity_threshold，如果沒有則使用默認值 0.7
+        similarity_threshold = config.get_all_attributes().get('similarity_threshold', 0.7)
+        self.logger.info(f"使用相似度閾值: {similarity_threshold}")
         filter_results = self.analyze_media_text_match(media_files, descriptions, similarity_threshold)
 
         # Generate social media caption（如果策略允許）
@@ -176,7 +178,7 @@ class ContentGenerationService(IContentGenerationService):
         Filters out low-quality results below similarity threshold.
 
         Args:
-            images: List of media file paths
+            images: List of media file paths (注意：此參數目前未被使用，策略會自行收集媒體文件)
             descriptions: List of original text descriptions
             similarity_threshold: Minimum similarity score (0.0-1.0) to keep media
 
@@ -185,13 +187,24 @@ class ContentGenerationService(IContentGenerationService):
             Only includes media meeting the similarity threshold.
         """
         self.logger.info("開始分析媒體內容匹配度")
+        self.logger.info(f"傳入的媒體文件數量: {len(images)}, 描述數量: {len(descriptions)}, 閾值: {similarity_threshold}")
+        
+        # 確保策略有 descriptions（如果傳入的 descriptions 與策略中的不同，需要更新）
+        if hasattr(self.strategy, 'descriptions') and descriptions != self.strategy.descriptions:
+            self.logger.warning("傳入的 descriptions 與策略中的不一致，使用策略中的 descriptions")
+            descriptions = self.strategy.descriptions
+        
+        # 調用策略的 analyze_media_text_match
+        # 注意：策略會自行收集媒體文件，這裡的 images 參數僅用於日誌記錄
         self.strategy.analyze_media_text_match(similarity_threshold)
 
         filter_results = []
         if hasattr(self.strategy, 'filter_results'):
             filter_results = self.strategy.filter_results
+        else:
+            self.logger.warning("策略沒有 filter_results 屬性")
 
-        self.logger.info(f"媒體內容分析完成，篩選出 {len(filter_results)} 個媒體文件")
+        self.logger.info(f"媒體內容分析完成，篩選出 {len(filter_results)} 個媒體文件（共分析 {len(images) if images else '未知數量'} 個媒體文件）")
 
         return filter_results
 
