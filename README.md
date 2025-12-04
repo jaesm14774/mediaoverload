@@ -373,17 +373,34 @@ _generate_final_article_content()
 
 ### 圖片放大（Upscale）
 
-**Text2ImageStrategy** 支援可選的圖片放大：
+#### Text2ImageStrategy
+支援可選的圖片放大：
 - 配置：`enable_upscale = True`
 - 工作流：`upscale_workflow_path`
 - 處理：對每張選中的圖片進行放大處理
 
+#### Text2Image2VideoStrategy
+支援可選的圖片放大：
+- 配置：`first_stage.enable_upscale = True`
+- 工作流：`first_stage.upscale_workflow_path`
+- 處理流程：
+  1. 使用者選擇圖片後，先對選中的圖片進行放大
+  2. 使用放大後的圖片生成影片
+  3. 使用者再選擇最終要發布的影片
+
+#### Text2LongVideoStrategy
+支援可選的圖片放大：
+- 配置：`first_stage.enable_upscale = True`
+- 工作流：`first_stage.upscale_workflow_path`
+- 處理流程：
+  1. 對第一幀進行放大後生成第一個影片段落
+  2. 對每個影片段落的最後一幀進行放大
+  3. 使用放大後的幀作為下一個段落的輸入
+
 ### 其他策略
 
 - **Text2Image2ImageStrategy**: 無後處理
-- **Text2Image2VideoStrategy**: 無後處理
 - **Text2VideoStrategy**: 無後處理
-- **Text2LongVideoStrategy**: 無後處理（影片合併在策略內部完成）
 
 ---
 

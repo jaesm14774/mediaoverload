@@ -249,8 +249,17 @@ class Text2LongVideoStrategy(ContentStrategy):
         # Get configs with proper merging
         longvideo_config = self._get_strategy_config('text2longvideo', 'longvideo_config')
         video_generation_config = self._get_strategy_config('text2longvideo', 'video_generation')
+        first_stage_config = self._get_strategy_config('text2longvideo', 'first_stage')
         
+        # 檢查是否需要 upscale 第一幀
+        enable_upscale = first_stage_config.get('enable_upscale', False)
         current_frame = first_frame_path
+        if enable_upscale:
+            self.logger.info("對第一幀進行放大處理")
+            upscaled_frames = self._upscale_images([current_frame], output_dir)
+            if upscaled_frames:
+                current_frame = upscaled_frames[0]
+                self.logger.info(f"第一幀放大完成: {current_frame}")
         segment_count = longvideo_config.get('segment_count', getattr(self.config, 'segment_count', 5))
         self.logger.info(f"設定段落數量: {segment_count}")
         
@@ -389,6 +398,14 @@ class Text2LongVideoStrategy(ContentStrategy):
                     )
                     current_frame = extracted_frame
                     self.logger.info(f"最後一幀已提取: {current_frame}")
+                    
+                    # 如果需要 upscale，對最後一幀進行放大
+                    if enable_upscale and i < segment_count - 1:
+                        self.logger.info(f"對段落 {i+1} 的最後一幀進行放大處理")
+                        upscaled_frames = self._upscale_images([current_frame], output_dir)
+                        if upscaled_frames:
+                            current_frame = upscaled_frames[0]
+                            self.logger.info(f"最後一幀放大完成: {current_frame}")
                 except Exception as e:
                     self.logger.error(f"提取最後一幀失敗: {e}")
                     # If extraction fails, we cannot continue to next segment
@@ -496,3 +513,45 @@ class Text2LongVideoStrategy(ContentStrategy):
     
     def should_generate_article_now(self) -> bool:
         return True
+    
+    def _upscale_images(self, image_paths: List[str], output_dir: str) -> List[str]:
+        """放大圖片
+        
+        Args:
+            image_paths: 圖片路徑列表
+            output_dir: 輸出路徑
+            
+        Returns:
+            放大後的圖片路徑列表
+        """
+        first_stage_config = self._get_strategy_config('text2longvideo', 'first_stage')
+        upscale_workflow = first_stage_config.get('upscale_workflow_path', 'configs/workflow/Tile Upscaler SDXL.json')
+        upscaled_paths = []
+        
+        for path in image_paths:
+            if not any(path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
+                upscaled_paths.append(path)
+                continue
+                
+            self.logger.info(f"放大圖片: {path}")
+            filename = self.media_generator.upload_image(path)
+            
+            updates = [{
+                "type": "direct_update",
+                "node_id": "225",
+                "inputs": {"image": filename}
+            }]
+            
+            generated = self.media_generator.generate(
+                workflow_path=upscale_workflow,
+                updates=updates,
+                output_dir=os.path.join(output_dir, 'upscaled'),
+                file_prefix=f"upscaled_{os.path.basename(path)}"
+            )
+            if generated:
+                upscaled_paths.extend(generated)
+            else:
+                upscaled_paths.append(path)
+        
+        self.logger.info(f"✅ 圖片放大完成，共 {len(upscaled_paths)} 張")
+        return upscaled_paths

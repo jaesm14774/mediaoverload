@@ -94,6 +94,7 @@ class OrchestrationService(IOrchestrationService):
             content_result = self.content_service.generate_content(config)
             
             strategy = self.content_service.strategy
+            strategy_name = getattr(strategy, 'name', None) or strategy.__class__.__name__
             
             # 步驟 5: Discord 人工審核流程（所有策略都需要）
             # 所有策略都必須實現 needs_user_review() 返回 True，並提供 get_review_items()
@@ -112,8 +113,9 @@ class OrchestrationService(IOrchestrationService):
                 self.cleanup(config_dict['output_dir'])
                 return {'status': 'no_media_selected'}
             
-            # 準備審核文字（如果還沒有生成文章內容，使用預設文字）
-            review_text = content_result.get('article_content', '請選擇要使用的圖片')
+            # 準備審核文字（如果還沒有生成文章內容，使用預設文字並顯示策略名稱）
+            default_review_text = f'[策略: {strategy_name}] 請選擇要使用的圖片'
+            review_text = content_result.get('article_content') or default_review_text
             
             # 步驟 6: Discord 人工審核內容
             review_result = await self.review_service.review_content(
@@ -170,8 +172,9 @@ class OrchestrationService(IOrchestrationService):
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_selected'}
                 
-                # 準備審核文字（使用新生成的基於影片的文章內容）
-                review_text = content_result.get('article_content', '請選擇要使用的影片')
+                # 準備審核文字（使用新生成的基於影片的文章內容，若無則顯示策略名稱）
+                default_review_text = f'[策略: {strategy_name}] 請選擇要使用的影片'
+                review_text = content_result.get('article_content') or default_review_text
                 
                 # 步驟 6.6: 再次審核內容（影片）
                 review_result = await self.review_service.review_content(

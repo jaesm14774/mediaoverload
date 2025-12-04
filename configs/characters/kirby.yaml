@@ -117,6 +117,9 @@ additional_params:
           sticker_prompt_system_prompt: 0.4
         images_per_description: 3
         t2i_workflow_path: /app/configs/workflow/nova-anime-xl.json
+        enable_upscale: true
+        upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
+    
       
       video:
         i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
@@ -147,6 +150,8 @@ additional_params:
         workflow_path: /app/configs/workflow/nova-anime-xl.json
         batch_size: 3
         style: "minimalism style with pure background"
+        enable_upscale: true
+        upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
         
         image_system_prompt_weights:
           stable_diffusion_prompt: 0.3

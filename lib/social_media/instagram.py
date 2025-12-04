@@ -117,26 +117,41 @@ class InstagramPlatform(SocialMediaPlatform):
                     media = self.client.photo_upload(media_path, caption)
             else:
                 # 多媒體（相簿）
-                # Instagram 最多支援 10 張圖片
+                # Instagram 最多支援 10 個媒體
                 media_paths = valid_media_paths[:10]
                 if len(valid_media_paths) > 10:
                     self.logger.warning(f"媒體數量超過限制 (10)，將只使用前 10 個")
                 
-                # 檢查是否都是圖片（相簿只能包含圖片）
-                image_paths = [p for p in media_paths if not p.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm'))]
+                # album_upload 支援的格式：圖片 (.jpg, .jpeg, .webp) 和影片 (.mp4)
+                supported_formats = ('.jpg', '.jpeg', '.webp', '.mp4')
+                supported_media = [p for p in media_paths if p.lower().endswith(supported_formats)]
                 
-                if len(image_paths) == len(media_paths):
-                    # 所有都是圖片，可以創建相簿
-                    self.logger.info(f"正在上傳相簿，包含 {len(image_paths)} 張圖片")
-                    media = self.client.album_upload(image_paths, caption)
+                if len(supported_media) == len(media_paths):
+                    # 所有媒體都是相簿支援的格式，可以創建相簿
+                    image_count = len([p for p in supported_media if p.lower().endswith(('.jpg', '.jpeg', '.webp'))])
+                    video_count = len([p for p in supported_media if p.lower().endswith('.mp4')])
+                    self.logger.info(f"正在上傳相簿，包含 {image_count} 張圖片和 {video_count} 個影片")
+                    media = self.client.album_upload(supported_media, caption)
                 else:
-                    # 混合媒體，只上傳第一張
-                    self.logger.warning("相簿只能包含圖片，將只上傳第一張媒體")
-                    media_path = media_paths[0]
-                    if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
-                        media = self.client.clip_upload(media_path, caption)
+                    # 包含不支援的格式，只上傳支援的媒體或第一個媒體
+                    unsupported = [p for p in media_paths if not p.lower().endswith(supported_formats)]
+                    if unsupported:
+                        self.logger.warning(f"相簿不支援以下格式的媒體: {', '.join(unsupported)}")
+                    
+                    if supported_media:
+                        # 如果有支援的媒體，上傳所有支援的媒體
+                        image_count = len([p for p in supported_media if p.lower().endswith(('.jpg', '.jpeg', '.webp'))])
+                        video_count = len([p for p in supported_media if p.lower().endswith('.mp4')])
+                        self.logger.info(f"正在上傳相簿（僅支援的格式），包含 {image_count} 張圖片和 {video_count} 個影片")
+                        media = self.client.album_upload(supported_media, caption)
                     else:
-                        media = self.client.photo_upload(media_path, caption)
+                        # 如果沒有支援的媒體，只上傳第一個
+                        self.logger.warning("沒有相簿支援的格式，將只上傳第一個媒體")
+                        media_path = media_paths[0]
+                        if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
+                            media = self.client.clip_upload(media_path, caption)
+                        else:
+                            media = self.client.photo_upload(media_path, caption)
             
             if media:
                 media_id = media.pk if hasattr(media, 'pk') else media.id if hasattr(media, 'id') else None

@@ -273,6 +273,7 @@ class ComfyUICommunicator:
         """
         儲存執行結果並返回儲存的檔案列表
         支援圖片和影片的儲存
+        只保存 output 類型的文件，過濾掉 temp 類型（PreviewImage 等節點的臨時輸出）
         """
         try:
             # 獲取歷史記錄
@@ -282,6 +283,10 @@ class ComfyUICommunicator:
             def process_media_files(media_list: List[Dict], default_extension: str = None):
                 """處理媒體文件的通用函數"""
                 for media in media_list:
+                    # 只保存 output 類型，跳過 temp 類型（PreviewImage 節點）
+                    if media.get('type') == 'temp':
+                        continue
+                    
                     # 獲取媒體數據
                     media_data = self.get_media_file(
                         media['filename'],

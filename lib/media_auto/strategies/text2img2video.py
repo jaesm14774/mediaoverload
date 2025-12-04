@@ -157,9 +157,62 @@ class Text2Image2VideoStrategy(ContentStrategy):
             self._videos_reviewed = True
             return True
             
-        # Reviewing images -> Generate Videos
+        # Reviewing images -> Upscale -> Generate Videos
+        # 檢查是否需要 upscale
+        first_stage_config = self._get_strategy_config('text2image2video', 'first_stage')
+        enable_upscale = first_stage_config.get('enable_upscale', False)
+        
+        if enable_upscale:
+            print("=" * 60)
+            print("圖片放大處理")
+            print("=" * 60)
+            selected_paths = self._upscale_images(selected_paths, output_dir)
+        
+        # Generate Videos using upscaled images
         self._generate_videos_from_images(selected_paths, output_dir)
         return True
+
+    def _upscale_images(self, image_paths: List[str], output_dir: str) -> List[str]:
+        """放大圖片
+        
+        Args:
+            image_paths: 圖片路徑列表
+            output_dir: 輸出路徑
+            
+        Returns:
+            放大後的圖片路徑列表
+        """
+        first_stage_config = self._get_strategy_config('text2image2video', 'first_stage')
+        upscale_workflow = first_stage_config.get('upscale_workflow_path', 'configs/workflow/Tile Upscaler SDXL.json')
+        upscaled_paths = []
+        
+        for path in image_paths:
+            if not any(path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
+                upscaled_paths.append(path)
+                continue
+                
+            print(f"放大圖片: {path}")
+            filename = self.media_generator.upload_image(path)
+            
+            updates = [{
+                "type": "direct_update",
+                "node_id": "225",
+                "inputs": {"image": filename}
+            }]
+            
+            generated = self.media_generator.generate(
+                workflow_path=upscale_workflow,
+                updates=updates,
+                output_dir=os.path.join(output_dir, 'upscaled'),
+                file_prefix=f"upscaled_{os.path.basename(path)}"
+            )
+            if generated:
+                upscaled_paths.extend(generated)
+            else:
+                upscaled_paths.append(path)
+        
+        print(f"✅ 圖片放大完成，共 {len(upscaled_paths)} 張")
+        return upscaled_paths
 
     def _generate_videos_from_images(self, image_paths: List[str], output_dir: str):
         print(f"開始使用 {len(image_paths)} 張圖片生成影片")
