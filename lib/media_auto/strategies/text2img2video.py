@@ -144,13 +144,14 @@ class Text2Image2VideoStrategy(ContentStrategy):
         # Return images
         return [{'media_path': p, 'similarity': 1.0} for p in self.first_stage_images[:max_items]]
 
-    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
-        if not selected_indices:
+    def handle_review_result(self, selected_indices: List[int], output_dir: str, selected_paths: List[str] = None) -> bool:
+        if not selected_indices and not selected_paths:
             return False
-            
-        # Map indices to images
-        review_items = self.get_review_items(max_items=10)
-        selected_paths = [review_items[i]['media_path'] for i in selected_indices if i < len(review_items)]
+        
+        # 優先使用傳入的 selected_paths，避免 get_review_items 順序不一致的問題
+        if selected_paths is None:
+            review_items = self.get_review_items(max_items=10)
+            selected_paths = [review_items[i]['media_path'] for i in selected_indices if i < len(review_items)]
         
         if self._videos_generated:
             # Reviewing videos, just confirm

@@ -235,7 +235,7 @@ generate_article_content()
 
 ---
 
-### 5. Text2LongVideoStrategy（文字生成長影片）
+### 5. Text2LongVideoStrategy（文字生成長影片 - 尾幀驅動）
 
 #### 執行流程
 
@@ -293,6 +293,148 @@ _generate_final_article_content()
 - `longvideo_config.use_tts`: 是否使用 TTS（預設 True）
 - `longvideo_config.tts_voice`: TTS 語音（預設 'en-US-AriaNeural'）
 - `first_stage.batch_size`: 第一幀候選圖片數量（預設 3）
+
+---
+
+### 6. Text2LongVideoFirstFrameStrategy（文字生成長影片 - 首幀驅動）
+
+#### 執行流程
+
+```
+generate_description()
+  ↓
+  生成第一個段落的腳本
+  ↓
+generate_media()
+  ↓
+  生成第一個段落的候選圖片
+  ↓
+needs_user_review() → True
+  ↓
+【Discord 審核：選擇第一幀圖片】
+  ↓
+handle_review_result()
+  ↓
+_generate_full_video_with_firstframe_transitions()
+  ↓
+【循環生成多個段落】
+  對每個段落：
+    1. 使用當前首幀生成影片
+    2. 從影片提取最後一幀
+    3. 生成下一段的腳本
+    4. ✨關鍵：使用 I2I 將尾幀 + 新分鏡描述 → 新首幀
+    5. 使用新首幀作為下一段的輸入
+  ↓
+【後處理】
+  1. 合併所有段落影片
+  2. 如果啟用 TTS，添加旁白
+  ↓
+生成文章內容
+```
+
+#### 與 Text2LongVideoStrategy 的關鍵差異
+
+| 項目 | 尾幀驅動 | 首幀驅動 |
+|------|----------|----------|
+| 段落銜接 | 尾幀 → 下一段 | 尾幀 → I2I → 新首幀 → 下一段 |
+| I2I 用途 | 無 | 場景+風格延續，符合新分鏡 |
+| Denoise | - | 0.5~0.6（保持風格，允許變化）|
+| 適用場景 | 動作連貫的短分鏡 | 場景變化較大的長分鏡 |
+
+#### 特點
+- **首幀驅動**：I2V 模型對首幀控制力最強，生成更自然
+- **I2I 過場**：透過低 denoise (0.5~0.6) 保持風格，同時適應新場景
+- **場景適應**：允許更大的場景變化，適合長敘事影片
+
+#### 配置參數
+```yaml
+text2longvideo_firstframe:
+  longvideo_config:
+    segment_count: 5
+    segment_duration: 5
+    use_tts: true
+    tts_voice: "en-US-AriaNeural"
+  
+  first_stage:
+    workflow_path: /app/configs/workflow/nova-anime-xl.json
+    batch_size: 3
+    style: "minimalism style"
+    enable_upscale: true
+  
+  # 關鍵：首幀轉換配置
+  frame_transition:
+    enabled: true
+    workflow_path: /app/configs/workflow/image_to_image.json
+    denoise: 0.55  # 保持風格，允許場景變化
+    style_continuity_prompt: "maintain visual style and color palette"
+  
+  video_generation:
+    workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
+```
+
+---
+
+### 7. StickerPackStrategy（貼圖包生成）
+
+#### 執行流程
+
+```
+generate_description()
+  ↓
+  使用 OpenRouter LLM 自動生成 8 種表情描述
+  （happy, sad, angry, surprised, love, sleepy, confused, excited 等）
+  ↓
+generate_media()
+  ↓
+  批量生成 8 張靜態貼圖
+  ↓
+needs_user_review() → True
+  ↓
+【Discord 審核：選擇要轉為動態 GIF 的圖片】
+  ↓
+handle_review_result()
+  ↓
+_generate_animated_stickers()
+  ↓
+  對選中的圖片：
+    1. 使用 I2V 生成短影片
+    2. 使用 FFmpeg 轉換為優化 GIF
+  ↓
+needs_user_review() → True
+  ↓
+【Discord 審核：選擇最終要發布的 GIF】
+  ↓
+生成文章內容
+```
+
+#### 特點
+- **LLM 自動生成表情**：使用 OpenRouter 隨機模型生成多樣化表情
+- **支援動態 GIF**：將選中的靜態貼圖轉為動態 GIF
+- **統一風格**：所有貼圖保持一致的 LINE 貼圖風格
+- **GIF 優化**：使用 FFmpeg 二階段轉換，最佳化檔案大小
+- **動作補幀**：使用 minterpolate 進行幀插值，讓動畫更流暢自然
+- **Instagram 相容**：自動將 GIF 轉換為 MP4 格式以符合 Instagram 上傳要求
+
+#### 配置參數
+```yaml
+sticker_pack:
+  style: "LINE sticker style, chibi proportions, white outline, simple background"
+  
+  static_config:
+    workflow_path: /app/configs/workflow/nova-anime-xl.json
+    images_per_expression: 1
+  
+  animated_config:
+    enabled: true
+    i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
+    # 短動畫參數（控制 GIF 長度）
+    total_frames: 33        # 總幀數（33 frames / 12 fps ≈ 2.75 秒）
+    video_fps: 12           # 影片 fps
+    # GIF 轉換參數
+    gif_fps: 10             # GIF fps
+    gif_max_colors: 256
+    gif_scale_width: 512
+```
 
 ---
 
@@ -415,6 +557,41 @@ _generate_final_article_content()
 5. **預設值**
 
 這確保了更細粒度的配置可以覆蓋更通用的配置。
+
+---
+
+## 社群媒體格式支援
+
+### Instagram 格式轉換
+
+Instagram 不支援直接上傳 GIF 格式，系統會自動將 GIF 轉換為 MP4 格式後再上傳。
+
+**自動轉換流程**：
+1. 檢測到 GIF 檔案時，自動使用 FFmpeg 轉換為 MP4
+2. 轉換後的 MP4 檔案會在上傳完成後自動清理
+3. 支援無限循環播放（loop=0）
+
+**轉換參數**：
+- FPS: 自動從 GIF 檔案讀取（使用 ffprobe），讀取失敗時使用預設值 10
+- Pixel Format: yuv420p（確保相容性）
+- Loop: 無限循環
+
+### GIF 優化功能
+
+系統在生成 LINE 貼圖 GIF 時會自動進行優化：
+
+**優化項目**：
+- **動作補幀**：使用 `minterpolate` 進行幀插值，讓動畫更流暢自然
+- **調色板優化**：使用二階段轉換，最佳化檔案大小
+- **解析度調整**：自動縮放以符合貼圖標準
+
+**配置參數**（在 `sticker_pack.animated_config` 中）：
+```yaml
+animated_config:
+  gif_fps: 10             # GIF 播放幀率
+  gif_max_colors: 256     # 最大顏色數
+  gif_scale_width: 512    # 寬度（高度自動計算）
+```
 
 ---
 

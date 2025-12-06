@@ -5,7 +5,9 @@
 - Text2Image2ImageStrategy: 文生圖 -> 圖生圖策略
 - Text2VideoStrategy: 文生影片策略
 - Text2Image2VideoStrategy: 文生圖 -> 圖生影片策略
-- Text2LongVideoStrategy: 文生長影片策略
+- Text2LongVideoStrategy: 文生長影片策略（尾幀驅動）
+- Text2LongVideoFirstFrameStrategy: 文生長影片策略（首幀驅動）
+- StickerPackStrategy: 貼圖包生成策略
 """
 
 from .text2img import Text2ImageStrategy
@@ -14,6 +16,8 @@ from .text2video import Text2VideoStrategy
 from .text2img2video import Text2Image2VideoStrategy
 from .img2img import Image2ImageStrategy
 from .text2longvideo import Text2LongVideoStrategy
+from .text2longvideo_firstframe import Text2LongVideoFirstFrameStrategy
+from .sticker_pack import StickerPackStrategy
 
 __all__ = [
     'Text2ImageStrategy',
@@ -22,4 +26,6 @@ __all__ = [
     'Text2Image2VideoStrategy',
     'Image2ImageStrategy',
     'Text2LongVideoStrategy',
+    'Text2LongVideoFirstFrameStrategy',
+    'StickerPackStrategy',
 ]

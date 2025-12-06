@@ -17,12 +17,13 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 0.2
+    text2img: 0
     text2video: 0
-    text2image2video: 0.4
-    text2longvideo: 0.3
+    text2image2video: 0
+    text2longvideo: 0
     image2image: 0
-    text2image2image: 0.1
+    text2image2image: 0
+    sticker_pack: 1
 
   # Workflow Path Configuration
   workflows:
@@ -30,6 +31,7 @@ generation:
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
     text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
     image2image: /app/configs/workflow/image_to_image.json
+    sticker_pack: /app/configs/workflow/nova-anime-xl.json
 
   # Quality Control
   similarity_threshold: 0.5
@@ -168,4 +170,19 @@ additional_params:
       video_generation:
         workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
         use_noise_seed: true
+
+    sticker_pack:
+      style: "LINE sticker style, chibi proportions, white outline, simple background"
+      static_config:
+        workflow_path: /app/configs/workflow/nova-anime-xl.json
+        images_per_expression: 1
+      animated_config:
+        enabled: true
+        i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
+        # Sticker GIF 專用參數（短動畫）
+        total_frames: 36
+        video_fps: 12
+        gif_fps: 10             # GIF fps
+        gif_max_colors: 256
+        gif_scale_width: 512
 

@@ -41,7 +41,8 @@ class Text2LongVideoStrategy(ContentStrategy):
         self.generated_media_paths: List[str] = []
         self.article_content: str = ""
         self.vision_manager = vision_manager  # Store for article content generation
-        self._final_video_generated = False  # 標記最終影片是否已生成
+        self._final_video_generated = False
+        self._videos_reviewed = False
         
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -209,25 +210,33 @@ class Text2LongVideoStrategy(ContentStrategy):
         """檢查是否需要使用者審核
         
         需要審核的情況：
-        1. 候選圖片已生成（選擇第一幀）
-        2. 最終影片已生成（選擇最終要發布的影片）
+        1. 候選圖片已生成，影片尚未生成（選擇第一幀）
+        2. 最終影片已生成，尚未審核（選擇最終要發布的影片）
         """
-        return len(self.generated_media_paths) > 0
+        if len(self.generated_media_paths) > 0 and not self._final_video_generated:
+            return True
+        if self._final_video_generated and not self._videos_reviewed:
+            return True
+        return False
 
     def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
         return [{'media_path': p} for p in self.generated_media_paths[:max_items]]
 
-    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+    def handle_review_result(self, selected_indices: List[int], output_dir: str, selected_paths: List[str] = None) -> bool:
         """
         Handles the user's selection of the first frame.
         Triggers the generation of the rest of the video.
         """
-        if not selected_indices:
+        if not selected_indices and not selected_paths:
             self.logger.warning("沒有選擇任何圖片，無法繼續生成影片")
             return False
-            
-        selected_index = selected_indices[0]
-        selected_image = self.generated_media_paths[selected_index]
+        
+        # 優先使用傳入的 selected_paths
+        if selected_paths:
+            selected_image = selected_paths[0]
+        else:
+            selected_index = selected_indices[0]
+            selected_image = self.generated_media_paths[selected_index]
         self.logger.info(f"User selected image: {selected_image}")
         
         # Start the loop for the rest of the segments

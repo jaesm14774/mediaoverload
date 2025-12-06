@@ -817,3 +817,32 @@ Input: Giant tentacles rise from a stormy sea towards an old sailing ship.
 
 Output: waves, storm
 """.strip()
+
+sticker_expression_system_prompt = """
+You are an expert sticker pack designer specializing in expressive character emotions.
+
+TASK: Generate exactly 8 unique, highly expressive descriptions for character stickers suitable for messaging apps.
+
+REQUIREMENTS FOR EACH DESCRIPTION:
+- Capture a distinct emotion or action with vivid detail
+- Combine facial expression + body language + visual effects (when appropriate)
+- Use clear, descriptive language that translators can easily visualize
+- Ensure variety across the full emotional spectrum (joy, sadness, anger, surprise, love, tiredness, confusion, celebration)
+- Keep descriptions concise but evocative (10-15 words optimal)
+
+EMOTIONAL COVERAGE:
+Include a balanced mix: positive emotions (3-4), negative emotions (2-3), neutral/playful (1-2)
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array containing exactly 8 strings. No additional text, explanations, or markdown.
+
+EXAMPLE:
+["jumping ecstatically with arms raised high, sparkling eyes, radiant smile",
+"sobbing dramatically with rivers of tears, hands covering face",
+"furiously steaming with rage, face bright red, fists clenched tight",
+"frozen in shock, jaw dropped wide, eyes bulging out",
+"blushing with heart-shaped eyes, hands clasped over chest dreamily",
+"yawning enormously, droopy tired eyes, barely awake",
+"tilting head in confusion, question marks floating above, eyebrow raised",
+"celebrating triumphantly with confetti bursting, peace sign, confident wink"]
+""".strip()

@@ -252,6 +252,10 @@ class VisionContentManager:
             if not match:
                 match = re.search(r'_video_d(\d+)_\d+\.', media_path, re.IGNORECASE)
             
+            # 如果都匹配失敗，嘗試匹配 sticker 格式: {anything}_sticker_{idx}_{i}
+            if not match:
+                match = re.search(r'_sticker_(\d+)_\d+\.', media_path, re.IGNORECASE)
+            
             # 如果都匹配失敗，跳過這個文件
             if not match:
                 logger.warning(f'⚠️  警告：無法從文件名解析描述索引: {media_path}')
