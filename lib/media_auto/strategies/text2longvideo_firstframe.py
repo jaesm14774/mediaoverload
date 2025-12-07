@@ -302,26 +302,17 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
             self.logger.info(f"Processing segment {i+1}/{segment_count}")
             self.logger.info("=" * 60)
             
-            # Generate script for segments after the first
-            if i > 0:
-                # Generate next segment script based on previous frame
-                self.logger.info(f"Generating script for segment {i+1}...")
-                segment_script = self.script_generator.generate_script_segment(
-                    context=context_data,
-                    last_frame_path=current_first_frame,  # Use current first frame for context
-                    segment_index=i
-                )
-                
-                if not segment_script:
-                    raise RuntimeError(f"Failed to generate script for segment {i+1}")
-                
-                self.script_segments.append(segment_script)
-                self.logger.info(f"Visual: {segment_script.get('visual', '')[:80]}...")
-            else:
+            # Get script for current segment
+            if i == 0:
+                # First segment uses pre-generated script
                 segment_script = self.script_segments[0]
+            else:
+                # For subsequent segments, script was generated in previous iteration
+                # Use the script that was generated based on last frame
+                segment_script = self.script_segments[i]
             
             # Generate video from current first frame
-            self.logger.info(f"Generating video from first frame...")
+            self.logger.info(f"Generating video from first frame: {current_first_frame}")
             img_filename = self.media_generator.upload_image(current_first_frame)
             vid_desc = segment_script.get('visual', '')
             
@@ -359,7 +350,7 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
             
             # Prepare for next segment (if not last)
             if i < segment_count - 1:
-                # Extract last frame
+                # Extract last frame from current video
                 last_frame_path = os.path.join(frames_dir, f"segment_{i}_last_frame.png")
                 self.ffmpeg_service.extract_last_frame(
                     video_path=generated_videos[0],
@@ -367,17 +358,25 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
                 )
                 self.logger.info(f"Extracted last frame: {last_frame_path}")
                 
-                # Generate next segment script first to get visual description
-                next_context = context_data.copy()
+                # Generate next segment script based on last frame
+                self.logger.info(f"Generating script for segment {i+2} based on last frame...")
                 next_segment_script = self.script_generator.generate_script_segment(
-                    context=next_context,
+                    context=context_data,
                     last_frame_path=last_frame_path,
                     segment_index=i + 1
                 )
                 
+                if not next_segment_script:
+                    raise RuntimeError(f"Failed to generate script for segment {i+2}")
+                
+                self.script_segments.append(next_segment_script)
+                self.logger.info(f"Next segment visual: {next_segment_script.get('visual', '')[:80]}...")
+                
                 if enable_transition:
-                    # Use I2I to generate new first frame
+                    # Use I2I to transform last frame into new first frame
+                    # This is the key difference: we use I2I to create a transition frame
                     next_visual = next_segment_script.get('visual', '')
+                    self.logger.info("Using I2I to transform last frame into new first frame...")
                     current_first_frame = self._generate_first_frame_from_last(
                         last_frame_path=last_frame_path,
                         next_visual_desc=next_visual
@@ -388,11 +387,9 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
                         upscaled = self._upscale_images([current_first_frame], output_dir)
                         if upscaled:
                             current_first_frame = upscaled[0]
-                    
-                    # Store the script (will be used in next iteration)
-                    self.script_segments.append(next_segment_script)
                 else:
-                    # Use last frame directly (fallback to original behavior)
+                    # Fallback: use last frame directly (no I2I transition)
+                    self.logger.info("Transition disabled, using last frame directly as next first frame")
                     current_first_frame = last_frame_path
                     if enable_upscale:
                         upscaled = self._upscale_images([current_first_frame], output_dir)

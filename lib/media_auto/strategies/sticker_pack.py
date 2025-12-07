@@ -274,7 +274,7 @@ class StickerPackStrategy(ContentStrategy):
             # Generate simple sticker-focused video description
             vid_desc = self.vision_manager.generate_video_prompts(
                 f"simple subtle loop animation, cute character slight movement, minimal motion",
-                "sticker_action_system_prompt"
+                "sticker_motion_system_prompt"
             )
             
             seed = random.randint(1, 999999999999)

@@ -55,7 +55,7 @@ class OrchestrationService(IOrchestrationService):
                 # 特殊處理：長影片且群組為 Kirby 時，直接使用 kirby 而不是隨機選擇
                 generation_type = getattr(character.config, 'generation_type', '')
                 is_kirby_group = character.group_name.lower() == 'kirby'
-                is_longvideo = generation_type.lower() == 'text2longvideo'
+                is_longvideo = generation_type.lower() in ['text2longvideo', 'text2longvideo_firstframe']
                 
                 if is_kirby_group and is_longvideo:
                     # 直接使用 kirby，不隨機選擇

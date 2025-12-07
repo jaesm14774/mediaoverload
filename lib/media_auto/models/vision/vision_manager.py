@@ -394,7 +394,8 @@ class VisionManagerBuilder:
             'warm_scene_description_system_prompt': warm_scene_description_system_prompt,
             'cinematic_stable_diffusion_prompt': cinematic_stable_diffusion_prompt,
             'conceptual_logo_design_prompt': conceptual_logo_design_prompt,
-            'audio_description_prompt': audio_description_prompt
+            'audio_description_prompt': audio_description_prompt,
+            'sticker_motion_system_prompt': sticker_motion_system_prompt
 
         }
     

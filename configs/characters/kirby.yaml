@@ -23,7 +23,8 @@ generation:
     text2longvideo: 0
     image2image: 0
     text2image2image: 0
-    sticker_pack: 1
+    sticker_pack: 0
+    text2longvideo_firstframe: 1
 
   # Workflow Path Configuration
   workflows:
@@ -185,4 +186,26 @@ additional_params:
         gif_fps: 10             # GIF fps
         gif_max_colors: 256
         gif_scale_width: 512
+
+    text2longvideo_firstframe:
+      longvideo_config:
+        segment_count: 5
+        segment_duration: 5
+        use_tts: true
+        tts_voice: "en-US-AriaNeural"
+      
+      first_stage:
+        workflow_path: /app/configs/workflow/nova-anime-xl.json
+        batch_size: 3
+        style: "minimalism style with pure background"
+        enable_upscale: false
+      
+      # 關鍵：首幀轉換配置
+      frame_transition:
+        enabled: false
+        workflow_path: /app/configs/workflow/image_to_image.json
+        denoise: 0.7
+      
+      video_generation:
+        workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
 
