@@ -7,12 +7,8 @@
 ```
 examples/
 ├── README.md                          # 本文件
+├── all_strategies_examples.ipynb      # 所有策略完整範例 ⭐⭐ 推薦
 ├── simple_content_service.py          # 簡化的內容生成服務
-├── flexible_generation_examples.ipynb # FlexibleGenerator Jupyter Notebook ⭐ 推薦
-├── flexible_generation_example.py     # FlexibleGenerator 腳本範例
-├── batch_generation_example.py        # 批次生成範例
-├── image2image_example.py             # Image to Image 範例
-├── text2image2image_example.py        # Text2Image2Image 範例
 ├── social_media_example.py            # 社群媒體發布範例
 └── quick_draw/                        # Quick Draw 模組
     ├── README.md                      # Quick Draw 詳細說明
@@ -25,70 +21,47 @@ examples/
 
 ## 🚀 快速開始
 
-### ⭐ 方式 1: FlexibleGenerator（推薦新手）
+### ⭐⭐ 方式 0: 所有策略完整範例（最全面）
 
-**最簡單直覺的方式！** 使用 FlexibleGenerator 只需指定 keywords 和 system_prompt：
+**包含所有策略的完整範例！** 每個策略都有自定義 Prompt 和從資料庫獲取 News 兩種模式，並支援批量生成：
 
 ```bash
-# 在 Jupyter Notebook 中使用（推薦）
-jupyter notebook examples/flexible_generation_examples.ipynb
+# 在 Jupyter Notebook 中使用
+jupyter notebook examples/all_strategies_examples.ipynb
 ```
+
+**特色功能**：
+- ✅ 8 種策略完整範例（Text2Image, Image2Image, Text2Image2Image, Text2Video, Text2Image2Video, Text2LongVideo, Text2LongVideoFirstFrame, StickerPack）
+- ✅ 每個策略支援自定義 Prompt 和從資料庫獲取 News
+- ✅ 支援批量生成（可指定數量，如 30 張、50 張等）
+- ✅ 自動執行生成，無需手動干預
 
 **使用範例**：
 
 ```python
-from examples.quick_draw.helpers import FlexibleGenerator
-
-# Windows 環境需先設定 ComfyUI 連接
-import os
-os.environ['COMFYUI_HOST'] = '127.0.0.1'
-
-generator = FlexibleGenerator()
-
-# 生成圖片 - 超簡單！
-result = generator.generate_images(
-    keywords=["cat", "cherry blossoms", "spring"],
-    system_prompt="stable_diffusion_prompt",  # 選擇系統提示詞
+# 批量生成 30 張圖片（使用自定義關鍵詞）
+results = batch_generate_by_count(
+    strategy_type='text2image',
+    num_total=30,
+    use_news=False,
+    custom_keywords="peaceful scene, beautiful landscape",
     character="kirby",
-    style="soft lighting, peaceful",
     num_images=4
 )
 
-# 生成影片 - 同樣簡單！
-result = generator.generate_videos(
-    keywords=["flying", "stars", "night"],
-    system_prompt="stable_diffusion_prompt",
+# 批量生成 50 張圖片（使用資料庫新聞）
+results = batch_generate_by_count(
+    strategy_type='text2image',
+    num_total=50,
+    use_news=True,  # 從資料庫獲取新聞
     character="kirby",
-    num_videos=2
+    num_images=4
 )
-
-# 批次生成 - 一次搞定多組！
-prompts = [
-    {"keywords": ["morning", "sunrise"], "style": "bright"},
-    {"keywords": ["night", "moon"], "style": "dark"}
-]
-results = generator.batch_generate(prompts, media_type="image")
 ```
 
-**核心概念**：
-- **keywords**: 用戶提供的關鍵詞（會被送到 system_prompt 去生成描述）
-- **system_prompt**: 從 `configs/prompt/image_system_guide.py` 選擇的系統提示詞
-  - `stable_diffusion_prompt` - 標準風格
-  - `black_humor_system_prompt` - 黑色幽默
-  - `buddhist_combined_image_system_prompt` - 佛性風格
-  - `cinematic_stable_diffusion_prompt` - 電影級別
-  - `two_character_interaction_generate_system_prompt` - 雙角色互動
+詳細用法請參考 [all_strategies_examples.ipynb](all_strategies_examples.ipynb)
 
-**優點**：
-- ✅ 最簡單的 API，無需了解內部架構
-- ✅ 使用 system_prompt + keywords 架構
-- ✅ 同時支援圖片和影片生成
-- ✅ 支援批次生成
-- ✅ 彈性參數配置
-
-詳細用法請參考 [flexible_generation_examples.ipynb](flexible_generation_examples.ipynb) 或 [Quick Draw README](quick_draw/README.md)
-
-### 方式 2: 使用 ConfigBuilder（進階用法）
+### ⭐ 方式 1: 使用 ConfigBuilder（進階用法）
 
 如果需要更細緻的控制，可以直接使用 ConfigBuilder：
 
@@ -113,27 +86,37 @@ result = service.generate_content(config)
 
 ## 📚 範例說明
 
-### FlexibleGenerator (推薦)
+### All Strategies Examples (最全面) ⭐⭐
 
-**檔案**: `flexible_generation_examples.ipynb`, `helpers/flexible_generator.py`
+**檔案**: `all_strategies_examples.ipynb`
 
-最簡單的生成方式，提供直覺的 API：
+包含所有 8 種生成策略的完整範例：
 
-- ✅ **圖片生成**: `generate_images()`
-- ✅ **影片生成**: `generate_videos()`
-- ✅ **批次生成**: `batch_generate()`
-- ✅ **多種風格**: 支援所有 system_prompts
+**支援的策略**：
+1. Text2ImageStrategy - 文生圖
+2. Image2ImageStrategy - 圖生圖
+3. Text2Image2ImageStrategy - 文生圖 → 圖生圖
+4. Text2VideoStrategy - 文生影片
+5. Text2Image2VideoStrategy - 文生圖 → 圖生影片
+6. Text2LongVideoStrategy - 文生長影片（尾幀驅動）
+7. Text2LongVideoFirstFrameStrategy - 文生長影片（首幀驅動）
+8. StickerPackStrategy - 貼圖包生成
 
-**優點**:
-- 最簡單的 API
-- system_prompt + keywords 架構
-- 支援批次生成
-- 自動處理配置
+**每個策略都包含**：
+- ✅ 自定義 Prompt 範例
+- ✅ 從資料庫獲取 News 範例
+- ✅ 批量生成範例（可指定數量）
 
-**使用時機**:
-- 新手入門
-- 快速原型製作
-- 不需要複雜配置的場景
+**優點**：
+- 最全面的範例集合
+- 自動執行生成
+- 支援批量生成（30 張、50 張等）
+- 包含輔助函數簡化使用
+
+**使用時機**：
+- 需要了解所有策略的使用方法
+- 需要批量生成大量媒體
+- 需要從資料庫獲取新聞進行生成
 
 ### Simple Content Service
 
@@ -409,8 +392,8 @@ A: System prompts 定義在 `configs/prompt/image_system_guide.py` 中。您可�
 
 ## 📝 相關文檔
 
+- [所有策略完整範例](all_strategies_examples.ipynb) ⭐⭐
 - [Quick Draw 詳細說明](quick_draw/README.md)
-- [FlexibleGenerator Notebook 範例](flexible_generation_examples.ipynb)
 - [專案主 README](../README.md)
 
 ## 🤝 貢獻
