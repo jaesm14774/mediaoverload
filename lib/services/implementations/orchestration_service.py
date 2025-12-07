@@ -55,7 +55,7 @@ class OrchestrationService(IOrchestrationService):
                 # 特殊處理：長影片且群組為 Kirby 時，直接使用 kirby 而不是隨機選擇
                 generation_type = getattr(character.config, 'generation_type', '')
                 is_kirby_group = character.group_name.lower() == 'kirby'
-                is_longvideo = generation_type.lower() == 'text2longvideo'
+                is_longvideo = generation_type.lower() in ['text2longvideo', 'text2longvideo_firstframe']
                 
                 if is_kirby_group and is_longvideo:
                     # 直接使用 kirby，不隨機選擇
@@ -131,14 +131,16 @@ class OrchestrationService(IOrchestrationService):
                 self.cleanup(config_dict['output_dir'])
                 return {'status': 'no_media_approved'}
             
+            # 根據使用者選擇的索引，從 review_items 中提取選中的項目（在調用 handle_review_result 前提取）
+            selected_result = [review_items[i] for i in selected_indices if i < len(review_items)]
+            selected_paths = [item['media_path'] for item in selected_result]
+            
             # 步驟 6.5: 處理使用者審核結果（策略會處理後續階段，包括 upscale 等）
-            if not strategy.handle_review_result(selected_indices, config_dict['output_dir']):
+            # 傳入 selected_paths 避免策略再次調用 get_review_items 導致順序不一致
+            if not strategy.handle_review_result(selected_indices, config_dict['output_dir'], selected_paths=selected_paths):
                 self.logger.warning('策略無法處理審核結果')
                 self.cleanup(config_dict['output_dir'])
                 return {'status': 'failed_to_continue'}
-            
-            # 根據使用者選擇的索引，從 review_items 中提取選中的項目
-            selected_result = [review_items[i] for i in selected_indices if i < len(review_items)]
             selected_result_already_filtered = True
             
             # 重新分析結果（獲取最終的媒體）

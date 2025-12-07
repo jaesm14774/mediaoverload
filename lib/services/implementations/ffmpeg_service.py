@@ -521,3 +521,318 @@ class FFmpegService:
                 os.unlink(filelist_path)
             except:
                 pass
+
+    def video_to_gif(
+        self,
+        video_path: str,
+        output_path: str,
+        fps: int = 12,
+        max_colors: int = 256,
+        scale_width: int = 512,
+        optimize: bool = True
+    ) -> str:
+        """
+        Convert video to optimized GIF.
+        
+        Args:
+            video_path: Path to input video file
+            output_path: Path for output GIF file
+            fps: Frames per second for GIF (default: 12)
+            max_colors: Maximum colors in palette (default: 256)
+            scale_width: Scale width, height auto-calculated (default: 512)
+            optimize: Whether to optimize GIF size (default: True)
+        
+        Returns:
+            Path to output GIF
+        """
+        try:
+            if optimize:
+                palette_path = output_path.replace('.gif', '_palette.png')
+                
+                # Pass 1: Generate palette
+                palette_cmd = [
+                    'ffmpeg',
+                    '-i', video_path,
+                    '-vf', f'fps={fps},scale={scale_width}:-1:flags=lanczos,palettegen=max_colors={max_colors}',
+                    '-y',
+                    palette_path
+                ]
+                
+                subprocess.run(
+                    palette_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True
+                )
+                
+                # Pass 2: Generate GIF with palette
+                gif_cmd = [
+                    'ffmpeg',
+                    '-i', video_path,
+                    '-i', palette_path,
+                    '-lavfi', f'fps={fps},scale={scale_width}:-1:flags=lanczos[x];[x][1:v]paletteuse',
+                    '-y',
+                    output_path
+                ]
+                
+                subprocess.run(
+                    gif_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True
+                )
+                
+                try:
+                    os.unlink(palette_path)
+                except:
+                    pass
+            else:
+                cmd = [
+                    'ffmpeg',
+                    '-i', video_path,
+                    '-vf', f'fps={fps},scale={scale_width}:-1:flags=lanczos',
+                    '-y',
+                    output_path
+                ]
+                
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True
+                )
+            
+            self.logger.info(f"Converted {video_path} to GIF: {output_path}")
+            return output_path
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to convert video to GIF: {e.stderr}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+
+    def extract_first_frame(
+        self,
+        video_path: str,
+        output_path: str
+    ) -> str:
+        """
+        Extract the first frame from a video file.
+        
+        Args:
+            video_path: Path to input video file
+            output_path: Path for output image file
+        
+        Returns:
+            Path to extracted frame image
+        """
+        try:
+            cmd = [
+                'ffmpeg',
+                '-i', video_path,
+                '-vframes', '1',
+                '-y',
+                output_path
+            ]
+            
+            subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+            
+            self.logger.info(f"Extracted first frame from {video_path} to {output_path}")
+            return output_path
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to extract first frame: {e.stderr}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+
+    def _get_gif_fps(self, gif_path: str) -> float:
+        """
+        Get FPS from GIF file using ffprobe.
+        
+        Args:
+            gif_path: Path to GIF file
+        
+        Returns:
+            FPS value, or None if cannot be determined
+        """
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=r_frame_rate',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                gif_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                text=True
+            )
+            
+            frame_rate = result.stdout.strip()
+            if frame_rate and '/' in frame_rate:
+                num, den = map(int, frame_rate.split('/'))
+                if den > 0:
+                    fps = num / den
+                    return fps
+            
+            return None
+        except Exception as e:
+            self.logger.debug(f"Could not get FPS from GIF {gif_path}: {e}")
+            return None
+
+    def gif_to_mp4(
+        self,
+        gif_path: str,
+        output_path: str,
+        fps: Optional[float] = None,
+        loop: int = 0,
+        pix_fmt: str = 'yuv420p'
+    ) -> str:
+        """
+        Convert GIF to MP4 video.
+        
+        Args:
+            gif_path: Path to input GIF file
+            output_path: Path for output MP4 file
+            fps: Frames per second (None = auto-detect from GIF, default: None)
+            loop: Number of loops (0 = infinite, -1 = no loop, default: 0)
+            pix_fmt: Pixel format (default: 'yuv420p' for compatibility)
+        
+        Returns:
+            Path to output MP4
+        """
+        try:
+            # Auto-detect FPS from GIF if not provided
+            if fps is None:
+                detected_fps = self._get_gif_fps(gif_path)
+                if detected_fps:
+                    fps = detected_fps
+                    self.logger.debug(f"Detected GIF FPS: {fps}")
+                else:
+                    fps = 10  # Default FPS for GIFs
+                    self.logger.debug(f"Using default FPS: {fps}")
+            
+            cmd = ['ffmpeg']
+            
+            # -stream_loop must be before -i
+            if loop != -1:
+                if loop == 0:
+                    cmd.extend(['-stream_loop', '-1'])
+                else:
+                    cmd.extend(['-stream_loop', str(loop)])
+            
+            cmd.extend([
+                '-i', gif_path,
+                '-vf', f'fps={fps}',
+                '-c:v', 'libx264',
+                '-pix_fmt', pix_fmt,
+                '-y',
+                output_path
+            ])
+            
+            subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+            
+            self.logger.info(f"Converted {gif_path} to MP4: {output_path} (FPS: {fps})")
+            return output_path
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to convert GIF to MP4: {e.stderr}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+
+    def optimize_gif(
+        self,
+        video_path: str,
+        output_path: str,
+        fps: int = 12,
+        max_colors: int = 256,
+        scale_width: int = 512,
+        minterpolate: bool = True
+    ) -> str:
+        """
+        Optimize GIF with frame interpolation for smoother animation.
+        
+        Args:
+            video_path: Path to input video file
+            output_path: Path for output GIF file
+            fps: Frames per second for GIF (default: 12)
+            max_colors: Maximum colors in palette (default: 256)
+            scale_width: Scale width, height auto-calculated (default: 512)
+            minterpolate: Whether to use frame interpolation for smoother motion (default: True)
+        
+        Returns:
+            Path to output GIF
+        """
+        try:
+            palette_path = output_path.replace('.gif', '_palette.png')
+            
+            # Pass 1: Generate palette
+            if minterpolate:
+                # Use frame interpolation for smoother motion
+                palette_filter = f'minterpolate=fps={fps * 2}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,fps={fps},scale={scale_width}:-1:flags=lanczos,palettegen=max_colors={max_colors}'
+            else:
+                palette_filter = f'fps={fps},scale={scale_width}:-1:flags=lanczos,palettegen=max_colors={max_colors}'
+            
+            palette_cmd = [
+                'ffmpeg',
+                '-i', video_path,
+                '-vf', palette_filter,
+                '-y',
+                palette_path
+            ]
+            
+            subprocess.run(
+                palette_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+            
+            # Pass 2: Generate optimized GIF with palette
+            if minterpolate:
+                gif_filter = f'minterpolate=fps={fps * 2}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,fps={fps},scale={scale_width}:-1:flags=lanczos[x];[x][1:v]paletteuse'
+            else:
+                gif_filter = f'fps={fps},scale={scale_width}:-1:flags=lanczos[x];[x][1:v]paletteuse'
+            
+            gif_cmd = [
+                'ffmpeg',
+                '-i', video_path,
+                '-i', palette_path,
+                '-lavfi', gif_filter,
+                '-y',
+                output_path
+            ]
+            
+            subprocess.run(
+                gif_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+            
+            try:
+                os.unlink(palette_path)
+            except:
+                pass
+            
+            self.logger.info(f"Optimized GIF created: {output_path}")
+            return output_path
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to optimize GIF: {e.stderr}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e

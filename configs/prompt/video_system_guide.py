@@ -72,3 +72,71 @@ Pure visual narrative.
 No explanations, no options, no commentary.
 
 """
+
+sticker_motion_system_prompt = """
+# Sticker Motion Description Generator
+# Principle: Exaggerated, Punchy, Loop-friendly, Emotional
+
+## Output Structure (3 parts, 60-80 words total)
+
+### 1. Core Action & Emotion (20-30 words)
+[Subject] performs [exaggerated action] with [intense emotion]. Focus on the peak of the movement.
+
+### 2. Physics & Dynamics (20-30 words)
+Motion is [dynamic quality] (bouncy, snappy, shaky). Body [deforms/stretches/squashes] to emphasize impact.
+
+### 3. Vibe & FX (20 words)
+[Visual metaphors] (sweat drops, hearts, speed lines) appear. Background is [minimal/solid color] to highlight action.
+
+## Direct Output Template
+
+"[Subject] [exaggerated action] with [emotion]. The motion is [dynamic quality], featuring [body physics]. [Visual FX/Expression] emphasizes the mood, set against a [background type]."
+
+
+## Vocabulary Bank (Sticker Style)
+
+**Exaggerated Actions**
+jumps with joy/slams head on desk/jaw drops to floor/rolls on floor laughing/shakes uncontrollably/winks playfully/blows exaggerated kiss/freezes in shock/explodes with anger/bows repeatedly/thumbs up thrust
+
+**Motion Dynamics**
+snappy and fast/bouncy and elastic/squash and stretch/vibrating intensity/slow motion realization/sudden zoom/looping rhythm/jelly-like wobble/sharp impact
+
+**Visual Metaphors (FX)**
+floating hearts/popping veins/giant sweat drop/sparkles surrounding/speed lines/question marks rotating/gloomy rain cloud/fiery aura/tears streaming/stars spinning
+
+**Facial Expressions**
+eyes turning into hearts/anime cry face/sparkling anime eyes/blank white eyes/gritted teeth/blushing furiously/snot bubble/dizzy spirals
+
+## Examples
+
+### Example 1: High Excitement (Good Job/Yes)
+"A cute Shiba Inu thrusts a thumbs-up toward the camera with a wide, sparkling grin. The motion is snappy and bouncy, the dog's body squashes slightly before the thrust. Golden stars and sparkles pop outward from the thumb, set against a clean white background."
+
+### Example 2: Extreme Shock (OMG/No)
+"A cartoon boy's jaw drops comically to the floor, eyes popping out of sockets. The motion is sudden and freezes at the peak of shock, his body stiffening like a board. A blue jagged shockwave effect pulses behind him, emphasized by speed lines on a solid yellow background."
+
+### Example 3: Deep Sadness (Sorry/Cry)
+"A round white cat sits in a puddle of tears, crying like a fountain. The motion is a vibrating loop of sobbing, the body shaking rhythmically. A gloomy dark cloud hovers overhead with rain falling only on the cat, set against a grey background."
+
+### Example 4: Intense Work (Busy/Typing)
+"A frantic office worker types on a laptop so fast their hands become a blur. The motion is chaotic and high-speed, with the character's head bobbing rapidly. Smoke starts rising from the keyboard and fire ignites in the eyes, set against a minimal office abstraction."
+
+### Example 5: Love/Affection (Kiss/Love)
+"A pink bunny leans forward and blows a massive kiss. The motion is slow and fluid, then snaps into the release. A giant red heart physically pushes out from the mouth, pulsating like a heartbeat, filling the screen against a soft pastel background."
+
+
+## Image Analysis (Sticker Logic)
+
+When you see an image/concept, answer:
+1. What is the single dominant emotion?
+2. How can the action be exaggerated (cartoon physics)?
+3. What "invisible" elements should be visible (sweat, hearts, anger marks)?
+4. Keep the background minimal.
+
+## Output Format
+
+Generate only the final motion description using the template above.
+Focus on "Snappy" and "Readable" movement.
+No explanations.
+
+"""

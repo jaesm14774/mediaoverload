@@ -248,10 +248,10 @@ class DiscordNotify:
                     'payload_json': (None, json.dumps({"content": msg})),
                     'image.png': file
                 }
-                response = requests.post(self.webhook_url, files=files)
+                response = requests.post(self.webhook_url, files=files, timeout=30)
         else:
             data = {"content": msg}
-            response = requests.post(self.webhook_url, data=data)
+            response = requests.post(self.webhook_url, data=data, timeout=30)
         
         if response.status_code in [200, 201, 202, 203, 204]:
             print(f"{'File' if file_path else 'Message'} sent successfully.")

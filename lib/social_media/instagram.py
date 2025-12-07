@@ -1,5 +1,7 @@
 import os
 import time
+import tempfile
+import random
 from dotenv import load_dotenv
 
 from .models import MediaPost
@@ -10,10 +12,13 @@ class InstagramPlatform(SocialMediaPlatform):
     
     def __init__(self, config_folder_path: str, prefix=''):
         from utils.logger import setup_logger
+        from lib.services.implementations.ffmpeg_service import FFmpegService
         self.logger = setup_logger(__name__)
         self.config_folder_path = config_folder_path
         self.prefix = prefix
         self.client = None
+        self.ffmpeg_service = FFmpegService()
+        self.temp_files = []
         self.load_config()
         self.authenticate()
     
@@ -108,9 +113,23 @@ class InstagramPlatform(SocialMediaPlatform):
                 # 單一媒體
                 media_path = valid_media_paths[0]
                 if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
-                    # 影片
-                    self.logger.info(f"正在上傳影片: {media_path}")
-                    media = self.client.clip_upload(media_path, caption)
+                    # 影片 - 如果是 GIF，先轉換為 MP4
+                    upload_path = media_path
+                    if media_path.lower().endswith('.gif'):
+                        self.logger.info(f"檢測到 GIF 檔案，轉換為 MP4 以符合 Instagram 格式要求")
+                        temp_mp4 = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+                        temp_mp4.close()
+                        upload_path = self.ffmpeg_service.gif_to_mp4(
+                            gif_path=media_path,
+                            output_path=temp_mp4.name,
+                            fps=None,  # 自動從 GIF 讀取 fps
+                            loop=0
+                        )
+                        self.temp_files.append(upload_path)
+                        self.logger.info(f"GIF 已轉換為 MP4: {upload_path}")
+                    
+                    self.logger.info(f"正在上傳影片: {upload_path}")
+                    media = self.client.clip_upload(upload_path, caption)
                 else:
                     # 圖片
                     self.logger.info(f"正在上傳圖片: {media_path}")
@@ -123,51 +142,102 @@ class InstagramPlatform(SocialMediaPlatform):
                     self.logger.warning(f"媒體數量超過限制 (10)，將只使用前 10 個")
                 
                 # album_upload 支援的格式：圖片 (.jpg, .jpeg, .webp) 和影片 (.mp4)
-                supported_formats = ('.jpg', '.jpeg', '.webp', '.mp4')
-                supported_media = [p for p in media_paths if p.lower().endswith(supported_formats)]
+                # 將 GIF 轉換為 MP4 後加入相簿
+                converted_media = []
+                for media_path in media_paths:
+                    if media_path.lower().endswith('.gif'):
+                        # GIF 轉換為 MP4
+                        self.logger.info(f"檢測到 GIF 檔案，轉換為 MP4 以符合 Instagram 格式要求")
+                        temp_mp4 = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+                        temp_mp4.close()
+                        converted_path = self.ffmpeg_service.gif_to_mp4(
+                            gif_path=media_path,
+                            output_path=temp_mp4.name,
+                            fps=None,  # 自動從 GIF 讀取 fps
+                            loop=0
+                        )
+                        self.temp_files.append(converted_path)
+                        converted_media.append(converted_path)
+                        self.logger.info(f"GIF 已轉換為 MP4: {converted_path}")
+                    elif media_path.lower().endswith(('.jpg', '.jpeg', '.webp', '.mp4')):
+                        # 直接支援的格式
+                        converted_media.append(media_path)
                 
-                if len(supported_media) == len(media_paths):
-                    # 所有媒體都是相簿支援的格式，可以創建相簿
-                    image_count = len([p for p in supported_media if p.lower().endswith(('.jpg', '.jpeg', '.webp'))])
-                    video_count = len([p for p in supported_media if p.lower().endswith('.mp4')])
+                if converted_media:
+                    image_count = len([p for p in converted_media if p.lower().endswith(('.jpg', '.jpeg', '.webp'))])
+                    video_count = len([p for p in converted_media if p.lower().endswith('.mp4')])
                     self.logger.info(f"正在上傳相簿，包含 {image_count} 張圖片和 {video_count} 個影片")
-                    media = self.client.album_upload(supported_media, caption)
+                    media = self.client.album_upload(converted_media, caption)
                 else:
-                    # 包含不支援的格式，只上傳支援的媒體或第一個媒體
-                    unsupported = [p for p in media_paths if not p.lower().endswith(supported_formats)]
-                    if unsupported:
-                        self.logger.warning(f"相簿不支援以下格式的媒體: {', '.join(unsupported)}")
-                    
-                    if supported_media:
-                        # 如果有支援的媒體，上傳所有支援的媒體
-                        image_count = len([p for p in supported_media if p.lower().endswith(('.jpg', '.jpeg', '.webp'))])
-                        video_count = len([p for p in supported_media if p.lower().endswith('.mp4')])
-                        self.logger.info(f"正在上傳相簿（僅支援的格式），包含 {image_count} 張圖片和 {video_count} 個影片")
-                        media = self.client.album_upload(supported_media, caption)
+                    # 如果沒有支援的媒體，只上傳第一個媒體
+                    self.logger.warning("沒有相簿支援的格式，將只上傳第一個媒體")
+                    media_path = media_paths[0]
+                    if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
+                        # 如果是 GIF，先轉換為 MP4
+                        upload_path = media_path
+                        if media_path.lower().endswith('.gif'):
+                            self.logger.info(f"檢測到 GIF 檔案，轉換為 MP4 以符合 Instagram 格式要求")
+                            temp_mp4 = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+                            temp_mp4.close()
+                            upload_path = self.ffmpeg_service.gif_to_mp4(
+                                gif_path=media_path,
+                                output_path=temp_mp4.name,
+                                fps=None,  # 自動從 GIF 讀取 fps
+                                loop=0
+                            )
+                            self.temp_files.append(upload_path)
+                            self.logger.info(f"GIF 已轉換為 MP4: {upload_path}")
+                        media = self.client.clip_upload(upload_path, caption)
                     else:
-                        # 如果沒有支援的媒體，只上傳第一個
-                        self.logger.warning("沒有相簿支援的格式，將只上傳第一個媒體")
-                        media_path = media_paths[0]
-                        if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
-                            media = self.client.clip_upload(media_path, caption)
-                        else:
-                            media = self.client.photo_upload(media_path, caption)
+                        media = self.client.photo_upload(media_path, caption)
             
             if media:
                 media_id = media.pk if hasattr(media, 'pk') else media.id if hasattr(media, 'id') else None
                 self.logger.info(f"Instagram 貼文發布成功，Media ID: {media_id}")
+                
+                # 檢查是否需要分享到 Story
+                if post.additional_params and post.additional_params.get('share_to_story', False):
+                    self.logger.info("開始分享到 Story")
+                    # 只選擇圖片（不選擇影片）進行隨機分享
+                    image_paths = [path for path in valid_media_paths 
+                                  if not path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm'))]
+                    
+                    if image_paths:
+                        # 隨機選擇一張圖片
+                        random_image = random.choice(image_paths)
+                        self.logger.info(f"隨機選擇圖片分享到 Story: {random_image}")
+                        
+                        story_post = MediaPost(
+                            media_paths=[random_image],
+                            caption=post.caption or '',
+                            hashtags=post.hashtags
+                        )
+                        story_result = self.share_story(story_post)
+                        if story_result:
+                            self.logger.info("Story 分享成功")
+                        else:
+                            self.logger.warning("Story 分享失敗")
+                    else:
+                        self.logger.warning("沒有可用的圖片分享到 Story")
+                
+                # 清理臨時檔案
+                self._cleanup_temp_files()
                 return True
             else:
                 self.logger.error("Instagram 貼文發布失敗：未返回媒體數據")
+                # 清理臨時檔案
+                self._cleanup_temp_files()
                 return False
                 
         except Exception as e:
             error_msg = f"Instagram 上傳失敗: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
+            # 清理臨時檔案
+            self._cleanup_temp_files()
             return False
 
     def share_story(self, post: MediaPost) -> bool:
-        """分享 Story 到 Instagram"""
+        """分享 Story 到 Instagram（只上傳第一張媒體）"""
         try:
             if not self.client:
                 error_msg = "Instagram 客戶端未初始化，請先進行認證"
@@ -183,25 +253,56 @@ class InstagramPlatform(SocialMediaPlatform):
                 self.logger.error("所有媒體文件都不存在")
                 return False
 
-            success_count = 0
-            for media_path in valid_media_paths:
-                try:
-                    if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
-                        self.logger.info(f"正在上傳影片 Story: {media_path}")
-                        self.client.video_upload_to_story(media_path, caption=post.caption)
-                    else:
-                        self.logger.info(f"正在上傳圖片 Story: {media_path}")
-                        self.client.photo_upload_to_story(media_path, caption=post.caption)
-                    success_count += 1
-                except Exception as e:
-                    self.logger.error(f"上傳 Story 失敗 ({media_path}): {str(e)}")
-            
-            return success_count > 0
+            # 只處理第一張媒體
+            media_path = valid_media_paths[0]
+            try:
+                if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.gif', '.webm')):
+                    # 如果是 GIF，先轉換為 MP4
+                    upload_path = media_path
+                    if media_path.lower().endswith('.gif'):
+                        self.logger.info(f"檢測到 GIF 檔案，轉換為 MP4 以符合 Instagram 格式要求")
+                        temp_mp4 = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+                        temp_mp4.close()
+                        upload_path = self.ffmpeg_service.gif_to_mp4(
+                            gif_path=media_path,
+                            output_path=temp_mp4.name,
+                            fps=None,  # 自動從 GIF 讀取 fps
+                            loop=0
+                        )
+                        self.temp_files.append(upload_path)
+                        self.logger.info(f"GIF 已轉換為 MP4: {upload_path}")
+                    self.logger.info(f"正在上傳影片 Story: {upload_path}")
+                    self.client.video_upload_to_story(upload_path, caption=post.caption)
+                else:
+                    self.logger.info(f"正在上傳圖片 Story: {media_path}")
+                    self.client.photo_upload_to_story(media_path, caption=post.caption)
+                
+                # 清理臨時檔案
+                self._cleanup_temp_files()
+                return True
+            except Exception as e:
+                self.logger.error(f"上傳 Story 失敗 ({media_path}): {str(e)}")
+                # 清理臨時檔案
+                self._cleanup_temp_files()
+                return False
 
         except Exception as e:
             error_msg = f"Instagram Story 上傳失敗: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
+            # 清理臨時檔案
+            self._cleanup_temp_files()
             return False
+
+    def _cleanup_temp_files(self):
+        """清理臨時轉換的 MP4 檔案"""
+        for temp_file in self.temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    self.logger.debug(f"已刪除臨時檔案: {temp_file}")
+            except Exception as e:
+                self.logger.warning(f"無法刪除臨時檔案 {temp_file}: {e}")
+        self.temp_files = []
     
     def load_config(self) -> None:
         """載入 Instagram 配置"""

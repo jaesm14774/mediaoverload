@@ -31,6 +31,7 @@ class Text2Image2ImageStrategy(ContentStrategy):
         self.descriptions: List[str] = []
         self.first_stage_images: List[str] = []
         self.filter_results: List[Dict[str, Any]] = []
+        self._reviewed = False
 
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -189,8 +190,10 @@ class Text2Image2ImageStrategy(ContentStrategy):
     def needs_user_review(self) -> bool:
         """檢查是否需要使用者審核
         
-        當有 filter_results 時，需要使用者審核選擇最終要發布的圖片
+        Text2Image2Image 只需要一次審核（選擇最終要發布的圖片）
         """
+        if self._reviewed:
+            return False
         return hasattr(self, 'filter_results') and len(self.filter_results) > 0
     
     def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
@@ -202,12 +205,12 @@ class Text2Image2ImageStrategy(ContentStrategy):
             return self.filter_results[:max_items]
         return []
     
-    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+    def handle_review_result(self, selected_indices: List[int], output_dir: str, selected_paths: List[str] = None) -> bool:
         """處理使用者審核結果
         
-        對於 Text2Image2ImageStrategy，審核後不需要特殊處理
-        返回 True 表示成功處理
+        對於 Text2Image2ImageStrategy，審核後標記為已審核，不需要第二次審核
         """
+        self._reviewed = True
         return True
     
     def generate_article_content(self):

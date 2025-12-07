@@ -32,7 +32,7 @@ class ComfyUICommunicator:
         p = {"prompt": prompt, "client_id": self.client_id}
         data = json.dumps(p).encode('utf-8')
         req = request.Request(f"http://{self.server_address}/prompt", data=data)
-        return json.loads(request.urlopen(req).read())
+        return json.loads(request.urlopen(req, timeout=30).read())
     
     def upload_image(self, image_path: str, subfolder: str = "", overwrite: bool = False) -> str:
         """上傳圖片到 ComfyUI 伺服器
@@ -96,7 +96,7 @@ class ComfyUICommunicator:
         )
         
         try:
-            response = request.urlopen(req)
+            response = request.urlopen(req, timeout=60)
             result = json.loads(response.read().decode('utf-8'))
             uploaded_filename = result.get('name', filename)
             print(f"✅ 圖片已上傳到 ComfyUI: {uploaded_filename}")
@@ -114,11 +114,11 @@ class ComfyUICommunicator:
         """
         data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
         url_values = urllib.parse.urlencode(data)
-        with request.urlopen(f"http://{self.server_address}/view?{url_values}") as response:
+        with request.urlopen(f"http://{self.server_address}/view?{url_values}", timeout=60) as response:
             return response.read()
             
     def get_history(self, prompt_id):
-        with request.urlopen(f"http://{self.server_address}/history/{prompt_id}") as response:
+        with request.urlopen(f"http://{self.server_address}/history/{prompt_id}", timeout=30) as response:
             return json.loads(response.read())
     
     def wait_for_completion(self, prompt_id):

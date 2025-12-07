@@ -415,7 +415,7 @@ class ContentStrategy(ABC):
         """
         return media_paths
     
-    def handle_review_result(self, selected_indices: List[int], output_dir: str) -> bool:
+    def handle_review_result(self, selected_indices: List[int], output_dir: str, selected_paths: List[str] = None) -> bool:
         """處理使用者審核結果
         
         預設返回 False（不需要後續操作），子類可以覆寫此方法來執行後續階段
@@ -424,6 +424,7 @@ class ContentStrategy(ABC):
         Args:
             selected_indices: 使用者選擇的項目索引列表（相對於 get_review_items 返回的列表）
             output_dir: 輸出路徑
+            selected_paths: 使用者選擇的媒體路徑列表（優先使用，避免重複調用 get_review_items）
             
         Returns:
             bool: 如果成功處理返回 True，否則返回 False
