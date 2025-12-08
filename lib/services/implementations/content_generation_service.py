@@ -7,7 +7,6 @@ text-to-image, image-to-image, and text-to-video workflows.
 from typing import Dict, Any, List
 from lib.services.interfaces.content_generation_service import IContentGenerationService
 from lib.media_auto.strategies.base_strategy import GenerationConfig
-from lib.media_auto.factory.strategy_factory import StrategyFactory
 from utils.logger import setup_logger
 import glob
 
@@ -69,6 +68,8 @@ class ContentGenerationService(IContentGenerationService):
         self.logger.info("開始內容生成流程")
 
         # Select and load generation strategy
+        # 延遲導入以避免循環導入
+        from lib.media_auto.factory.strategy_factory import StrategyFactory
         generation_type = config.get_all_attributes().get('generation_type', 'text2img')
         self.strategy = StrategyFactory.get_strategy(
             generation_type,

@@ -122,8 +122,7 @@ class InstagramPlatform(SocialMediaPlatform):
                         upload_path = self.ffmpeg_service.gif_to_mp4(
                             gif_path=media_path,
                             output_path=temp_mp4.name,
-                            fps=None,  # 自動從 GIF 讀取 fps
-                            loop=0
+                            fps=None  # 自動從 GIF 讀取 fps
                         )
                         self.temp_files.append(upload_path)
                         self.logger.info(f"GIF 已轉換為 MP4: {upload_path}")
@@ -153,8 +152,7 @@ class InstagramPlatform(SocialMediaPlatform):
                         converted_path = self.ffmpeg_service.gif_to_mp4(
                             gif_path=media_path,
                             output_path=temp_mp4.name,
-                            fps=None,  # 自動從 GIF 讀取 fps
-                            loop=0
+                            fps=None  # 自動從 GIF 讀取 fps
                         )
                         self.temp_files.append(converted_path)
                         converted_media.append(converted_path)
@@ -266,8 +264,7 @@ class InstagramPlatform(SocialMediaPlatform):
                         upload_path = self.ffmpeg_service.gif_to_mp4(
                             gif_path=media_path,
                             output_path=temp_mp4.name,
-                            fps=None,  # 自動從 GIF 讀取 fps
-                            loop=0
+                            fps=None  # 自動從 GIF 讀取 fps
                         )
                         self.temp_files.append(upload_path)
                         self.logger.info(f"GIF 已轉換為 MP4: {upload_path}")

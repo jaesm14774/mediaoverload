@@ -649,12 +649,13 @@ class FFmpegService:
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
-    def _get_gif_fps(self, gif_path: str) -> float:
+    def _get_gif_fps(self, gif_path: str, timeout: int = 30) -> Optional[float]:
         """
         Get FPS from GIF file using ffprobe.
         
         Args:
             gif_path: Path to GIF file
+            timeout: Timeout in seconds (default: 30)
         
         Returns:
             FPS value, or None if cannot be determined
@@ -674,7 +675,8 @@ class FFmpegService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=True,
-                text=True
+                text=True,
+                timeout=timeout
             )
             
             frame_rate = result.stdout.strip()
@@ -685,8 +687,11 @@ class FFmpegService:
                     return fps
             
             return None
+        except subprocess.TimeoutExpired:
+            self.logger.debug(f"獲取 GIF FPS 超時: {gif_path}")
+            return None
         except Exception as e:
-            self.logger.debug(f"Could not get FPS from GIF {gif_path}: {e}")
+            self.logger.debug(f"無法從 GIF 獲取 FPS {gif_path}: {e}")
             return None
 
     def gif_to_mp4(
@@ -695,22 +700,35 @@ class FFmpegService:
         output_path: str,
         fps: Optional[float] = None,
         loop: int = 0,
-        pix_fmt: str = 'yuv420p'
+        pix_fmt: str = 'yuv420p',
+        timeout: int = 120
     ) -> str:
         """
         Convert GIF to MP4 video.
+        
+        注意：此方法不使用 -stream_loop，因為它會導致轉換卡住。
+        對於 Instagram，只需要將 GIF 轉換為 MP4 一次即可，不需要循環輸入。
         
         Args:
             gif_path: Path to input GIF file
             output_path: Path for output MP4 file
             fps: Frames per second (None = auto-detect from GIF, default: None)
-            loop: Number of loops (0 = infinite, -1 = no loop, default: 0)
+            loop: 已棄用，保留以維持 API 相容性，但不會使用
             pix_fmt: Pixel format (default: 'yuv420p' for compatibility)
+            timeout: Timeout in seconds (default: 120 = 2 minutes)
         
         Returns:
             Path to output MP4
         """
         try:
+            # 檢查輸入檔案是否存在
+            if not os.path.exists(gif_path):
+                raise FileNotFoundError(f"GIF 檔案不存在: {gif_path}")
+            
+            # 檢查檔案大小
+            file_size = os.path.getsize(gif_path)
+            self.logger.info(f"開始轉換 GIF 為 MP4: {gif_path} (大小: {file_size / 1024 / 1024:.2f} MB)")
+            
             # Auto-detect FPS from GIF if not provided
             if fps is None:
                 detected_fps = self._get_gif_fps(gif_path)
@@ -721,37 +739,78 @@ class FFmpegService:
                     fps = 10  # Default FPS for GIFs
                     self.logger.debug(f"Using default FPS: {fps}")
             
-            cmd = ['ffmpeg']
-            
-            # -stream_loop must be before -i
-            if loop != -1:
-                if loop == 0:
-                    cmd.extend(['-stream_loop', '-1'])
-                else:
-                    cmd.extend(['-stream_loop', str(loop)])
-            
-            cmd.extend([
+            # 構建 FFmpeg 命令
+            # 重要：不使用 -stream_loop，因為它會導致轉換卡住
+            # 直接轉換 GIF 一次即可，Instagram 會自動循環播放 MP4
+            cmd = [
+                'ffmpeg',
                 '-i', gif_path,
                 '-vf', f'fps={fps}',
                 '-c:v', 'libx264',
                 '-pix_fmt', pix_fmt,
-                '-y',
+                '-movflags', 'faststart',  # 優化串流播放
+                '-y',  # 覆蓋輸出檔案
                 output_path
-            ])
+            ]
             
-            subprocess.run(
+            self.logger.debug(f"執行 FFmpeg 命令: {' '.join(cmd)}")
+            
+            # 執行轉換，捕獲 stderr 以便錯誤診斷
+            result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                check=True
+                check=True,
+                timeout=timeout
             )
             
-            self.logger.info(f"Converted {gif_path} to MP4: {output_path} (FPS: {fps})")
+            # 檢查輸出檔案是否存在
+            if not os.path.exists(output_path):
+                stderr_output = result.stderr.decode('utf-8', errors='ignore') if isinstance(result.stderr, bytes) else str(result.stderr)
+                raise RuntimeError(f"轉換完成但輸出檔案不存在: {output_path}\nFFmpeg stderr: {stderr_output}")
+            
+            # 檢查輸出檔案大小（應該大於 0）
+            output_size = os.path.getsize(output_path)
+            if output_size == 0:
+                stderr_output = result.stderr.decode('utf-8', errors='ignore') if isinstance(result.stderr, bytes) else str(result.stderr)
+                raise RuntimeError(f"轉換完成但輸出檔案為空: {output_path}\nFFmpeg stderr: {stderr_output}")
+            
+            self.logger.info(f"GIF 轉換為 MP4 完成: {output_path} (FPS: {fps}, 大小: {output_size / 1024 / 1024:.2f} MB)")
             return output_path
             
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Failed to convert GIF to MP4: {e.stderr}"
+        except subprocess.TimeoutExpired as e:
+            error_msg = f"GIF 轉 MP4 轉換超時（超過 {timeout} 秒）: {gif_path}"
             self.logger.error(error_msg)
+            # 嘗試清理可能的部分輸出檔案
+            if os.path.exists(output_path):
+                try:
+                    os.unlink(output_path)
+                except:
+                    pass
+            raise RuntimeError(error_msg) from e
+        except subprocess.CalledProcessError as e:
+            stderr_output = e.stderr.decode('utf-8', errors='ignore') if isinstance(e.stderr, bytes) else str(e.stderr)
+            error_msg = f"GIF 轉 MP4 轉換失敗: {gif_path}\nFFmpeg stderr: {stderr_output}"
+            self.logger.error(error_msg)
+            # 嘗試清理可能的部分輸出檔案
+            if os.path.exists(output_path):
+                try:
+                    os.unlink(output_path)
+                except:
+                    pass
+            raise RuntimeError(error_msg) from e
+        except FileNotFoundError as e:
+            self.logger.error(f"檔案不存在: {e}")
+            raise
+        except Exception as e:
+            error_msg = f"GIF 轉 MP4 轉換時發生未預期的錯誤: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            # 嘗試清理可能的部分輸出檔案
+            if os.path.exists(output_path):
+                try:
+                    os.unlink(output_path)
+                except:
+                    pass
             raise RuntimeError(error_msg) from e
 
     def optimize_gif(
