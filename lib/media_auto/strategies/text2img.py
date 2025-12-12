@@ -49,14 +49,31 @@ class Text2ImageStrategy(ContentStrategy):
         style = self._get_config_value(image_config, 'style', '')
         image_system_prompt = self._get_system_prompt(image_config)
         
-        prompt = self.config.prompt
+        # 獲取 prompt（關鍵詞）
+        prompt = getattr(self.config, 'prompt', None)
+        
+        # 如果 prompt 為 None，嘗試從 _attributes 獲取
+        if prompt is None and hasattr(self.config, '_attributes'):
+            prompt = self.config._attributes.get('prompt')
+        
+        # 驗證 prompt 不為空
+        if not prompt or not str(prompt).strip():
+            error_msg = f"prompt (關鍵詞) 不能為空！請確保在 GenerationConfig 中設置了 prompt 屬性。"
+            error_msg += f"\n當前 config.prompt = {repr(prompt)}"
+            if hasattr(self.config, '_attributes'):
+                error_msg += f"\nconfig._attributes = {self.config._attributes}"
+            raise ValueError(error_msg)
+        
+        prompt = str(prompt).strip()
+        print(f'📝 使用的 prompt (關鍵詞): {prompt}')
+        
         if style and style.strip():
             prompt = f"{prompt}\nstyle: {style}".strip()
             
         # Add character info if needed
         if self.config.character:
             char_lower = self.config.character.lower()
-            if char_lower not in prompt.lower() and "main character" not in prompt.lower():
+            if prompt and char_lower not in prompt.lower() and "main character" not in prompt.lower():
                 prompt = f"Main character: {self.config.character}\n{prompt}"
 
         try:

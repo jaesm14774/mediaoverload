@@ -44,7 +44,8 @@ class MediaGenerator:
         )
 
         if not success:
-            raise RuntimeError(f"Media generation failed for {workflow_path}")
+            error_msg = saved_files[0] if isinstance(saved_files, list) and saved_files and isinstance(saved_files[0], str) else "Unknown error"
+            raise RuntimeError(f"Media generation failed for {workflow_path}: {error_msg}")
 
         return saved_files
 

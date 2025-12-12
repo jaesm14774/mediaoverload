@@ -508,10 +508,11 @@ class ComfyUICommunicator:
             return self.save_results(prompt_id, output_path, file_name)
             
         except Exception as e:
-            print(f"Error processing workflow: {str(e)}")
+            error_msg = f"Error processing workflow: {str(e)}"
+            print(error_msg)
             import traceback
             traceback.print_exc()
-            return False, []
+            return False, [error_msg]
         finally:
             # 只在 auto_close=True 時關閉 WebSocket
             if auto_close and self.ws and self.ws.connected:

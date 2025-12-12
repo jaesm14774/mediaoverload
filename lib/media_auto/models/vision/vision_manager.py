@@ -70,12 +70,20 @@ class VisionContentManager:
     def generate_image_prompts(self, user_input: str, system_prompt_key: str = 'stable_diffusion_prompt', **kwargs) -> str:
         """根據用戶輸入生成圖片描述提示詞"""
         
+        # 驗證 user_input 不為空
+        if not user_input or not str(user_input).strip():
+            raise ValueError(f"user_input (關鍵詞) 不能為空！當前值: {repr(user_input)}")
+        
+        user_input = str(user_input).strip()
+        
         actual_key_to_use = system_prompt_key
         if system_prompt_key not in self.prompts:
             print(f"Warning: Prompt key '{system_prompt_key}' not found in prompts configuration. Falling back to default 'stable_diffusion_prompt'.")
             actual_key_to_use = 'stable_diffusion_prompt'
 
         print(f"Using image system prompt key: {actual_key_to_use}")
+        print(f"📝 傳遞給 LLM 的 user_input (關鍵詞): {user_input}")
+        
         messages = [
             {'role': 'system', 'content': self.prompts[actual_key_to_use]},
             {'role': 'user', 'content': user_input}

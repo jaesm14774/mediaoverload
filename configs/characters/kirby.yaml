@@ -179,6 +179,7 @@ additional_params:
         images_per_expression: 1
       animated_config:
         enabled: true
+        gif_probability: 0.5
         i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
         # Sticker GIF 專用參數（短動畫）
         total_frames: 36

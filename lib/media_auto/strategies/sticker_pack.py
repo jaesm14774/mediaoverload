@@ -197,7 +197,7 @@ class StickerPackStrategy(ContentStrategy):
         return [{'media_path': p, 'similarity': 1.0} for p in self.static_stickers[:max_items]]
 
     def handle_review_result(self, selected_indices: List[int], output_dir: str, selected_paths: List[str] = None) -> bool:
-        """Handle user selection and generate animated GIFs.
+        """Handle user selection and optionally generate animated GIFs.
         
         Args:
             selected_indices: 用戶選擇的索引（向後兼容）
@@ -223,16 +223,34 @@ class StickerPackStrategy(ContentStrategy):
             ]
             return True
         
-        # Generate animated GIFs for selected stickers
+        # 檢查是否要生成動畫 GIF
         sticker_config = self._get_strategy_config('sticker_pack')
         animated_config = sticker_config.get('animated_config', {})
         
         if not animated_config.get('enabled', True):
             self.logger.info("Animated stickers disabled in config")
+            self.filter_results = [
+                {'media_path': p, 'description': '', 'similarity': 1.0}
+                for p in selected_paths
+            ]
             self._gifs_generated = True
             return True
         
-        self._generate_animated_stickers(selected_paths, output_dir)
+        # 隨機決定是否生成 GIF（預設 50% 機率）
+        gif_probability = animated_config.get('gif_probability', 0.5)
+        should_generate_gif = random.random() < gif_probability
+        
+        if should_generate_gif:
+            self.logger.info(f"🎬 決定生成動畫 GIF（機率: {gif_probability:.0%}）")
+            self._generate_animated_stickers(selected_paths, output_dir)
+        else:
+            self.logger.info(f"🖼️ 決定使用靜態貼圖（機率: {1-gif_probability:.0%}）")
+            self.filter_results = [
+                {'media_path': p, 'description': '', 'similarity': 1.0}
+                for p in selected_paths
+            ]
+            self._gifs_generated = True
+        
         return True
 
     def _generate_animated_stickers(self, image_paths: List[str], output_dir: str):

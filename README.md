@@ -390,26 +390,33 @@ generate_media()
   ↓
 needs_user_review() → True
   ↓
-【Discord 審核：選擇要轉為動態 GIF 的圖片】
+【Discord 審核：選擇要使用的圖片】
   ↓
 handle_review_result()
   ↓
-_generate_animated_stickers()
-  ↓
-  對選中的圖片：
-    1. 使用 I2V 生成短影片
-    2. 使用 FFmpeg 轉換為優化 GIF
-  ↓
-needs_user_review() → True
-  ↓
-【Discord 審核：選擇最終要發布的 GIF】
+  隨機決定（根據 gif_probability）：
+    ├─ 生成動態 GIF（機率：gif_probability）
+    │   ↓
+    │  _generate_animated_stickers()
+    │   ↓
+    │  對選中的圖片：
+    │    1. 使用 I2V 生成短影片
+    │    2. 使用 FFmpeg 轉換為優化 GIF
+    │   ↓
+    │  needs_user_review() → True
+    │   ↓
+    │  【Discord 審核：選擇最終要發布的 GIF】
+    │
+    └─ 使用靜態貼圖（機率：1 - gif_probability）
+        ↓
+        直接跳到生成文章內容
   ↓
 生成文章內容
 ```
 
 #### 特點
 - **LLM 自動生成表情**：使用 OpenRouter 隨機模型生成多樣化表情
-- **支援動態 GIF**：將選中的靜態貼圖轉為動態 GIF
+- **隨機動態/靜態**：根據配置的機率隨機決定生成動態 GIF 或使用靜態貼圖，增加內容多樣性
 - **統一風格**：所有貼圖保持一致的 LINE 貼圖風格
 - **GIF 優化**：使用 FFmpeg 二階段轉換，最佳化檔案大小
 - **動作補幀**：使用 minterpolate 進行幀插值，讓動畫更流暢自然
@@ -426,6 +433,7 @@ sticker_pack:
   
   animated_config:
     enabled: true
+    gif_probability: 0.5        # 生成 GIF 的機率（0.0-1.0），預設 0.5（50%）
     i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
     # 短動畫參數（控制 GIF 長度）
     total_frames: 33        # 總幀數（33 frames / 12 fps ≈ 2.75 秒）

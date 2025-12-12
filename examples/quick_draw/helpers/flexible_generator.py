@@ -69,7 +69,7 @@ class FlexibleGenerator:
                  output_folder: Optional[str] = None,
                  env_path: Optional[str] = None,
                  default_image_workflow: str = 'nova-anime-xl',
-                 default_video_workflow: str = 'video-workflow',
+                 default_video_workflow: str = 'wan2.1_t2v_audio.json',
                  verbose: bool = True):
         """初始化彈性生成器
 
