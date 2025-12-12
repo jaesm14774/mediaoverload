@@ -1,4 +1,4 @@
-"""TTS Service - Text-to-Speech using Edge-TTS"""
+"""TTS 服務"""
 import asyncio
 import os
 import tempfile
@@ -15,28 +15,8 @@ except ImportError:
 
 
 class TTSService:
-    """
-    Text-to-Speech service using Edge-TTS.
+    """TTS 服務"""
     
-    Provides narration audio generation for long-form video segments.
-    Uses Microsoft Edge's neural TTS voices for high-quality speech synthesis.
-    
-    Features:
-    - Multiple voice options (different languages and genders)
-    - Adjustable speech rate
-    - High-quality neural voices
-    - Free to use (no API key required)
-    
-    Example:
-        >>> tts = TTSService()
-        >>> audio_path = await tts.generate_speech(
-        ...     "Hello, this is a test narration",
-        ...     output_path="narration.mp3",
-        ...     voice="en-US-AriaNeural"
-        ... )
-    """
-    
-    # Popular voice options
     VOICES = {
         # English voices
         "en-US-AriaNeural": "Female, American English (default)",
@@ -56,24 +36,11 @@ class TTSService:
     }
     
     def __init__(self, default_voice: str = "en-US-AriaNeural"):
-        """
-        Initialize TTS service.
-        
-        Args:
-            default_voice: Default voice to use for speech generation
-        
-        Raises:
-            ImportError: If edge-tts is not installed
-        """
         if not EDGE_TTS_AVAILABLE:
-            raise ImportError(
-                "edge-tts is not installed. "
-                "Install it with: pip install edge-tts"
-            )
+            raise ImportError("edge-tts is not installed. Install it with: pip install edge-tts")
         
         self.default_voice = default_voice
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"TTSService initialized with voice: {default_voice}")
     
     async def generate_speech(
         self,
@@ -82,52 +49,36 @@ class TTSService:
         voice: Optional[str] = None,
         rate: str = "+0%"
     ) -> str:
-        """
-        Generate speech from text using Edge-TTS.
+        """生成語音
         
         Args:
-            text: Text to convert to speech
-            output_path: Path for output audio file (e.g., 'narration.mp3')
-            voice: Voice to use (if None, uses default_voice)
-            rate: Speech rate adjustment (e.g., "+10%", "-20%", "+0%")
-                  Positive values = faster, negative = slower
-        
+            text: 要轉換的文字
+            output_path: 輸出音訊檔案路徑
+            voice: 語音（None 則使用預設語音）
+            rate: 語速調整（例如: "+10%", "-20%", "+0%"）
+                  正值 = 更快，負值 = 更慢
+                  
         Returns:
-            Path to generated audio file
-        
+            生成的音訊檔案路徑
+            
         Raises:
-            RuntimeError: If speech generation fails
-        
-        Example:
-            >>> audio = await tts.generate_speech(
-            ...     "Welcome to this video",
-            ...     "segment1_audio.mp3",
-            ...     rate="+10%"  # Slightly faster
-            ... )
+            RuntimeError: 生成失敗時
         """
         voice = voice or self.default_voice
         
         try:
-            # Ensure output directory exists
             output_dir = os.path.dirname(output_path)
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             
-            # Create TTS communicator
             communicate = edge_tts.Communicate(text, voice, rate=rate)
-            
-            # Generate and save audio
             await communicate.save(output_path)
             
-            # Verify file was created
             if not os.path.exists(output_path):
                 raise RuntimeError(f"Audio file was not created: {output_path}")
             
             file_size = os.path.getsize(output_path)
-            self.logger.info(
-                f"Generated speech: {len(text)} chars → "
-                f"{output_path} ({file_size} bytes, voice: {voice})"
-            )
+            self.logger.info(f"已生成語音: {len(text)} 字元 → {output_path} ({file_size} bytes, 語音: {voice})")
             
             return output_path
             
@@ -143,29 +94,23 @@ class TTSService:
         voice: Optional[str] = None,
         rate: str = "+0%"
     ) -> str:
-        """
-        Synchronous wrapper for generate_speech.
+        """同步版本的 generate_speech
         
-        Use this if you need to call TTS from non-async code.
-        Handles both cases: when called from sync context and when called from async context.
+        用於從非 async 程式碼呼叫 TTS。
         
         Args:
-            text: Text to convert to speech
-            output_path: Path for output audio file
-            voice: Voice to use (if None, uses default_voice)
-            rate: Speech rate adjustment
-        
+            text: 要轉換的文字
+            output_path: 輸出音訊檔案路徑
+            voice: 語音（None 則使用預設語音）
+            rate: 語速調整
+            
         Returns:
-            Path to generated audio file
+            生成的音訊檔案路徑
         """
         try:
-            # Try to get the current event loop
             loop = asyncio.get_running_loop()
-            # If we're in an async context, we need to use a different approach
-            # We'll create a new event loop in a thread
             
             def run_in_thread():
-                # Create a new event loop for this thread
                 new_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(new_loop)
                 try:
@@ -175,13 +120,11 @@ class TTSService:
                 finally:
                     new_loop.close()
             
-            # Run in a separate thread
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_thread)
                 return future.result()
                 
         except RuntimeError:
-            # No running event loop, we can use asyncio.run()
             return asyncio.run(
                 self.generate_speech(text, output_path, voice, rate)
             )
@@ -194,29 +137,19 @@ class TTSService:
         rate: str = "+0%",
         filename_prefix: str = "segment"
     ) -> List[str]:
-        """
-        Generate multiple speech files from a list of texts.
+        """生成多個語音檔案
         
-        Useful for generating narration for all video segments at once.
+        用於一次生成所有影片片段的旁白。
         
         Args:
-            texts: List of text strings to convert
-            output_dir: Directory to save audio files
-            voice: Voice to use for all segments
-            rate: Speech rate adjustment
-            filename_prefix: Prefix for output filenames
-        
+            texts: 要轉換的文字列表
+            output_dir: 儲存音訊檔案的目錄
+            voice: 所有片段使用的語音
+            rate: 語速調整
+            filename_prefix: 輸出檔名前綴
+            
         Returns:
-            List of paths to generated audio files
-        
-        Example:
-            >>> segments = ["Intro text", "Middle text", "Outro text"]
-            >>> audio_files = await tts.generate_multiple_speeches(
-            ...     segments,
-            ...     "output/audio",
-            ...     filename_prefix="narration"
-            ... )
-            >>> # Returns: ["output/audio/narration_001.mp3", ...]
+            生成的音訊檔案路徑列表
         """
         os.makedirs(output_dir, exist_ok=True)
         
@@ -231,24 +164,15 @@ class TTSService:
             await self.generate_speech(text, output_path, voice, rate)
             audio_files.append(output_path)
         
-        self.logger.info(
-            f"Generated {len(audio_files)} audio files in {output_dir}"
-        )
-        
+        self.logger.info(f"已生成 {len(audio_files)} 個音訊檔案於 {output_dir}")
         return audio_files
     
     @staticmethod
     async def list_available_voices() -> List[dict]:
-        """
-        List all available voices from Edge-TTS.
+        """列出所有可用的語音
         
         Returns:
-            List of voice dictionaries with name, gender, and locale info
-        
-        Example:
-            >>> voices = await TTSService.list_available_voices()
-            >>> for voice in voices[:5]:
-            ...     print(f"{voice['ShortName']}: {voice['Gender']}, {voice['Locale']}")
+            語音字典列表，包含名稱、性別和地區資訊
         """
         if not EDGE_TTS_AVAILABLE:
             raise ImportError("edge-tts is not installed")
@@ -257,22 +181,20 @@ class TTSService:
         return voices
     
     def get_voice_info(self, voice_name: str) -> Optional[str]:
-        """
-        Get description of a voice from the predefined list.
+        """取得語音資訊
         
         Args:
-            voice_name: Voice short name (e.g., "en-US-AriaNeural")
-        
+            voice_name: 語音短名稱（例如: "en-US-AriaNeural"）
+            
         Returns:
-            Voice description or None if not in predefined list
+            語音描述，如果不在預定義列表中則返回 None
         """
         return self.VOICES.get(voice_name)
     
     def list_popular_voices(self) -> dict:
-        """
-        Get list of popular pre-configured voices.
+        """列出常用語音
         
         Returns:
-            Dictionary of voice names and descriptions
+            語音名稱和描述的字典
         """
         return self.VOICES.copy()

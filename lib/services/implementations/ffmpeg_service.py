@@ -1,4 +1,4 @@
-"""FFmpeg Service - Video processing operations for long-form video generation"""
+"""FFmpeg 服務"""
 import subprocess
 import os
 import tempfile
@@ -8,25 +8,18 @@ import logging
 
 
 class FFmpegService:
-    """
-    FFmpeg service for video processing operations.
+    """FFmpeg 服務
     
-    Provides core video manipulation functions needed for long-form video generation:
-    - Extract last frame from video segments
-    - Concatenate multiple video segments
-    - Merge audio with video
-    - Create video from static image + audio
-    
-    All operations use ffmpeg command-line tool.
+    提供影片處理功能：提取幀、合併影片、合併音訊、格式轉換等。
     """
     
     def __init__(self):
-        """Initialize FFmpeg service and verify ffmpeg is available"""
+        """初始化 FFmpeg 服務並檢查 ffmpeg 是否可用"""
         self.logger = logging.getLogger(__name__)
         self._check_ffmpeg_installed()
     
     def _check_ffmpeg_installed(self):
-        """Verify ffmpeg is installed and accessible"""
+        """檢查 ffmpeg 是否已安裝"""
         try:
             subprocess.run(
                 ['ffmpeg', '-version'],
@@ -34,7 +27,7 @@ class FFmpegService:
                 stderr=subprocess.PIPE,
                 check=True
             )
-            self.logger.info("FFmpeg is available")
+            self.logger.info("FFmpeg 可用")
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             raise RuntimeError(
                 "FFmpeg is not installed or not in PATH. "
@@ -46,31 +39,21 @@ class FFmpegService:
         video_path: str,
         output_path: str
     ) -> str:
-        """
-        Extract the last frame from a video file.
+        """提取影片最後一幀
         
-        This is critical for long-form video generation as each segment
-        uses the previous segment's last frame as conditioning.
+        用於長影片生成，每個片段使用前一片段的最後一幀作為條件。
         
         Args:
-            video_path: Path to input video file
-            output_path: Path for output image file (e.g., 'frame_last.png')
-        
+            video_path: 輸入影片路徑
+            output_path: 輸出圖片路徑
+            
         Returns:
-            Path to extracted frame image
+            提取的圖片路徑
             
         Raises:
-            RuntimeError: If frame extraction fails
-            
-        Example:
-            >>> ffmpeg_service = FFmpegService()
-            >>> last_frame = ffmpeg_service.extract_last_frame(
-            ...     'segment_1.mp4',
-            ...     'segment_1_last_frame.png'
-            ... )
+            RuntimeError: 提取失敗時
         """
         try:
-            # Get total frame count
             probe_cmd = [
                 'ffprobe',
                 '-v', 'error',
@@ -92,13 +75,12 @@ class FFmpegService:
             total_frames = int(result.stdout.strip())
             last_frame_idx = total_frames - 1
             
-            # Extract last frame
             extract_cmd = [
                 'ffmpeg',
                 '-i', video_path,
                 '-vf', f'select=eq(n\\,{last_frame_idx})',
                 '-vframes', '1',
-                '-y',  # Overwrite output file
+                '-y',
                 output_path
             ]
             
@@ -109,7 +91,7 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Extracted last frame from {video_path} to {output_path}")
+            self.logger.info(f"已提取最後一幀: {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -123,31 +105,25 @@ class FFmpegService:
         output_path: str,
         method: Literal['demuxer', 'filter'] = 'demuxer'
     ) -> str:
-        """
-        Concatenate multiple video files into one.
+        """合併多個影片
         
         Args:
-            video_paths: List of video file paths to concatenate (in order)
-            output_path: Path for output concatenated video
-            method: Concatenation method
-                - 'demuxer': Fast, no re-encoding (requires same codec)
-                - 'filter': Slower but handles different formats
-        
+            video_paths: 要合併的影片路徑列表（按順序）
+            output_path: 輸出影片路徑
+            method: 合併方法
+                - 'demuxer': 快速，無需重新編碼（需要相同編碼）
+                - 'filter': 較慢但可處理不同格式
+                
         Returns:
-            Path to concatenated video
+            合併後的影片路徑
             
         Raises:
-            RuntimeError: If concatenation fails
-            
-        Example:
-            >>> segments = ['seg1.mp4', 'seg2.mp4', 'seg3.mp4']
-            >>> final = ffmpeg_service.concat_videos(segments, 'final.mp4')
+            RuntimeError: 合併失敗時
         """
         if not video_paths:
             raise ValueError("video_paths cannot be empty")
         
         if len(video_paths) == 1:
-            # Only one video, just copy it
             import shutil
             shutil.copy2(video_paths[0], output_path)
             return output_path
@@ -160,13 +136,7 @@ class FFmpegService:
             raise ValueError(f"Unknown method: {method}")
     
     def _concat_demuxer(self, video_paths: List[str], output_path: str) -> str:
-        """
-        Concatenate using concat demuxer (fast, no re-encoding).
-        
-        FFmpeg equivalent:
-            ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
-        """
-        # Create temporary file list
+        """使用 concat demuxer 合併影片"""
         with tempfile.NamedTemporaryFile(
             mode='w',
             suffix='.txt',
@@ -175,7 +145,6 @@ class FFmpegService:
         ) as f:
             filelist_path = f.name
             for video_path in video_paths:
-                # Convert to absolute path and escape special characters
                 abs_path = os.path.abspath(video_path)
                 f.write(f"file '{abs_path}'\n")
         
@@ -197,7 +166,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Concatenated {len(video_paths)} videos to {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -212,20 +180,11 @@ class FFmpegService:
                 pass
     
     def _concat_filter(self, video_paths: List[str], output_path: str) -> str:
-        """
-        Concatenate using concat filter (slower but handles different formats).
-        
-        FFmpeg equivalent:
-            ffmpeg -i v1.mp4 -i v2.mp4 
-                   -filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]"
-                   -map "[v]" -map "[a]" output.mp4
-        """
-        # Build filter complex
+        """使用 concat filter 合併影片"""
         inputs = []
         for path in video_paths:
             inputs.extend(['-i', path])
         
-        # Build concat filter
         filter_parts = []
         for i in range(len(video_paths)):
             filter_parts.append(f'[{i}:v][{i}:a]')
@@ -252,7 +211,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Concatenated {len(video_paths)} videos using filter to {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -267,39 +225,31 @@ class FFmpegService:
         output_path: str,
         audio_codec: str = 'aac'
     ) -> str:
-        """
-        Merge audio file with video file.
+        """合併音訊與影片
         
-        If video already has audio, it will be replaced with the new audio.
+        如果影片已有音訊，將被新音訊取代。
         
         Args:
-            video_path: Path to input video file
-            audio_path: Path to input audio file
-            output_path: Path for output video with merged audio
-            audio_codec: Audio codec to use (default: 'aac')
-        
+            video_path: 輸入影片路徑
+            audio_path: 輸入音訊路徑
+            output_path: 輸出影片路徑
+            audio_codec: 音訊編碼（預設: 'aac'）
+            
         Returns:
-            Path to output video
+            輸出影片路徑
             
         Raises:
-            RuntimeError: If merging fails
-            
-        Example:
-            >>> result = ffmpeg_service.merge_audio_video(
-            ...     'video.mp4',
-            ...     'narration.mp3',
-            ...     'video_with_audio.mp4'
-            ... )
+            RuntimeError: 合併失敗時
         """
         cmd = [
             'ffmpeg',
             '-i', video_path,
             '-i', audio_path,
-            '-c:v', 'copy',  # Copy video stream without re-encoding
-            '-c:a', audio_codec,  # Encode audio
-            '-map', '0:v:0',  # Map video from first input
-            '-map', '1:a:0',  # Map audio from second input
-            '-shortest',  # Finish when shortest stream ends
+            '-c:v', 'copy',
+            '-c:a', audio_codec,
+            '-map', '0:v:0',
+            '-map', '1:a:0',
+            '-shortest',
             '-y',
             output_path
         ]
@@ -312,7 +262,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Merged audio from {audio_path} with video {video_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -327,34 +276,25 @@ class FFmpegService:
         output_path: str,
         fps: int = 30
     ) -> str:
-        """
-        Create video from static image and audio.
+        """從圖片和音訊建立影片
         
-        Video duration will match audio duration.
-        Useful for creating video segments from still images with narration.
+        影片長度將匹配音訊長度。
         
         Args:
-            image_path: Path to input image
-            audio_path: Path to input audio file
-            output_path: Path for output video
-            fps: Frames per second (default: 30)
-        
+            image_path: 輸入圖片路徑
+            audio_path: 輸入音訊路徑
+            output_path: 輸出影片路徑
+            fps: 幀率（預設: 30）
+            
         Returns:
-            Path to output video
+            輸出影片路徑
             
         Raises:
-            RuntimeError: If video creation fails
-            
-        Example:
-            >>> video = ffmpeg_service.create_video_from_image(
-            ...     'image.png',
-            ...     'narration.mp3',
-            ...     'segment.mp4'
-            ... )
+            RuntimeError: 建立失敗時
         """
         cmd = [
             'ffmpeg',
-            '-loop', '1',  # Loop the image
+            '-loop', '1',
             '-i', image_path,
             '-i', audio_path,
             '-c:v', 'libx264',
@@ -362,7 +302,7 @@ class FFmpegService:
             '-c:a', 'aac',
             '-b:a', '192k',
             '-pix_fmt', 'yuv420p',
-            '-shortest',  # Duration = audio duration
+            '-shortest',
             '-r', str(fps),
             '-y',
             output_path
@@ -376,7 +316,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Created video from image {image_path} with audio {audio_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -392,23 +331,20 @@ class FFmpegService:
         volume: float = 0.2,
         loop: bool = True
     ) -> str:
-        """
-        Add background music to video.
+        """加入背景音樂
         
         Args:
-            video_path: Path to input video
-            bgm_path: Path to BGM audio file
-            output_path: Path for output video
-            volume: BGM volume relative to original audio (0.0 to 1.0)
-            loop: Whether to loop BGM if shorter than video
+            video_path: 輸入影片路徑
+            bgm_path: 背景音樂路徑
+            output_path: 輸出影片路徑
+            volume: BGM 音量相對於原始音訊（0.0 到 1.0）
+            loop: 如果 BGM 比影片短，是否循環播放
             
         Returns:
-            Path to output video
+            輸出影片路徑
         """
-        # Build inputs
         inputs = ['-i', video_path]
         
-        # BGM input options
         bgm_opts = []
         if loop:
             bgm_opts.extend(['-stream_loop', '-1'])
@@ -416,8 +352,6 @@ class FFmpegService:
         
         inputs.extend(bgm_opts)
         
-        # Filter complex for mixing
-        # [1:a]volume=0.2[bgm];[0:a][bgm]amix=inputs=2:duration=first[a]
         filter_complex = (
             f"[1:a]volume={volume}[bgm];"
             f"[0:a][bgm]amix=inputs=2:duration=first[a]"
@@ -427,10 +361,10 @@ class FFmpegService:
             'ffmpeg',
             *inputs,
             '-filter_complex', filter_complex,
-            '-map', '0:v',   # Keep original video
-            '-map', '[a]',   # Use mixed audio
-            '-c:v', 'copy',  # Copy video stream
-            '-c:a', 'aac',   # Encode audio
+            '-map', '0:v',
+            '-map', '[a]',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
             '-y',
             output_path
         ]
@@ -443,7 +377,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Added BGM {bgm_path} to {video_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -457,27 +390,23 @@ class FFmpegService:
         output_path: str,
         audio_codec: str = 'libmp3lame'
     ) -> str:
-        """
-        Concatenate multiple audio files into one.
+        """合併多個音訊檔案
         
-        Uses concat demuxer with re-encoding to ensure valid output stream
-        and correct duration headers (fixes 'Estimating duration from bitrate' error).
+        使用 concat demuxer 並重新編碼以確保有效的輸出流和正確的時長標頭。
         
         Args:
-            audio_paths: List of audio file paths to concatenate
-            output_path: Path for output concatenated audio
-            audio_codec: Audio codec to use (default: 'libmp3lame')
+            audio_paths: 要合併的音訊路徑列表
+            output_path: 輸出音訊路徑
+            audio_codec: 音訊編碼（預設: 'libmp3lame'）
             
         Returns:
-            Path to concatenated audio
+            合併後的音訊路徑
             
         Raises:
-            RuntimeError: If concatenation fails
+            RuntimeError: 合併失敗時
         """
         if not audio_paths:
             raise ValueError("audio_paths cannot be empty")
-            
-        # Create temporary file list
         with tempfile.NamedTemporaryFile(
             mode='w',
             suffix='.txt',
@@ -486,7 +415,6 @@ class FFmpegService:
         ) as f:
             filelist_path = f.name
             for audio_path in audio_paths:
-                # Convert to absolute path and escape special characters
                 abs_path = os.path.abspath(audio_path)
                 f.write(f"file '{abs_path}'\n")
         
@@ -496,7 +424,7 @@ class FFmpegService:
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', filelist_path,
-                '-c:a', audio_codec,  # Re-encode audio
+                '-c:a', audio_codec,
                 '-y',
                 output_path
             ]
@@ -508,7 +436,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Concatenated {len(audio_paths)} audio files to {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -531,25 +458,22 @@ class FFmpegService:
         scale_width: int = 512,
         optimize: bool = True
     ) -> str:
-        """
-        Convert video to optimized GIF.
+        """將影片轉換為優化的 GIF
         
         Args:
-            video_path: Path to input video file
-            output_path: Path for output GIF file
-            fps: Frames per second for GIF (default: 12)
-            max_colors: Maximum colors in palette (default: 256)
-            scale_width: Scale width, height auto-calculated (default: 512)
-            optimize: Whether to optimize GIF size (default: True)
-        
+            video_path: 輸入影片路徑
+            output_path: 輸出 GIF 路徑
+            fps: GIF 幀率（預設: 12）
+            max_colors: 調色板最大顏色數（預設: 256）
+            scale_width: 縮放寬度，高度自動計算（預設: 512）
+            optimize: 是否優化 GIF 大小（預設: True）
+            
         Returns:
-            Path to output GIF
+            輸出 GIF 路徑
         """
         try:
             if optimize:
                 palette_path = output_path.replace('.gif', '_palette.png')
-                
-                # Pass 1: Generate palette
                 palette_cmd = [
                     'ffmpeg',
                     '-i', video_path,
@@ -565,7 +489,6 @@ class FFmpegService:
                     check=True
                 )
                 
-                # Pass 2: Generate GIF with palette
                 gif_cmd = [
                     'ffmpeg',
                     '-i', video_path,
@@ -602,7 +525,6 @@ class FFmpegService:
                     check=True
                 )
             
-            self.logger.info(f"Converted {video_path} to GIF: {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -615,15 +537,14 @@ class FFmpegService:
         video_path: str,
         output_path: str
     ) -> str:
-        """
-        Extract the first frame from a video file.
+        """提取影片第一幀
         
         Args:
-            video_path: Path to input video file
-            output_path: Path for output image file
-        
+            video_path: 輸入影片路徑
+            output_path: 輸出圖片路徑
+            
         Returns:
-            Path to extracted frame image
+            提取的圖片路徑
         """
         try:
             cmd = [
@@ -641,7 +562,6 @@ class FFmpegService:
                 check=True
             )
             
-            self.logger.info(f"Extracted first frame from {video_path} to {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:
@@ -650,15 +570,14 @@ class FFmpegService:
             raise RuntimeError(error_msg) from e
 
     def _get_gif_fps(self, gif_path: str, timeout: int = 30) -> Optional[float]:
-        """
-        Get FPS from GIF file using ffprobe.
+        """取得 GIF 的 FPS
         
         Args:
-            gif_path: Path to GIF file
-            timeout: Timeout in seconds (default: 30)
-        
+            gif_path: GIF 檔案路徑
+            timeout: 超時時間（秒）
+            
         Returns:
-            FPS value, or None if cannot be determined
+            FPS 值，如果無法確定則返回 None
         """
         try:
             cmd = [
@@ -687,11 +606,7 @@ class FFmpegService:
                     return fps
             
             return None
-        except subprocess.TimeoutExpired:
-            self.logger.debug(f"獲取 GIF FPS 超時: {gif_path}")
-            return None
-        except Exception as e:
-            self.logger.debug(f"無法從 GIF 獲取 FPS {gif_path}: {e}")
+        except (subprocess.TimeoutExpired, Exception):
             return None
 
     def gif_to_mp4(
@@ -703,59 +618,46 @@ class FFmpegService:
         pix_fmt: str = 'yuv420p',
         timeout: int = 120
     ) -> str:
-        """
-        Convert GIF to MP4 video.
+        """將 GIF 轉換為 MP4
         
-        注意：此方法不使用 -stream_loop，因為它會導致轉換卡住。
-        對於 Instagram，只需要將 GIF 轉換為 MP4 一次即可，不需要循環輸入。
+        注意：不使用 -stream_loop，因為會導致轉換卡住。
+        對於 Instagram，只需要將 GIF 轉換為 MP4 一次即可。
         
         Args:
-            gif_path: Path to input GIF file
-            output_path: Path for output MP4 file
-            fps: Frames per second (None = auto-detect from GIF, default: None)
-            loop: 已棄用，保留以維持 API 相容性，但不會使用
-            pix_fmt: Pixel format (default: 'yuv420p' for compatibility)
-            timeout: Timeout in seconds (default: 120 = 2 minutes)
-        
+            gif_path: 輸入 GIF 路徑
+            output_path: 輸出 MP4 路徑
+            fps: 幀率（None = 自動偵測，預設: None）
+            loop: 已棄用，保留以維持 API 相容性
+            pix_fmt: 像素格式（預設: 'yuv420p'）
+            timeout: 超時時間（秒，預設: 120）
+            
         Returns:
-            Path to output MP4
+            輸出 MP4 路徑
         """
         try:
-            # 檢查輸入檔案是否存在
             if not os.path.exists(gif_path):
                 raise FileNotFoundError(f"GIF 檔案不存在: {gif_path}")
             
-            # 檢查檔案大小
-            file_size = os.path.getsize(gif_path)
-            self.logger.info(f"開始轉換 GIF 為 MP4: {gif_path} (大小: {file_size / 1024 / 1024:.2f} MB)")
-            
-            # Auto-detect FPS from GIF if not provided
             if fps is None:
                 detected_fps = self._get_gif_fps(gif_path)
                 if detected_fps:
                     fps = detected_fps
-                    self.logger.debug(f"Detected GIF FPS: {fps}")
+                    self.logger.debug(f"偵測到 GIF FPS: {fps}")
                 else:
-                    fps = 10  # Default FPS for GIFs
-                    self.logger.debug(f"Using default FPS: {fps}")
+                    fps = 10
+                    self.logger.debug(f"使用預設 FPS: {fps}")
             
-            # 構建 FFmpeg 命令
-            # 重要：不使用 -stream_loop，因為它會導致轉換卡住
-            # 直接轉換 GIF 一次即可，Instagram 會自動循環播放 MP4
             cmd = [
                 'ffmpeg',
                 '-i', gif_path,
                 '-vf', f'fps={fps}',
                 '-c:v', 'libx264',
                 '-pix_fmt', pix_fmt,
-                '-movflags', 'faststart',  # 優化串流播放
-                '-y',  # 覆蓋輸出檔案
+                '-movflags', 'faststart',
+                '-y',
                 output_path
             ]
             
-            self.logger.debug(f"執行 FFmpeg 命令: {' '.join(cmd)}")
-            
-            # 執行轉換，捕獲 stderr 以便錯誤診斷
             result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -764,12 +666,10 @@ class FFmpegService:
                 timeout=timeout
             )
             
-            # 檢查輸出檔案是否存在
             if not os.path.exists(output_path):
                 stderr_output = result.stderr.decode('utf-8', errors='ignore') if isinstance(result.stderr, bytes) else str(result.stderr)
                 raise RuntimeError(f"轉換完成但輸出檔案不存在: {output_path}\nFFmpeg stderr: {stderr_output}")
             
-            # 檢查輸出檔案大小（應該大於 0）
             output_size = os.path.getsize(output_path)
             if output_size == 0:
                 stderr_output = result.stderr.decode('utf-8', errors='ignore') if isinstance(result.stderr, bytes) else str(result.stderr)
@@ -781,7 +681,6 @@ class FFmpegService:
         except subprocess.TimeoutExpired as e:
             error_msg = f"GIF 轉 MP4 轉換超時（超過 {timeout} 秒）: {gif_path}"
             self.logger.error(error_msg)
-            # 嘗試清理可能的部分輸出檔案
             if os.path.exists(output_path):
                 try:
                     os.unlink(output_path)
@@ -792,20 +691,17 @@ class FFmpegService:
             stderr_output = e.stderr.decode('utf-8', errors='ignore') if isinstance(e.stderr, bytes) else str(e.stderr)
             error_msg = f"GIF 轉 MP4 轉換失敗: {gif_path}\nFFmpeg stderr: {stderr_output}"
             self.logger.error(error_msg)
-            # 嘗試清理可能的部分輸出檔案
             if os.path.exists(output_path):
                 try:
                     os.unlink(output_path)
                 except:
                     pass
             raise RuntimeError(error_msg) from e
-        except FileNotFoundError as e:
-            self.logger.error(f"檔案不存在: {e}")
+        except FileNotFoundError:
             raise
         except Exception as e:
-            error_msg = f"GIF 轉 MP4 轉換時發生未預期的錯誤: {str(e)}"
+            error_msg = f"GIF 轉 MP4 轉換時發生錯誤: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            # 嘗試清理可能的部分輸出檔案
             if os.path.exists(output_path):
                 try:
                     os.unlink(output_path)
@@ -822,26 +718,23 @@ class FFmpegService:
         scale_width: int = 512,
         minterpolate: bool = True
     ) -> str:
-        """
-        Optimize GIF with frame interpolation for smoother animation.
+        """優化 GIF，使用幀插值使動畫更流暢
         
         Args:
-            video_path: Path to input video file
-            output_path: Path for output GIF file
-            fps: Frames per second for GIF (default: 12)
-            max_colors: Maximum colors in palette (default: 256)
-            scale_width: Scale width, height auto-calculated (default: 512)
-            minterpolate: Whether to use frame interpolation for smoother motion (default: True)
-        
+            video_path: 輸入影片路徑
+            output_path: 輸出 GIF 路徑
+            fps: GIF 幀率（預設: 12）
+            max_colors: 調色板最大顏色數（預設: 256）
+            scale_width: 縮放寬度（預設: 512）
+            minterpolate: 是否使用幀插值（預設: True）
+            
         Returns:
-            Path to output GIF
+            輸出 GIF 路徑
         """
         try:
             palette_path = output_path.replace('.gif', '_palette.png')
             
-            # Pass 1: Generate palette
             if minterpolate:
-                # Use frame interpolation for smoother motion
                 palette_filter = f'minterpolate=fps={fps * 2}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,fps={fps},scale={scale_width}:-1:flags=lanczos,palettegen=max_colors={max_colors}'
             else:
                 palette_filter = f'fps={fps},scale={scale_width}:-1:flags=lanczos,palettegen=max_colors={max_colors}'
@@ -861,7 +754,6 @@ class FFmpegService:
                 check=True
             )
             
-            # Pass 2: Generate optimized GIF with palette
             if minterpolate:
                 gif_filter = f'minterpolate=fps={fps * 2}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,fps={fps},scale={scale_width}:-1:flags=lanczos[x];[x][1:v]paletteuse'
             else:
@@ -888,7 +780,7 @@ class FFmpegService:
             except:
                 pass
             
-            self.logger.info(f"Optimized GIF created: {output_path}")
+            self.logger.info(f"已優化 GIF: {output_path}")
             return output_path
             
         except subprocess.CalledProcessError as e:

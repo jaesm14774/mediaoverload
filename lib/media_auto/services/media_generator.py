@@ -4,10 +4,7 @@ from typing import Dict, List, Any, Optional
 from lib.comfyui.websockets_api import ComfyUICommunicator
 
 class MediaGenerator:
-    """
-    Unified service for generating media (images/videos) using ComfyUI.
-    Abstracts away the low-level details of workflow manipulation and WebSocket communication.
-    """
+    """媒體生成服務"""
     def __init__(self, host: str = None, port: int = None):
         self.communicator = ComfyUICommunicator(host, port)
         self.communicator.connect_websocket()
@@ -17,18 +14,7 @@ class MediaGenerator:
                  updates: List[Dict[str, Any]], 
                  output_dir: str, 
                  file_prefix: str = "media") -> List[str]:
-        """
-        Generic generation method.
-        
-        Args:
-            workflow_path: Path to the ComfyUI workflow JSON file.
-            updates: List of updates to apply to the workflow.
-            output_dir: Directory to save the generated files.
-            file_prefix: Prefix for the output filenames.
-            
-        Returns:
-            List of generated file paths.
-        """
+        """生成媒體"""
         if not os.path.exists(workflow_path):
             raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
 
@@ -40,7 +26,7 @@ class MediaGenerator:
             updates=updates,
             output_path=output_dir,
             file_name=file_prefix,
-            auto_close=False # Keep connection open for performance
+            auto_close=False
         )
 
         if not success:
@@ -50,5 +36,5 @@ class MediaGenerator:
         return saved_files
 
     def upload_image(self, image_path: str) -> str:
-        """Uploads an image to ComfyUI and returns the filename."""
+        """上傳圖片到 ComfyUI"""
         return self.communicator.upload_image(image_path)

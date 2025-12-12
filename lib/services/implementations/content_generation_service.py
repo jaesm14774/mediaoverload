@@ -1,9 +1,4 @@
-"""Content generation service implementation.
-
-This module orchestrates the full media generation pipeline from description generation
-through media creation to quality analysis. Supports multiple generation types including
-text-to-image, image-to-image, and text-to-video workflows.
-"""
+"""內容生成服務實現"""
 from typing import Dict, Any, List
 from lib.services.interfaces.content_generation_service import IContentGenerationService
 from lib.media_auto.strategies.base_strategy import GenerationConfig
@@ -12,30 +7,17 @@ import glob
 
 
 class ContentGenerationService(IContentGenerationService):
-    """Media generation pipeline orchestrator.
-
-    Coordinates the complete content generation workflow:
-    1. Generate text descriptions
-    2. Create media (images/videos) from descriptions
-    3. Analyze media-text similarity
-    4. Generate article content for social media
-
-    Different generation strategies handle specifics for each generation type
-    (text2img, image2image, text2video).
-
-    Attributes:
-        logger: Logger instance for tracking generation progress
-        strategy: Current generation strategy instance
-        character_repository: Optional character database access
-        vision_manager: Optional vision model manager for similarity analysis
+    """內容生成服務
+    
+    協調完整的媒體生成流程：描述生成、媒體創建、品質分析、文章生成。
     """
-
+    
     def __init__(self, character_repository=None, vision_manager=None):
-        """Initialize content generation service.
-
+        """初始化內容生成服務
+        
         Args:
-            character_repository: Character database access (optional)
-            vision_manager: Vision model manager for image analysis (optional)
+            character_repository: 角色資料庫存取（可選）
+            vision_manager: 視覺模型管理器（可選）
         """
         self.logger = setup_logger(__name__)
         self.strategy = None
@@ -43,32 +25,15 @@ class ContentGenerationService(IContentGenerationService):
         self.vision_manager = vision_manager
 
     def generate_content(self, config: GenerationConfig) -> Dict[str, Any]:
-        """Run complete content generation pipeline.
-
-        Executes full workflow from description generation to article creation.
-        Returns all intermediate and final outputs.
-
-        Pipeline steps:
-        1. Load appropriate strategy for generation type
-        2. Generate text descriptions
-        3. Create media files from descriptions
-        4. Analyze media-text matching quality
-        5. Generate article content for posting
-
+        """執行完整內容生成流程
+        
         Args:
-            config: Generation configuration containing all parameters
-
+            config: 生成配置
+            
         Returns:
-            Dictionary with keys:
-                - descriptions: List of generated text descriptions
-                - media_files: List of generated media file paths
-                - filter_results: List of quality-filtered media with scores
-                - article_content: Social media caption text
+            包含 descriptions, media_files, filter_results, article_content 的字典
         """
         self.logger.info("開始內容生成流程")
-
-        # Select and load generation strategy
-        # 延遲導入以避免循環導入
         from lib.media_auto.factory.strategy_factory import StrategyFactory
         generation_type = config.get_all_attributes().get('generation_type', 'text2img')
         self.strategy = StrategyFactory.get_strategy(
@@ -78,15 +43,11 @@ class ContentGenerationService(IContentGenerationService):
         )
         strategy_name = getattr(self.strategy, 'name', None) or self.strategy.__class__.__name__
         self.logger.info(f"使用策略: {strategy_name}")
-
-        # Load configuration into strategy
+        
         self.strategy.load_config(config)
-        self.logger.info("策略配置載入完成")
-
-        # Generate text descriptions
+        
         descriptions = self.generate_descriptions(config)
-
-        # Early exit if no descriptions generated
+        
         if not descriptions:
             self.logger.warning("沒有生成任何描述，終止流程")
             return {
@@ -96,21 +57,14 @@ class ContentGenerationService(IContentGenerationService):
                 'article_content': ''
             }
 
-        # Generate media files
         media_files = self.generate_media(config)
-
-        # Analyze and filter by quality
-        # 優先從 config 中獲取 similarity_threshold，如果沒有則使用默認值 0.7
+        
         similarity_threshold = config.get_all_attributes().get('similarity_threshold', 0.7)
-        self.logger.info(f"使用相似度閾值: {similarity_threshold}")
         filter_results = self.analyze_media_text_match(media_files, descriptions, similarity_threshold)
 
-        # Generate social media caption（如果策略允許）
         article_content = ''
         if self.strategy.should_generate_article_now():
             article_content = self.generate_article(config, filter_results)
-        else:
-            self.logger.info("策略延遲生成文章內容，將在後續階段生成")
 
         return {
             'descriptions': descriptions,
@@ -120,83 +74,59 @@ class ContentGenerationService(IContentGenerationService):
         }
 
     def generate_descriptions(self, config: GenerationConfig) -> List[str]:
-        """Generate text descriptions for media.
-
-        Creates text prompts that will be used to generate images or videos.
-        Number of descriptions depends on strategy and configuration.
-
+        """生成文字描述
+        
         Args:
-            config: Generation configuration
-
+            config: 生成配置
+            
         Returns:
-            List of description strings
+            描述字串列表
         """
-        self.logger.info("開始生成描述")
-        self.logger.info(f"採用圖片生成策略 : {config.image_system_prompt}")
-        self.logger.info(f"採用風格 : {config.style}")
         self.strategy.generate_description()
         descriptions = self.strategy.descriptions
-        self.logger.info(f"描述生成完成，共 {len(descriptions)} 個描述")
-        for desc in descriptions:
-            self.logger.info(f"描述: {desc}")
+        self.logger.info(f"生成 {len(descriptions)} 個描述")
         return descriptions
 
     def generate_media(self, config: GenerationConfig) -> List[str]:
-        """Create media files from descriptions.
-
-        Generates images or videos based on configuration. Media type determined
-        by the strategy implementation.
-
+        """生成媒體檔案
+        
         Args:
-            config: Generation configuration
-
+            config: 生成配置
+            
         Returns:
-            List of generated media file paths (PNG for images, MP4/GIF for videos)
+            生成的媒體檔案路徑列表
         """
-        self.logger.info("開始生成媒體")
         self.strategy.generate_media()
 
-        # Collect media files (both images and videos)
         image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.webp']
         video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
         media_files = []
         
         for ext in image_extensions + video_extensions:
             media_files.extend(glob.glob(f'{config.output_dir}/{ext}'))
-            # Also check subdirectories (e.g., first_stage, videos)
             media_files.extend(glob.glob(f'{config.output_dir}/*/{ext}'))
 
-        self.logger.info(f"媒體生成完成，共生成 {len(media_files)} 個媒體文件")
+        self.logger.info(f"生成 {len(media_files)} 個媒體檔案")
         return media_files
 
     def analyze_media_text_match(self,
                                images: List[str],
                                descriptions: List[str],
                                similarity_threshold: float = 0.9) -> List[Dict[str, Any]]:
-        """Analyze media-text matching quality.
-
-        Compares generated media against original descriptions using vision models.
-        Filters out low-quality results below similarity threshold.
-
-        Args:
-            images: List of media file paths (注意：此參數目前未被使用，策略會自行收集媒體文件)
-            descriptions: List of original text descriptions
-            similarity_threshold: Minimum similarity score (0.0-1.0) to keep media
-
-        Returns:
-            List of dictionaries with media paths and similarity scores.
-            Only includes media meeting the similarity threshold.
-        """
-        self.logger.info("開始分析媒體內容匹配度")
-        self.logger.info(f"傳入的媒體文件數量: {len(images)}, 描述數量: {len(descriptions)}, 閾值: {similarity_threshold}")
+        """分析媒體文字匹配度
         
-        # 確保策略有 descriptions（如果傳入的 descriptions 與策略中的不同，需要更新）
+        Args:
+            images: 媒體檔案路徑列表（注意：策略會自行收集）
+            descriptions: 原始文字描述列表
+            similarity_threshold: 相似度閾值（0.0-1.0）
+            
+        Returns:
+            符合閾值的媒體結果列表
+        """
         if hasattr(self.strategy, 'descriptions') and descriptions != self.strategy.descriptions:
             self.logger.warning("傳入的 descriptions 與策略中的不一致，使用策略中的 descriptions")
             descriptions = self.strategy.descriptions
         
-        # 調用策略的 analyze_media_text_match
-        # 注意：策略會自行收集媒體文件，這裡的 images 參數僅用於日誌記錄
         self.strategy.analyze_media_text_match(similarity_threshold)
 
         filter_results = []
@@ -205,26 +135,19 @@ class ContentGenerationService(IContentGenerationService):
         else:
             self.logger.warning("策略沒有 filter_results 屬性")
 
-        self.logger.info(f"媒體內容分析完成，篩選出 {len(filter_results)} 個媒體文件（共分析 {len(images) if images else '未知數量'} 個媒體文件）")
-
+        self.logger.info(f"篩選出 {len(filter_results)} 個媒體檔案")
         return filter_results
 
     def generate_article(self, config: GenerationConfig, filter_results: List[Dict[str, Any]]) -> str:
-        """Generate social media article content.
-
-        Creates caption text for social media posts. Content includes descriptions,
-        hashtags, and other metadata formatted for platforms like Instagram.
-
+        """生成文章內容
+        
         Args:
-            config: Generation configuration
-            filter_results: Filtered media results with quality scores
-
+            config: 生成配置
+            filter_results: 篩選後的媒體結果
+            
         Returns:
-            Article content string ready for social media posting.
-            Truncates to fallback hashtags if exceeds 4000 characters.
+            文章內容字串
         """
-        self.logger.info("開始生成文章內容")
-        # 確保策略的 filter_results 已設置為最新的結果
         if hasattr(self.strategy, 'filter_results'):
             self.strategy.filter_results = filter_results
         self.strategy.generate_article_content()
@@ -234,5 +157,4 @@ class ContentGenerationService(IContentGenerationService):
             article_content = self.strategy.article_content
         if len(article_content) > 4000:
             article_content = '#ai #video #unbelievable #world #humor #interesting #funny #creative'
-        self.logger.info(f"文章內容生成完成，長度: {len(article_content)}")
         return article_content

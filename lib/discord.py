@@ -152,11 +152,9 @@ class DiscordFeedbackBot:
         
         self._cleanup_done = True
         try:
-            # 先關閉 bot
             if not self.bot.is_closed():
                 await self.bot.close()
 
-            # 使用簡單的方式取消主任務
             if self._main_task and not self._main_task.done():
                 self._main_task.cancel()
                 try:
@@ -165,7 +163,7 @@ class DiscordFeedbackBot:
                     pass
                 
         except Exception as e:
-            print(f"清理過程中發生錯誤: {str(e)}")
+            print(f"清理錯誤: {str(e)}")
 
     async def get_user_response(
         self,
@@ -215,18 +213,7 @@ class DiscordFeedbackBot:
             await self.safe_cleanup()
 
 async def run_discord_file_feedback_process(token: str, channel_id: int, text: str, filepaths, timeout: float = 60.0):
-    """
-    執行 Discord 檔案回饋程序，包含超時處理機制
-    
-    Args:
-        token: Discord bot token
-        channel_id: 目標頻道ID
-        filepaths: 檔案路徑列表或單一檔案路徑
-        timeout: 整體程序的超時時間（秒）
-        
-    Returns:
-        tuple: (結果, 用戶, 編輯後內容, 選擇的圖片索引列表)
-    """
+    """執行 Discord 檔案回饋程序"""
     bot = None
     try:
         bot = DiscordFeedbackBot(token, channel_id)
