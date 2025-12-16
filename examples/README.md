@@ -21,7 +21,7 @@ examples/
 
 ## 🚀 快速開始
 
-### ⭐⭐ 方式 0: 所有策略完整範例（最全面）
+### ⭐⭐ 方式 0: 所有策略完整範例（最推薦）
 
 **包含所有策略的完整範例！** 每個策略都有自定義 Prompt 和從資料庫獲取 News 兩種模式，並支援批量生成：
 
@@ -35,33 +35,35 @@ jupyter notebook examples/all_strategies_examples.ipynb
 - ✅ 每個策略支援自定義 Prompt 和從資料庫獲取 News
 - ✅ 支援批量生成（可指定數量，如 30 張、50 張等）
 - ✅ 自動執行生成，無需手動干預
+- ✅ **🆕 長影片直接模式**：不保存中間圖片，只輸出最終完整影片（含 TTS）
 
-**使用範例**：
+**批量生成範例**：
 
 ```python
-# 批量生成 30 張圖片（使用自定義關鍵詞）
+# 批量生成 30 張圖片
 results = batch_generate_by_count(
     strategy_type='text2image',
     num_total=30,
-    use_news=False,
-    custom_keywords="peaceful scene, beautiful landscape",
+    use_news=True,
     character="kirby",
     num_images=4
 )
 
-# 批量生成 50 張圖片（使用資料庫新聞）
+# 🆕 批量生成長影片（直接模式）
 results = batch_generate_by_count(
-    strategy_type='text2image',
-    num_total=50,
-    use_news=True,  # 從資料庫獲取新聞
+    strategy_type='text2longvideo',
+    num_total=2,
+    use_news=True,
     character="kirby",
-    num_images=4
+    skip_candidate_stage=True,  # 不保存中間圖片
+    segment_count=3,
+    use_tts=True
 )
 ```
 
 詳細用法請參考 [all_strategies_examples.ipynb](all_strategies_examples.ipynb)
 
-### ⭐ 方式 1: 使用 ConfigBuilder（進階用法）
+### 方式 1: 使用 ConfigBuilder（進階用法）
 
 如果需要更細緻的控制，可以直接使用 ConfigBuilder：
 
@@ -86,7 +88,7 @@ result = service.generate_content(config)
 
 ## 📚 範例說明
 
-### All Strategies Examples (最全面) ⭐⭐
+### All Strategies Examples ⭐⭐
 
 **檔案**: `all_strategies_examples.ipynb`
 
@@ -109,14 +111,14 @@ result = service.generate_content(config)
 
 **優點**：
 - 最全面的範例集合
-- 自動執行生成
+- 互動式 Jupyter Notebook
 - 支援批量生成（30 張、50 張等）
 - 包含輔助函數簡化使用
 
 **使用時機**：
 - 需要了解所有策略的使用方法
-- 需要批量生成大量媒體
-- 需要從資料庫獲取新聞進行生成
+- 喜歡互動式開發環境
+- 需要查看即時結果
 
 ### Simple Content Service
 

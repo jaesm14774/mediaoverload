@@ -80,8 +80,14 @@ class Text2LongVideoStrategy(ContentStrategy):
         if not self.script_segments:
             raise RuntimeError("No script segments generated. Call generate_description first.")
             
-        # This method is called to generate the FIRST stage media (candidates)
-        # In the original flow, this generates candidate images for the first frame.
+        longvideo_config = self._get_strategy_config('text2longvideo', 'longvideo_config')
+        skip_candidate_stage = longvideo_config.get('skip_candidate_stage', False)
+        
+        if skip_candidate_stage:
+            self.logger.info("跳過候選圖片生成，直接生成完整影片")
+            output_dir = getattr(self.config, 'output_dir', 'output')
+            self._generate_full_video_direct(output_dir)
+            return self.generated_media_paths
         
         self.logger.info("Generating candidate images for first segment...")
         
@@ -564,3 +570,57 @@ class Text2LongVideoStrategy(ContentStrategy):
         
         self.logger.info(f"✅ 圖片放大完成，共 {len(upscaled_paths)} 張")
         return upscaled_paths
+    
+    def _generate_full_video_direct(self, output_dir: str):
+        """直接生成完整影片，不經過候選圖片階段"""
+        self.logger.info("開始直接生成完整影片（無候選圖片）")
+        
+        longvideo_config = self._get_strategy_config('text2longvideo', 'longvideo_config')
+        video_generation_config = self._get_strategy_config('text2longvideo', 'video_generation')
+        first_stage_config = self._get_strategy_config('text2longvideo', 'first_stage')
+        
+        segment_count = longvideo_config.get('segment_count', getattr(self.config, 'segment_count', 5))
+        
+        # 先生成第一幀圖片
+        self.logger.info("生成第一幀圖片...")
+        workflow_path = first_stage_config.get('workflow_path') or getattr(self.config, 'workflow_path', 'configs/workflow/txt2img.json')
+        style = self._get_config_value(first_stage_config, 'style', '')
+        prompt = self.script_segments[0]['visual']
+        if style and style.strip():
+            prompt = f"{prompt}\nstyle: {style}".strip()
+        
+        import json
+        with open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow = json.load(f)
+        
+        seed = random.randint(1, 999999999999)
+        merged_params = self._merge_node_manager_params(first_stage_config)
+        updates = self.node_manager.generate_updates(
+            workflow=workflow,
+            updates_config=first_stage_config.get('custom_node_updates', []),
+            description=prompt,
+            seed=seed,
+            **merged_params
+        )
+        
+        temp_dir = os.path.join(output_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        first_frame_files = self.media_generator.generate(
+            workflow_path=workflow_path,
+            updates=updates,
+            output_dir=temp_dir,
+            file_prefix="first_frame"
+        )
+        
+        if not first_frame_files:
+            raise RuntimeError("第一幀圖片生成失敗")
+        
+        first_frame = first_frame_files[0]
+        self.logger.info(f"第一幀圖片生成完成: {first_frame}")
+        
+        self._generate_full_video_loop(first_frame, output_dir)
+        
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            self.logger.info("清理臨時檔案完成")
