@@ -162,19 +162,27 @@ class VisionContentManager:
         ]
         return self.text_model.chat_completion(messages=messages, **kwargs)
 
-    def generate_input_prompt(self, character, extra='', prompt_type='arbitrary_input_system_prompt') -> str:
+    def generate_input_prompt(self, character, extra='', prompt_type='') -> str:
         """生成任意輸入的轉換結果"""
         messages = [
             {'role': 'system', 'content': self.prompts[prompt_type]},
-            {'role': 'user', 'content': f"""Central Figure: {character}, central figure's name must be in the final response! {extra}"""}
+            {'role': 'user', 'content': f"""Central Figure: {character},  Useful materials:{extra}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)    
         if '</think>' in result:  # deepseek r1 will have <think>...</think> format
             result = result.split('</think>')[-1].strip()
         
         messages = [
-            {'role': 'system', 'content': f"As an expert editor, distill the text's essence. You must preserve the principal character's name, along with the original style and emotion. Keep the output under 30 words."},
-            {'role': 'user', 'content': f"""Central Figure: {character}, central figure's name must be in the final response! {result}"""}
+            {'role': 'system', 
+            'content': f"""
+                    As a master prompt engineer and visual director, refine the provided text into a high-impact image generation prompt. Your goal is to fix logical inconsistencies and distill the essence into a cinematic, visual-first description.
+
+                    1. Rationalize & Fuse: Harmonize the cartoon character (e.g., Kirby, Mario) with the news theme. Ensure their interaction with the environment is visually believable (e.g., how a soft Kirby interacts with a hard industrial port). 2. Enhance Visual Depth: Replace abstract concepts with concrete visual cues—focus on lighting, camera angle, and material textures. 3. Eliminate Clutter: Strip away repetitive adjectives and meta-commentary. Keep only what contributes directly to the 'image'. 4. Preserve the Core: Maintain the principal character’s name and the original's emotional 'vibe'.
+
+                    Output ONLY the refined description in English. No preamble, no word count, no explanations.
+            """
+            },
+            {'role': 'user', 'content': f"""{result}"""}
         ]
         result = self.text_model.chat_completion(messages=messages)   
 
@@ -400,7 +408,6 @@ class VisionManagerBuilder:
             'video_description_system_prompt': video_description_system_prompt,
             'sticker_prompt_system_prompt': sticker_prompt_system_prompt,
             'warm_scene_description_system_prompt': warm_scene_description_system_prompt,
-            'cinematic_stable_diffusion_prompt': cinematic_stable_diffusion_prompt,
             'conceptual_logo_design_prompt': conceptual_logo_design_prompt,
             'audio_description_prompt': audio_description_prompt,
             'sticker_motion_system_prompt': sticker_motion_system_prompt

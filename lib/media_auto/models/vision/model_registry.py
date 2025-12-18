@@ -96,8 +96,10 @@ class OpenRouterModel(AIModelInterface):
         "deepseek/deepseek-chat-v3.1:free",
         "z-ai/glm-4.5-air:free",
         "deepseek/deepseek-r1-0528:free",
-        "x-ai/grok-4.1-fast:free",
-        "moonshotai/kimi-k2:free"
+        "moonshotai/kimi-k2:free",
+        "allenai/olmo-3.1-32b-think:free",
+        "xiaomi/mimo-v2-flash:free",
+        "mistralai/devstral-2512:free"
     ]
     
     FREE_VISION_MODELS = [

@@ -107,27 +107,32 @@ class TTSService:
         Returns:
             生成的音訊檔案路徑
         """
-        try:
-            loop = asyncio.get_running_loop()
-            
-            def run_in_thread():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(
-                        self.generate_speech(text, output_path, voice, rate)
-                    )
-                finally:
-                    new_loop.close()
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_thread)
-                return future.result()
-                
-        except RuntimeError:
-            return asyncio.run(
-                self.generate_speech(text, output_path, voice, rate)
-            )
+        voice = voice or self.default_voice
+        
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        
+        def run_tts_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                communicate = edge_tts.Communicate(text, voice, rate=rate)
+                loop.run_until_complete(communicate.save(output_path))
+            finally:
+                loop.close()
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_tts_in_thread)
+            future.result(timeout=60)
+        
+        if not os.path.exists(output_path):
+            raise RuntimeError(f"Audio file was not created: {output_path}")
+        
+        file_size = os.path.getsize(output_path)
+        self.logger.info(f"已生成語音: {len(text)} 字元 → {output_path} ({file_size} bytes, 語音: {voice})")
+        
+        return output_path
     
     async def generate_multiple_speeches(
         self,

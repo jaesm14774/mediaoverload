@@ -20,10 +20,10 @@ class SimpleContentGenerationService:
     適用於快速範例和人工審核的情況
     """
     
-    def __init__(self, character_repository=None, vision_manager=None):
+    def __init__(self, character_data_service=None, vision_manager=None):
         self.logger = setup_logger(__name__)
         self.strategy = None
-        self.character_repository = character_repository
+        self.character_data_service = character_data_service
         self.vision_manager = vision_manager
     
     def generate_content(self, config: GenerationConfig) -> Dict[str, Any]:
@@ -45,7 +45,7 @@ class SimpleContentGenerationService:
         generation_type = config.get_all_attributes().get('generation_type', 'text2img')
         self.strategy = StrategyFactory.get_strategy(
             generation_type, 
-            character_repository=self.character_repository,
+            character_data_service=self.character_data_service,
             vision_manager=self.vision_manager
         )
         self.logger.info(f"使用策略: {generation_type}")

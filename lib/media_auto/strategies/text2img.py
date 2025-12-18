@@ -16,8 +16,8 @@ class Text2ImageStrategy(ContentStrategy):
     Refactored to use composition.
     """
 
-    def __init__(self, character_repository=None, vision_manager=None):
-        self.character_repository = character_repository
+    def __init__(self, character_data_service=None, vision_manager=None):
+        self.character_data_service = character_data_service
         
         if vision_manager is None:
             # Default to Gemini as per original code
@@ -45,8 +45,8 @@ class Text2ImageStrategy(ContentStrategy):
         # Get strategy config with proper merging
         image_config = self._get_strategy_config('text2img')
         
-        # Get style: image_config -> config.style
-        style = self._get_config_value(image_config, 'style', '')
+        # Get style: support weights or single value
+        style = self._get_style(image_config)
         image_system_prompt = self._get_system_prompt(image_config)
         
         # 獲取 prompt（關鍵詞）
@@ -108,17 +108,6 @@ class Text2ImageStrategy(ContentStrategy):
         print(f'Image descriptions : {self.descriptions}')
         print(f'生成描述花費 : {time.time() - start_time:.2f} 秒')
         return self
-
-    def _get_system_prompt(self, image_config):
-        weights = image_config.get('image_system_prompt_weights')
-        if weights:
-            # Simple weighted choice
-            choices = list(weights.keys())
-            probs = list(weights.values())
-            total = sum(probs)
-            probs = [p/total for p in probs]
-            return np.random.choice(choices, p=probs)
-        return self._get_config_value(image_config, 'image_system_prompt', 'stable_diffusion_prompt')
 
     def generate_media(self):
         start_time = time.time()

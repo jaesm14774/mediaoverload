@@ -12,16 +12,16 @@ class ContentGenerationService(IContentGenerationService):
     協調完整的媒體生成流程：描述生成、媒體創建、品質分析、文章生成。
     """
     
-    def __init__(self, character_repository=None, vision_manager=None):
+    def __init__(self, character_data_service=None, vision_manager=None):
         """初始化內容生成服務
         
         Args:
-            character_repository: 角色資料庫存取（可選）
+            character_data_service: 角色資料服務（可選）
             vision_manager: 視覺模型管理器（可選）
         """
         self.logger = setup_logger(__name__)
         self.strategy = None
-        self.character_repository = character_repository
+        self.character_data_service = character_data_service
         self.vision_manager = vision_manager
 
     def generate_content(self, config: GenerationConfig) -> Dict[str, Any]:
@@ -38,7 +38,7 @@ class ContentGenerationService(IContentGenerationService):
         generation_type = config.get_all_attributes().get('generation_type', 'text2img')
         self.strategy = StrategyFactory.get_strategy(
             generation_type,
-            character_repository=self.character_repository,
+            character_data_service=self.character_data_service,
             vision_manager=self.vision_manager
         )
         strategy_name = getattr(self.strategy, 'name', None) or self.strategy.__class__.__name__

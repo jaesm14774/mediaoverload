@@ -42,13 +42,13 @@ class StrategyFactory:
     }
     
     @classmethod
-    def get_strategy(cls, strategy_type: str, character_repository=None, vision_manager=None) -> ContentStrategy:
+    def get_strategy(cls, strategy_type: str, character_data_service=None, vision_manager=None) -> ContentStrategy:
         """獲取對應的策略實例"""
         strategy_class = cls._strategies.get(strategy_type)
         if not strategy_class:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
         
-        return strategy_class(character_repository=character_repository, vision_manager=vision_manager)
+        return strategy_class(character_data_service=character_data_service, vision_manager=vision_manager)
     
     @classmethod
     def register_strategy(cls, strategy_type: str, strategy_class: Type[ContentStrategy]):

@@ -164,7 +164,7 @@
   },
   "260:252": {
     "inputs": {
-      "ckpt_name": "sdxl\\noobaiXLNAIXL_vPred10Version.safetensors"
+      "ckpt_name": "sdxl\\novaCartoonXL_v30.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -421,15 +421,6 @@
       "title": "VAE Decode"
     }
   },
-  "272:261": {
-    "inputs": {
-      "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
   "272:268": {
     "inputs": {
       "filename_prefix": "model3",
@@ -441,6 +432,15 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "Save Image"
+    }
+  },
+  "272:261": {
+    "inputs": {
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV140.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
     }
   }
 }

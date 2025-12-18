@@ -2,6 +2,7 @@ import os
 import time
 import random
 import json
+import numpy as np
 from typing import List, Dict, Any, Optional
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
@@ -34,9 +35,9 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
     8. Concatenate all videos
     """
     
-    def __init__(self, character_repository=None, vision_manager=None):
+    def __init__(self, character_data_service=None, vision_manager=None):
         self.logger = setup_logger(__name__)
-        self.character_repository = character_repository
+        self.character_data_service = character_data_service
         
         if vision_manager is None:
             vision_manager = VisionManagerBuilder() \
@@ -81,13 +82,13 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
         context_data['tts_voice'] = longvideo_config.get('tts_voice', 'en-US-AriaNeural')
         context_data['tts_rate'] = longvideo_config.get('tts_rate', '+0%')
         context_data['fps'] = longvideo_config.get('fps', 16)
-        context_data['style'] = self._get_config_value(first_stage_config, 'style', '')
+        context_data['style'] = self._get_style(first_stage_config)
         
         first_segment = self.script_generator.generate_script_segment(context_data)
         self.script_segments = [first_segment]
         self.descriptions = [first_segment['visual']]
         
-        self.logger.info(f"First segment script: {first_segment['visual'][:100]}...")
+        self.logger.info(f"First segment script: {first_segment['visual']}")
         print(f'生成描述花費: {time.time() - start_time:.2f} 秒')
         return self
 
@@ -99,7 +100,7 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
         workflow_path = first_stage_config.get('workflow_path') or \
                        getattr(self.config, 'workflow_path', 'configs/workflow/nova-anime-xl.json')
         
-        style = self._get_config_value(first_stage_config, 'style', '')
+        style = self._get_style(first_stage_config)
         prompt = self.script_segments[0]['visual']
         if style:
             prompt = f"{prompt}\nstyle: {style}".strip()
@@ -206,7 +207,7 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
         
         # Build transition prompt
         transition_prompt = f"{next_visual_desc}, {style_prompt}"
-        self.logger.info(f"Transition prompt: {transition_prompt[:100]}...")
+        self.logger.info(f"Transition prompt: {transition_prompt}")
         self.logger.info(f"Denoise: {denoise}")
         
         # Upload last frame
@@ -288,7 +289,7 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
         context_data = self.config.get_all_attributes()
         context_data['segment_duration'] = longvideo_config.get('segment_duration', 5)
         context_data['segment_count'] = segment_count
-        context_data['style'] = self._get_config_value(first_stage_config, 'style', '')
+        context_data['style'] = self._get_style(first_stage_config)
         
         frames_dir = os.path.join(output_dir, 'frames')
         video_output_dir = os.path.join(output_dir, 'videos')
@@ -370,7 +371,7 @@ class Text2LongVideoFirstFrameStrategy(ContentStrategy):
                     raise RuntimeError(f"Failed to generate script for segment {i+2}")
                 
                 self.script_segments.append(next_segment_script)
-                self.logger.info(f"Next segment visual: {next_segment_script.get('visual', '')[:80]}...")
+                self.logger.info(f"Next segment visual: {next_segment_script.get('visual', '')}")
                 
                 if enable_transition:
                     # Use I2I to transform last frame into new first frame

@@ -18,7 +18,7 @@ class Text2LongVideoStrategy(ContentStrategy):
     Text-to-Long-Video generation strategy.
     Refactored to use composition over inheritance.
     """
-    def __init__(self, character_repository=None, vision_manager=None):
+    def __init__(self, character_data_service=None, vision_manager=None):
         
         self.logger = setup_logger(__name__)
         
@@ -66,7 +66,7 @@ class Text2LongVideoStrategy(ContentStrategy):
         context_data['tts_voice'] = longvideo_config.get('tts_voice', context_data.get('tts_voice', 'en-US-AriaNeural'))
         context_data['tts_rate'] = longvideo_config.get('tts_rate', context_data.get('tts_rate', '+0%'))
         context_data['fps'] = longvideo_config.get('fps', context_data.get('fps', 16))
-        style_value = self._get_config_value(first_stage_config, 'style', '')
+        style_value = self._get_style(first_stage_config)
         context_data['style'] = style_value
         first_segment = self.script_generator.generate_script_segment(context_data)
         self.script_segments = [first_segment]
@@ -98,7 +98,7 @@ class Text2LongVideoStrategy(ContentStrategy):
         workflow_path = first_stage_config.get('workflow_path') or getattr(self.config, 'workflow_path', 'configs/workflow/txt2img.json')
         
         # Get style and add to prompt if needed
-        style = self._get_config_value(first_stage_config, 'style', '')
+        style = self._get_style(first_stage_config)
         prompt = self.script_segments[0]['visual']
         if style and style.strip():
             prompt = f"{prompt}\nstyle: {style}".strip()
@@ -293,8 +293,8 @@ class Text2LongVideoStrategy(ContentStrategy):
         context_data = self.config.get_all_attributes()
         context_data['segment_duration'] = longvideo_config.get('segment_duration', context_data.get('segment_duration', 5))
         context_data['segment_count'] = segment_count
-        # Get style: first_stage -> general -> config.style
-        context_data['style'] = self._get_config_value(first_stage_config, 'style', '')
+        # Get style: support weights or single value
+        context_data['style'] = self._get_style(first_stage_config)
         
         # Create frames directory for storing extracted frames
         frames_dir = os.path.join(output_dir, 'frames')
@@ -584,7 +584,7 @@ class Text2LongVideoStrategy(ContentStrategy):
         # 先生成第一幀圖片
         self.logger.info("生成第一幀圖片...")
         workflow_path = first_stage_config.get('workflow_path') or getattr(self.config, 'workflow_path', 'configs/workflow/txt2img.json')
-        style = self._get_config_value(first_stage_config, 'style', '')
+        style = self._get_style(first_stage_config)
         prompt = self.script_segments[0]['visual']
         if style and style.strip():
             prompt = f"{prompt}\nstyle: {style}".strip()

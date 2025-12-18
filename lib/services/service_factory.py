@@ -3,8 +3,6 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 from lib.database import db_pool
-from lib.repositories.character_repository import CharacterRepository
-from lib.repositories.news_repository import NewsRepository
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.services.implementations import (
     PromptService,
@@ -12,7 +10,9 @@ from lib.services.implementations import (
     ReviewService,
     PublishingService,
     NotificationService,
-    OrchestrationService
+    OrchestrationService,
+    CharacterDataService,
+    NewsDataService
 )
 
 
@@ -100,24 +100,24 @@ class ServiceFactory:
             
         return self._vision_manager
     
-    def get_character_repository(self) -> CharacterRepository:
-        """獲取角色資料庫存取層"""
+    def get_character_data_service(self) -> CharacterDataService:
+        """獲取角色資料服務"""
         if self._character_repository is None:
-            self._character_repository = CharacterRepository(self.mysql_conn)
+            self._character_repository = CharacterDataService(self.mysql_conn)
         return self._character_repository
     
-    def get_news_repository(self) -> NewsRepository:
-        """獲取新聞資料庫存取層"""
+    def get_news_data_service(self) -> NewsDataService:
+        """獲取新聞資料服務"""
         if self._news_repository is None:
-            self._news_repository = NewsRepository(self.mysql_conn)
+            self._news_repository = NewsDataService(self.mysql_conn)
         return self._news_repository
     
     def get_prompt_service(self) -> PromptService:
         """獲取提示詞生成服務"""
         if self._prompt_service is None:
             self._prompt_service = PromptService(
-                news_repository=self.get_news_repository(),
-                character_repository=self.get_character_repository(),
+                news_data_service=self.get_news_data_service(),
+                character_data_service=self.get_character_data_service(),
                 vision_manager=self.get_vision_manager()
             )
         return self._prompt_service
@@ -126,7 +126,7 @@ class ServiceFactory:
         """獲取內容生成服務"""
         if self._content_service is None:
             self._content_service = ContentGenerationService(
-                character_repository=self.get_character_repository(),
+                character_data_service=self.get_character_data_service(),
                 vision_manager=self.get_vision_manager()
             )
         return self._content_service
@@ -167,7 +167,7 @@ class ServiceFactory:
         """獲取協調服務（新的 ContentProcessor）"""
         if self._orchestration_service is None:
             self._orchestration_service = OrchestrationService(
-                character_repository=self.get_character_repository()
+                character_data_service=self.get_character_data_service()
             )
             
             # 配置所有依賴的服務

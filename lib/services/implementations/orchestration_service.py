@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from lib.services.interfaces.orchestration_service import IOrchestrationService
 from lib.media_auto.character_config import BaseCharacter
 from lib.media_auto.strategies.base_strategy import GenerationConfig
-from lib.repositories.character_repository import ICharacterRepository
+from lib.services.interfaces.character_data_service import ICharacterDataService
 from lib.social_media import MediaPost
 from utils.logger import setup_logger, log_execution_time
 
@@ -18,14 +18,14 @@ class OrchestrationService(IOrchestrationService):
     負責協調各個服務完成整個工作流程：提示詞生成、內容生成、審核、發布。
     """
     
-    def __init__(self, character_repository: ICharacterRepository = None):
+    def __init__(self, character_data_service: ICharacterDataService = None):
         """初始化協調服務
         
         Args:
-            character_repository: 角色資料庫存取層（可選）
+            character_data_service: 角色資料服務（可選）
         """
         self.logger = setup_logger(__name__)
-        self.character_repository = character_repository
+        self.character_data_service = character_data_service
         self.prompt_service = None
         self.content_service = None
         self.review_service = None
@@ -73,8 +73,11 @@ class OrchestrationService(IOrchestrationService):
         config = None
         
         try:
+            # 保存原始群組代表角色（用於查詢同群組的其他角色）
+            group_representative_character = character.character
+            
             # 處理角色選擇
-            if character.group_name and self.character_repository:
+            if character.group_name and self.character_data_service:
                 generation_type = getattr(character.config, 'generation_type', '')
                 is_kirby_group = character.group_name.lower() == 'kirby'
                 is_longvideo = generation_type.lower() in ['text2longvideo', 'text2longvideo_firstframe']
@@ -85,7 +88,7 @@ class OrchestrationService(IOrchestrationService):
                     self.logger.info(f"長影片模式：群組 {character.group_name} 直接使用角色 kirby")
                 else:
                     workflow_name = os.path.splitext(os.path.basename(character.workflow_path))[0]
-                    dynamic_character = self.character_repository.get_random_character_from_group(
+                    dynamic_character = self.character_data_service.get_random_character_from_group(
                         character.group_name, 
                         workflow_name
                     )
@@ -102,11 +105,13 @@ class OrchestrationService(IOrchestrationService):
                     temperature=temperature,
                     character_config=character.config
                 )
-                self.logger.info(f"生成提示詞: {prompt[:100]}..." if len(prompt) > 100 else f"生成提示詞: {prompt}")
+                self.logger.info(f"生成提示詞: {prompt}")
             
             # 準備生成配置
             config_dict = character.get_generation_config(prompt)
             config_dict['output_dir'] = os.path.join(config_dict['output_dir'], config_dict['character'])
+            # 傳遞群組代表角色，用於雙角色互動查詢
+            config_dict['group_representative_character'] = group_representative_character
             config = GenerationConfig(**config_dict)
             
             # 生成內容（第一階段）

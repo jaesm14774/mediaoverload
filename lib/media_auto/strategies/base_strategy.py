@@ -86,6 +86,65 @@ class ContentStrategy(ABC):
         # 最後返回默認值
         return default
     
+    def _get_system_prompt(self, stage_config: Dict[str, Any], default: str = 'stable_diffusion_prompt') -> str:
+        """獲取系統提示詞，支援加權隨機選擇
+        
+        優先級順序：
+        1. stage_config 中的 image_system_prompt_weights（加權隨機選擇）
+        2. stage_config 或 config 中的 image_system_prompt（單一值）
+        3. 默認值
+        
+        Args:
+            stage_config: 階段配置字典
+            default: 默認系統提示詞
+        
+        Returns:
+            選中的系統提示詞
+        """
+        weights = stage_config.get('image_system_prompt_weights')
+        if weights:
+            choices = list(weights.keys())
+            probs = list(weights.values())
+            total = sum(probs)
+            if total > 0:
+                probs = [p/total for p in probs]
+                selected = np.random.choice(choices, p=probs)
+                print(f'[System Prompt] 使用加權隨機選擇: {selected} (權重: {dict(zip(choices, [f"{p:.1%}" for p in probs]))})')
+                return selected
+        result = self._get_config_value(stage_config, 'image_system_prompt', default)
+        print(f'[System Prompt] 使用單一值或預設: {result}')
+        return result
+    
+    def _get_style(self, stage_config: Dict[str, Any], default: str = '') -> str:
+        """獲取視覺風格，支援加權隨機選擇
+        
+        優先級順序：
+        1. stage_config 中的 style_weights（加權隨機選擇）
+        2. stage_config 或 config 中的 style（單一值）
+        3. 默認值
+        
+        Args:
+            stage_config: 階段配置字典
+            default: 默認風格
+        
+        Returns:
+            選中的風格字串
+        """
+        weights = stage_config.get('style_weights')
+        if weights:
+            choices = list(weights.keys())
+            probs = list(weights.values())
+            total = sum(probs)
+            if total > 0:
+                probs = [p/total for p in probs]
+                selected = np.random.choice(choices, p=probs)
+                print(f'[Style] 使用加權隨機選擇: {selected[:50]}...' if len(selected) > 50 else f'[Style] 使用加權隨機選擇: {selected}')
+                return selected
+        result = self._get_config_value(stage_config, 'style', default)
+        if result:
+            print(f'[Style] 使用單一值或預設: {result[:50]}...' if len(result) > 50 else f'[Style] 使用單一值或預設: {result}')
+        return result
+    
     def _merge_node_manager_params(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """合併參數供 NodeManager.generate_updates 使用
         
@@ -206,44 +265,45 @@ class ContentStrategy(ABC):
 
         return hashtag_text.lower().strip()
     
-    def _get_random_secondary_character(self, main_character: str) -> Optional[str]:
+    def _get_random_secondary_character(self, main_character: str, same_group_probability: float = 0.6) -> Optional[str]:
         """獲取隨機的 Secondary Role
         
-        從角色資料庫中獲取與主角色同群組的其他角色。
+        60% 機率選擇同 group 角色，40% 機率選擇其他 group 角色。
+        所有角色都必須 status = 1。
         
         Args:
             main_character: 主角色名稱
+            same_group_probability: 選擇同 group 角色的機率（預設 0.6 = 60%）
         
         Returns:
             次要角色名稱，如果無法獲取則返回 None
         """
         try:
-            # 檢查是否有 character_repository
-            if not hasattr(self, 'character_repository') or self.character_repository is None:
+            if not hasattr(self, 'character_data_service') or self.character_data_service is None:
                 try:
                     from lib.services.service_factory import ServiceFactory
                     service_factory = ServiceFactory()
-                    character_repository = service_factory.get_character_repository()
+                    character_data_service = service_factory.get_character_data_service()
                 except ImportError:
-                    print("無法導入 ServiceFactory，使用預設角色")
-                    return self._get_default_secondary_character(main_character)
+                    print("無法導入 ServiceFactory，無法獲取次要角色")
+                    return None
             else:
-                character_repository = self.character_repository
+                character_data_service = self.character_data_service
             
-            # 從角色配置中獲取 group_name 和 workflow
             group_name = getattr(self.config, 'group_name', '')
             workflow_path = getattr(self.config, 'workflow_path', '')
-            
-            # 從 workflow_path 中提取 workflow 名稱（去掉路徑和副檔名）
             workflow_name = os.path.splitext(os.path.basename(workflow_path))[0] if workflow_path else ''
             
-            print(f"嘗試從群組 '{group_name}' 和工作流 '{workflow_name}' 中獲取角色")
-            
-            if group_name and workflow_name:
-                # 從資料庫中獲取同群組的角色
-                characters = character_repository.get_characters_by_group(group_name, workflow_name)
+            if group_name:
+                use_same_group = random.random() < same_group_probability
                 
-                # 過濾掉主角色
+                if use_same_group:
+                    characters = character_data_service.get_characters_by_group(group_name, workflow_name)
+                    print(f"[DEBUG] 選擇同 group ({group_name}) 角色")
+                else:
+                    characters = character_data_service.get_characters_outside_group(group_name)
+                    print(f"[DEBUG] 選擇其他 group 角色 (排除 {group_name})")
+                
                 available_characters = [
                     char for char in characters 
                     if char.lower() != main_character.lower()
@@ -251,19 +311,34 @@ class ContentStrategy(ABC):
                 
                 if available_characters:
                     selected_character = random.choice(available_characters)
-                    print(f"從資料庫獲取到 Secondary Role: {selected_character}")
+                    print(f"✓ 獲取到 Secondary Role: {selected_character}")
                     return selected_character
+                
+                # Fallback: 如果該選擇沒有可用角色，嘗試另一個
+                if use_same_group:
+                    fallback_characters = character_data_service.get_characters_outside_group(group_name)
+                    print(f"[DEBUG] 同 group 無可用角色，fallback 到其他 group")
                 else:
-                    print(f"群組 '{group_name}' 中沒有其他可用角色")
+                    fallback_characters = character_data_service.get_characters_by_group(group_name, workflow_name)
+                    print(f"[DEBUG] 其他 group 無可用角色，fallback 到同 group")
+                
+                available_fallback = [char for char in fallback_characters if char.lower() != main_character.lower()]
+                if available_fallback:
+                    selected = random.choice(available_fallback)
+                    print(f"✓ Fallback 獲取到 Secondary Role: {selected}")
+                    return selected
+                
+                print(f"✗ 無法找到任何可用的 Secondary Role")
             else:
-                print(f"角色配置中缺少 group_name 或 workflow_path")
+                print(f"✗ 角色配置中缺少 group_name")
             
-            # 如果無法從資料庫獲取，使用預設角色
-            return self._get_default_secondary_character(main_character)
+            return None
             
         except Exception as e:
             print(f"獲取 Secondary Role 時發生錯誤: {e}")
-            return 
+            import traceback
+            traceback.print_exc()
+            return None 
     
     def _generate_two_character_interaction_description(self, prompt: str, style: str = '') -> str:
         """生成雙角色互動描述

@@ -2,6 +2,7 @@ import time
 import random
 import glob
 import os
+import numpy as np
 from typing import List, Dict, Any, Optional
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
@@ -14,8 +15,8 @@ class Image2ImageStrategy(ContentStrategy):
     Image-to-Image generation strategy.
     Refactored to use composition.
     """
-    def __init__(self, character_repository=None, vision_manager=None):
-        self.character_repository = character_repository
+    def __init__(self, character_data_service=None, vision_manager=None):
+        self.character_data_service = character_data_service
         
         if vision_manager is None:
             vision_manager = VisionManagerBuilder() \
@@ -71,8 +72,8 @@ class Image2ImageStrategy(ContentStrategy):
             self.descriptions = [descriptions] if descriptions else []
         else:
             prompt = self.config.prompt or ''
-            # Get style: i2i_config -> general -> config.style
-            style = self._get_config_value(i2i_config, 'style', '')
+            # Get style: support weights or single value
+            style = self._get_style(i2i_config)
             if style and style.strip():
                 prompt = f"{prompt}\nstyle: {style}".strip()
                 

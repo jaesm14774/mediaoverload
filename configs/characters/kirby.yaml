@@ -6,7 +6,7 @@
 # Character Identity
 # -----------------------------------------------------------------
 character:
-  name: kirby_longvideo  # Character identifier
+  name: Kirby  # Character name
   group_name: Kirby  # Character group
 
 # Generation Settings
@@ -17,14 +17,14 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 1
+    text2img: 0
     text2video: 0
-    text2image2video: 2
-    text2longvideo: 2
+    text2image2video: 1
+    text2longvideo: 0
     image2image: 0
-    text2image2image: 1
-    sticker_pack: 3
-    text2longvideo_firstframe: 2
+    text2image2image: 0
+    sticker_pack: 0
+    text2longvideo_firstframe: 0
 
   # Workflow Path Configuration
   workflows:
@@ -35,26 +35,28 @@ generation:
     sticker_pack: /app/configs/workflow/nova-anime-xl.json
 
   # Quality Control
-  similarity_threshold: 0.5
+  similarity_threshold: 0.6
 
   # Prompt Generation Method Weights
   prompt_method_weights:
-    arbitrary: 0.1
-    news: 0.9
+    arbitrary: 0.15
+    news: 0.85
 
-  # Image System Prompt Weights
+  # Image System Prompt Weights（頂層預設，可被策略覆蓋）
   image_system_prompt_weights:
-    stable_diffusion_prompt: 0.3
-    warm_scene_description_system_prompt: 0.3
-    sticker_prompt_system_prompt: 0.4
-    two_character_interaction_generate_system_prompt: 0.3
+    stable_diffusion_prompt: 0.25
+    warm_scene_description_system_prompt: 0.25
+    sticker_prompt_system_prompt: 0.25
+    two_character_interaction_generate_system_prompt: 150
 
   # Visual Style Weights
   style_weights:
     "minimalism style with pure background": 0.2
     "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.3
     "watercolor painting style with pure background": 0.1
-    "": 0.4
+    "Vibrant high-fantasy character concept art, bold clean line art, stylized cartoon illustration, cell-shaded with soft gradients, whimsical adventure aesthetic": 0.2
+    "Papercraft / Digital 2D Paper Cutout Style": 0.1
+    "": 0.1
 
 # Social Media Configuration
 # -----------------------------------------------------------------
@@ -114,10 +116,12 @@ additional_params:
     text2image2video:
       first_stage:
         style: "minimalism style with pure background"
+        # 注意：這裡的 weights 會覆蓋頂層配置，需要包含所有想使用的 prompt 類型
         image_system_prompt_weights:
           stable_diffusion_prompt: 0.3
           warm_scene_description_system_prompt: 0.3
-          sticker_prompt_system_prompt: 0.4
+          sticker_prompt_system_prompt: 0.3
+          two_character_interaction_generate_system_prompt: 0.1
         images_per_description: 3
         t2i_workflow_path: /app/configs/workflow/nova-anime-xl.json
         enable_upscale: true

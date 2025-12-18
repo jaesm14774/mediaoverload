@@ -104,7 +104,11 @@ results = batch_generate_by_count(
 ```
 generate_description()
   ↓
-  使用 VisionManager 生成圖片描述（支援雙角色互動）
+  根據 image_system_prompt_weights 隨機選擇 system prompt
+  （支援：stable_diffusion_prompt, warm_scene_description_system_prompt, 
+   sticker_prompt_system_prompt, two_character_interaction_generate_system_prompt）
+  ↓
+  使用 VisionManager 生成圖片描述
   ↓
 generate_media()
   ↓
@@ -673,7 +677,205 @@ animated_config:
 
 ---
 
+## 加權隨機選擇功能
+
+系統支援兩個重要的加權隨機選擇功能：
+1. **Image System Prompt Weights** - 描述生成系統提示詞的加權選擇
+2. **Style Weights** - 視覺風格的加權選擇
+
+這兩個功能使得內容生成更加多樣化和可控。
+
+---
+
+## Two Character Interaction 功能
+
+### 概述
+
+Two Character Interaction 是一個特殊的圖片描述生成系統，用於生成兩個角色互動的場景。
+
+### 支援策略
+
+✅ **已支援** (2025-12-17 修復):
+- `Text2ImageStrategy` - 文字生成圖片
+- `Text2Image2ImageStrategy` - 文字→圖片→圖片
+- `Text2Image2VideoStrategy` - 文字→圖片→影片  
+- `Text2VideoStrategy` - 文字生成影片（角色描述階段）
+
+❌ **不支援**:
+- `Text2LongVideoStrategy` - 長影片（使用腳本生成系統）
+- `Text2LongVideoFirstFrameStrategy` - 長影片首幀模式（使用腳本生成系統）
+- `Image2ImageStrategy` - 圖片→圖片（從現有圖片提取內容）
+- `StickerPackStrategy` - 貼圖包（使用專用表情系統）
+
+### 使用方式
+
+在角色配置檔案中，使用 `image_system_prompt_weights` 來設定 two character interaction 的機率：
+
+```yaml
+generation:
+  # 全域設定（所有策略）
+  image_system_prompt_weights:
+    stable_diffusion_prompt: 0.3
+    warm_scene_description_system_prompt: 0.3
+    sticker_prompt_system_prompt: 0.4
+    two_character_interaction_generate_system_prompt: 0.3  # 30% 機率
+```
+
+或針對特定策略設定：
+
+```yaml
+additional_params:
+  strategies:
+    text2image2video:
+      first_stage:
+        image_system_prompt_weights:
+          stable_diffusion_prompt: 0.3
+          two_character_interaction_generate_system_prompt: 0.7  # 70% 機率
+```
+
+### Secondary Character 來源
+
+當系統選擇使用 two character interaction 時，會自動選擇第二角色：
+
+1. **優先**：從 `config.secondary_character` 獲取（如果有指定）
+2. **次要**：從資料庫中隨機選擇與主角色不同的角色
+3. **回退**：如果無法獲取，則使用預設的圖片生成方法
+
+### 實現細節
+
+- 基類 `ContentStrategy` 提供 `_get_system_prompt()` 方法，支援加權隨機選擇
+- 所有策略繼承這個方法，特殊需求的策略可以覆寫
+- 系統會根據權重隨機選擇 system prompt
+- 當選中 `two_character_interaction_generate_system_prompt` 時：
+  - 調用 `_generate_two_character_interaction_description()` 方法
+  - 該方法會獲取 secondary character
+  - 使用 `vision_manager.generate_two_character_interaction_prompt()` 生成場景描述
+- 生成的描述會包含兩個角色的互動細節（動作、表情、環境等）
+
+### 配置優先級
+
+配置查找順序（從高到低）：
+1. 階段特定配置：`strategies.{strategy_name}.{stage}.image_system_prompt_weights`
+2. 策略特定配置：`strategies.{strategy_name}.image_system_prompt_weights`
+3. 全域配置：`generation.image_system_prompt_weights`
+4. 單一值：`image_system_prompt`（不支援加權選擇）
+
+---
+
+## Style Weights 功能
+
+### 概述
+
+Style Weights 允許系統根據權重隨機選擇視覺風格，讓生成的內容更加多樣化。
+
+### 支援策略
+
+✅ **全部支援** (2025-12-17 修復):
+- `Text2ImageStrategy` - 文字生成圖片
+- `Text2Image2ImageStrategy` - 文字→圖片→圖片
+- `Text2Image2VideoStrategy` - 文字→圖片→影片
+- `Text2VideoStrategy` - 文字生成影片
+- `Text2LongVideoStrategy` - 長影片（尾幀驅動）
+- `Text2LongVideoFirstFrameStrategy` - 長影片（首幀驅動）
+- `Image2ImageStrategy` - 圖片→圖片
+- `StickerPackStrategy` - 貼圖包
+
+### 使用方式
+
+在角色配置檔案中，使用 `style_weights` 來設定不同風格的機率：
+
+```yaml
+generation:
+  # 全域風格設定（所有策略）
+  style_weights:
+    "minimalism style with pure background": 0.2
+    "watercolor painting style with pure background": 0.1
+    "A highly saturated, dreamy-colored digital illustration style": 0.3
+    "": 0.4  # 空字串表示不加風格提示詞
+```
+
+或針對特定策略設定：
+
+```yaml
+additional_params:
+  strategies:
+    text2image2video:
+      first_stage:
+        style_weights:
+          "minimalism style with pure background": 0.8
+          "": 0.2
+```
+
+### 實現細節
+
+- 基類 `ContentStrategy` 提供 `_get_style()` 方法，支援加權隨機選擇
+- 所有策略繼承這個方法，特殊需求的策略可以覆寫（如 `StickerPackStrategy`）
+- 系統會根據權重隨機選擇風格
+- 選中的風格會被添加到 prompt 中：`{prompt}\nstyle: {style}`
+- 如果選中空字串 `""`，則不添加風格提示詞
+- 每次生成時都會重新隨機選擇
+
+### 代碼架構
+
+**基類實現** (`base_strategy.py`):
+```python
+def _get_style(self, stage_config: Dict[str, Any], default: str = '') -> str:
+    """獲取視覺風格，支援加權隨機選擇"""
+    weights = stage_config.get('style_weights')
+    if weights:
+        choices = list(weights.keys())
+        probs = list(weights.values())
+        total = sum(probs)
+        if total > 0:
+            probs = [p/total for p in probs]
+            return np.random.choice(choices, p=probs)
+    return self._get_config_value(stage_config, 'style', default)
+```
+
+**特殊策略覆寫** (例如 `sticker_pack.py`):
+```python
+def _get_style(self, stage_config):
+    """覆寫基類方法以使用不同的默認值"""
+    return super()._get_style(stage_config, 
+        default='LINE sticker style, chibi proportions, white outline...')
+```
+
+這種設計：
+- ✅ 減少代碼重複
+- ✅ 提高可維護性
+- ✅ 保持彈性（子類可覆寫）
+- ✅ 統一行為（所有策略使用相同邏輯）
+
+### 配置優先級
+
+配置查找順序（從高到低）：
+1. 階段特定配置：`strategies.{strategy_name}.{stage}.style_weights`
+2. 策略特定配置：`strategies.{strategy_name}.style_weights`
+3. 全域配置：`generation.style_weights`
+4. 單一值：`style`（不支援加權選擇）
+
+### 與 image_system_prompt_weights 的關係
+
+這兩個功能是**獨立的**：
+- `image_system_prompt_weights` 控制**如何生成描述**（使用哪個系統提示詞）
+- `style_weights` 控制**生成什麼風格的描述**（視覺風格）
+
+它們可以同時使用，系統會：
+1. 先根據 `image_system_prompt_weights` 選擇系統提示詞
+2. 再根據 `style_weights` 選擇風格
+3. 將風格添加到 prompt 中
+4. 使用選定的系統提示詞和 prompt 生成描述
+
+---
+
 ## 常見問題
+
+### Q: 在 Jupyter Notebook 中出現 `NameError: name '__file__' is not defined` 錯誤？
+
+A: 在 Jupyter Notebook 環境中，`__file__` 變數不存在。`all_strategies_examples.ipynb` 已經修正此問題：
+- Cell 2 中定義了全局 `project_root` 變數
+- `build_config_for_strategy` 函數使用 `global project_root` 來存取專案路徑
+- 確保按順序執行 Cell 2（環境初始化）後再執行其他 Cell
 
 ### Q: 什麼是「審核」？
 
@@ -710,3 +912,58 @@ A: 使用 `selected_result_already_filtered` 標記來區分兩種情況：
 - 如果未過濾：使用 `selected_indices` 索引 `selected_result`
 
 這確保了無論審核流程如何，都能正確提取使用者選擇的媒體。
+
+## 🔧 錯誤修復記錄
+
+### 雙角色互動獲取 Secondary Role 返回 None (2025-12-17)
+
+**問題**: 使用雙角色互動系統提示詞時，`_get_random_secondary_character` 方法返回 `None`，導致無法生成雙角色互動描述。
+
+**根本原因**:
+系統在查詢同群組的其他角色時，使用了**隨機選出的角色**（如 `metaknight`）而不是**群組代表角色**（如 `kirby`）。
+
+**執行流程說明**:
+1. `orchestration_service` 從群組 `Kirby` 中隨機選擇了 `MetaKnight` 作為主角色
+2. 在 `_get_random_secondary_character` 中，使用 `metaknight` 去查詢同群組的其他角色
+3. 但資料庫查詢應該使用**群組代表角色**（`kirby`）來查詢，才能找到同群組的所有角色
+
+**修復方案**:
+1. 在 `orchestration_service` 中，保存原始的群組代表角色（`group_representative_character`）
+2. 通過 `config_dict` 傳遞給 `GenerationConfig`
+3. 在 `_get_random_secondary_character` 中，優先使用 `group_representative_character` 進行資料庫查詢
+4. 過濾角色時，排除**當前主角色**（隨機選出的角色）
+
+**修復內容**:
+1. `orchestration_service.py`:
+   - 在角色選擇前保存 `group_representative_character = character.character`
+   - 將其加入 `config_dict['group_representative_character']`
+
+2. `base_strategy.py`:
+   - 在 `_get_random_secondary_character` 中，使用 `getattr(self.config, 'group_representative_character', main_character)` 進行查詢
+   - 添加 DEBUG 日誌顯示「當前主角色」和「群組代表角色」的區別
+   - 過濾時仍然排除當前主角色（隨機選出的角色）
+
+**影響檔案**: 
+- `lib/services/implementations/orchestration_service.py`
+- `lib/media_auto/strategies/base_strategy.py`
+
+**範例**:
+- 群組代表角色: `kirby`
+- 隨機選出的主角色: `metaknight`
+- 查詢使用: `kirby`（群組代表角色）
+- 過濾排除: `metaknight`（當前主角色）
+- 可能的 Secondary Role: `waddle dee`, `king dedede` 等
+
+---
+
+### TTS 音訊生成 asyncio 錯誤 (2025-12-17)
+
+**問題**: Text2LongVideo 策略在生成 TTS 音訊時出現 `asyncio.run() cannot be called from a running event loop` 錯誤
+
+**原因**: `TTSService.generate_speech_sync()` 方法在檢測到運行中的 event loop 時，會在新線程中執行 async 任務。但在異常處理的 `except RuntimeError` 區塊中，仍然使用 `asyncio.run()`，導致當沒有運行中的 event loop 時也會失敗。
+
+**修復**: 重構 `generate_speech_sync()` 方法，將在新線程中執行的邏輯提取為 `run_in_thread()` 函數，並在兩種情況下都使用：
+- 有運行中的 event loop：在線程池中執行
+- 沒有運行中的 event loop：直接執行
+
+**影響檔案**: `lib/services/implementations/tts_service.py`
