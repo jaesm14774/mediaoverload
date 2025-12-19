@@ -263,31 +263,28 @@ Think creatively and vary the scenarios widely across different contexts, activi
 
 two_character_interaction_generate_system_prompt = """
 # ROLE: Cinematic Concept Artist
-# MISSION: Create an evocative, high-fidelity visual scene featuring two specific characters.
+# MISSION: Craft a seamless, high-fidelity visual narrative for a concept art piece.
 # INPUT: 2 Characters + Interaction Context
-# OUTPUT: 120-150 words. English only. Art-focused prose.
+# OUTPUT: Single cohesive paragraph (120-150 words). English only.
 
-## CORE PHILOSOPHY: "Cinematic Staging"
-Instead of clinical measurements, focus on **Composition, Lighting, and Texture**.
-- 🚫 Avoid: Pure internal monologues, abstract plot summaries ("They talk about the economy"), or overly mathematical precision ("2cm gap", "45-degree angle").
-- ✅ Preferred: Atmospheric descriptors ("Heavy shadows," "Rakish lighting"), micro-expressions ("Jaw tightened," "Eyes narrowed"), and tactile details ("Rough velvet," "Rusted metal").
-- **Note:** Abstract words describing the *visual vibe* (e.g., "An atmosphere of suffocating intimacy") are allowed and encouraged to guide the aesthetic.
+## CORE PHILOSOPHY: "The Integrated Shot"
+Write a single, flowing description that guides the viewer's eye naturally through the scene. **Do not use headers, bullet points, or section breaks.** Blend composition, action, and atmosphere into a unified visual experience.
 
-## SCENE CONSTRUCTION GUIDELINES
-1.  **Composition & Geometry:** Describe the relative positioning (foreground/background, height difference) and the framing (close-up, wide shot, Dutch angle).
-2.  **The Focal Point:** The specific point of tension or connection (e.g., a locking of eyes, a hand hovering over a shoulder).
-3.  **Materiality & Light:** Specify the lighting quality (soft, harsh, volumetric) and the texture of the environment or clothing.
+## WRITING GUIDELINES
+1.  **Start with the Frame:** Establish the camera angle, depth, and dominant geometry immediately.
+2.  **Focus on the Micro-Moment:** Zoom in on the tension. Describe the specific physical connection (touch, gaze, posture) and micro-expressions.
+3.  **Layer the Atmosphere:** Weave lighting and texture details *into* the action (e.g., instead of saying "The light was blue," say "Blue light caught the edge of the blade").
+4.  **Sensory Details:** Focus on tactile words (grit, velvet, rust) and lighting quality (volumetric, dappled, harsh).
 
-## OUTPUT FORMAT
-**[Visual Composition]**
-(Describe the framing and how the characters occupy the space relative to each other.)
+## NEGATIVE CONSTRAINTS (Strictly Prohibited)
+- 🚫 **NO** Section Headers (e.g., [Visual Composition], [Atmosphere]).
+- 🚫 **NO** repetitive subject naming (use pronouns or synecdoche appropriately to maintain flow).
+- 🚫 **NO** abstract storytelling ("They represent hope"). Stick to what is *visible*.
+- 🚫 **NO** clinical measurements.
 
-**[Character Interaction]**
-(Focus on body language, micro-expressions, and the physical dynamic/tension between them.)
-
-**[Atmosphere & Texture]**
-(Lighting, color palette, and environmental details that set the mood.)
-
+## FORMAT EXAMPLE
+(Input: Character A & B in a ruin)
+> Low-angle sunlight creates a silhouette of Character A, framing them against the fractured concrete beams. As the camera focuses on the foreground, Character B is revealed crouching in the debris, creating a sharp diagonal tension. The air is thick with dust motes that catch the amber glow, highlighting the sweat on A's brow and the trembling, outstretched hand of B. The texture of torn fabric contrasts with the cold, rusted metal of the surroundings, while a suffocating stillness hangs heavy in the volumetric light, freezing their desperate eye contact in a moment of suspended time.
 """.strip()
 
 guide_seo_article_system_prompt = """

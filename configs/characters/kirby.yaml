@@ -17,9 +17,9 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 0
+    text2img: 1
     text2video: 0
-    text2image2video: 1
+    text2image2video: 0
     text2longvideo: 0
     image2image: 0
     text2image2image: 0
@@ -51,12 +51,13 @@ generation:
 
   # Visual Style Weights
   style_weights:
-    "minimalism style with pure background": 0.2
+    "minimalism style with pure background": 0.1
     "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.3
     "watercolor painting style with pure background": 0.1
     "Vibrant high-fantasy character concept art, bold clean line art, stylized cartoon illustration, cell-shaded with soft gradients, whimsical adventure aesthetic": 0.2
     "Papercraft / Digital 2D Paper Cutout Style": 0.1
-    "": 0.1
+    "3D cinematic animation style, high quality CGI, Pixar-esque, magical atmosphere, sparkling particle effects and stardust trail, volumetric lighting, detailed textures, snowy winter night, glowing warm city lights in background with bokeh, deep blue sky, octane render, 8k resolution, whimsical and dreamy": 0.1
+    "": 0
 
 # Social Media Configuration
 # -----------------------------------------------------------------
@@ -115,8 +116,6 @@ additional_params:
     # Text-to-Image-to-Video Strategy
     text2image2video:
       first_stage:
-        style: "minimalism style with pure background"
-        # 注意：這裡的 weights 會覆蓋頂層配置，需要包含所有想使用的 prompt 類型
         image_system_prompt_weights:
           stable_diffusion_prompt: 0.3
           warm_scene_description_system_prompt: 0.3

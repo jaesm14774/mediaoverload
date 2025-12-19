@@ -9,6 +9,7 @@ from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationC
 from lib.media_auto.services.media_generator import MediaGenerator
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.comfyui.node_manager import NodeManager
+from utils.logger import setup_logger
 
 class Text2Image2ImageStrategy(ContentStrategy):
     """
@@ -33,6 +34,7 @@ class Text2Image2ImageStrategy(ContentStrategy):
         self.first_stage_images: List[str] = []
         self.filter_results: List[Dict[str, Any]] = []
         self._reviewed = False
+        self.logger = setup_logger('mediaoverload')
 
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -66,7 +68,9 @@ class Text2Image2ImageStrategy(ContentStrategy):
         self.descriptions = [descriptions] if descriptions else []
         
         print(f'Image descriptions : {self.descriptions}')
+        self.logger.info(f'最終生成的描述: {self.descriptions}')
         print(f'生成描述花費 : {time.time() - start_time}')
+        self.logger.info(f'生成描述花費 : {time.time() - start_time} 秒')
         return self
 
     def generate_media(self):

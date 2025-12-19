@@ -404,6 +404,7 @@ class ContentStrategy(ABC):
                 
                 if descriptions and descriptions.strip():
                     logger.info(f'雙角色互動描述生成成功（長度: {len(descriptions)} 字元）')
+                    logger.info(f'最終生成的描述: {descriptions}')
                     logger.debug(f'生成的描述: {descriptions[:200]}...' if len(descriptions) > 200 else f'生成的描述: {descriptions}')
                     return descriptions
                 else:

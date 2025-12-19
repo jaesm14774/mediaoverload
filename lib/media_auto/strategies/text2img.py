@@ -9,6 +9,7 @@ from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationC
 from lib.media_auto.services.media_generator import MediaGenerator
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.comfyui.node_manager import NodeManager
+from utils.logger import setup_logger
 
 class Text2ImageStrategy(ContentStrategy):
     """
@@ -34,6 +35,7 @@ class Text2ImageStrategy(ContentStrategy):
         self.descriptions: List[str] = []
         self.filter_results: List[Dict[str, Any]] = []
         self._reviewed = False
+        self.logger = setup_logger('mediaoverload')
 
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -86,10 +88,12 @@ class Text2ImageStrategy(ContentStrategy):
             # 確保 descriptions 不為空
             if not descriptions or not descriptions.strip():
                 print('⚠️  警告：API 返回空描述，使用原始 prompt 作為回退')
+                self.logger.warning('API 返回空描述，使用原始 prompt 作為回退')
                 descriptions = prompt
         except Exception as e:
             print(f'⚠️  警告：生成描述時發生錯誤: {e}')
             print(f'   使用原始 prompt 作為回退: {prompt}')
+            self.logger.error(f'生成描述時發生錯誤: {e}', exc_info=True)
             descriptions = prompt
             
         # Filter descriptions based on character name (simple check)
@@ -101,12 +105,15 @@ class Text2ImageStrategy(ContentStrategy):
                 # 如果字符檢查失敗，仍然使用描述（而不是設為空）
                 # 因為字符名稱可能以不同形式出現
                 print(f'⚠️  警告：描述中未找到角色名稱 "{self.config.character}"，但仍使用該描述')
+                self.logger.warning(f'描述中未找到角色名稱 "{self.config.character}"，但仍使用該描述')
                 self.descriptions = [descriptions] if descriptions else [prompt]
         else:
              self.descriptions = [descriptions] if descriptions else [prompt]
 
         print(f'Image descriptions : {self.descriptions}')
+        self.logger.info(f'最終生成的描述: {self.descriptions}')
         print(f'生成描述花費 : {time.time() - start_time:.2f} 秒')
+        self.logger.info(f'生成描述花費 : {time.time() - start_time:.2f} 秒')
         return self
 
     def generate_media(self):
