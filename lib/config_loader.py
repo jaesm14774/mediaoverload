@@ -17,7 +17,7 @@ class ConfigLoader:
     @staticmethod
     def process_weighted_choice(weights: Dict[str, float]) -> str:
         choices = list(weights.keys())
-        probabilities = list(weights.values())
+        probabilities = [p if p is not None else 0.0 for p in weights.values()]
 
         total = sum(probabilities)
         if total > 0:

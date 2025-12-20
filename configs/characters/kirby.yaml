@@ -17,10 +17,10 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 1
+    text2img: 0
     text2video: 0
-    text2image2video: 0
-    text2longvideo: 0
+    text2image2video: 0 
+    text2longvideo: 1
     image2image: 0
     text2image2image: 0
     sticker_pack: 0
@@ -47,7 +47,7 @@ generation:
     stable_diffusion_prompt: 0.25
     warm_scene_description_system_prompt: 0.25
     sticker_prompt_system_prompt: 0.25
-    two_character_interaction_generate_system_prompt: 150
+    two_character_interaction_generate_system_prompt: 0.25
 
   # Visual Style Weights
   style_weights:
@@ -98,6 +98,7 @@ additional_params:
     # Text-to-Image Strategy
     text2img:
       images_per_description: 6
+      optimize_prompt_for_sd: true
       custom_node_updates:
         - node_type: "PrimitiveInt"
           inputs:

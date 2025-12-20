@@ -95,6 +95,25 @@ class Text2ImageStrategy(ContentStrategy):
             print(f'   使用原始 prompt 作為回退: {prompt}')
             self.logger.error(f'生成描述時發生錯誤: {e}', exc_info=True)
             descriptions = prompt
+
+        # Optimization for Stable Diffusion
+        optimize_for_sd = self._get_config_value(image_config, 'optimize_prompt_for_sd', False)
+        
+        if optimize_for_sd and image_system_prompt != 'stable_diffusion_prompt' and descriptions and descriptions.strip():
+            print('🔄 正在進行 Stable Diffusion Prompt 優化...')
+            try:
+                optimized_description = self.vision_manager.generate_image_prompts(
+                    descriptions, 
+                    system_prompt_key='stable_diffusion_prompt'
+                )
+                if optimized_description and optimized_description.strip():
+                    print(f'✅ SD 優化完成:\n原始: {descriptions[:50]}...\n優化後: {optimized_description[:50]}...')
+                    descriptions = optimized_description
+                else:
+                    print('⚠️ SD 優化返回空值，保留原始描述')
+            except Exception as e:
+                print(f'⚠️ SD 優化過程發生錯誤: {e}，保留原始描述')
+                self.logger.error(f'SD 優化過程發生錯誤: {e}', exc_info=True)
             
         # Filter descriptions based on character name (simple check)
         if self.config.character:

@@ -187,7 +187,7 @@ class OpenRouterModel(AIModelInterface):
                     self.base_url,
                     headers=self.headers,
                     json=data,  # 使用 json 參數而不是 data=json.dumps()
-                    timeout=(10, 120)  # (連接超時, 讀取超時) 秒
+                    timeout=(10, 30)  # (連接超時, 讀取超時) 秒 - 縮短讀取超時以加快重試
                 )
                 response.raise_for_status()
 
