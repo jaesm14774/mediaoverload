@@ -1,0 +1,166 @@
+{
+  "67": {
+    "inputs": {
+      "value": "\"Meta Knight in a dynamic action scene, surfing on a purple board while holding a silver sword forward. Camera follows his rapid movement from a side angle, his cape billows behind him, stylized splashes of white and blue radiate outward. Bright light from the front illuminates his silver armor and glowing yellow eyes, ends on his sword pointing directly ahead, frozen in motion.\""
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "97": {
+    "inputs": {
+      "conditioning": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "98": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "101",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "99": {
+    "inputs": {
+      "vae_name": "flux\\ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "100": {
+    "inputs": {
+      "clip_name": "qwen\\qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "101": {
+    "inputs": {
+      "unet_name": "z_image\\z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "102": {
+    "inputs": {
+      "samples": [
+        "104",
+        0
+      ],
+      "vae": [
+        "99",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "103": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "100",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "104": {
+    "inputs": {
+      "seed": 52,
+      "steps": 9,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 0.5,
+      "model": [
+        "98",
+        0
+      ],
+      "positive": [
+        "103",
+        0
+      ],
+      "negative": [
+        "97",
+        0
+      ],
+      "latent_image": [
+        "106",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "105": {
+    "inputs": {
+      "image": "i2i_00001__metaknight_d0_2.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "106": {
+    "inputs": {
+      "pixels": [
+        "105",
+        0
+      ],
+      "vae": [
+        "99",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "107": {
+    "inputs": {
+      "filename_prefix": "zimage_i2i",
+      "images": [
+        "102",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

@@ -80,7 +80,7 @@ class OrchestrationService(IOrchestrationService):
             if character.group_name and self.character_data_service:
                 generation_type = getattr(character.config, 'generation_type', '')
                 is_kirby_group = character.group_name.lower() == 'kirby'
-                is_longvideo = generation_type.lower() in ['text2longvideo', 'text2longvideo_firstframe']
+                is_longvideo = generation_type.lower() == 'text2longvideo'
                 
                 if is_kirby_group and is_longvideo:
                     character.character = 'kirby'
@@ -134,8 +134,40 @@ class OrchestrationService(IOrchestrationService):
                 self.cleanup(config_dict['output_dir'])
                 return {'status': 'no_media_selected'}
             
-            default_review_text = f'[策略: {strategy_name}] 請選擇要使用的圖片'
-            review_text = content_result.get('article_content') or default_review_text
+            # 準備 filter_results 用於生成 article_content
+            if hasattr(strategy, 'filter_results') and strategy.filter_results:
+                initial_filter_results = strategy.filter_results
+            else:
+                similarity_threshold = config_dict.get('similarity_threshold', 0.9)
+                initial_filter_results = self.content_service.analyze_media_text_match(
+                    images=[],
+                    descriptions=content_result['descriptions'],
+                    similarity_threshold=similarity_threshold
+                )
+            
+            # 檢查策略是否應該在第一次審核時顯示 article_content
+            should_show_article = strategy.should_show_article_in_first_review()
+            
+            # 如果策略要求在第一次審核時顯示 article_content，現在生成
+            if should_show_article and strategy.should_generate_article_now():
+                # 暫時設置 filter_results 以便生成 article_content
+                original_filter_results = getattr(strategy, 'filter_results', None)
+                strategy.filter_results = initial_filter_results
+                
+                article_content = self.content_service.generate_article(config, initial_filter_results)
+                content_result['article_content'] = article_content
+                
+                # 恢復 filter_results
+                if original_filter_results is not None:
+                    strategy.filter_results = original_filter_results
+                elif hasattr(strategy, 'filter_results'):
+                    delattr(strategy, 'filter_results')
+            
+            # 第一次審核：根據策略決定顯示內容
+            if should_show_article and content_result.get('article_content'):
+                review_text = content_result['article_content']
+            else:
+                review_text = f'[策略: {strategy_name}] 請選擇要使用的媒體'
             
             review_result = await self.review_service.review_content(
                 text=review_text,
@@ -158,16 +190,25 @@ class OrchestrationService(IOrchestrationService):
                 return {'status': 'failed_to_continue'}
             selected_result_already_filtered = True
             
-            similarity_threshold = config_dict.get('similarity_threshold', 0.9)
-            final_filter_results = self.content_service.analyze_media_text_match(
-                images=[],
-                descriptions=content_result['descriptions'],
-                similarity_threshold=similarity_threshold
-            )
+            # 使用策略中已設置的 filter_results（handle_review_result 已設置）
+            if hasattr(strategy, 'filter_results') and strategy.filter_results:
+                final_filter_results = strategy.filter_results
+            else:
+                final_filter_results = initial_filter_results
             
             content_result['filter_results'] = final_filter_results
             
+            # 如果策略在第一次審核時顯示了 article_content，處理用戶編輯
+            if should_show_article:
+                if edited_content and edited_content.strip():
+                    content_result['article_content'] = edited_content
+                elif not content_result.get('article_content') or not content_result['article_content'].strip():
+                    article_content = self.content_service.generate_article(config, final_filter_results)
+                    content_result['article_content'] = article_content
+            
+            # 檢查是否需要第二次審核（多階段策略）
             if strategy.needs_user_review():
+                # 第二次審核：在最後一次審核時生成最終 article content
                 if strategy.should_generate_article_now():
                     article_content = self.content_service.generate_article(config, final_filter_results)
                     content_result['article_content'] = article_content
@@ -178,8 +219,11 @@ class OrchestrationService(IOrchestrationService):
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_selected'}
                 
-                default_review_text = f'[策略: {strategy_name}] 請選擇要使用的影片'
-                review_text = content_result.get('article_content') or default_review_text
+                # 第二次審核：只顯示最終 article_content，不顯示策略名稱
+                if content_result.get('article_content'):
+                    review_text = content_result['article_content']
+                else:
+                    review_text = '請選擇要使用的媒體'
                 
                 review_result = await self.review_service.review_content(
                     text=review_text,
@@ -204,19 +248,17 @@ class OrchestrationService(IOrchestrationService):
                 content_result['filter_results'] = final_filter_results
                 selected_result_already_filtered = True
                 
+                # 如果用戶編輯了內容，使用編輯後的內容；否則確保有最終 article content
                 if edited_content and edited_content.strip():
                     content_result['article_content'] = edited_content
-                else:
-                    if not content_result.get('article_content') or not content_result['article_content'].strip():
-                        article_content = self.content_service.generate_article(config, final_filter_results)
-                        content_result['article_content'] = article_content
+                elif not content_result.get('article_content') or not content_result['article_content'].strip():
+                    article_content = self.content_service.generate_article(config, final_filter_results)
+                    content_result['article_content'] = article_content
             else:
+                # 單階段策略：如果第一次 review 時沒有生成 article_content，現在生成
                 if strategy.should_generate_article_now():
                     current_article_content = content_result.get('article_content', '')
                     if not current_article_content or current_article_content.strip() == '':
-                        article_content = self.content_service.generate_article(config, final_filter_results)
-                        content_result['article_content'] = article_content
-                    else:
                         article_content = self.content_service.generate_article(config, final_filter_results)
                         content_result['article_content'] = article_content
                 

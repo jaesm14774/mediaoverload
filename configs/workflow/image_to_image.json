@@ -42,28 +42,9 @@
       "title": "negative_prompt"
     }
   },
-  "68": {
-    "inputs": {
-      "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.6000000000000001,
-      "strength_clip": 1.0000000000000002,
-      "model": [
-        "47:0",
-        0
-      ],
-      "clip": [
-        "47:0",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
   "47:0": {
     "inputs": {
-      "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
+      "ckpt_name": "sdxl\\waiIllustriousSDXL_v150.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -77,7 +58,7 @@
         0
       ],
       "clip": [
-        "68",
+        "47:0",
         1
       ]
     },
@@ -93,7 +74,7 @@
         0
       ],
       "clip": [
-        "68",
+        "47:0",
         1
       ]
     },
@@ -109,9 +90,9 @@
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
-      "denoise": 0.7000000000000002,
+      "denoise": 0.7,
       "model": [
-        "68",
+        "47:0",
         0
       ],
       "positive": [

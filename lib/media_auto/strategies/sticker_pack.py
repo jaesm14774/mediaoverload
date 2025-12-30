@@ -197,7 +197,11 @@ class StickerPackStrategy(ContentStrategy):
         if self._gifs_generated:
             gif_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'animated_stickers')
             gif_paths = glob.glob(f'{gif_dir}/*.gif')
-            return [{'media_path': p, 'similarity': 1.0} for p in sorted(gif_paths)[:max_items]]
+            if gif_paths:
+                return [{'media_path': p, 'similarity': 1.0} for p in sorted(gif_paths)[:max_items]]
+            # 如果沒有 GIF，返回 filter_results 中的靜態貼圖（用於第二次 review）
+            if hasattr(self, 'filter_results') and self.filter_results:
+                return self.filter_results[:max_items]
         
         return [{'media_path': p, 'similarity': 1.0} for p in self.static_stickers[:max_items]]
 

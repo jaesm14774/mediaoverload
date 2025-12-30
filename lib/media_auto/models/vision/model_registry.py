@@ -97,7 +97,6 @@ class OpenRouterModel(AIModelInterface):
         "z-ai/glm-4.5-air:free",
         "deepseek/deepseek-r1-0528:free",
         "moonshotai/kimi-k2:free",
-        "allenai/olmo-3.1-32b-think:free",
         "xiaomi/mimo-v2-flash:free",
         "mistralai/devstral-2512:free"
     ]
@@ -138,7 +137,7 @@ class OpenRouterModel(AIModelInterface):
                        messages: List[dict],
                        images: Optional[List[str]] = None,
                        max_retries: int = 10,
-                       initial_retry_delay: float = 5,
+                       initial_retry_delay: float = 3,
                        **kwargs) -> str:
         """使用 OpenRouter API 進行聊天完成（含增強的重試機制）
 
@@ -146,7 +145,7 @@ class OpenRouterModel(AIModelInterface):
             messages: 訊息列表
             images: 圖片列表（可選）
             max_retries: 最大重試次數（預設 10 次）
-            initial_retry_delay: 初始重試間隔秒數（預設 5 秒）
+            initial_retry_delay: 初始重試間隔秒數（預設 3 秒）
             **kwargs: 其他參數
         """
         # 處理圖片輸入 - 將圖片轉換為 base64

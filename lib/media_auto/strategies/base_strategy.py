@@ -175,7 +175,7 @@ class ContentStrategy(ABC):
             param_name for param_name, param in sig.parameters.items()
             if param.kind != inspect.Parameter.VAR_KEYWORD  # 排除 **kwargs
         ]
-
+        
         merged = {**general_params, **config}
 
         return {k: v for k, v in merged.items() if k not in exclude_keys}
@@ -475,6 +475,17 @@ class ContentStrategy(ABC):
             bool: 如果應該現在生成文章內容返回 True，否則返回 False
         """
         return True
+    
+    def should_show_article_in_first_review(self) -> bool:
+        """判斷是否應該在第一次審核時顯示 article_content
+        
+        對於單階段策略（如 Text2Image），應該在第一次審核時就顯示 article_content
+        對於多階段策略（如 Text2Image2Video），應該在最後一次審核時才顯示 article_content
+        
+        Returns:
+            bool: 如果應該在第一次審核時顯示 article_content 返回 True，否則返回 False
+        """
+        return False
     
     def post_process_media(self, media_paths: List[str], output_dir: str) -> List[str]:
         """後處理媒體文件（例如：放大圖片）

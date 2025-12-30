@@ -1,0 +1,21 @@
+# Workflow 配置映射文件
+# 將 workflow 路徑映射到對應的 seed 排除配置
+# 這樣當更換 workflow 時，配置會自動跟隨 workflow 路徑
+
+workflows:
+  # z_image_plus_nova_model.json 的配置
+  # z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機
+  "/app/configs/workflow/z_image_plus_nova_model.json":
+    exclude_sampler_node_ids: ["80:44"]
+    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
+  
+  # 相對路徑也支援
+  "configs/workflow/z_image_plus_nova_model.json":
+    exclude_sampler_node_ids: ["80:44"]
+    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
+  
+  # 也可以只使用文件名（會匹配所有包含該文件名的路徑）
+  "z_image_plus_nova_model.json":
+    exclude_sampler_node_ids: ["80:44"]
+    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
+

@@ -275,7 +275,23 @@ generate_article_content()
 
 ---
 
-### 5. Text2LongVideoStrategy（文字生成長影片 - 尾幀驅動）
+### 5. Text2LongVideoStrategy（文字生成長影片 - 尾幀驅動，已優化）
+
+#### ✨ 最新優化（2025-12-17）
+
+1. **I2I 幀轉換**：使用 nova-anime-xl 的 I2I workflow 重新生成高質量第一幀
+   - 解決問題：wan2.2 沒有角色知識，直接使用最後一幀會導致角色崩壞
+   - 解決方案：在每個段落之間使用 I2I 重新生成，確保角色準確性
+   - 配置：`frame_transition.enabled = true`
+
+2. **劇情推進優化**：基於新腳本描述進行 I2I 轉換
+   - 解決問題：劇情停滯，看起來像重複的 6 秒影片
+   - 解決方案：I2I 轉換時使用下一段的視覺描述，確保劇情推進
+
+3. **TTS 音訊生成改進**：
+   - 增強錯誤處理和日誌記錄
+   - 確保音訊文件正確生成和合併
+   - 更好的失敗降級處理
 
 #### 執行流程
 
@@ -302,7 +318,11 @@ _generate_full_video_loop()
     1. 如果不是第一段，基於上一段最後一幀生成腳本
     2. 上傳當前幀圖片
     3. 使用 I2V 生成該段落的影片
-    4. 從影片提取最後一幀作為下一段的輸入
+    4. 從影片提取最後一幀
+    5. ✨優化：如果不是最後一段，使用 I2I（nova-anime-xl）重新生成高質量第一幀
+       - 避免角色崩壞（wan2.2 沒有角色知識）
+       - 確保劇情推進（基於新腳本描述）
+       - 保持視覺連續性
   ↓
 【後處理】
   1. 合併所有段落影片為一個完整影片
@@ -361,84 +381,10 @@ _generate_final_article_content()
 - `longvideo_config.use_tts`: 是否使用 TTS（預設 True）
 - `longvideo_config.tts_voice`: TTS 語音（預設 'en-US-AriaNeural'）
 - `first_stage.batch_size`: 第一幀候選圖片數量（預設 3，僅候選模式）
-
----
-
-### 6. Text2LongVideoFirstFrameStrategy（文字生成長影片 - 首幀驅動）
-
-#### 執行流程
-
-```
-generate_description()
-  ↓
-  生成第一個段落的腳本
-  ↓
-generate_media()
-  ↓
-  生成第一個段落的候選圖片
-  ↓
-needs_user_review() → True
-  ↓
-【Discord 審核：選擇第一幀圖片】
-  ↓
-handle_review_result()
-  ↓
-_generate_full_video_with_firstframe_transitions()
-  ↓
-【循環生成多個段落】
-  對每個段落：
-    1. 使用當前首幀生成影片
-    2. 從影片提取最後一幀
-    3. 生成下一段的腳本
-    4. ✨關鍵：使用 I2I 將尾幀 + 新分鏡描述 → 新首幀
-    5. 使用新首幀作為下一段的輸入
-  ↓
-【後處理】
-  1. 合併所有段落影片
-  2. 如果啟用 TTS，添加旁白
-  ↓
-生成文章內容
-```
-
-#### 與 Text2LongVideoStrategy 的關鍵差異
-
-| 項目 | 尾幀驅動 | 首幀驅動 |
-|------|----------|----------|
-| 段落銜接 | 尾幀 → 下一段 | 尾幀 → I2I → 新首幀 → 下一段 |
-| I2I 用途 | 無 | 場景+風格延續，符合新分鏡 |
-| Denoise | - | 0.5~0.6（保持風格，允許變化）|
-| 適用場景 | 動作連貫的短分鏡 | 場景變化較大的長分鏡 |
-
-#### 特點
-- **首幀驅動**：I2V 模型對首幀控制力最強，生成更自然
-- **I2I 過場**：透過低 denoise (0.5~0.6) 保持風格，同時適應新場景
-- **場景適應**：允許更大的場景變化，適合長敘事影片
-
-#### 配置參數
-```yaml
-text2longvideo_firstframe:
-  longvideo_config:
-    segment_count: 5
-    segment_duration: 5
-    use_tts: true
-    tts_voice: "en-US-AriaNeural"
-  
-  first_stage:
-    workflow_path: /app/configs/workflow/nova-anime-xl.json
-    batch_size: 3
-    style: "minimalism style"
-    enable_upscale: true
-  
-  # 關鍵：首幀轉換配置
-  frame_transition:
-    enabled: true
-    workflow_path: /app/configs/workflow/image_to_image.json
-    denoise: 0.55  # 保持風格，允許場景變化
-    style_continuity_prompt: "maintain visual style and color palette"
-  
-  video_generation:
-    workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
-```
+- `frame_transition.enabled`: 是否啟用 I2I 幀轉換（預設 true）✨新增
+- `frame_transition.workflow_path`: I2I 工作流路徑（預設 image_to_image.json）✨新增
+- `frame_transition.denoise`: I2I denoise 強度（預設 0.6，推薦 0.5-0.7）✨新增
+- `frame_transition.style_continuity_prompt`: 風格連續性提示詞✨新增
 
 ---
 
@@ -759,6 +705,70 @@ additional_params:
 2. 策略特定配置：`strategies.{strategy_name}.image_system_prompt_weights`
 3. 全域配置：`generation.image_system_prompt_weights`
 4. 單一值：`image_system_prompt`（不支援加權選擇）
+
+---
+
+## Seed 管理功能
+
+### exclude_sampler_node_ids 參數（推薦）
+
+當 workflow 中包含多個 KSampler 節點時，可以在 `configs/workflow_config.yaml` 配置文件中將 workflow 路徑映射到對應的 exclude 配置，避免其 seed 被自動更新。
+
+**優點**：
+- ✅ 配置與 workflow 綁定，更換 workflow 時不會遺忘配置
+- ✅ 不修改 workflow JSON，保持 ComfyUI 兼容性
+- ✅ 使用 node_id 精確指定，不依賴節點順序
+- ✅ 配置集中管理，易於維護
+
+**使用場景**：
+- 當 workflow 中有多個採樣器（例如 z-image + nova model）時
+- 希望某些採樣器的 seed 保持固定，而其他採樣器的 seed 隨機
+
+**配置方式（推薦 - 在 workflow_config.yaml 中）**：
+
+在 `configs/workflow_config.yaml` 文件中添加 workflow 路徑映射：
+
+```yaml
+workflows:
+  # 完整路徑匹配
+  "/app/configs/workflow/z_image_plus_nova_model.json":
+    exclude_sampler_node_ids: ["80:44"]
+    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
+  
+  # 相對路徑匹配（會匹配所有以該路徑結尾的 workflow）
+  "configs/workflow/z_image_plus_nova_model.json":
+    exclude_sampler_node_ids: ["80:44"]
+  
+  # 文件名匹配（會匹配所有包含該文件名的 workflow）
+  "z_image_plus_nova_model.json":
+    exclude_sampler_node_ids: ["80:44"]
+```
+
+**配置參數說明**：
+- `exclude_sampler_node_ids`: 要排除的節點 ID 列表（推薦使用，精確指定）
+- `exclude_sampler_indices`: 要排除的節點索引列表（備選方案，基於節點順序）
+- `description`: 可選的描述文字，用於說明配置用途
+
+**匹配優先級**：
+1. 完整路徑匹配
+2. 相對路徑匹配（路徑結尾匹配）
+3. 文件名匹配
+
+**備選配置方式（在 YAML 配置文件中）**：
+
+如果無法修改 `workflow_config.yaml`，也可以在策略配置中使用 `exclude_sampler_indices`：
+
+```yaml
+strategies:
+  text2img:
+    exclude_sampler_indices: [0]  # 排除第一個 KSampler，保持其 seed 固定
+```
+
+**注意**：
+- 優先級：`workflow_config.yaml` 中的配置 > YAML 配置文件中的配置
+- 推薦使用 `exclude_sampler_node_ids`，因為它不依賴節點順序，更穩定
+- 只有未被排除的 KSampler 會自動更新 seed
+- 系統會自動根據 workflow 路徑查找對應的配置
 
 ---
 

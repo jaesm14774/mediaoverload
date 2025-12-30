@@ -2,6 +2,7 @@ import time
 import random
 import glob
 import os
+import json
 import numpy as np
 from typing import List, Dict, Any, Optional
 
@@ -33,7 +34,9 @@ class Text2Image2ImageStrategy(ContentStrategy):
         self.descriptions: List[str] = []
         self.first_stage_images: List[str] = []
         self.filter_results: List[Dict[str, Any]] = []
-        self._reviewed = False
+        self._first_stage_reviewed = False
+        self._second_stage_generated = False
+        self._second_stage_reviewed = False
         self.logger = setup_logger('mediaoverload')
 
     def load_config(self, config: GenerationConfig):
@@ -120,11 +123,11 @@ class Text2Image2ImageStrategy(ContentStrategy):
         if not generated_paths:
             print("警告：第一階段沒有生成任何圖片")
             return self
-            
-        print("\n第一階段生成完成，開始第二階段 Image to Image 生成...")
         
-        # Filter best images
-        print(f"正在從 {len(generated_paths)} 張圖片中篩選最佳圖片...")
+        # 保存第一階段的圖片，等待第一次審核
+        self.first_stage_images = sorted(generated_paths)
+        
+        # 為第一次審核準備 filter_results
         filter_results = self.vision_manager.analyze_media_text_match(
             media_paths=generated_paths,
             descriptions=self.descriptions,
@@ -132,14 +135,25 @@ class Text2Image2ImageStrategy(ContentStrategy):
             similarity_threshold=0.0,
             temperature=0.3
         )
+        self.filter_results = filter_results
         
-        # Get second_stage config with proper merging
-        second_stage_config = self._get_strategy_config('text2image2image', 'second_stage')
+        print(f'\n✅ Text2Image2Image 第一階段完成，生成 {len(generated_paths)} 張圖片')
+        print(f'等待使用者審核選擇要進行 I2I 的圖片...')
+        return self
+    
+    def _generate_second_stage(self, selected_image_paths: List[str]):
+        """生成第二階段 I2I 圖片
         
-        # Second Stage: I2I
+        Args:
+            selected_image_paths: 使用者選擇的第一階段圖片路徑列表
+        """
+        start_time = time.time()
         print("\n" + "=" * 60)
         print("第二階段：Image to Image 生成")
         print("=" * 60)
+        
+        # Get second_stage config with proper merging
+        second_stage_config = self._get_strategy_config('text2image2image', 'second_stage')
         
         i2i_workflow_path = second_stage_config.get('workflow_path') or getattr(self.config.workflows, 'image2image', '')
         images_per_input = second_stage_config.get('images_per_input', 1)
@@ -147,10 +161,19 @@ class Text2Image2ImageStrategy(ContentStrategy):
         
         with open(i2i_workflow_path, 'r', encoding='utf-8') as f:
             i2i_workflow = json.load(f)
-            
-        for img_idx, row in enumerate(filter_results):
-            input_image_path = row['media_path']
-            description = row['description']
+        
+        # 找到選中圖片對應的描述
+        selected_descriptions = []
+        for img_path in selected_image_paths:
+            for row in self.filter_results:
+                if row['media_path'] == img_path:
+                    selected_descriptions.append(row['description'])
+                    break
+            else:
+                # 如果找不到對應描述，使用第一個描述
+                selected_descriptions.append(self.descriptions[0] if self.descriptions else '')
+        
+        for img_idx, (input_image_path, description) in enumerate(zip(selected_image_paths, selected_descriptions)):
             image_filename = self.media_generator.upload_image(input_image_path)
             
             for i in range(images_per_input):
@@ -175,37 +198,69 @@ class Text2Image2ImageStrategy(ContentStrategy):
                     output_dir=second_stage_output_dir,
                     file_prefix=f"{getattr(self.config, 'character', 'char')}_i2i_{img_idx}_{i}"
                 )
-                
-        print(f'\n✅ Text2Image2Image 生成總耗時: {time.time() - start_time:.2f} 秒')
-        return self
+        
+        self._second_stage_generated = True
+        print(f'\n✅ Text2Image2Image 第二階段完成，耗時: {time.time() - start_time:.2f} 秒')
 
     def analyze_media_text_match(self, similarity_threshold):
-        output_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'second_stage')
-        media_paths = glob.glob(f'{output_dir}/*')
-        image_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])]
+        """分析媒體與文本的匹配度
         
-        self.filter_results = self.vision_manager.analyze_media_text_match(
-            media_paths=image_paths,
-            descriptions=self.descriptions,
-            main_character=getattr(self.config, 'character', ''),
-            similarity_threshold=similarity_threshold
-        )
+        如果第二階段已生成，分析第二階段的圖片
+        否則分析第一階段的圖片（用於第一次審核）
+        """
+        if self._second_stage_generated:
+            # 第二階段已生成，分析第二階段的圖片
+            output_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'second_stage')
+            media_paths = glob.glob(f'{output_dir}/*')
+            image_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])]
+            
+            self.filter_results = self.vision_manager.analyze_media_text_match(
+                media_paths=image_paths,
+                descriptions=self.descriptions,
+                main_character=getattr(self.config, 'character', ''),
+                similarity_threshold=similarity_threshold
+            )
+        else:
+            # 第一階段，filter_results 已在 generate_media 中設置
+            pass
         return self
+    
+    def should_generate_article_now(self) -> bool:
+        """判斷是否應該現在生成文章內容
+        
+        應該在第二階段完成後才生成文章內容
+        """
+        return self._second_stage_generated
 
     def needs_user_review(self) -> bool:
         """檢查是否需要使用者審核
         
-        Text2Image2Image 只需要一次審核（選擇最終要發布的圖片）
+        Text2Image2Image 需要兩次審核：
+        1. 第一次：選擇第一階段的圖片（用於第二階段的 I2I）
+        2. 第二次：選擇第二階段的最終圖片（用於發布）
         """
-        if self._reviewed:
-            return False
-        return hasattr(self, 'filter_results') and len(self.filter_results) > 0
+        if not self._first_stage_reviewed:
+            # 第一次審核：第一階段圖片已生成，尚未審核
+            return hasattr(self, 'first_stage_images') and len(self.first_stage_images) > 0
+        if self._second_stage_generated and not self._second_stage_reviewed:
+            # 第二次審核：第二階段圖片已生成，尚未審核
+            return True
+        return False
     
     def get_review_items(self, max_items: int = 10) -> List[Dict[str, Any]]:
         """獲取需要審核的項目
         
-        返回 filter_results 中的項目，最多 max_items 個
+        第一次審核：返回第一階段的圖片
+        第二次審核：返回第二階段的圖片
         """
+        if self._second_stage_generated and not self._second_stage_reviewed:
+            # 第二次審核：返回第二階段的圖片
+            output_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'second_stage')
+            media_paths = glob.glob(f'{output_dir}/*')
+            image_paths = [p for p in media_paths if any(p.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp'])]
+            return [{'media_path': p, 'similarity': 1.0} for p in sorted(image_paths)[:max_items]]
+        
+        # 第一次審核：返回第一階段的圖片
         if hasattr(self, 'filter_results') and self.filter_results:
             return self.filter_results[:max_items]
         return []
@@ -213,9 +268,28 @@ class Text2Image2ImageStrategy(ContentStrategy):
     def handle_review_result(self, selected_indices: List[int], output_dir: str, selected_paths: List[str] = None) -> bool:
         """處理使用者審核結果
         
-        對於 Text2Image2ImageStrategy，審核後標記為已審核，不需要第二次審核
+        第一次審核：觸發第二階段 I2I 生成
+        第二次審核：標記為完成
         """
-        self._reviewed = True
+        if not self._first_stage_reviewed:
+            # 第一次審核：獲取選中的圖片路徑
+            if selected_paths:
+                selected_image_paths = selected_paths
+            else:
+                review_items = self.get_review_items(max_items=10)
+                selected_image_paths = [review_items[i]['media_path'] for i in selected_indices if i < len(review_items)]
+            
+            if not selected_image_paths:
+                self.logger.warning("沒有選擇任何圖片，無法繼續生成第二階段")
+                return False
+            
+            # 觸發第二階段生成
+            self._generate_second_stage(selected_image_paths)
+            self._first_stage_reviewed = True
+            return True
+        
+        # 第二次審核完成
+        self._second_stage_reviewed = True
         return True
     
     def generate_article_content(self):

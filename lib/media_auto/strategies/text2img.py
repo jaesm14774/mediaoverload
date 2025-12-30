@@ -162,6 +162,7 @@ class Text2ImageStrategy(ContentStrategy):
                     updates_config=image_config.get('custom_node_updates', []),
                     description=description,
                     seed=seed,
+                    workflow_path=workflow_path,
                     **merged_params
                 )
                 
@@ -284,6 +285,10 @@ class Text2ImageStrategy(ContentStrategy):
         圖片放大在 post_process_media 中處理
         """
         self._reviewed = True
+        return True
+    
+    def should_show_article_in_first_review(self) -> bool:
+        """Text2Image 是單階段策略，應該在第一次審核時就顯示 article_content"""
         return True
     
     def generate_article_content(self):

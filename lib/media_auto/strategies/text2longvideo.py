@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import json
 from typing import List, Dict, Any, Optional
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
@@ -61,18 +62,41 @@ class Text2LongVideoStrategy(ContentStrategy):
         first_stage_config = self._get_strategy_config('text2longvideo', 'first_stage')
         context_data = self.config.get_all_attributes()
         context_data['segment_duration'] = longvideo_config.get('segment_duration', context_data.get('segment_duration', 5))
-        context_data['segment_count'] = longvideo_config.get('segment_count', context_data.get('segment_count', 5))
+        segment_count = longvideo_config.get('segment_count', context_data.get('segment_count', 5))
+        context_data['segment_count'] = segment_count
         context_data['use_tts'] = longvideo_config.get('use_tts', context_data.get('use_tts', True))
         context_data['tts_voice'] = longvideo_config.get('tts_voice', context_data.get('tts_voice', 'en-US-AriaNeural'))
         context_data['tts_rate'] = longvideo_config.get('tts_rate', context_data.get('tts_rate', '+0%'))
         context_data['fps'] = longvideo_config.get('fps', context_data.get('fps', 16))
         style_value = self._get_style(first_stage_config)
         context_data['style'] = style_value
-        first_segment = self.script_generator.generate_script_segment(context_data)
+        
+        # 生成第一段腳本
+        self.logger.info(f"生成第一段腳本...")
+        first_segment = self.script_generator.generate_script_segment(
+            context=context_data,
+            segment_index=0
+        )
         self.script_segments = [first_segment]
         self.descriptions = [first_segment['visual']]
+        self.logger.info(f"第一段腳本生成完成: {first_segment['visual'][:50]}...")
         
-        self.logger.info(f"Script generation started. First segment: {first_segment['visual'][:50]}...")
+        # 預先生成所有後續段落腳本
+        self.logger.info(f"開始預先生成所有 {segment_count} 個段落腳本...")
+        for i in range(1, segment_count):
+            self.logger.info(f"生成段落 {i+1}/{segment_count} 腳本...")
+            previous_segment = self.script_segments[i-1]
+            next_segment = self.script_generator.generate_script_segment(
+                context=context_data,
+                previous_segment=previous_segment,
+                segment_index=i
+            )
+            self.script_segments.append(next_segment)
+            self.descriptions.append(next_segment['visual'])
+            self.logger.info(f"段落 {i+1} 腳本生成完成: {next_segment['visual'][:50]}...")
+        
+        elapsed_time = time.time() - start_time
+        self.logger.info(f"所有 {segment_count} 個段落腳本生成完成，耗時 {elapsed_time:.2f} 秒")
         return self
 
     def generate_media(self):
@@ -309,47 +333,17 @@ class Text2LongVideoStrategy(ContentStrategy):
             self.logger.info(f"Processing segment {i+1}/{segment_count}")
             self.logger.info(f"=" * 60)
             
-            # If it's not the first segment, we need to generate the script for it first
-            if i > 0:
-                self.logger.info(f"為段落 {i+1} 生成腳本...")
-                self.logger.info(f"  使用上一段的最後一幀: {current_frame}")
-                try:
-                    segment_script = self.script_generator.generate_script_segment(
-                        context=context_data,
-                        last_frame_path=current_frame,
-                        segment_index=i
-                    )
-                    self.logger.info(f"  腳本生成返回結果: {segment_script}")
-                    
-                    if not segment_script:
-                        self.logger.error(f"段落 {i+1} 腳本生成返回 None 或空值")
-                        raise RuntimeError(f"段落 {i+1} 腳本生成失敗：返回 None 或空值")
-                    
-                    self.script_segments.append(segment_script)
-                    # 記錄完整的描述
-                    visual_desc = segment_script.get('visual', '')
-                    narration_desc = segment_script.get('narration', '')
-                    
-                    self.logger.info(f"段落 {i+1} 腳本生成完成")
-                    self.logger.info(f"  視覺描述: {visual_desc}")
-                    self.logger.info(f"  旁白內容: {narration_desc}")
-                    
-                    if not visual_desc:
-                        self.logger.warning(f"段落 {i+1} 視覺描述為空")
-                    if not narration_desc:
-                        self.logger.warning(f"段落 {i+1} 旁白內容為空")
-                        
-                except Exception as e:
-                    self.logger.error(f"段落 {i+1} 腳本生成時發生錯誤: {e}", exc_info=True)
-                    raise
-            else:
-                # Use existing script for first segment
-                segment_script = self.script_segments[0] if self.script_segments else {'visual': '', 'narration': ''}
-                visual_desc = segment_script.get('visual', '')
-                narration_desc = segment_script.get('narration', '')
-                self.logger.info(f"使用第一段腳本")
-                self.logger.info(f"  視覺描述: {visual_desc}")
-                self.logger.info(f"  旁白內容: {narration_desc}")
+            # 使用預先生成的腳本
+            if len(self.script_segments) <= i:
+                self.logger.error(f"段落 {i+1} 腳本不存在，這不應該發生。請確保已調用 generate_description() 預先生成所有腳本")
+                raise RuntimeError(f"段落 {i+1} 腳本不存在，請確保已調用 generate_description() 預先生成所有腳本")
+            
+            segment_script = self.script_segments[i]
+            visual_desc = segment_script.get('visual', '')
+            narration_desc = segment_script.get('narration', '')
+            self.logger.info(f"使用預先生成的段落 {i+1} 腳本")
+            self.logger.info(f"  視覺描述: {visual_desc}")
+            self.logger.info(f"  旁白內容: {narration_desc}")
             
             # Generate video for this segment using I2V
             # Upload current frame (must be an image file)
@@ -413,18 +407,49 @@ class Text2LongVideoStrategy(ContentStrategy):
                     )
                     current_frame = extracted_frame
                     self.logger.info(f"最後一幀已提取: {current_frame}")
-                    
-                    # 如果需要 upscale，對最後一幀進行放大
-                    if enable_upscale and i < segment_count - 1:
+                except Exception as e:
+                    self.logger.error(f"提取最後一幀失敗: {e}")
+                    # If extraction fails, we cannot continue to next segment
+                    raise RuntimeError(f"無法從影片 {last_video} 提取最後一幀，無法繼續生成下一段: {e}")
+                
+                # 如果不是最後一段，使用 I2I 重新生成高質量的第一幀
+                if i < segment_count - 1:
+                    # 使用預先生成的下一段腳本
+                    if len(self.script_segments) > i + 1:
+                        next_segment_script = self.script_segments[i + 1]
+                        next_visual_desc = next_segment_script.get('visual', '')
+                        
+                        # 使用 I2I 重新生成高質量的第一幀（避免崩壞並推進劇情）
+                        try:
+                            self.logger.info(f"使用 I2I 重新生成段落 {i+2} 的高質量第一幀...")
+                            current_frame = self._regenerate_first_frame_with_i2i(
+                                last_frame_path=current_frame,
+                                next_visual_desc=next_visual_desc,
+                                output_dir=output_dir,
+                                segment_index=i + 1
+                            )
+                            self.logger.info(f"✅ 段落 {i+2} 的第一幀已重新生成: {current_frame}")
+                        except Exception as e:
+                            self.logger.warning(f"I2I 重新生成第一幀失敗，使用原始最後一幀: {e}")
+                            # 如果 I2I 失敗，繼續使用最後一幀（降級處理）
+                            # 如果需要 upscale，對最後一幀進行放大
+                            if enable_upscale:
+                                self.logger.info(f"對段落 {i+1} 的最後一幀進行放大處理")
+                                upscaled_frames = self._upscale_images([current_frame], output_dir)
+                                if upscaled_frames:
+                                    current_frame = upscaled_frames[0]
+                                    self.logger.info(f"最後一幀放大完成: {current_frame}")
+                    else:
+                        self.logger.error(f"段落 {i+2} 腳本不存在，這不應該發生")
+                        raise RuntimeError(f"段落 {i+2} 腳本不存在，請確保已調用 generate_description() 預先生成所有腳本")
+                else:
+                    # 最後一段，如果需要 upscale，對最後一幀進行放大
+                    if enable_upscale:
                         self.logger.info(f"對段落 {i+1} 的最後一幀進行放大處理")
                         upscaled_frames = self._upscale_images([current_frame], output_dir)
                         if upscaled_frames:
                             current_frame = upscaled_frames[0]
                             self.logger.info(f"最後一幀放大完成: {current_frame}")
-                except Exception as e:
-                    self.logger.error(f"提取最後一幀失敗: {e}")
-                    # If extraction fails, we cannot continue to next segment
-                    raise RuntimeError(f"無法從影片 {last_video} 提取最後一幀，無法繼續生成下一段: {e}")
             else:
                 self.logger.error(f"段落 {i+1} 沒有生成任何影片文件")
                 raise RuntimeError(f"段落 {i+1} 影片生成失敗，沒有輸出文件")
@@ -443,7 +468,9 @@ class Text2LongVideoStrategy(ContentStrategy):
         # Step 2: Generate TTS audio for each segment and merge with video if enabled
         use_tts = longvideo_config.get('use_tts', True)
         if use_tts:
+            self.logger.info("=" * 60)
             self.logger.info("開始生成 TTS 音訊...")
+            self.logger.info("=" * 60)
             tts_voice = longvideo_config.get('tts_voice', 'en-US-AriaNeural')
             tts_rate = longvideo_config.get('tts_rate', '+0%')
             
@@ -452,43 +479,85 @@ class Text2LongVideoStrategy(ContentStrategy):
             os.makedirs(audio_dir, exist_ok=True)
             audio_files = []
             
+            # 確保 script_segments 數量正確
+            if len(self.script_segments) != segment_count:
+                self.logger.warning(f"腳本段落數量 ({len(self.script_segments)}) 與設定段落數量 ({segment_count}) 不一致")
+            
             for i, segment_script in enumerate(self.script_segments):
                 narration_text = segment_script.get('narration', '')
                 if narration_text and narration_text.strip():
                     audio_path = os.path.join(audio_dir, f'segment_{i}_narration.mp3')
+                    self.logger.info(f"生成段落 {i+1} TTS 音訊...")
+                    self.logger.info(f"  旁白內容: {narration_text[:100]}...")
+                    self.logger.info(f"  語音: {tts_voice}, 語速: {tts_rate}")
+                    self.logger.info(f"  輸出路徑: {audio_path}")
+                    
                     try:
-                        self.tts_service.generate_speech_sync(
+                        # 確保目錄存在
+                        os.makedirs(os.path.dirname(audio_path), exist_ok=True)
+                        
+                        # 生成 TTS
+                        result_path = self.tts_service.generate_speech_sync(
                             text=narration_text,
                             output_path=audio_path,
                             voice=tts_voice,
                             rate=tts_rate
                         )
-                        audio_files.append(audio_path)
-                        self.logger.info(f"段落 {i+1} TTS 音訊生成完成: {audio_path}")
+                        
+                        # 驗證文件
+                        if result_path and os.path.exists(result_path):
+                            file_size = os.path.getsize(result_path)
+                            if file_size > 0:
+                                audio_files.append(result_path)
+                                self.logger.info(f"✅ 段落 {i+1} TTS 音訊生成完成: {result_path} ({file_size} bytes)")
+                            else:
+                                self.logger.error(f"❌ 段落 {i+1} TTS 音訊文件為空: {result_path}")
+                        elif os.path.exists(audio_path):
+                            file_size = os.path.getsize(audio_path)
+                            if file_size > 0:
+                                audio_files.append(audio_path)
+                                self.logger.info(f"✅ 段落 {i+1} TTS 音訊生成完成: {audio_path} ({file_size} bytes)")
+                            else:
+                                self.logger.error(f"❌ 段落 {i+1} TTS 音訊文件為空: {audio_path}")
+                        else:
+                            self.logger.error(f"❌ 段落 {i+1} TTS 音訊文件不存在: {audio_path}")
                     except Exception as e:
-                        self.logger.error(f"段落 {i+1} TTS 音訊生成失敗: {e}")
+                        self.logger.error(f"❌ 段落 {i+1} TTS 音訊生成失敗: {e}", exc_info=True)
+                        self.logger.error(f"  錯誤類型: {type(e).__name__}")
+                        self.logger.error(f"  錯誤訊息: {str(e)}")
                         # Continue even if TTS fails for one segment
                         continue
+                else:
+                    self.logger.warning(f"⚠️ 段落 {i+1} 沒有旁白內容，跳過 TTS 生成")
+                    self.logger.debug(f"  腳本內容: {segment_script}")
             
             if audio_files:
                 # Concatenate all audio files
                 self.logger.info(f"開始合併 {len(audio_files)} 個 TTS 音訊文件...")
                 concatenated_audio_path = os.path.join(audio_dir, 'concatenated_audio.mp3')
-                final_audio = self.ffmpeg_service.concat_audio(
-                    audio_paths=audio_files,
-                    output_path=concatenated_audio_path
-                )
-                self.logger.info(f"TTS 音訊合併完成: {final_audio}")
-                
-                # Merge audio with video
-                self.logger.info("開始將 TTS 音訊與影片合併...")
-                final_video_with_audio = os.path.join(output_dir, 'videos', 'final_video_with_audio.mp4')
-                final_video = self.ffmpeg_service.merge_audio_video(
-                    video_path=final_video,
-                    audio_path=final_audio,
-                    output_path=final_video_with_audio
-                )
-                self.logger.info(f"最終影片（含 TTS 音訊）生成完成: {final_video}")
+                try:
+                    final_audio = self.ffmpeg_service.concat_audio(
+                        audio_paths=audio_files,
+                        output_path=concatenated_audio_path
+                    )
+                    if os.path.exists(final_audio) and os.path.getsize(final_audio) > 0:
+                        self.logger.info(f"✅ TTS 音訊合併完成: {final_audio}")
+                        
+                        # Merge audio with video
+                        self.logger.info("開始將 TTS 音訊與影片合併...")
+                        final_video_with_audio = os.path.join(output_dir, 'videos', 'final_video_with_audio.mp4')
+                        final_video = self.ffmpeg_service.merge_audio_video(
+                            video_path=final_video,
+                            audio_path=final_audio,
+                            output_path=final_video_with_audio
+                        )
+                        self.logger.info(f"✅ 最終影片（含 TTS 音訊）生成完成: {final_video}")
+                    else:
+                        self.logger.error(f"TTS 音訊合併失敗，文件不存在或為空: {final_audio}")
+                        self.logger.warning("使用無音訊的合併影片")
+                except Exception as e:
+                    self.logger.error(f"TTS 音訊合併或與影片合併失敗: {e}", exc_info=True)
+                    self.logger.warning("使用無音訊的合併影片")
             else:
                 self.logger.warning("沒有生成任何 TTS 音訊文件，使用無音訊的合併影片")
         
@@ -529,6 +598,135 @@ class Text2LongVideoStrategy(ContentStrategy):
     def should_generate_article_now(self) -> bool:
         return True
     
+    def _regenerate_first_frame_with_i2i(
+        self,
+        last_frame_path: str,
+        next_visual_desc: str,
+        output_dir: str,
+        segment_index: int
+    ) -> str:
+        """
+        使用 I2I 重新生成高質量的第一幀
+        
+        關鍵概念：
+        - 使用 nova-anime-xl（有 kirby 知識）來重新生成高質量的第一幀
+        - 避免直接使用 wan2.2 生成的最後一幀（可能崩壞）
+        - 通過 I2I 轉換，保持視覺連續性的同時推進劇情
+        
+        Args:
+            last_frame_path: 上一段的最後一幀路徑
+            next_visual_desc: 下一段的視覺描述
+            output_dir: 輸出路徑
+            segment_index: 段落索引
+            
+        Returns:
+            重新生成的第一幀路徑
+        """
+        self.logger.info("=" * 60)
+        self.logger.info(f"使用 I2I 重新生成段落 {segment_index + 1} 的高質量第一幀")
+        self.logger.info("=" * 60)
+        
+        # 獲取 frame_transition 配置
+        frame_transition_config = self._get_strategy_config('text2longvideo', 'frame_transition')
+        if not frame_transition_config or not frame_transition_config.get('enabled', True):
+            self.logger.info("I2I 轉換已禁用，使用原始最後一幀")
+            return last_frame_path
+        
+        # 獲取 I2I workflow 路徑（使用 nova-anime-xl v140 的 I2I workflow，與第一幀一致）
+        i2i_workflow_path = frame_transition_config.get('workflow_path', 'configs/workflow/image_to_image.json')
+        denoise = frame_transition_config.get('denoise', 0.55)
+        style_prompt = frame_transition_config.get('style_continuity_prompt', 'maintain visual style, color palette, and artistic consistency')
+        
+        # 獲取前一段的腳本上下文（用於故事連貫性）
+        previous_segment = None
+        if segment_index > 0 and len(self.script_segments) > segment_index - 1:
+            previous_segment = self.script_segments[segment_index - 1]
+        
+        # 構建轉換提示詞，加入前一段的敘事上下文
+        if previous_segment:
+            previous_narration = previous_segment.get('narration', '')
+            # 限制長度避免提示詞過長
+            story_context = previous_narration[:150] + "..." if len(previous_narration) > 150 else previous_narration
+            transition_prompt = f"Story progression from: {story_context}. {next_visual_desc}, {style_prompt}"
+            self.logger.info(f"轉換提示詞（含故事上下文）: {transition_prompt}")
+        else:
+            transition_prompt = f"{next_visual_desc}, {style_prompt}"
+            self.logger.info(f"轉換提示詞: {transition_prompt}")
+        self.logger.info(f"Denoise: {denoise}")
+        
+        # 上傳最後一幀
+        try:
+            img_filename = self.media_generator.upload_image(last_frame_path)
+            self.logger.info(f"圖片上傳成功: {img_filename}")
+        except Exception as e:
+            self.logger.error(f"圖片上傳失敗: {e}")
+            raise RuntimeError(f"無法上傳圖片 {last_frame_path}: {e}")
+        
+        # 載入 workflow
+        try:
+            with open(i2i_workflow_path, 'r', encoding='utf-8') as f:
+                workflow = json.load(f)
+        except Exception as e:
+            self.logger.error(f"無法載入 I2I workflow: {e}")
+            raise RuntimeError(f"無法載入 I2I workflow {i2i_workflow_path}: {e}")
+        
+        # 準備更新
+        custom_updates = frame_transition_config.get('custom_node_updates', []).copy()
+        custom_updates.append({
+            "node_type": "LoadImage",
+            "node_index": 0,
+            "inputs": {"image": img_filename}
+        })
+        
+        seed = random.randint(1, 999999999999)
+        
+        # 合併參數
+        merged_params = self._merge_node_manager_params(frame_transition_config)
+        merged_params['denoise'] = denoise
+        
+        # 生成更新
+        updates = self.node_manager.generate_updates(
+            workflow=workflow,
+            updates_config=custom_updates,
+            description=transition_prompt,
+            seed=seed,
+            **merged_params
+        )
+        
+        # 生成新的第一幀
+        first_frames_dir = os.path.join(output_dir, 'first_frames')
+        os.makedirs(first_frames_dir, exist_ok=True)
+        
+        try:
+            generated_paths = self.media_generator.generate(
+                workflow_path=i2i_workflow_path,
+                updates=updates,
+                output_dir=first_frames_dir,
+                file_prefix=f"first_frame_segment_{segment_index}"
+            )
+            
+            if not generated_paths:
+                raise RuntimeError("I2I 生成沒有返回任何文件")
+            
+            new_first_frame = generated_paths[0]
+            self.logger.info(f"✅ 新的第一幀已生成: {new_first_frame}")
+            
+            # 如果需要 upscale
+            first_stage_config = self._get_strategy_config('text2longvideo', 'first_stage')
+            enable_upscale = first_stage_config.get('enable_upscale', False)
+            if enable_upscale:
+                self.logger.info("對重新生成的第一幀進行放大處理")
+                upscaled_frames = self._upscale_images([new_first_frame], output_dir)
+                if upscaled_frames:
+                    new_first_frame = upscaled_frames[0]
+                    self.logger.info(f"第一幀放大完成: {new_first_frame}")
+            
+            return new_first_frame
+            
+        except Exception as e:
+            self.logger.error(f"I2I 生成失敗: {e}", exc_info=True)
+            raise RuntimeError(f"無法使用 I2I 重新生成第一幀: {e}")
+
     def _upscale_images(self, image_paths: List[str], output_dir: str) -> List[str]:
         """放大圖片
         

@@ -181,49 +181,6 @@ class SimpleContentGenerationService:
             
             self.logger.info(f"長影片生成完成，共生成 {len(media_files)} 個影片段落")
             return media_files
-        elif generation_type == 'text2longvideo_firstframe':
-            self.logger.info("開始 Text2LongVideoFirstFrame 生成流程")
-            
-            # 1. 第一階段：生成候選圖片
-            self.strategy.generate_media()
-            
-            # 2. 從 generated_media_paths 獲取候選圖片（保存在 candidates 目錄）
-            candidate_images = self.strategy.generated_media_paths
-            
-            if not candidate_images:
-                # 如果 generated_media_paths 為空，嘗試從 candidates 目錄查找
-                candidates_dir = os.path.join(config.output_dir, 'candidates')
-                image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.webp']
-                candidate_images = []
-                for ext in image_extensions:
-                    candidate_images.extend(glob.glob(os.path.join(candidates_dir, ext)))
-                self.logger.info(f"從 candidates 目錄找到 {len(candidate_images)} 張候選圖片")
-            
-            if not candidate_images:
-                self.logger.warning("沒有找到候選圖片，無法繼續生成影片")
-                return []
-            
-            # 3. 自動選擇第一張圖片進行完整影片生成
-            self.logger.info(f"自動選擇第一張候選圖片進行完整影片生成: {candidate_images[0]}")
-            self.strategy.handle_review_result(
-                selected_indices=[0],
-                output_dir=config.output_dir,
-                selected_paths=[candidate_images[0]]
-            )
-            
-            # 4. 收集最終生成的影片（從 videos 目錄）
-            video_output_dir = os.path.join(config.output_dir, 'videos')
-            video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
-            media_files = []
-            for ext in video_extensions:
-                media_files.extend(glob.glob(os.path.join(video_output_dir, ext)))
-            
-            # 如果沒有找到影片，嘗試從 generated_media_paths 獲取
-            if not media_files and hasattr(self.strategy, 'generated_media_paths'):
-                media_files = [p for p in self.strategy.generated_media_paths if any(p.endswith(ext.replace('*', '')) for ext in video_extensions)]
-            
-            self.logger.info(f"長影片（首幀驅動）生成完成，共生成 {len(media_files)} 個影片段落")
-            return media_files
         else:
             self.logger.info("開始生成圖片")
             self.strategy.generate_media()

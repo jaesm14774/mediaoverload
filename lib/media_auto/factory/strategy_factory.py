@@ -7,7 +7,6 @@ from lib.media_auto.strategies import (
     Text2VideoStrategy,
     Text2Image2VideoStrategy,
     Text2LongVideoStrategy,
-    Text2LongVideoFirstFrameStrategy,
     StickerPackStrategy
 )
 
@@ -33,9 +32,6 @@ class StrategyFactory:
         # 文生長片策略（尾幀驅動）
         'text2longvideo': Text2LongVideoStrategy,
         't2lv': Text2LongVideoStrategy,
-        # 文生長片策略（首幀驅動）
-        'text2longvideo_firstframe': Text2LongVideoFirstFrameStrategy,
-        't2lv_ff': Text2LongVideoFirstFrameStrategy,
         # 貼圖包生成策略
         'sticker_pack': StickerPackStrategy,
         'stickerpack': StickerPackStrategy

@@ -160,13 +160,11 @@ class ComfyUICommunicator:
                         if current_prompt_id == prompt_id:
                             if current_node is None:
                                 # 工作流執行完成
-                                print(f"✓ 工作流 {prompt_id} 執行完成（耗時 {elapsed_time:.2f} 秒）")
                                 break
                             else:
                                 # 更新當前處理的節點
                                 if current_node != last_node:
                                     last_node = current_node
-                                    print(f"  → 正在處理節點: {current_node}")
                     
                     elif message_type == 'progress':
                         # 顯示進度信息
@@ -183,8 +181,6 @@ class ComfyUICommunicator:
                         status_data = data.get('status', {})
                         exec_info = status_data.get('exec_info', {})
                         queue_remaining = exec_info.get('queue_remaining', 0)
-                        if queue_remaining > 0:
-                            print(f"  → 佇列中還有 {queue_remaining} 個任務")
                     
                     elif message_type == 'execution_error':
                         # 執行錯誤
