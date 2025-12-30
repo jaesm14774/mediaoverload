@@ -35,7 +35,7 @@
   "3": {
     "inputs": {
       "add_noise": "enable",
-      "noise_seed": 410422438731459,
+      "noise_seed": 855895852634698,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -205,7 +205,7 @@
   },
   "29": {
     "inputs": {
-      "unet_name": "wan\\Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf"
+      "unet_name": "wan\\Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf"
     },
     "class_type": "UnetLoaderGGUF",
     "_meta": {
@@ -214,7 +214,7 @@
   },
   "30": {
     "inputs": {
-      "unet_name": "wan\\Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf"
+      "unet_name": "wan\\Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf"
     },
     "class_type": "UnetLoaderGGUF",
     "_meta": {
@@ -470,7 +470,7 @@
       ],
       "steps": 25,
       "cfg": 4.5,
-      "seed": 27,
+      "seed": 34,
       "prompt": [
         "94",
         0

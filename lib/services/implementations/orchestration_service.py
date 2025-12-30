@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from lib.services.interfaces.orchestration_service import IOrchestrationService
 from lib.media_auto.character_config import BaseCharacter
 from lib.media_auto.strategies.base_strategy import GenerationConfig
-from lib.repositories.character_repository import ICharacterRepository
+from lib.services.interfaces.character_data_service import ICharacterDataService
 from lib.social_media import MediaPost
 from utils.logger import setup_logger, log_execution_time
 
@@ -18,14 +18,14 @@ class OrchestrationService(IOrchestrationService):
     負責協調各個服務完成整個工作流程：提示詞生成、內容生成、審核、發布。
     """
     
-    def __init__(self, character_repository: ICharacterRepository = None):
+    def __init__(self, character_data_service: ICharacterDataService = None):
         """初始化協調服務
         
         Args:
-            character_repository: 角色資料庫存取層（可選）
+            character_data_service: 角色資料服務（可選）
         """
         self.logger = setup_logger(__name__)
-        self.character_repository = character_repository
+        self.character_data_service = character_data_service
         self.prompt_service = None
         self.content_service = None
         self.review_service = None
@@ -73,11 +73,14 @@ class OrchestrationService(IOrchestrationService):
         config = None
         
         try:
+            # 保存原始群組代表角色（用於查詢同群組的其他角色）
+            group_representative_character = character.character
+            
             # 處理角色選擇
-            if character.group_name and self.character_repository:
+            if character.group_name and self.character_data_service:
                 generation_type = getattr(character.config, 'generation_type', '')
                 is_kirby_group = character.group_name.lower() == 'kirby'
-                is_longvideo = generation_type.lower() in ['text2longvideo', 'text2longvideo_firstframe']
+                is_longvideo = generation_type.lower() == 'text2longvideo'
                 
                 if is_kirby_group and is_longvideo:
                     character.character = 'kirby'
@@ -85,7 +88,7 @@ class OrchestrationService(IOrchestrationService):
                     self.logger.info(f"長影片模式：群組 {character.group_name} 直接使用角色 kirby")
                 else:
                     workflow_name = os.path.splitext(os.path.basename(character.workflow_path))[0]
-                    dynamic_character = self.character_repository.get_random_character_from_group(
+                    dynamic_character = self.character_data_service.get_random_character_from_group(
                         character.group_name, 
                         workflow_name
                     )
@@ -102,11 +105,13 @@ class OrchestrationService(IOrchestrationService):
                     temperature=temperature,
                     character_config=character.config
                 )
-                self.logger.info(f"生成提示詞: {prompt[:100]}..." if len(prompt) > 100 else f"生成提示詞: {prompt}")
+                self.logger.info(f"生成提示詞: {prompt}")
             
             # 準備生成配置
             config_dict = character.get_generation_config(prompt)
             config_dict['output_dir'] = os.path.join(config_dict['output_dir'], config_dict['character'])
+            # 傳遞群組代表角色，用於雙角色互動查詢
+            config_dict['group_representative_character'] = group_representative_character
             config = GenerationConfig(**config_dict)
             
             # 生成內容（第一階段）
@@ -129,8 +134,40 @@ class OrchestrationService(IOrchestrationService):
                 self.cleanup(config_dict['output_dir'])
                 return {'status': 'no_media_selected'}
             
-            default_review_text = f'[策略: {strategy_name}] 請選擇要使用的圖片'
-            review_text = content_result.get('article_content') or default_review_text
+            # 準備 filter_results 用於生成 article_content
+            if hasattr(strategy, 'filter_results') and strategy.filter_results:
+                initial_filter_results = strategy.filter_results
+            else:
+                similarity_threshold = config_dict.get('similarity_threshold', 0.9)
+                initial_filter_results = self.content_service.analyze_media_text_match(
+                    images=[],
+                    descriptions=content_result['descriptions'],
+                    similarity_threshold=similarity_threshold
+                )
+            
+            # 檢查策略是否應該在第一次審核時顯示 article_content
+            should_show_article = strategy.should_show_article_in_first_review()
+            
+            # 如果策略要求在第一次審核時顯示 article_content，現在生成
+            if should_show_article and strategy.should_generate_article_now():
+                # 暫時設置 filter_results 以便生成 article_content
+                original_filter_results = getattr(strategy, 'filter_results', None)
+                strategy.filter_results = initial_filter_results
+                
+                article_content = self.content_service.generate_article(config, initial_filter_results)
+                content_result['article_content'] = article_content
+                
+                # 恢復 filter_results
+                if original_filter_results is not None:
+                    strategy.filter_results = original_filter_results
+                elif hasattr(strategy, 'filter_results'):
+                    delattr(strategy, 'filter_results')
+            
+            # 第一次審核：根據策略決定顯示內容
+            if should_show_article and content_result.get('article_content'):
+                review_text = content_result['article_content']
+            else:
+                review_text = f'[策略: {strategy_name}] 請選擇要使用的媒體'
             
             review_result = await self.review_service.review_content(
                 text=review_text,
@@ -153,16 +190,25 @@ class OrchestrationService(IOrchestrationService):
                 return {'status': 'failed_to_continue'}
             selected_result_already_filtered = True
             
-            similarity_threshold = config_dict.get('similarity_threshold', 0.9)
-            final_filter_results = self.content_service.analyze_media_text_match(
-                images=[],
-                descriptions=content_result['descriptions'],
-                similarity_threshold=similarity_threshold
-            )
+            # 使用策略中已設置的 filter_results（handle_review_result 已設置）
+            if hasattr(strategy, 'filter_results') and strategy.filter_results:
+                final_filter_results = strategy.filter_results
+            else:
+                final_filter_results = initial_filter_results
             
             content_result['filter_results'] = final_filter_results
             
+            # 如果策略在第一次審核時顯示了 article_content，處理用戶編輯
+            if should_show_article:
+                if edited_content and edited_content.strip():
+                    content_result['article_content'] = edited_content
+                elif not content_result.get('article_content') or not content_result['article_content'].strip():
+                    article_content = self.content_service.generate_article(config, final_filter_results)
+                    content_result['article_content'] = article_content
+            
+            # 檢查是否需要第二次審核（多階段策略）
             if strategy.needs_user_review():
+                # 第二次審核：在最後一次審核時生成最終 article content
                 if strategy.should_generate_article_now():
                     article_content = self.content_service.generate_article(config, final_filter_results)
                     content_result['article_content'] = article_content
@@ -173,8 +219,11 @@ class OrchestrationService(IOrchestrationService):
                     self.cleanup(config_dict['output_dir'])
                     return {'status': 'no_media_selected'}
                 
-                default_review_text = f'[策略: {strategy_name}] 請選擇要使用的影片'
-                review_text = content_result.get('article_content') or default_review_text
+                # 第二次審核：只顯示最終 article_content，不顯示策略名稱
+                if content_result.get('article_content'):
+                    review_text = content_result['article_content']
+                else:
+                    review_text = '請選擇要使用的媒體'
                 
                 review_result = await self.review_service.review_content(
                     text=review_text,
@@ -199,19 +248,17 @@ class OrchestrationService(IOrchestrationService):
                 content_result['filter_results'] = final_filter_results
                 selected_result_already_filtered = True
                 
+                # 如果用戶編輯了內容，使用編輯後的內容；否則確保有最終 article content
                 if edited_content and edited_content.strip():
                     content_result['article_content'] = edited_content
-                else:
-                    if not content_result.get('article_content') or not content_result['article_content'].strip():
-                        article_content = self.content_service.generate_article(config, final_filter_results)
-                        content_result['article_content'] = article_content
+                elif not content_result.get('article_content') or not content_result['article_content'].strip():
+                    article_content = self.content_service.generate_article(config, final_filter_results)
+                    content_result['article_content'] = article_content
             else:
+                # 單階段策略：如果第一次 review 時沒有生成 article_content，現在生成
                 if strategy.should_generate_article_now():
                     current_article_content = content_result.get('article_content', '')
                     if not current_article_content or current_article_content.strip() == '':
-                        article_content = self.content_service.generate_article(config, final_filter_results)
-                        content_result['article_content'] = article_content
-                    else:
                         article_content = self.content_service.generate_article(config, final_filter_results)
                         content_result['article_content'] = article_content
                 

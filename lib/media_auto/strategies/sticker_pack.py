@@ -3,6 +3,7 @@ import random
 import glob
 import json
 import os
+import numpy as np
 from typing import List, Dict, Any, Optional
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
@@ -20,8 +21,8 @@ class StickerPackStrategy(ContentStrategy):
     Generates multiple expression stickers for a character, with optional animated GIF support.
     """
     
-    def __init__(self, character_repository=None, vision_manager=None):
-        self.character_repository = character_repository
+    def __init__(self, character_data_service=None, vision_manager=None):
+        self.character_data_service = character_data_service
         self.logger = setup_logger(__name__)
         
         if vision_manager is None:
@@ -89,8 +90,7 @@ class StickerPackStrategy(ContentStrategy):
         self.logger.info(f"Generated {len(self.expressions)} expressions")
         
         # Build full descriptions with character and style
-        style = self._get_config_value(sticker_config, 'style', 
-            'LINE sticker style, chibi proportions, white outline, simple clean background, 2D flat shading')
+        style = self._get_style(sticker_config)
         
         self.descriptions = []
         for expr in self.expressions:
@@ -124,7 +124,7 @@ class StickerPackStrategy(ContentStrategy):
         generated_paths = []
         
         for idx, description in enumerate(self.descriptions):
-            self.logger.info(f"Generating sticker {idx + 1}/{len(self.descriptions)}: {self.expressions[idx][:30]}...")
+            self.logger.info(f"Generating sticker {idx + 1}/{len(self.descriptions)}: {self.expressions[idx]}")
             
             for i in range(images_per_expression):
                 seed = random.randint(1, 999999999999)
@@ -154,6 +154,11 @@ class StickerPackStrategy(ContentStrategy):
 
     def analyze_media_text_match(self, similarity_threshold):
         """Analyze sticker quality."""
+        # 如果已經在 handle_review_result 中設置了 filter_results，不要覆蓋
+        if self._gifs_generated and self.filter_results:
+            self.logger.info(f"使用已選中的 {len(self.filter_results)} 個貼圖")
+            return self
+        
         output_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'stickers')
         
         if self._gifs_generated:
@@ -192,7 +197,11 @@ class StickerPackStrategy(ContentStrategy):
         if self._gifs_generated:
             gif_dir = os.path.join(getattr(self.config, 'output_dir', 'output'), 'animated_stickers')
             gif_paths = glob.glob(f'{gif_dir}/*.gif')
-            return [{'media_path': p, 'similarity': 1.0} for p in sorted(gif_paths)[:max_items]]
+            if gif_paths:
+                return [{'media_path': p, 'similarity': 1.0} for p in sorted(gif_paths)[:max_items]]
+            # 如果沒有 GIF，返回 filter_results 中的靜態貼圖（用於第二次 review）
+            if hasattr(self, 'filter_results') and self.filter_results:
+                return self.filter_results[:max_items]
         
         return [{'media_path': p, 'similarity': 1.0} for p in self.static_stickers[:max_items]]
 
@@ -354,6 +363,11 @@ class StickerPackStrategy(ContentStrategy):
         
         self._gifs_generated = True
         self.logger.info(f"✅ Generated {len(self.animated_stickers)} animated stickers")
+    
+    def _get_style(self, stage_config):
+        """覆寫基類方法以使用不同的默認值"""
+        return super()._get_style(stage_config, 
+            default='LINE sticker style, chibi proportions, white outline, simple clean background, 2D flat shading')
 
     def should_generate_article_now(self) -> bool:
         """Generate article after GIFs are created."""

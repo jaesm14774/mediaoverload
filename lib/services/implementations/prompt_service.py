@@ -5,8 +5,8 @@ import re
 from typing import Optional
 import datetime
 from lib.services.interfaces.prompt_service import IPromptService
-from lib.repositories.news_repository import INewsRepository
-from lib.repositories.character_repository import ICharacterRepository
+from lib.services.interfaces.news_data_service import INewsDataService
+from lib.services.interfaces.character_data_service import ICharacterDataService
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from utils.logger import setup_logger
 
@@ -17,16 +17,16 @@ class PromptService(IPromptService):
     支援多種生成方式：任意生成、新聞生成、雙角色互動生成。
     """
     
-    def __init__(self, news_repository: INewsRepository = None, character_repository: ICharacterRepository = None, vision_manager=None):
+    def __init__(self, news_data_service: INewsDataService = None, character_data_service: ICharacterDataService = None, vision_manager=None):
         """初始化提示詞服務
         
         Args:
-            news_repository: 新聞資料庫存取層（可選）
-            character_repository: 角色資料庫存取層（可選）
+            news_data_service: 新聞資料服務（可選）
+            character_data_service: 角色資料服務（可選）
             vision_manager: 視覺模型管理器（可選）
         """
-        self.news_repository = news_repository
-        self.character_repository = character_repository
+        self.news_data_service = news_data_service
+        self.character_data_service = character_data_service
         self.logger = setup_logger(__name__)
         self.vision_manager = vision_manager
     
@@ -77,7 +77,7 @@ class PromptService(IPromptService):
             raise ValueError(f"未知的生成方法: {method}")
         
         prompt = self._process_prompt_adjustments(prompt)
-        self.logger.info(f'生成的提示詞: {prompt[:100]}...' if len(prompt) > 100 else f'生成的提示詞: {prompt}')
+        self.logger.info(f'生成的提示詞: {prompt}')
         
         return prompt.lower()
     
@@ -95,7 +95,8 @@ class PromptService(IPromptService):
         
         # 生成第一層提示詞
         prompt = vision_manager.generate_input_prompt(
-            character=character
+            character=character,
+            prompt_type='arbitrary_input_system_prompt'
         )
         prompt = prompt.replace("'", '').replace('"', '')
         
@@ -111,11 +112,11 @@ class PromptService(IPromptService):
         Returns:
             生成的提示詞字串
         """
-        if self.news_repository is None:
-            raise ValueError("新聞資料庫存取層未設定")
+        if self.news_data_service is None:
+            raise ValueError("新聞資料服務未設定")
         
         now_date = datetime.datetime.now().strftime('%Y-%m-%d')
-        news_info = self.news_repository.get_random_news(now_date)
+        news_info = self.news_data_service.get_random_news(now_date)
         
         if news_info is None:
             self.logger.warning("無法獲取新聞資訊，切換到默認方法")
@@ -145,16 +146,15 @@ class PromptService(IPromptService):
         Returns:
             生成的提示詞字串
         """
-        if self.character_repository is None:
-            raise ValueError("角色資料庫存取層未設定")
+        if self.character_data_service is None:
+            raise ValueError("角色資料服務未設定")
         
         vision_manager = self._get_vision_manager(temperature)
         
         secondary_character = extra_info if extra_info else self._get_random_secondary_character_with_config(character, character_config)
         
         if not secondary_character:
-            self.logger.warning("無法獲取 Secondary Role，切換到默認方法")
-            return self.generate_by_arbitrary(character, temperature)
+            raise ValueError("無法獲取 Secondary Role")
         
         self.logger.info(f'雙角色互動：Main Role: {character}, Secondary Role: {secondary_character}')
         prompt = vision_manager.generate_two_character_interaction_prompt(
@@ -165,23 +165,52 @@ class PromptService(IPromptService):
         
         return prompt
     
-    def _get_random_secondary_character_with_config(self, main_character: str, character_config: Optional[object]) -> Optional[str]:
-        """使用角色配置獲取隨機的 Secondary Role"""
+    def _get_random_secondary_character_with_config(
+        self, 
+        main_character: str, 
+        character_config: Optional[object],
+        same_group_probability: float = 0.6
+    ) -> Optional[str]:
+        """使用角色配置獲取隨機的 Secondary Role
+        
+        Args:
+            main_character: 主角色名稱
+            character_config: 角色配置
+            same_group_probability: 選擇同 group 角色的機率（預設 0.6 = 60%）
+        """
         try:
             if character_config:
                 group_name = getattr(character_config, 'group_name', '')
                 workflow_path = getattr(character_config, 'workflow_path', '')
-                
-                # 從 workflow_path 中提取 workflow 名稱
                 workflow_name = os.path.splitext(os.path.basename(workflow_path))[0] if workflow_path else ''
                 
-                if group_name and workflow_name:
-                    characters = self.character_repository.get_characters_by_group(group_name, workflow_name)
+                if group_name:
+                    use_same_group = random.random() < same_group_probability
+                    
+                    if use_same_group:
+                        characters = self.character_data_service.get_characters_by_group(group_name, workflow_name)
+                        self.logger.info(f"選擇同 group ({group_name}) 角色")
+                    else:
+                        characters = self.character_data_service.get_characters_outside_group(group_name)
+                        self.logger.info(f"選擇其他 group 角色 (排除 {group_name})")
+                    
                     available_characters = [char for char in characters if char.lower() != main_character.lower()]
                     
                     if available_characters:
                         selected_character = random.choice(available_characters)
                         return selected_character
+                    
+                    # 如果該選擇沒有可用角色，嘗試另一個選擇
+                    if use_same_group:
+                        fallback_characters = self.character_data_service.get_characters_outside_group(group_name)
+                        self.logger.info("同 group 無可用角色，fallback 到其他 group")
+                    else:
+                        fallback_characters = self.character_data_service.get_characters_by_group(group_name, workflow_name)
+                        self.logger.info("其他 group 無可用角色，fallback 到同 group")
+                    
+                    available_fallback = [char for char in fallback_characters if char.lower() != main_character.lower()]
+                    if available_fallback:
+                        return random.choice(available_fallback)
             
             # 如果無法從資料庫獲取，使用預設角色
             default_characters = ["waddledee", "wobbuffet", "pikachu", "mario", "sonic"]

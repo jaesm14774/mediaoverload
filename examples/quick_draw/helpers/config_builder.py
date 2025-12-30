@@ -92,7 +92,6 @@ class ConfigBuilder:
                 - 'two_character_interaction_generate_system_prompt'
                 - 'buddhist_combined_image_system_prompt'
                 - 'black_humor_system_prompt'
-                - 'cinematic_stable_diffusion_prompt'
                 - 'unbelievable_world_system_prompt'
 
         Returns:

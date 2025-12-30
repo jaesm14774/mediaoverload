@@ -96,8 +96,9 @@ class OpenRouterModel(AIModelInterface):
         "deepseek/deepseek-chat-v3.1:free",
         "z-ai/glm-4.5-air:free",
         "deepseek/deepseek-r1-0528:free",
-        "x-ai/grok-4.1-fast:free",
-        "moonshotai/kimi-k2:free"
+        "moonshotai/kimi-k2:free",
+        "xiaomi/mimo-v2-flash:free",
+        "mistralai/devstral-2512:free"
     ]
     
     FREE_VISION_MODELS = [
@@ -136,7 +137,7 @@ class OpenRouterModel(AIModelInterface):
                        messages: List[dict],
                        images: Optional[List[str]] = None,
                        max_retries: int = 10,
-                       initial_retry_delay: float = 5,
+                       initial_retry_delay: float = 3,
                        **kwargs) -> str:
         """使用 OpenRouter API 進行聊天完成（含增強的重試機制）
 
@@ -144,7 +145,7 @@ class OpenRouterModel(AIModelInterface):
             messages: 訊息列表
             images: 圖片列表（可選）
             max_retries: 最大重試次數（預設 10 次）
-            initial_retry_delay: 初始重試間隔秒數（預設 5 秒）
+            initial_retry_delay: 初始重試間隔秒數（預設 3 秒）
             **kwargs: 其他參數
         """
         # 處理圖片輸入 - 將圖片轉換為 base64
@@ -185,7 +186,7 @@ class OpenRouterModel(AIModelInterface):
                     self.base_url,
                     headers=self.headers,
                     json=data,  # 使用 json 參數而不是 data=json.dumps()
-                    timeout=(10, 120)  # (連接超時, 讀取超時) 秒
+                    timeout=(10, 30)  # (連接超時, 讀取超時) 秒 - 縮短讀取超時以加快重試
                 )
                 response.raise_for_status()
 

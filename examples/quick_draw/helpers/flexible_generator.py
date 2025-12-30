@@ -18,7 +18,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from lib.media_auto.strategies.base_strategy import GenerationConfig
-from lib.repositories.character_repository import CharacterRepository
+from lib.services.implementations.character_data_service import CharacterDataService
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.database import db_pool
 from examples.simple_content_service import SimpleContentGenerationService
@@ -124,9 +124,9 @@ class FlexibleGenerator:
 
     def _init_services(self):
         """初始化服務層"""
-        # 初始化 character repository
+        # 初始化角色資料服務
         mysql_conn = db_pool.get_connection('mysql')
-        self.character_repository = CharacterRepository(mysql_conn)
+        self.character_data_service = CharacterDataService(mysql_conn)
 
         # 初始化 vision manager
         self.vision_manager = VisionManagerBuilder() \
@@ -137,7 +137,7 @@ class FlexibleGenerator:
 
         # 使用簡化的內容生成服務
         self.content_service = SimpleContentGenerationService(
-            character_repository=self.character_repository,
+            character_data_service=self.character_data_service,
             vision_manager=self.vision_manager
         )
 
@@ -173,7 +173,7 @@ class FlexibleGenerator:
             keywords: 關鍵字（字串或列表），會被送到 system_prompt 去生成描述
             system_prompt: 系統提示詞名稱，從 configs/prompt/image_system_guide.py 選擇
                 可選值: 'stable_diffusion_prompt', 'black_humor_system_prompt',
-                       'buddhist_combined_image_system_prompt', 'cinematic_stable_diffusion_prompt',
+                       'buddhist_combined_image_system_prompt',
                        'two_character_interaction_generate_system_prompt' 等
             character: 主角色名稱（可選）
             secondary_character: 次要角色名稱（可選）

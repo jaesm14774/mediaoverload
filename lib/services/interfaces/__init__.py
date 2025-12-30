@@ -5,6 +5,8 @@ from .review_service import IReviewService
 from .publishing_service import IPublishingService
 from .notification_service import INotificationService
 from .orchestration_service import IOrchestrationService
+from .character_data_service import ICharacterDataService
+from .news_data_service import INewsDataService
 
 __all__ = [
     'IPromptService',
@@ -12,5 +14,7 @@ __all__ = [
     'IReviewService',
     'IPublishingService',
     'INotificationService',
-    'IOrchestrationService'
+    'IOrchestrationService',
+    'ICharacterDataService',
+    'INewsDataService'
 ] 

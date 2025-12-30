@@ -3,20 +3,22 @@ import random
 import glob
 import re
 import os
+import numpy as np
 from typing import List, Dict, Any, Optional
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
 from lib.media_auto.services.media_generator import MediaGenerator
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.comfyui.node_manager import NodeManager
+from utils.logger import setup_logger
 
 class Text2Image2VideoStrategy(ContentStrategy):
     """
     Text-to-Image-to-Video generation strategy.
     Refactored to use composition.
     """
-    def __init__(self, character_repository=None, vision_manager=None):
-        self.character_repository = character_repository
+    def __init__(self, character_data_service=None, vision_manager=None):
+        self.character_data_service = character_data_service
         
         if vision_manager is None:
             vision_manager = VisionManagerBuilder() \
@@ -36,6 +38,7 @@ class Text2Image2VideoStrategy(ContentStrategy):
         self.audio_descriptions: Dict[str, str] = {}
         self._videos_generated = False
         self._videos_reviewed = False
+        self.logger = setup_logger('mediaoverload')
 
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -47,10 +50,10 @@ class Text2Image2VideoStrategy(ContentStrategy):
         # Get strategy config with proper merging
         first_stage_config = self._get_strategy_config('text2image2video', 'first_stage')
         
-        # Get style: first_stage -> general -> config.style
-        style = self._get_config_value(first_stage_config, 'style', '')
-        # Get image_system_prompt: first_stage -> general -> config.image_system_prompt
-        image_system_prompt = self._get_config_value(first_stage_config, 'image_system_prompt', 'stable_diffusion_prompt')
+        # Get style: support weights or single value
+        style = self._get_style(first_stage_config)
+        # Get image_system_prompt: support weights or single value
+        image_system_prompt = self._get_system_prompt(first_stage_config)
 
         prompt = self.config.prompt
         if style and style.strip():
@@ -69,7 +72,9 @@ class Text2Image2VideoStrategy(ContentStrategy):
         self.descriptions = [descriptions] if descriptions else []
         
         print(f'Image descriptions : {self.descriptions}')
+        self.logger.info(f'最終生成的描述: {self.descriptions}')
         print(f'生成描述花費 : {time.time() - start_time}')
+        self.logger.info(f'生成描述花費 : {time.time() - start_time} 秒')
         return self
 
     def generate_media(self):
@@ -279,23 +284,25 @@ class Text2Image2VideoStrategy(ContentStrategy):
     def analyze_media_text_match(self, similarity_threshold):
         """分析媒體與文本的匹配度
         
-        如果影片已生成，則分析影片文件並使用影片描述。
-        否則分析圖片文件並使用圖片描述。
+        Text2Image2Video 策略的篩選邏輯：
+        - 第一階段（圖片）：不使用 LLM 篩選，直接返回所有圖片讓用戶篩選
+        - 第二階段（影片）：直接返回所有影片讓用戶篩選
+        
+        這樣可以避免浪費 LLM 篩選時間，讓用戶直接選擇想要的圖片/影片。
         
         Args:
-            similarity_threshold: 相似度閾值（0.0-1.0）
+            similarity_threshold: 相似度閾值（此策略不使用）
         """
         output_dir = getattr(self.config, 'output_dir', 'output')
         
         if self._videos_generated:
-            # 影片已生成，分析影片文件
+            # 影片已生成，直接返回所有影片讓用戶篩選（不用 LLM 篩選）
             video_dir = os.path.join(output_dir, 'videos')
             if not os.path.exists(video_dir):
-                print(f'⚠️  警告：影片目錄不存在: {video_dir}')
+                print(f'⚠️ 警告：影片目錄不存在: {video_dir}')
                 self.filter_results = []
                 return self
             
-            # 查找所有影片文件
             video_extensions = ['*.mp4', '*.avi', '*.mov', '*.gif', '*.webm']
             video_paths = []
             for ext in video_extensions:
@@ -304,42 +311,36 @@ class Text2Image2VideoStrategy(ContentStrategy):
                 video_paths.extend(found)
             
             video_paths = sorted(list(set(video_paths)))
-            print(f'找到 {len(video_paths)} 個影片文件進行分析')
+            print(f'找到 {len(video_paths)} 個影片，直接交由用戶篩選（不使用 LLM）')
             
             if len(video_paths) == 0:
-                print(f'⚠️  警告：在 {video_dir} 中沒有找到任何影片文件')
+                print(f'⚠️ 警告：在 {video_dir} 中沒有找到任何影片文件')
                 self.filter_results = []
                 return self
             
             # 為每個影片創建 filter_result，使用對應的影片描述
             self.filter_results = []
             for video_path in video_paths:
-                # 嘗試從文件名中提取圖片索引，以匹配對應的 video_description
-                # 文件名格式: {character}_i2v_{img_idx}_{i}.mp4
                 match = re.search(r'_i2v_(\d+)_\d+\.', video_path)
                 if match:
                     img_idx = int(match.group(1))
-                    # 找到對應的原始圖片路徑
                     if img_idx < len(self.first_stage_images):
                         img_path = self.first_stage_images[img_idx]
-                        # 使用該圖片對應的影片描述
                         video_desc = self.video_descriptions.get(img_path, '')
                         if not video_desc:
-                            # 如果沒有找到對應的描述，使用第一個可用的描述
                             video_desc = list(self.video_descriptions.values())[0] if self.video_descriptions else ''
                     else:
                         video_desc = list(self.video_descriptions.values())[0] if self.video_descriptions else ''
                 else:
-                    # 如果無法從文件名解析，使用第一個可用的描述
                     video_desc = list(self.video_descriptions.values())[0] if self.video_descriptions else ''
                 
                 self.filter_results.append({
                     'media_path': video_path,
                     'description': video_desc if video_desc else (self.descriptions[0] if self.descriptions else ''),
-                    'similarity': 1.0  # 影片直接使用 1.0，因為已經通過圖片審核
+                    'similarity': 1.0
                 })
         else:
-            # 影片未生成，分析圖片文件（第一階段）
+            # 第一階段（圖片）：直接返回所有圖片讓用戶篩選，不使用 LLM 篩選
             first_stage_dir = os.path.join(output_dir, 'first_stage')
             if not os.path.exists(first_stage_dir):
                 first_stage_dir = output_dir
@@ -352,26 +353,23 @@ class Text2Image2VideoStrategy(ContentStrategy):
                 image_paths.extend(found)
             
             image_paths = sorted(list(set(image_paths)))
-            print(f'找到 {len(image_paths)} 個圖片文件進行分析')
+            print(f'找到 {len(image_paths)} 個圖片，直接交由用戶篩選（不使用 LLM）')
             
             if len(image_paths) == 0:
-                print(f'⚠️  警告：在 {first_stage_dir} 中沒有找到任何圖片文件')
+                print(f'⚠️ 警告：在 {first_stage_dir} 中沒有找到任何圖片文件')
                 self.filter_results = []
                 return self
             
-            # 確保有 descriptions
-            if not self.descriptions:
-                print(f'⚠️  警告：沒有描述可用於分析')
-                self.filter_results = []
-                return self
-            
-            # 使用 vision_manager 分析圖片與描述的匹配度
-            self.filter_results = self.vision_manager.analyze_media_text_match(
-                media_paths=image_paths,
-                descriptions=self.descriptions,
-                main_character=getattr(self.config, 'character', ''),
-                similarity_threshold=similarity_threshold
-            )
+            # 直接返回所有圖片，不進行 LLM 篩選
+            description = self.descriptions[0] if self.descriptions else ''
+            self.filter_results = [
+                {
+                    'media_path': img_path,
+                    'description': description,
+                    'similarity': 1.0  # 不篩選，全部返回
+                }
+                for img_path in image_paths
+            ]
         
         return self
 

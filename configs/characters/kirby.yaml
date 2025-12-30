@@ -6,7 +6,7 @@
 # Character Identity
 # -----------------------------------------------------------------
 character:
-  name: kirby_longvideo  # Character identifier
+  name: Kirby  # Character name
   group_name: Kirby  # Character group
 
 # Generation Settings
@@ -17,44 +17,46 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 1
+    text2img: 2
     text2video: 0
     text2image2video: 2
-    text2longvideo: 2
+    text2longvideo: 1
     image2image: 0
-    text2image2image: 1
+    text2image2image: 0.5
     sticker_pack: 3
-    text2longvideo_firstframe: 2
 
   # Workflow Path Configuration
   workflows:
-    text2img: /app/configs/workflow/nova-anime-xl.json
+    text2img: /app/configs/workflow/z_image_plus_nova_model.json
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
     text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
     image2image: /app/configs/workflow/image_to_image.json
     sticker_pack: /app/configs/workflow/nova-anime-xl.json
 
   # Quality Control
-  similarity_threshold: 0.5
+  similarity_threshold: 0.6
 
   # Prompt Generation Method Weights
   prompt_method_weights:
-    arbitrary: 0.1
-    news: 0.9
+    arbitrary: 0.15
+    news: 0.85
 
-  # Image System Prompt Weights
+  # Image System Prompt Weights（頂層預設，可被策略覆蓋）
   image_system_prompt_weights:
-    stable_diffusion_prompt: 0.3
-    warm_scene_description_system_prompt: 0.3
-    sticker_prompt_system_prompt: 0.4
-    two_character_interaction_generate_system_prompt: 0.3
+    stable_diffusion_prompt: 0.25
+    warm_scene_description_system_prompt: 0.25
+    sticker_prompt_system_prompt: 0.25
+    two_character_interaction_generate_system_prompt: 0.25
 
   # Visual Style Weights
   style_weights:
-    "minimalism style with pure background": 0.2
+    "minimalism style with pure background": 0.1
     "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.3
     "watercolor painting style with pure background": 0.1
-    "": 0.4
+    "Vibrant high-fantasy character concept art, bold clean line art, stylized cartoon illustration, cell-shaded with soft gradients, whimsical adventure aesthetic": 0.2
+    "Papercraft / Digital 2D Paper Cutout Style": 0.1
+    "3D cinematic animation style, high quality CGI, Pixar-esque, magical atmosphere, sparkling particle effects and stardust trail, volumetric lighting, detailed textures, snowy winter night, glowing warm city lights in background with bokeh, deep blue sky, octane render, 8k resolution, whimsical and dreamy": 0.1
+    "": 0
 
 # Social Media Configuration
 # -----------------------------------------------------------------
@@ -84,7 +86,7 @@ additional_params:
     images_per_input: 2
     videos_per_description: 2
     videos_per_image: 1
-    denoise: 0.6
+    denoise: 0.7
     
     enable_upscale: true
     upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json
@@ -94,7 +96,8 @@ additional_params:
   strategies:
     # Text-to-Image Strategy
     text2img:
-      images_per_description: 6
+      images_per_description: 9
+      optimize_prompt_for_sd: false
       custom_node_updates:
         - node_type: "PrimitiveInt"
           inputs:
@@ -103,24 +106,23 @@ additional_params:
     # Text-to-Image-to-Image Strategy
     text2image2image:
       first_stage:
-        images_per_description: 4
-        workflow_path: /app/configs/workflow/nova-anime-xl.json
+        images_per_description: 9
+        workflow_path: /app/configs/workflow/z_image_plus_nova_model.json
       second_stage:
         images_per_input: 1
-        workflow_path: /app/configs/workflow/image_to_image.json
-        denoise: 0.7
+        workflow_path: /app/configs/workflow/z_image_i2i.json
+        denoise: 0.5
 
     # Text-to-Image-to-Video Strategy
     text2image2video:
       first_stage:
-        style: "minimalism style with pure background"
         image_system_prompt_weights:
-          stable_diffusion_prompt: 0.3
-          warm_scene_description_system_prompt: 0.3
-          sticker_prompt_system_prompt: 0.4
-        images_per_description: 3
-        t2i_workflow_path: /app/configs/workflow/nova-anime-xl.json
-        enable_upscale: true
+          stable_diffusion_prompt: 3
+          sticker_prompt_system_prompt: 3
+          two_character_interaction_generate_system_prompt: 1
+        images_per_description: 9
+        t2i_workflow_path: /app/configs/workflow/z_image_plus_nova_model.json
+        enable_upscale: false
         upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
     
       
@@ -150,16 +152,16 @@ additional_params:
       # First Stage: Generate first-frame candidates (Text-to-Image)
       # User will select best candidate via Discord
       first_stage:
-        workflow_path: /app/configs/workflow/nova-anime-xl.json
-        batch_size: 3
+        workflow_path: /app/configs/workflow/z_image_plus_nova_model.json
+        batch_size: 9
         style: "minimalism style with pure background"
-        enable_upscale: true
+        enable_upscale: false
         upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
         
         image_system_prompt_weights:
-          stable_diffusion_prompt: 0.3
-          warm_scene_description_system_prompt: 0.4
-          sticker_prompt_system_prompt: 0.3
+          stable_diffusion_prompt: 3
+          sticker_prompt_system_prompt: 3
+          buddhist_combined_image_system_prompt: 1
         
         custom_node_updates:
           - node_type: "PrimitiveInt"
@@ -171,6 +173,15 @@ additional_params:
       video_generation:
         workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
         use_noise_seed: true
+
+      # Frame Transition: Use I2I to regenerate high-quality first frames
+      # This prevents character degradation and ensures story progression
+      frame_transition:
+        enabled: true                    # Enable I2I transition to regenerate frames
+        workflow_path: /app/configs/workflow/z_image_i2i.json
+        denoise: 0.5                    # Denoise strength (0.5-0.6 recommended for balance, lower = more detail preservation)
+        style_continuity_prompt: "maintain visual style, color palette, and artistic consistency, ensure character accuracy"
+        custom_node_updates: []
 
     sticker_pack:
       style: "LINE sticker style, chibi proportions, white outline, simple background"
@@ -187,26 +198,4 @@ additional_params:
         gif_fps: 10             # GIF fps
         gif_max_colors: 256
         gif_scale_width: 512
-
-    text2longvideo_firstframe:
-      longvideo_config:
-        segment_count: 5
-        segment_duration: 5
-        use_tts: true
-        tts_voice: "en-US-AriaNeural"
-      
-      first_stage:
-        workflow_path: /app/configs/workflow/nova-anime-xl.json
-        batch_size: 3
-        style: "minimalism style with pure background"
-        enable_upscale: false
-      
-      # 關鍵：首幀轉換配置
-      frame_transition:
-        enabled: false
-        workflow_path: /app/configs/workflow/image_to_image.json
-        denoise: 0.7
-      
-      video_generation:
-        workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
 

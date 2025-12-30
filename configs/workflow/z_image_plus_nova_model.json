@@ -1,0 +1,359 @@
+{
+  "67": {
+    "inputs": {
+      "value": "A cute kawaii-style illustration featuring a towering stack of waddle dee characters.   Composition: Multiple waddle dee are playfully stacked on top of each other in a precarious Christmas tree-shaped pyramid formation, each with different adorable expressions and poses.  Some are sleeping with a small \"Zzz\" bubble, some are beaming with happy closed-eye smiles,  one at the bottom looks slightly squished and grumpy, and the waddle dee at the very top is stretching its arms out like a bright star.   Characters & Details: The stack includes waddle dee in various festive holiday hats, such as tiny Santa caps, reindeer antlers, and green elf hats. Some waddle dee are holding small colorful ornaments or striped candy canes. A few waddle dee are \"inhaling\" (pouty cheeks) to try and balance the stack.  Art Style: Soft pastel colors (pinks, mint greens, and warm reds), rounded shapes, chibi proportions, thick outlines, mobile game illustration style. Clean and polished digital art with a glossy, slightly 3D appearance, making them look like soft marshmallows.  Background: Simple pale icy blue gradient background with fluffy white clouds and sparkling golden stars and gently falling snowflakes. Minimal background to keep focus on the character stack.   Mood: Playful, cheerful, wholesome, stress-relieving, perfect for a casual mobile puzzle game aesthetic."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "68": {
+    "inputs": {
+      "value": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "69": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "width"
+    }
+  },
+  "70": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "height"
+    }
+  },
+  "73": {
+    "inputs": {
+      "ckpt_name": "sdxl\\waiIllustriousSDXL_v150.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "80:42": {
+    "inputs": {
+      "conditioning": [
+        "80:45",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "80:47": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "80:46",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "80:40": {
+    "inputs": {
+      "vae_name": "flux\\ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "80:39": {
+    "inputs": {
+      "clip_name": "qwen\\qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "80:41": {
+    "inputs": {
+      "width": [
+        "69",
+        0
+      ],
+      "height": [
+        "70",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "80:46": {
+    "inputs": {
+      "unet_name": "z_image\\z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "80:43": {
+    "inputs": {
+      "samples": [
+        "80:44",
+        0
+      ],
+      "vae": [
+        "80:40",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "80:80": {
+    "inputs": {
+      "images": [
+        "80:43",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "80:45": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "80:39",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "80:44": {
+    "inputs": {
+      "seed": 52,
+      "steps": 9,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "80:47",
+        0
+      ],
+      "positive": [
+        "80:45",
+        0
+      ],
+      "negative": [
+        "80:42",
+        0
+      ],
+      "latent_image": [
+        "80:41",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "81:79": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "73",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "81:75": {
+    "inputs": {
+      "text": [
+        "68",
+        0
+      ],
+      "clip": [
+        "73",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "81:77": {
+    "inputs": {
+      "samples": [
+        "81:76",
+        0
+      ],
+      "vae": [
+        "73",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "81:78": {
+    "inputs": {
+      "filename_prefix": "i2i",
+      "images": [
+        "81:77",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "81:92": {
+    "inputs": {
+      "width": [
+        "69",
+        0
+      ],
+      "height": [
+        "70",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "81:107": {
+    "inputs": {
+      "image": [
+        "80:43",
+        0
+      ],
+      "vae": [
+        "73",
+        2
+      ],
+      "latent_size": [
+        "81:92",
+        0
+      ]
+    },
+    "class_type": "ACN_ReferencePreprocessor",
+    "_meta": {
+      "title": "Reference Preproccessor"
+    }
+  },
+  "81:105": {
+    "inputs": {
+      "reference_type": "reference_attn",
+      "style_fidelity": 0.5,
+      "ref_weight": 1
+    },
+    "class_type": "ACN_ReferenceControlNet",
+    "_meta": {
+      "title": "Reference ControlNet"
+    }
+  },
+  "81:76": {
+    "inputs": {
+      "seed": 65,
+      "steps": 25,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.9,
+      "model": [
+        "73",
+        0
+      ],
+      "positive": [
+        "81:88",
+        0
+      ],
+      "negative": [
+        "81:88",
+        1
+      ],
+      "latent_image": [
+        "81:92",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "81:88": {
+    "inputs": {
+      "strength": 0.7,
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "81:79",
+        0
+      ],
+      "negative": [
+        "81:75",
+        0
+      ],
+      "control_net": [
+        "81:105",
+        0
+      ],
+      "image": [
+        "81:107",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  }
+}

@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": " Sticker of a tiny, serious chibi Kirby piloting the legendary Dragoon machine, expression of fierce, anime-protagonist determination, with thick eyebrows furrowed and eyes burning with competitive fire. He is leaning forward aerodynamically, soaring through the air with majestic speed. Accompanied by symbolic flair like magnificent rainbow-colored contrails (🌈) streaming from the wings, jagged speed lines indicating supersonic velocity, and sparkling lens flares emphasizing the machine's legendary status. Art style: chibi, kawaii, cute, vector art, bold outlines, flat colors, sticker design, high quality. Composition: centered, isolated on a clean white background, minimal."
+      "value": " A low-angle perspective captures the intimate scene within the high-backed salon chair, focusing on the Waddle Dee's blissful expression as its head tilts back. Soft, volumetric sunlight pours through a large window, bathing the character in a warm, dreamy glow that highlights the glossy sheen of the perm solution being carefully brushed onto dark, curly hair. In the foreground, the stylist’s crisp white coat and the precise grip on a perm rod create a delicate focal point, while the background dissolves into a soft-focus haze of gleaming chrome tools and luxury product cases. The highly saturated colors of the navy blue vest contrast with the polished marble and sleek grey floor, where a subtle mirror reflection captures the stylists' concentrated faces, freezing this meticulous, cute moment in a bubble of serene, saturated light."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -28,7 +28,7 @@
   },
   "183": {
     "inputs": {
-      "value": "worst quality, worst quality, low quality, lowres, blurry, pixelated, distorted, jpeg artifacts, compression artifacts, bad art, ugly, cartoonish, blurry, out of focus, watermark, text, signature, logo, noisy, grainy, overexposed, oversaturated, monochrome, poorly drawn,  unclear details, multiple subjects, multiple people, group, crowd, many people, extra people, twins, sisters, brothers, clones, duplicates, replication, collage, grid view, split view, multiple angles"
+      "value": "worst quality, low quality, lowres, blurry, pixelated, distorted, jpeg artifacts, compression artifacts, bad art, ugly, cartoonish, blurry, out of focus, watermark, text, signature, logo, noisy, grainy, overexposed, oversaturated, monochrome, poorly drawn,  unclear details, multiple subjects, multiple people, group, crowd, many people, extra people, twins, sisters, brothers, clones, duplicates, replication, collage, grid view, split view, multiple angles"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -59,7 +59,7 @@
         0
       ],
       "clip": [
-        "260:254",
+        "260:252",
         1
       ]
     },
@@ -75,7 +75,7 @@
         0
       ],
       "clip": [
-        "260:254",
+        "260:252",
         1
       ]
     },
@@ -93,7 +93,7 @@
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "260:254",
+        "260:252",
         0
       ],
       "positive": [
@@ -141,25 +141,6 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "Save Image"
-    }
-  },
-  "260:254": {
-    "inputs": {
-      "lora_name": "sdxl\\reiXL_NB11.safetensors",
-      "strength_model": 0.8000000000000002,
-      "strength_clip": 0.8500000000000002,
-      "model": [
-        "260:252",
-        0
-      ],
-      "clip": [
-        "260:252",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "Load LoRA"
     }
   },
   "260:252": {
@@ -421,15 +402,6 @@
       "title": "VAE Decode"
     }
   },
-  "272:261": {
-    "inputs": {
-      "ckpt_name": "sdxl\\novaAnimeXL_ilV60.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
   "272:268": {
     "inputs": {
       "filename_prefix": "model3",
@@ -441,6 +413,15 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "Save Image"
+    }
+  },
+  "272:261": {
+    "inputs": {
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV140.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
     }
   }
 }

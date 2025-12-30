@@ -17,6 +17,7 @@ class CharacterConfig:
     generate_prompt_method : str = 'arbitrary'
     image_system_prompt: str = 'stable_diffusion_prompt'
     style: str = ''
+    optimize_prompt_for_sd: bool = False
 
 class BaseCharacter(ABC):
     """Base class for character implementations."""
@@ -44,7 +45,8 @@ class BaseCharacter(ABC):
             group_name=self.group_name,
             generate_prompt_method = self.generate_prompt_method,
             image_system_prompt = self.image_system_prompt,
-            style = self.style
+            style = self.style,
+            optimize_prompt_for_sd = getattr(self, 'optimize_prompt_for_sd', False)
         )
 
     def get_generation_config(self, prompt: str) -> Dict[str, Any]:

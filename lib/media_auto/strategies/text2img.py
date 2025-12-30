@@ -9,6 +9,7 @@ from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationC
 from lib.media_auto.services.media_generator import MediaGenerator
 from lib.media_auto.models.vision.vision_manager import VisionManagerBuilder
 from lib.comfyui.node_manager import NodeManager
+from utils.logger import setup_logger
 
 class Text2ImageStrategy(ContentStrategy):
     """
@@ -16,8 +17,8 @@ class Text2ImageStrategy(ContentStrategy):
     Refactored to use composition.
     """
 
-    def __init__(self, character_repository=None, vision_manager=None):
-        self.character_repository = character_repository
+    def __init__(self, character_data_service=None, vision_manager=None):
+        self.character_data_service = character_data_service
         
         if vision_manager is None:
             # Default to Gemini as per original code
@@ -34,6 +35,7 @@ class Text2ImageStrategy(ContentStrategy):
         self.descriptions: List[str] = []
         self.filter_results: List[Dict[str, Any]] = []
         self._reviewed = False
+        self.logger = setup_logger('mediaoverload')
 
     def load_config(self, config: GenerationConfig):
         self.config = config
@@ -45,8 +47,8 @@ class Text2ImageStrategy(ContentStrategy):
         # Get strategy config with proper merging
         image_config = self._get_strategy_config('text2img')
         
-        # Get style: image_config -> config.style
-        style = self._get_config_value(image_config, 'style', '')
+        # Get style: support weights or single value
+        style = self._get_style(image_config)
         image_system_prompt = self._get_system_prompt(image_config)
         
         # 獲取 prompt（關鍵詞）
@@ -86,11 +88,32 @@ class Text2ImageStrategy(ContentStrategy):
             # 確保 descriptions 不為空
             if not descriptions or not descriptions.strip():
                 print('⚠️  警告：API 返回空描述，使用原始 prompt 作為回退')
+                self.logger.warning('API 返回空描述，使用原始 prompt 作為回退')
                 descriptions = prompt
         except Exception as e:
             print(f'⚠️  警告：生成描述時發生錯誤: {e}')
             print(f'   使用原始 prompt 作為回退: {prompt}')
+            self.logger.error(f'生成描述時發生錯誤: {e}', exc_info=True)
             descriptions = prompt
+
+        # Optimization for Stable Diffusion
+        optimize_for_sd = self._get_config_value(image_config, 'optimize_prompt_for_sd', False)
+        
+        if optimize_for_sd and image_system_prompt != 'stable_diffusion_prompt' and descriptions and descriptions.strip():
+            print('🔄 正在進行 Stable Diffusion Prompt 優化...')
+            try:
+                optimized_description = self.vision_manager.generate_image_prompts(
+                    descriptions, 
+                    system_prompt_key='stable_diffusion_prompt'
+                )
+                if optimized_description and optimized_description.strip():
+                    print(f'✅ SD 優化完成:\n原始: {descriptions[:50]}...\n優化後: {optimized_description[:50]}...')
+                    descriptions = optimized_description
+                else:
+                    print('⚠️ SD 優化返回空值，保留原始描述')
+            except Exception as e:
+                print(f'⚠️ SD 優化過程發生錯誤: {e}，保留原始描述')
+                self.logger.error(f'SD 優化過程發生錯誤: {e}', exc_info=True)
             
         # Filter descriptions based on character name (simple check)
         if self.config.character:
@@ -101,24 +124,16 @@ class Text2ImageStrategy(ContentStrategy):
                 # 如果字符檢查失敗，仍然使用描述（而不是設為空）
                 # 因為字符名稱可能以不同形式出現
                 print(f'⚠️  警告：描述中未找到角色名稱 "{self.config.character}"，但仍使用該描述')
+                self.logger.warning(f'描述中未找到角色名稱 "{self.config.character}"，但仍使用該描述')
                 self.descriptions = [descriptions] if descriptions else [prompt]
         else:
              self.descriptions = [descriptions] if descriptions else [prompt]
 
         print(f'Image descriptions : {self.descriptions}')
+        self.logger.info(f'最終生成的描述: {self.descriptions}')
         print(f'生成描述花費 : {time.time() - start_time:.2f} 秒')
+        self.logger.info(f'生成描述花費 : {time.time() - start_time:.2f} 秒')
         return self
-
-    def _get_system_prompt(self, image_config):
-        weights = image_config.get('image_system_prompt_weights')
-        if weights:
-            # Simple weighted choice
-            choices = list(weights.keys())
-            probs = list(weights.values())
-            total = sum(probs)
-            probs = [p/total for p in probs]
-            return np.random.choice(choices, p=probs)
-        return self._get_config_value(image_config, 'image_system_prompt', 'stable_diffusion_prompt')
 
     def generate_media(self):
         start_time = time.time()
@@ -147,6 +162,7 @@ class Text2ImageStrategy(ContentStrategy):
                     updates_config=image_config.get('custom_node_updates', []),
                     description=description,
                     seed=seed,
+                    workflow_path=workflow_path,
                     **merged_params
                 )
                 
@@ -269,6 +285,10 @@ class Text2ImageStrategy(ContentStrategy):
         圖片放大在 post_process_media 中處理
         """
         self._reviewed = True
+        return True
+    
+    def should_show_article_in_first_review(self) -> bool:
+        """Text2Image 是單階段策略，應該在第一次審核時就顯示 article_content"""
         return True
     
     def generate_article_content(self):

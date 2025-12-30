@@ -2,6 +2,7 @@ import time
 import random
 import glob
 import os
+import numpy as np
 from typing import List, Dict, Any, Optional
 
 from lib.media_auto.strategies.base_strategy import ContentStrategy, GenerationConfig
@@ -14,8 +15,8 @@ class Text2VideoStrategy(ContentStrategy):
     Text-to-Video generation strategy.
     Refactored to use composition.
     """
-    def __init__(self, character_repository=None, vision_manager=None):
-        self.character_repository = character_repository
+    def __init__(self, character_data_service=None, vision_manager=None):
+        self.character_data_service = character_data_service
         
         if vision_manager is None:
             vision_manager = VisionManagerBuilder() \
@@ -42,10 +43,10 @@ class Text2VideoStrategy(ContentStrategy):
         # Get strategy config with proper merging
         video_config = self._get_strategy_config('text2video')
         
-        # Get style: video_config -> general -> config.style
-        style = self._get_config_value(video_config, 'style', '')
-        # Get image_system_prompt: video_config -> general -> config.image_system_prompt
-        image_system_prompt = self._get_config_value(video_config, 'image_system_prompt', 'unbelievable_world_system_prompt')
+        # Get style: support weights or single value
+        style = self._get_style(video_config)
+        # Get image_system_prompt: support weights or single value
+        image_system_prompt = self._get_system_prompt(video_config)
         
         prompt = self.config.prompt
         if style:
@@ -74,6 +75,10 @@ class Text2VideoStrategy(ContentStrategy):
         print(f'Final video descriptions: {self.descriptions}')
         print(f'生成描述花費: {time.time() - start_time}')
         return self
+    
+    def _get_system_prompt(self, stage_config):
+        """覆寫基類方法以使用不同的默認值"""
+        return super()._get_system_prompt(stage_config, default='unbelievable_world_system_prompt')
 
     def generate_media(self):
         """Generates videos."""
