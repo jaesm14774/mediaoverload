@@ -564,6 +564,7 @@ class Text2LongVideoStrategy(ContentStrategy):
         # Update generated_media_paths with final merged video (single file)
         self.generated_media_paths = [final_video]
         self._final_video_generated = True
+        self._videos_reviewed = False
         self.logger.info(f"所有 {segment_count} 個段落已生成並合併完成，最終影片: {final_video}")
         
         # Generate article content based on all segments

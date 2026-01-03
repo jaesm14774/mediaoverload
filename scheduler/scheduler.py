@@ -8,6 +8,7 @@ import sys
 import math
 from typing import Dict, Any, Optional
 import asyncio
+import threading
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -24,6 +25,10 @@ class MediaScheduler:
         self.last_execution_times = {}  # 儲存每個角色的上次執行時間
         self.service_factory = ServiceFactory()
         self.orchestration_service = self.service_factory.get_orchestration_service()
+        
+        # 任務執行鎖，用於防止多個角色同時執行（使用 threading.Lock 以支持跨事件循環）
+        self.execution_lock = threading.Lock()
+        self.is_task_running = False  # 追蹤是否有任務正在執行
 
         # 從配置文件讀取或使用默認值
         probability_settings = self.config.get('probability_settings', {})
@@ -97,6 +102,9 @@ class MediaScheduler:
             self.logger.info(f"距離上次執行 {hours_since_last:.1f} 小時, "
                            f"時間因子 {time_factor:.2f}, "
                            f"當前執行機率 {current_probability:.3%}/小時")
+        else:
+            # 如果沒有上次執行時間，使用基礎機率
+            current_probability = base_prob
 
         return random.random() < current_probability
 
@@ -106,8 +114,18 @@ class MediaScheduler:
             self.logger.info(f"根據機率決定跳過執行角色 {character_name}")
             return
 
-        self.logger.info(f"開始處理角色 {character_name}")
+        # 檢查是否有任務正在執行
+        with self.execution_lock:
+            if self.is_task_running:
+                self.logger.info(f"檢測到有任務正在執行，跳過角色 {character_name} 的執行（不影響下次機率）")
+                return
+            
+            # 設置任務執行標記
+            self.is_task_running = True
+
         try:
+            self.logger.info(f"開始處理角色 {character_name}")
+            
             # 載入角色配置
             character_config_path = f"configs/characters/{character_name.lower()}.yaml"
             character = ConfigurableCharacterWithSocialMedia(character_config_path)
@@ -129,10 +147,15 @@ class MediaScheduler:
             )
             
             self.logger.info(f"成功處理角色 {character_name}")
+            # 只有在成功執行後才更新執行時間
             self.last_execution_times[character_name] = datetime.now()
             
         except Exception as e:
             self.logger.error(f"處理角色 {character_name} 時發生錯誤: {str(e)}", exc_info=True)
+        finally:
+            # 無論成功或失敗，都要釋放鎖
+            with self.execution_lock:
+                self.is_task_running = False
 
     async def instant_execution(self) -> None:
         """立即執行所有角色的處理"""

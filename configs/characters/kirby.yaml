@@ -17,13 +17,13 @@ generation:
   # Generation Type Weights
   # Added text2longvideo with 30% probability
   generation_type_weights:
-    text2img: 2
+    text2img: 1
     text2video: 0
-    text2image2video: 2
+    text2image2video: 1
     text2longvideo: 1
     image2image: 0
     text2image2image: 0.5
-    sticker_pack: 3
+    sticker_pack: 2
 
   # Workflow Path Configuration
   workflows:

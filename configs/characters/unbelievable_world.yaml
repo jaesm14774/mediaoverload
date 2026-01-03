@@ -8,26 +8,32 @@ generation:
   
   # 生成類型的權重配置（機率選擇）
   generation_type_weights:
-    text2img: 0.5
-    text2video: 0.5
+    text2img: 1
+    text2video: 1
+    text2image2video: 1
   
   # 工作流路徑配置（根據生成類型自動選擇）
   workflows:
-    text2img: /app/configs/workflow/flux_krea_dev.json
+    text2img: /app/configs/workflow/z_image.json
     text2video: /app/configs/workflow/wan2.1_t2v_audio.json
   
   similarity_threshold: 0.6
   
   # 提示詞生成方法的權重配置
   prompt_method_weights:
-    arbitrary: 0.3
-    news: 0.7
+    arbitrary: 0.15
+    news: 0.85
     
   # 圖片系統提示的權重配置  
   image_system_prompt_weights:
     unbelievable_world_system_prompt: 0.5
     black_humor_system_prompt: 0.5
-  style: CINEMATIC STYLE
+
+  style_weights:
+    "watercolor painting style with pure background": 0.2
+    "Vibrant high-fantasy character concept art, bold clean line art, stylized cartoon illustration, cell-shaded with soft gradients, whimsical adventure aesthetic": 0.2
+    "Papercraft / Digital 2D Paper Cutout Style": 0.3
+    "": 0.3
 
 social_media:
   default_hashtags:
@@ -38,25 +44,51 @@ social_media:
       config_folder_path: /app/configs/social_media/credentials/unbelievable_world
       enabled: true
 
+    twitter:
+      config_folder_path: /app/configs/social_media/credentials/unbelievable_world
+      prefix: ""
+      enabled: true
+
 additional_params:
   # 通用參數（向後兼容）
   is_negative: false
   
-  # 圖片生成專用參數
-  image:
-    images_per_description: 10
-    custom_node_updates:
-      - node_type: "PrimitiveInt"
-        inputs:
-          value: 768  # 圖片使用中等解析度
-  
-  # 視頻生成專用參數
-  video:
+  general:
+    images_per_description: 4
+    images_per_input: 2
     videos_per_description: 2
-    custom_node_updates:
-      - node_type: "PrimitiveInt"
-        inputs:
-          value: 512  # 視頻使用較低解析度
-      - node_type: "EmptyHunyuanLatentVideo"
-        inputs:
-          length: 97
+    videos_per_image: 1
+    denoise: 0.7
+    
+    enable_upscale: true
+    upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json
+    custom_node_updates: []
+
+  # Strategy-Specific Parameters
+  strategies:
+    # Text-to-Image Strategy
+    text2img:
+      images_per_description: 9
+      custom_node_updates:
+        - node_type: "PrimitiveInt"
+          inputs:
+            value: 1024
+    
+    text2video:
+      videos_per_description: 2
+      custom_node_updates:
+        - node_type: "PrimitiveInt"
+          inputs:
+            value: 768
+
+    text2image2video:
+      first_stage:
+        t2i_workflow_path: /app/configs/workflow/z_image.json
+        enable_upscale: true
+        upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
+    
+      video:
+        i2v_workflow_path: /app/configs/workflow/wan2.1_t2v_audio.json
+        videos_per_image: 2
+        use_noise_seed: true
+        custom_node_updates: []

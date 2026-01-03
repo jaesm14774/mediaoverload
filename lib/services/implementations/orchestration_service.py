@@ -231,6 +231,11 @@ class OrchestrationService(IOrchestrationService):
                     timeout=4000
                 )
                 
+                if review_result is None or review_result[0] is None:
+                    self.logger.error("第二次審核返回 None，審核流程失敗")
+                    self.cleanup(config_dict['output_dir'])
+                    return {'status': 'review_failed'}
+                
                 approval_result, user, edited_content, selected_indices = review_result
                 
                 if approval_result == "accept" and not selected_indices:

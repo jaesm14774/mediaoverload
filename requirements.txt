@@ -30,6 +30,12 @@ ollama>=0.1.6
 websocket-client>=1.7.0
 urllib3>=2.1.0
 
+# HTTP 請求（Instagram 等需要）
+requests>=2.31.0
+
+# Proxy 支援（SOCKS proxy）
+PySocks>=1.7.1
+
 # 開發工具
 rich>=13.7.0
 

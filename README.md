@@ -923,6 +923,36 @@ A: 使用 `selected_result_already_filtered` 標記來區分兩種情況：
 
 這確保了無論審核流程如何，都能正確提取使用者選擇的媒體。
 
+### Q: Instagram 登入時出現「找不到帳號」錯誤？
+
+A: 如果出現 `We can't find an account with {username}` 錯誤，可能原因：
+
+1. **使用者名稱格式不正確**：Instagram API 的 `IG_USERNAME` 欄位可以接受：
+   - 使用者名稱（例如：`wobbuffet_mao_66666`）
+   - Email（例如：`your_email@example.com`）
+   - 電話號碼（例如：`+886912345678`）
+
+2. **建議解決方案**：
+   - 如果使用使用者名稱登入失敗，請嘗試使用 **email** 登入
+   - 檢查 `configs/social_media/credentials/{character_name}/ig.env` 中的 `IG_USERNAME` 設定
+   - 確認帳號是否需要驗證（檢查電子郵件或簡訊）
+   - 確認帳號未被停用或刪除
+
+3. **配置範例**：
+   ```env
+   # 使用 email 登入（推薦）
+   IG_USERNAME=your_email@example.com
+   IG_PASSWORD=your_password
+   
+   # 或使用電話號碼
+   IG_USERNAME=+886912345678
+   IG_PASSWORD=your_password
+   ```
+
+4. **注意**：如果能在 UI 介面登入但程式碼無法登入，通常是因為：
+   - UI 可能使用 email 登入，而配置檔案使用的是使用者名稱
+   - Instagram API 對某些使用者名稱格式的支援可能有限制
+
 ## 🔧 錯誤修復記錄
 
 ### 雙角色互動獲取 Secondary Role 返回 None (2025-12-17)

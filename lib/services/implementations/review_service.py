@@ -43,6 +43,10 @@ class ReviewService(IReviewService):
             timeout=timeout
         )
         
+        if result is None:
+            self.logger.error("Discord 審核流程返回 None，可能是 bot 未正確啟動或超時")
+            return None, None, None, None
+        
         approval_result, user, edited_content, selected_indices = result
         
         if edited_content is None:

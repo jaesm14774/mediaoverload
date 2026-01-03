@@ -206,6 +206,12 @@ class DiscordFeedbackBot:
                 await asyncio.wait_for(self._process_completed.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 print(f"整體程序超時 ({timeout} 秒)")
+                if self.result_data is None:
+                    self.result_data = (None, None, None, None)
+            
+            if self.result_data is None:
+                print("警告: result_data 為 None，返回默認值")
+                return (None, None, None, None)
             
             return self.result_data
             

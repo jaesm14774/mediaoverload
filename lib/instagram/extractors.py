@@ -83,6 +83,10 @@ def extract_media_v1(data):
     # Fix: Ensure audio_filter_infos is a list, not None
     if "clips_metadata" in media and media["clips_metadata"]:
         clips_metadata = media["clips_metadata"]
+        # Fix: Convert list to None for reusable_text_info (should be dict or None)
+        if "reusable_text_info" in clips_metadata:
+            if isinstance(clips_metadata["reusable_text_info"], list):
+                clips_metadata["reusable_text_info"] = None
         if "original_sound_info" in clips_metadata and clips_metadata["original_sound_info"]:
             original_sound_info = clips_metadata["original_sound_info"]
             if "audio_filter_infos" in original_sound_info and original_sound_info["audio_filter_infos"] is None:

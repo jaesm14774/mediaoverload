@@ -466,6 +466,11 @@ class PrivateRequestMixin:
                 self.logger.warning("Status 429: Too many requests")
                 raise ClientThrottledError(e, response=e.response, **last_json)
             elif e.response.status_code == 404:
+                # 檢查是否為登入重定向（session 過期）
+                response_url = str(e.response.url) if hasattr(e.response, 'url') else ''
+                if '/accounts/login/' in response_url:
+                    self.logger.warning("Status 404: Session expired, redirecting to login page")
+                    raise LoginRequired(response=e.response, **last_json)
                 self.logger.warning("Status 404: Endpoint %s does not exist", endpoint)
                 raise ClientNotFoundError(e, response=e.response, **last_json)
             elif e.response.status_code == 408:
