@@ -9,8 +9,10 @@ generation:
   # 生成類型的權重配置（機率選擇）
   generation_type_weights:
     text2img: 1
-    text2video: 1
+    text2video: 0.1
     text2image2video: 1
+    text2longvideo: 1
+    sticker_pack: 1
   
   # 工作流路徑配置（根據生成類型自動選擇）
   workflows:
@@ -92,3 +94,67 @@ additional_params:
         videos_per_image: 2
         use_noise_seed: true
         custom_node_updates: []
+
+    text2longvideo:
+      # Long-video specific configuration
+      longvideo_config:
+        segment_count: 5              # Number of video segments (e.g., 5 segments × 5 seconds = 25 second video)
+        segment_duration: 5           # Duration per segment in seconds
+        use_tts: true                 # Enable TTS narration
+        tts_voice: "en-US-AriaNeural"  # Edge-TTS voice (English female)
+        # Available voices:
+        # English: en-US-AriaNeural, en-US-GuyNeural, en-GB-SoniaNeural
+        # Chinese: zh-CN-XiaoxiaoNeural, zh-TW-HsiaoChenNeural
+        # Japanese: ja-JP-NanamiNeural
+        tts_rate: "+0%"               # Speech rate: -50% to +50%
+        fps: 16                       # Video frame rate
+
+      # First Stage: Generate first-frame candidates (Text-to-Image)
+      # User will select best candidate via Discord
+      first_stage:
+        workflow_path: /app/configs/workflow/z_image.json
+        batch_size: 9
+        style: "minimalism style with pure background"
+        enable_upscale: false
+        upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
+        
+        image_system_prompt_weights:
+          stable_diffusion_prompt: 1
+          unbelievable_world_system_prompt: 1
+          black_humor_system_prompt: 1
+        
+        custom_node_updates:
+          - node_type: "PrimitiveInt"
+            inputs:
+              value: 1024  # Resolution for first frame
+
+      # Video Generation: Sequential Image-to-Video for each segment
+      # Each segment uses last frame of previous segment as input
+      video_generation:
+        workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
+        use_noise_seed: true
+
+      # Frame Transition: Use I2I to regenerate high-quality first frames
+      # This prevents character degradation and ensures story progression
+      frame_transition:
+        enabled: true                    # Enable I2I transition to regenerate frames
+        workflow_path: /app/configs/workflow/z_image_i2i.json
+        denoise: 0.5                    # Denoise strength (0.5-0.6 recommended for balance, lower = more detail preservation)
+        style_continuity_prompt: "maintain visual style, color palette, and artistic consistency, ensure character accuracy"
+        custom_node_updates: []
+
+    sticker_pack:
+      style: "LINE sticker style, chibi proportions, white outline, simple background"
+      static_config:
+        workflow_path: /app/configs/workflow/z_image.json
+        images_per_expression: 1
+      animated_config:
+        enabled: true
+        gif_probability: 0.5
+        i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
+        # Sticker GIF 專用參數（短動畫）
+        total_frames: 36
+        video_fps: 12
+        gif_fps: 10             # GIF fps
+        gif_max_colors: 256
+        gif_scale_width: 512

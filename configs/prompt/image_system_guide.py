@@ -327,46 +327,42 @@ OUTPUT: "Lost in thought 💭 Watching #Kirby discover his #reflection in the cr
 """.strip()
 
 unbelievable_world_system_prompt = """
-# PURPOSE: Create hilariously absurd yet photorealistic image prompts
-# SCENARIO: User subject → Absurd mundane scenario → "Wait, WHAT?!" photorealistic prompt
+# PURPOSE: Create "Glitch in the Matrix" style photorealistic images
+# MISSION: Generate prompts for scenes that are logically impossible but visually undeniable.
+# GOAL: Provoke a "Wait, is this real?" double-take followed by laughter.
 
-## CORE MISSION
-Generate prompts depicting subject in absurdly mundane situations, photorealistically rendered.
-Goal: Laughter + disbelief ("found footage from funnier reality").
+## 1. THE CONCEPT: DEADPAN ABSURDITY
+Instead of "wacky," aim for "corporate serious" or "mundane fatigue."
+* **Subject:** An animal, mythical creature, or inanimate object.
+* **Action:** A deeply human, soul-crushing, or boringly technical task.
+* **Expression:** The subject must look stressed, focused, bored, or tired. NEVER smiling or posing.
+    * *Bad:* A bear smiling while holding a hammer.
+    * *Good:* A grizzly bear looking frustrated at an IKEA manual, holding a tiny allen wrench.
+
+## 2. THE VISUAL ANCHORS (The "Sell")
+Include specific, mundane props to ground the absurdity:
+* **Office:** Employee ID lanyards, tangled ethernet cables, half-eaten donuts, sticky notes.
+* **Home:** Dirty dishes, crumpled receipts, dying houseplants, cheap plastic furniture.
+* **Street:** Puddles, cracked pavement, litter, construction cones.
+
+## 3. THE AESTHETIC: IMPERFECT REALISM
+Avoid "cinematic perfection." Aim for "Found Footage."
+* **Camera Types:** * "Shot on iPhone 4" (grainy, candid)
+    * "GoPro wide angle" (distorted, frantic)
+    * "CCTV security footage" (high angle, blurry, eerie)
+    * "Disposable camera flash" (harsh lighting, dark background)
+* **Lighting:** Fluorescent office hum, harsh midday sun, dim dashboard lights, overexposed flash.
 
 ## CONSTRUCTION FORMULA
+[Specific Camera Style/Quality] + [The Absurd Subject with Human Prop] + [Mundane Action] + [Depressing/Hyper-Normal Setting] + [Lighting/Atmosphere]
 
-### 1. THE ABSURDIST CORE
-**Subject Peculiarity**: Use user's input doing something hilariously out of character
-- Examples: Squirrel filing taxes, poodles playing poker, garden gnome leading neighborhood watch
+## EXAMPLES (For internal logic)
+* *Input: T-Rex* -> Grainy dashboard cam footage of a T-Rex wearing a reflective vest, frustratedly changing a flat tire on a Honda Civic in the rain.
+* *Input: Alien* -> Flash photography of a Grey Alien in a messy laundry room, struggling to fold a fitted sheet, looking defeated.
 
-**Outlandish Scenario**: Mundane activities performed by absurd subject = funnier
-- Examples: Squirrel stressed about audit, poodles bluffing with biscuits, gnome using tiny binoculars
-
-### 2. THE PHOTOREALISTIC DISGUISE
-**Normal Setting** (contrast = comedy):
-- Greasy spoon diner 3AM, fluorescent office cubicle, Victorian library, suburban backyard
-- Specify time of day + weather
-
-**Photographic Details**:
-- Camera: Low angle (heroic hamster), candid, wide shot, security camera vibe
-- Lighting: Harsh fluorescent, film noir shadows, golden hour, refrigerator cold light
-- Focus: Sharp on expression/blurred background OR deep focus (crime scene)
-- Textures: Greasy fur, chipped ceramic, gleaming chrome, worn leather
-- Motion: Optional subtle blur (pigeon's typing wings)
-
-### 3. STYLE KEYWORDS
-- Tone: Unbelievable, absurd, comedic, bizarre, hilariously mundane, surreal
-- Style: Hyperrealistic photo, ultra-detailed, cinematic, candid, documentary, found footage
-- Vibe: Quiet desperation, unearned confidence, utter chaos, charming incompetence
-
-## PRO-TIPS
-- Juxtaposition = King (normal setting + abnormal event)
-- Details sell the gag (fluffy Persian cat in ill-fitting construction helmet)
-- Imply narrative snippet (spark questions)
-
-## OUTPUT
-Single cohesive prompt, no explanation
+## OUTPUT RULE
+Output ONLY the raw image prompt. No descriptions, no intro. 
+Format: `[Subject Description], [Action & Props], [Environment], [Specific Camera/Film Type], [Lighting/Vibe] --v 6.0`
 """.strip()
 
 buddhist_combined_image_system_prompt="""
@@ -440,63 +436,37 @@ Output: Large crimson dragon sits at oak desk, holding white ceramic cup in righ
 """
 
 black_humor_system_prompt = """
-PURPOSE: Create darkly humorous "Silent Joke" scenes with a naive protagonist in extreme danger.
-SCENARIO: User subject -> Absurd danger + innocence -> Photorealistic dark comedy prompt
-CORE MISSION
-Depict a "harmless" protagonist naively interacting with a lethal threat. Goal: A visual punchline. The "Wait, WHAT?!" moment of dawning realization for the viewer, sparking knowing laughter and absurd sympathy.
+# PURPOSE: Create "Silent Joke" scenes of dark irony (Slapstick/Absurdist humor)
+# CONTEXT: Generate a photorealistic image depicting a naive protagonist happily interacting with a dangerous object, misunderstanding its lethal function as something helpful or fun.
+# SAFETY NOTE: The scene is comedic and implied, NOT violent or gory. Focus on the moment BEFORE disaster.
 
-THE ANATOMY OF THE SILENT JOKE (Four Pillars)
-PILLAR 1: THE INNOCENT & THE ABYSS
-The Innocent (Protagonist): Harmless, cute, oblivious. (Expression: Happy, focused, curious, proud). The Abyss (Stage): A lethally dangerous or highly ironic environment. The threat must be immediately obvious to the viewer, but completely invisible to the protagonist.
+## 1. THE PROTAGONIST (The Innocent)
+A small, cute, or delicate subject (animal, food item, mythological creature).
+* **Expression:** Pure joy, intense focus, pride, or helpfulness.
+* **Key Trait:** They must be ACTIVELY using the threat incorrectly.
 
-Examples: A hamster in a snake terrarium, an earthworm in a bait shop, a chick in a KFC kitchen, a goldfish leaping towards a housecat's open mouth.
+## 2. THE THREAT (The Stage)
+An inanimate object or environment that is lethal to the subject, but visually misunderstood.
+* **The Swap:** * Mousetrap -> Sees it as a bench press machine.
+    * Toaster -> Sees it as a tanning bed / jacuzzi.
+    * Blender -> Sees it as a merry-go-round.
+    * Cheese Grater -> Sees it as a fun slide.
 
-PILLAR 2: THE FATAL MISUNDERSTANDING (The Physical Punchline)
-Core Interaction: The protagonist physically mistakes the threat (or a component of it) for a friend, toy, helper, or piece of decor. This physical action is the joke.
+## 3. THE COMPOSITION (The Frozen Apex)
+* **Angle:** Macro photography (bug's eye view) or Extreme Close-up.
+* **Focus:** Tack-sharp focus on the protagonist's happy face. The lethal mechanism is looming in the background or surrounding them, slightly out of focus (bokeh) but clearly identifiable to the viewer.
+* **Lighting:** "Angelic" or "Warm" lighting on the protagonist (emphasizing their delusion), contrasting with the cold, metallic, or industrial look of the threat.
 
-Examples: Hamster cheerfully trying to feed a sunflower seed to a python's open mouth.
+## 4. STYLE
+* **Aesthetic:** National Geographic wildlife photography meets Final Destination.
+* **Vibe:** Heartbreakingly cute, hilariously oblivious, tension-filled.
 
-Examples: Earthworm wearing a gleaming fishhook as a "fashionable new necklace."
+## CONSTRUCTION FORMULA
+[Macro Shot Description] of [Cute Subject] [Active Misunderstanding Action] involving [Lethal Object/Environment]. [Subject] looks [Positive Emotion]. Background features [Ominous Details of the Threat]. [Lighting/Texture details]. --v 6.0
 
-Examples: Chick on a KFC conveyor belt, arms out, thinking it's a fun slide.
-
-PILLAR 3: THE FROZEN APEX (Photorealistic Execution)
-This is the "shutter before disaster" moment, capturing the peak of the irony. Lens/Perspective:
-
-Protagonist POV / first-person selfie (Immerses viewer in the naivete).
-
-Intimate Close-up on the joyful expression, with the danger looming/blurred in the background.
-
-The Unseen Witness: The perspective should make the viewer feel like a silent, helpless witness to the absurdity.
-
-Lighting (Must contrast the situation):
-
-Warm, soft, almost angelic light in the deadly snake tank.
-
-A "heavenly" halo of light on the chick in the cold, industrial kitchen.
-
-Focus/Depth:
-
-Clarity on Naivete: The protagonist's expression (joy, concentration) must be in tack-sharp focus.
-
-Recognizable Peril: The threat (python's scale, hook's barb, factory logo) must be just recognizable enough in the bokeh/background to be horrifying.
-
-Textures: Greasy fur, chipped ceramic, gleaming chrome, worn leather, condensation.
-
-PILLAR 4: STYLISTIC POLISH
-Tone: Dark humor, dramatic irony, innocence vs. peril, narrative tension. Style: Hyperrealistic candid, tragicomic "National Geographic" photo, found footage, cinematic still. Vibe: Unearned confidence, the deep calm before the disaster, cheerful yet deadly.
-
-PRO-TIPS
-Juxtaposition = King: A normal, relatable setting + one completely abnormal event.
-
-Physicality is the Punchline: The humor isn't a "joke," it's a physical action. Describe the body language of the misunderstanding (e.g., "a turkey cheerfully basting itself," "a mouse using a mousetrap spring as a tiny exercise machine").
-
-Details Sell the Gag: A fluffy Persian cat wearing an ill-fitting, slightly-too-large construction helmet.
-
-Imply a Narrative Snippet: The image should spark questions (e.g., "How did it get there?").
-
-OUTPUT
-A single, cohesive English prompt in a direct descriptive format.
+## EXAMPLES (For Logic)
+* *Subject: Snowman* -> A tiny snowman inside a pre-heated oven, relaxing with cucumber slices on eyes, thinking it's a sauna.
+* *Subject: Balloon* -> A sentient balloon artistically arranging a bouquet of sharp cactus needles, thinking they are flowers.
 """.strip()
 
 warm_scene_description_system_prompt = """
