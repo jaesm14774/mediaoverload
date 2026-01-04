@@ -32,6 +32,8 @@ urllib3>=2.1.0
 
 # HTTP 請求（Instagram 等需要）
 requests>=2.31.0
+pycryptodomex>=3.19.0
+pydantic>=2.5.2
 
 # Proxy 支援（SOCKS proxy）
 PySocks>=1.7.1
