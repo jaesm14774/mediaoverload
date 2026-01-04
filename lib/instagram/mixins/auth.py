@@ -11,8 +11,9 @@ from typing import Dict, Union
 from uuid import uuid4
 
 import requests
-import nacl.public
-import nacl.encoding
+from Cryptodome.Cipher import AES, PKCS1_v1_5
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Random import get_random_bytes
 from pydantic import ValidationError
 
 from lib.instagram import config
@@ -303,35 +304,46 @@ class LoginMixin(PreLoginFlowMixin, PostLoginFlowMixin):
     locale = "en_US"
     timezone_offset: int = -14400  # New York, GMT-4 in seconds
     # Example: CLN,49897488153,1666640702:01f7bdb93090f4f773516fc2cf1424178a58a2295b4c754090ba02cb0a834e2d1f731e20
-    ig_u_rur = ""
-    ig_www_claim = ""  # e.g. hmac.AR2uidim8es5kYgDiNxY0UG_ZhffFFSt8TGCV5eA1VYYsMNx
+    ig_u_rur = None
+    ig_www_claim = None  # e.g. hmac.AR2uidim8es5kYgDiNxY0UG_ZhffFFSt8TGCV5eA1VYYsMNx
 
     def __init__(self):
         self.user_agent = None
         self.settings = None
 
-    def get_public_key(self):
-        """
-        Get public key for password encryption
-        """
-        resp = self.public.get("https://www.instagram.com/data/shared_data/")
-        json_data = resp.json()
-        key = json_data["encryption"]["key_id"]
-        pub_key = json_data["encryption"]["public_key"]
-        expiry = json_data["encryption"].get("expiry")
-        return key, pub_key, expiry
+    def password_publickeys(self):
+        resp = self.public.get("https://i.instagram.com/api/v1/qe/sync/")
+        publickeyid = int(resp.headers.get("ig-set-password-encryption-key-id"))
+        publickey = resp.headers.get("ig-set-password-encryption-pub-key")
+        return publickeyid, publickey
 
     def password_encrypt(self, password):
-        """
-        Encrypt password
-        """
-        key_id, pub_key, expiry = self.get_public_key()
+        publickeyid, publickey = self.password_publickeys()
+        session_key = get_random_bytes(32)
+        iv = get_random_bytes(12)
         timestamp = str(int(time.time()))
-        key = nacl.public.PublicKey(pub_key, nacl.encoding.HexEncoder)
-        sealed_box = nacl.public.SealedBox(key)
-        encrypted = sealed_box.encrypt(password.encode("utf-8"))
-        encrypted_password = base64.b64encode(encrypted).decode("utf-8")
-        return f"#PWD_INSTAGRAM_BROWSER:10:{timestamp}:{encrypted_password}"
+        decoded_publickey = base64.b64decode(publickey.encode())
+        recipient_key = RSA.import_key(decoded_publickey)
+        cipher_rsa = PKCS1_v1_5.new(recipient_key)
+        rsa_encrypted = cipher_rsa.encrypt(session_key)
+        cipher_aes = AES.new(session_key, AES.MODE_GCM, iv)
+        cipher_aes.update(timestamp.encode())
+        aes_encrypted, tag = cipher_aes.encrypt_and_digest(password.encode("utf8"))
+        size_buffer = len(rsa_encrypted).to_bytes(2, byteorder="little")
+        payload = base64.b64encode(
+            b"".join(
+                [
+                    b"\x01",
+                    publickeyid.to_bytes(1, byteorder="big"),
+                    iv,
+                    size_buffer,
+                    rsa_encrypted,
+                    tag,
+                    aes_encrypted,
+                ]
+            )
+        )
+        return f"#PWD_INSTAGRAM:4:{timestamp}:{payload.decode()}"
 
 
     def init(self) -> bool:
@@ -457,7 +469,7 @@ class LoginMixin(PreLoginFlowMixin, PostLoginFlowMixin):
             ),
             "phone_id": self.phone_id,
             "enc_password": enc_password,
-            "username": username,
+            "username": self.username,
             "adid": self.advertising_id,
             "guid": self.uuid,
             "device_id": self.android_device_id,
@@ -482,7 +494,7 @@ class LoginMixin(PreLoginFlowMixin, PostLoginFlowMixin):
                 "phone_id": self.phone_id,
                 "_csrftoken": self.token,
                 "two_factor_identifier": two_factor_identifier,
-                "username": username,
+                "username": self.username,
                 "trust_this_device": "0",
                 "guid": self.uuid,
                 "device_id": self.android_device_id,

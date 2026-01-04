@@ -953,6 +953,19 @@ A: 如果出現 `We can't find an account with {username}` 錯誤，可能原因
    - UI 可能使用 email 登入，而配置檔案使用的是使用者名稱
    - Instagram API 對某些使用者名稱格式的支援可能有限制
 
+### Q: 如何更新或新增 Instagram Session？
+
+A: 使用專用的 Session 產生器腳本：
+
+```bash
+python utils/generate_ig_session.py
+```
+
+該腳本會引導您：
+1. 選擇現有角色或新增角色。
+2. 確認或輸入 `ig.env` 中的憑證（使用者名稱、密碼、Proxy）。
+3. 執行登入並自動將 Session 儲存到對應的角色目錄下（`instagram_session.json`）。
+
 ## 🔧 錯誤修復記錄
 
 ### 雙角色互動獲取 Secondary Role 返回 None (2025-12-17)

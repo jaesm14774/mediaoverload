@@ -4,12 +4,12 @@ probability_settings:
   min_probability: 0.03334  # 最小機率（每15小時0.5次）
 
 schedules:
-  # wobbuffet:
-  #   character: "Wobbuffet"
-  #   prompts:
-  #     - use_llm: true
-  #       prompt: ""
-  #       temperature: 1.0
+  wobbuffet:
+    character: "Wobbuffet"
+    prompts:
+      - use_llm: true
+        prompt: ""
+        temperature: 1.0
 
   kirby:
     character: "Kirby"
