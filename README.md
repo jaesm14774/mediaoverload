@@ -89,7 +89,7 @@ results = batch_generate_by_count(
    - 檢查是否需要再次審核（例如：影片生成後）
 7. **後處理媒體** - 調用 strategy.post_process_media()（例如：圖片放大）
 8. **處理媒體格式** - 轉換格式等
-9. **發布到社群媒體** - Instagram、Twitter 等
+9. **發布到社群媒體** - Instagram、Twitter、Facebook 粉絲專頁等
 10. **發送通知**
 11. **清理資源**
 
@@ -604,6 +604,34 @@ Instagram 不支援直接上傳 GIF 格式，系統會自動將 GIF 轉換為 MP
 - 移除了 `-stream_loop` 參數，這是導致轉換卡住的根本原因
 - Instagram 會自動循環播放 MP4，不需要在轉換時循環輸入
 
+### Facebook 粉絲專頁發布
+
+當 Instagram 有驗證問題時，可改用 Facebook 粉絲專頁發布。使用 Graph API，需具備 `pages_manage_posts`、`pages_read_engagement` 權限。
+
+**所需資訊**：
+- `FB_PAGE_ID`：粉絲專頁 ID（專頁「關於」或 API 查詢取得）
+- `FB_PAGE_ACCESS_TOKEN`：粉絲專頁長期 Access Token
+
+**設定步驟**：
+1. 在 `configs/social_media/credentials/{character_name}/` 建立 `facebook.env`
+2. 複製 `facebook.env.example` 並填入上述憑證
+3. 在角色 YAML 的 `social_media.platforms` 新增：
+
+```yaml
+social_media:
+  platforms:
+    facebook:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+```
+
+**取得 Token**：前往 [developers.facebook.com](https://developers.facebook.com/) 建立應用程式，取得長期 Page Access Token。詳見 `configs/social_media/credentials/facebook.env.example`。
+
+**重新產生長期 Token**：當 Page Token 過期時，執行 `python utils/generate_fb_token.py`，依提示選擇角色並貼上短期 User Token（可從 [Graph API Explorer](https://developers.facebook.com/tools/explorer/) 取得，需具備 `pages_manage_posts`、`pages_read_engagement` 權限），腳本會交換為長期 Page Token 並可選擇寫入 `facebook.env`。
+
+**測試發布**：`python utils/test_fb_post.py` 可測試純文字；加 `--image` 或 `--video` 可測試圖片／影片。
+
 ### GIF 優化功能
 
 系統在生成 LINE 貼圖 GIF 時會自動進行優化：
@@ -965,6 +993,10 @@ python utils/generate_ig_session.py
 1. 選擇現有角色或新增角色。
 2. 確認或輸入 `ig.env` 中的憑證（使用者名稱、密碼、Proxy）。
 3. 執行登入並自動將 Session 儲存到對應的角色目錄下（`instagram_session.json`）。
+
+### Q: 如何重新產生 Facebook 長期 Page Token？
+
+A: 執行 `python utils/generate_fb_token.py`，選擇角色後貼上短期 User Token（從 [Graph API Explorer](https://developers.facebook.com/tools/explorer/) 取得，需勾選 `pages_manage_posts`、`pages_read_engagement`），腳本會交換為長期 Page Token 並可選擇寫入 `facebook.env`。
 
 ## 🔧 錯誤修復記錄
 

@@ -57,11 +57,12 @@ class ConfigurableCharacterWithSocialMedia(ConfigurableCharacter, SocialMediaMix
             self._register_platforms_from_config()
 
     def _register_platforms_from_config(self):
-        from lib.social_media import InstagramPlatform, TwitterPlatform
+        from lib.social_media import InstagramPlatform, TwitterPlatform, FacebookPlatform
 
         platform_mapping = {
             'instagram': InstagramPlatform,
-            'twitter': TwitterPlatform
+            'twitter': TwitterPlatform,
+            'facebook': FacebookPlatform
         }
 
         platforms_to_register = {}

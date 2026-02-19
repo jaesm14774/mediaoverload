@@ -88,24 +88,18 @@ class GeminiModel(AIModelInterface):
 class OpenRouterModel(AIModelInterface):
     """OpenRouter 模型實現 - 支援透過 API 呼叫任何模型"""
     
-    # OpenRouter 免費模型列表
+    # OpenRouter 免費模型列表 (2026-02 更新)
     FREE_TEXT_MODELS = [
-        "tngtech/deepseek-r1t2-chimera:free",
-        "qwen/qwen3-235b-a22b:free",
-        "minimax/minimax-m2:free",
-        "deepseek/deepseek-chat-v3.1:free",
+        "arcee-ai/trinity-large-preview:free",
+        "stepfun/step-3.5-flash:free",
         "z-ai/glm-4.5-air:free",
         "deepseek/deepseek-r1-0528:free",
-        "moonshotai/kimi-k2:free",
-        "xiaomi/mimo-v2-flash:free",
-        "mistralai/devstral-2512:free"
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "openai/gpt-oss-120b:free"
     ]
     
     FREE_VISION_MODELS = [
-        "nvidia/nemotron-nano-12b-v2-vl:free",
-        "qwen/qwen2.5-vl-32b-instruct:free",
-        "google/gemma-3-27b-it:free",
-        "google/gemini-2.0-flash-exp:free"
+        "nvidia/nemotron-nano-12b-v2-vl:free"
     ]
     
     def __init__(self, config: ModelConfig):
@@ -117,7 +111,9 @@ class OpenRouterModel(AIModelInterface):
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/mediaoverload",
+            "X-Title": "MediaOverload"
         }
         self.logger = logging.getLogger(__name__)
     
@@ -286,9 +282,31 @@ class OpenRouterModel(AIModelInterface):
                     raise RuntimeError(f"OpenRouter API JSON 解析錯誤（已重試 {max_retries} 次）: {e}")
                     
             except KeyError as e:
-                # KeyError 通常是回應格式問題，不應該重試
-                self.logger.error(f"OpenRouter API 回應格式錯誤: {e}")
-                raise ValueError(f"OpenRouter API 回應格式錯誤: {e}")
+                last_exception = e
+                if attempt < max_retries - 1:
+                    if is_free_model:
+                        new_model = self._switch_to_another_free_model(
+                            available_models, tried_models, current_model
+                        )
+                        if new_model:
+                            data['model'] = new_model
+                            tried_models.append(new_model)
+                            self.logger.info(
+                                f"切換模型: {current_model} -> {new_model} "
+                                f"（嘗試 {attempt + 1}/{max_retries}）"
+                            )
+                            current_model = new_model
+                    current_delay = retry_delay * (1.2 ** attempt)
+                    jitter = random.uniform(0.8, 1.2)
+                    actual_delay = current_delay * jitter
+                    self.logger.warning(
+                        f"OpenRouter API 回應格式錯誤 (嘗試 {attempt + 1}/{max_retries}): {e}。"
+                        f"等待 {actual_delay:.1f} 秒後重試..."
+                    )
+                    time.sleep(actual_delay)
+                else:
+                    self.logger.error(f"OpenRouter API 回應格式錯誤（已重試 {max_retries} 次）: {e}")
+                    raise ValueError(f"OpenRouter API 回應格式錯誤（已重試 {max_retries} 次）: {e}")
             except Exception as e:
                 last_exception = e
                 if attempt < max_retries - 1:
@@ -421,7 +439,10 @@ class OpenRouterModel(AIModelInterface):
             return 1.5
     
     def _process_messages_with_images(self, messages: List[dict], images: Optional[List[str]] = None) -> List[dict]:
-        """處理包含圖片的訊息"""
+        """處理包含圖片的訊息
+        
+        根據 OpenRouter 文檔建議，文字內容應放在圖片前面
+        """
         processed_messages = []
         
         for message in messages:
@@ -431,10 +452,17 @@ class OpenRouterModel(AIModelInterface):
 
             processed_message = message.copy()
             
-            # 如果是有圖片，添加圖片內容到user message 最前面
             if images:
                 content_parts = []
-                # 添加圖片內容
+                
+                # 先添加文字內容 (OpenRouter 建議文字放前面)
+                if isinstance(message.get('content'), str):
+                    content_parts.append({
+                        "type": "text",
+                        "text": message['content']
+                    })
+                
+                # 再添加圖片內容
                 for image_path in images:
                     try:
                         image_base64 = self._encode_image_to_base64(image_path)
@@ -445,15 +473,8 @@ class OpenRouterModel(AIModelInterface):
                             }
                         })
                     except Exception as e:
-                        print(f"無法處理圖片 {image_path}: {e}")
+                        self.logger.warning(f"無法處理圖片 {image_path}: {e}")
                         continue
-                
-                # 添加文字內容
-                if isinstance(message.get('content'), str):
-                    content_parts.append({
-                        "type": "text",
-                        "text": message['content']
-                    })
                 
                 processed_message['content'] = content_parts
             processed_messages.append(processed_message)
@@ -461,22 +482,29 @@ class OpenRouterModel(AIModelInterface):
         return processed_messages
     
     def _encode_image_to_base64(self, image_path: str) -> str:
-        """將圖片檔案轉換為 Base64 編碼的字串"""
+        """將圖片檔案轉換為 Base64 編碼的字串
+        
+        支援格式: image/png, image/jpeg, image/webp, image/gif
+        """
         import base64
-        try:
-            # 1. 以「二進位讀取」模式 (rb) 開啟本地圖檔
-            with open(image_path, "rb") as image_file:
-                # 2. 讀取檔案的全部二進位內容
-                binary_data = image_file.read()
-                # 3. 進行 Base64 編碼，得到 bytes 型態的結果
-                base64_encoded_data = base64.b64encode(binary_data)
-                # 4. 將 bytes 解碼成 utf-8 字串
-                base64_string = base64_encoded_data.decode('utf-8')
-                # 5. 組合成 API 需要的 "Data URL" 格式
-                return f"data:image/jpeg;base64,{base64_string}"
-        except FileNotFoundError:
-            print(f"錯誤：找不到圖片檔案 '{image_path}'")
-            return None
+        import os
+        
+        # 根據副檔名判斷 MIME type
+        ext = os.path.splitext(image_path)[1].lower()
+        mime_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif'
+        }
+        mime_type = mime_types.get(ext, 'image/jpeg')
+        
+        with open(image_path, "rb") as image_file:
+            binary_data = image_file.read()
+            base64_encoded_data = base64.b64encode(binary_data)
+            base64_string = base64_encoded_data.decode('utf-8')
+            return f"data:{mime_type};base64,{base64_string}"
 
 class ModelRegistry:
     """模型註冊表，用於管理不同類型的模型實例"""

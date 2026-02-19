@@ -66,10 +66,15 @@ social_media:
     - 星のカービィ
   
   platforms:
-    instagram:
+    # instagram:
+    #   config_folder_path: /app/configs/social_media/credentials/kirby
+    #   enabled: true
+
+    facebook:
       config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
       enabled: true
-    
+
     twitter:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""
