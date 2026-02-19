@@ -32,6 +32,9 @@ urllib3>=2.1.0
 
 # HTTP 請求（Instagram 等需要）
 requests>=2.31.0
+
+# Cloudinary 媒體上傳（IG Graph API 需公開 URL）
+cloudinary>=1.36.0
 pycryptodomex>=3.19.0
 pydantic>=2.5.2
 

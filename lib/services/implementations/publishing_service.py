@@ -3,7 +3,7 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 from lib.services.interfaces.publishing_service import IPublishingService
-from lib.social_media import MediaPost, SocialMediaManager, InstagramPlatform, TwitterPlatform, FacebookPlatform
+from lib.social_media import MediaPost, SocialMediaManager, InstagramPlatform, InstagramGraphPlatform, TwitterPlatform, FacebookPlatform
 from utils.image import ImageProcessor
 from utils.logger import setup_logger
 
@@ -101,6 +101,13 @@ class PublishingService(IPublishingService):
         
         if platform_name_lower == 'instagram':
             platform = InstagramPlatform(
+                config_folder_path=platform_config['config_folder_path'],
+                prefix=platform_config.get('prefix', '')
+            )
+            self.social_media_manager.register_platform(platform_name, platform)
+            self.logger.info(f"已註冊平台: {platform_name}")
+        elif platform_name_lower == 'instagram_graph':
+            platform = InstagramGraphPlatform(
                 config_folder_path=platform_config['config_folder_path'],
                 prefix=platform_config.get('prefix', '')
             )

@@ -62,6 +62,9 @@ class FacebookPlatform(SocialMediaPlatform):
             resp = requests.get(url, params={"access_token": self.page_access_token}, timeout=30)
             resp.raise_for_status()
             data = resp.json()
+            me_id = data.get("id")
+            if me_id:
+                self.page_id = str(me_id)
             self.logger.debug(f"Facebook 驗證成功，Page: {data.get('name', self.page_id)}")
         except requests.RequestException as e:
             self.logger.error(f"Facebook 驗證失敗: {e}")
@@ -102,7 +105,8 @@ class FacebookPlatform(SocialMediaPlatform):
         if ext == "gif":
             media_path = self._gif_to_mp4(media_path)
 
-        url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.page_id}"
+        node = "me"
+        url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{node}"
         endpoint = "videos" if is_video else "photos"
         text_key = "description" if is_video else "message"
 
@@ -120,7 +124,7 @@ class FacebookPlatform(SocialMediaPlatform):
         return True
 
     def _upload_multiple(self, media_paths: list, caption: str) -> bool:
-        """上傳多個媒體：圖片走 unpublished → attached_media，影片逐一上傳"""
+        """上傳多個媒體：圖片/影片皆走 unpublished → attached_media 一次發布"""
         image_paths = []
         video_paths = []
 
@@ -145,12 +149,15 @@ class FacebookPlatform(SocialMediaPlatform):
         elif len(image_paths) == 1 and not video_paths:
             return self._upload_single(image_paths[0], caption)
 
-        for vp in video_paths:
-            vc = caption if not caption_used else ""
-            if self._upload_single(vp, vc):
+        if len(video_paths) >= 2:
+            if self._post_videos_album(video_paths, caption):
                 success = True
             caption_used = True
-            time.sleep(2)
+        elif len(video_paths) == 1:
+            vc = caption if not caption_used else ""
+            if self._upload_single(video_paths[0], vc):
+                success = True
+            caption_used = True
 
         if len(image_paths) == 1 and video_paths:
             ic = caption if not caption_used else ""
@@ -160,10 +167,46 @@ class FacebookPlatform(SocialMediaPlatform):
         self._cleanup_temp()
         return success
 
+    def _post_videos_album(self, video_paths: list, caption: str) -> bool:
+        """透過 unpublished videos + feed attached_media 發布多影片貼文"""
+        media_fbids = []
+        upload_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/videos"
+
+        for path in video_paths:
+            try:
+                with open(path, "rb") as f:
+                    files = {"source": (os.path.basename(path), f, self._get_content_type(path))}
+                    data = {"published": "false", "access_token": self.page_access_token}
+                    resp = requests.post(upload_url, files=files, data=data, timeout=300)
+                    resp.raise_for_status()
+                    vid = resp.json().get("id") or resp.json().get("video_id")
+                    if vid:
+                        media_fbids.append(vid)
+                        self.logger.debug(f"上傳未發布影片成功，ID: {vid}")
+                    else:
+                        self.logger.warning(f"上傳影片未返回 ID: {path}")
+            except requests.RequestException as e:
+                self.logger.error(f"上傳影片失敗: {path}, {e}")
+            time.sleep(2)
+
+        if not media_fbids:
+            self.logger.error("所有影片上傳失敗")
+            return False
+
+        feed_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/feed"
+        data = {"message": caption, "access_token": self.page_access_token}
+        for i, fid in enumerate(media_fbids):
+            data[f"attached_media[{i}]"] = json.dumps({"media_fbid": fid})
+
+        resp = requests.post(feed_url, data=data, timeout=60)
+        resp.raise_for_status()
+        self.logger.info(f"Facebook 多影片貼文發布成功，ID: {resp.json().get('id')}")
+        return True
+
     def _post_images_album(self, image_paths: list, caption: str) -> bool:
         """透過 unpublished photos + feed attached_media 發布多圖貼文"""
         media_fbids = []
-        upload_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.page_id}/photos"
+        upload_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/photos"
 
         for path in image_paths:
             try:

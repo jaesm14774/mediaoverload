@@ -34,7 +34,7 @@ generation:
     sticker_pack: /app/configs/workflow/nova-anime-xl.json
 
   # Quality Control
-  similarity_threshold: 0.6
+  similarity_threshold: 0.7
 
   # Prompt Generation Method Weights
   prompt_method_weights:
@@ -69,6 +69,11 @@ social_media:
     # instagram:
     #   config_folder_path: /app/configs/social_media/credentials/kirby
     #   enabled: true
+
+    instagram_graph:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
 
     facebook:
       config_folder_path: /app/configs/social_media/credentials/kirby

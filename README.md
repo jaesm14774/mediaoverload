@@ -632,6 +632,42 @@ social_media:
 
 **測試發布**：`python utils/test_fb_post.py` 可測試純文字；加 `--image` 或 `--video` 可測試圖片／影片。
 
+### Instagram Graph API 官方發布
+
+使用 [Instagram API with Instagram Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing) 發布至 IG 商業帳號。**無需 Facebook 粉絲專頁**，與 instagrapi（`instagram` 平台）並存。
+
+**權限**：`instagram_business_basic`、`instagram_business_content_publish`
+
+**所需資訊**：
+- `IG_GRAPH_ACCESS_TOKEN`：Instagram User access token（從 App Dashboard 或 Business Login 取得）
+- 媒體 URL（二選一）：Cloudinary 或 `IG_GRAPH_MEDIA_BASE_URL`
+- `IG_USER_ID`：可選，未設定時從 `/me` 端點自動取得
+
+**媒體 URL 說明**：graph.instagram.com 使用 `image_url`/`video_url`，API 會 cURL 媒體。可選：
+1. **Cloudinary**：在 `media_overload.env` 設定 `CLOUDINARY_CLOUD_NAME`、`CLOUDINARY_API_KEY`、`CLOUDINARY_API_SECRET`（或 `cloudinary_token`），系統會自動上傳取得 URL
+2. **靜態基底**：設定 `IG_GRAPH_MEDIA_BASE_URL`，媒體需已可透過該 URL 存取（nginx、S3、CDN）
+
+**設定步驟**：
+1. 在 `configs/social_media/credentials/{character_name}/` 建立 `instagram_graph.env`
+2. 複製 `instagram_graph.env.example` 並填入憑證
+3. 設定 Cloudinary（`media_overload.env`）或 `IG_GRAPH_MEDIA_BASE_URL`（`instagram_graph.env`）
+4. 在角色 YAML 的 `social_media.platforms` 新增：
+
+```yaml
+social_media:
+  platforms:
+    instagram_graph:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+```
+
+**與 instagrapi 的差異**：`instagram` 使用 instagrapi（帳密登入），`instagram_graph` 使用官方 Instagram API（Token 認證，無需 FB 專頁）。兩者可同時啟用。
+
+**快速連線測試**：`python utils/test_instagram_graph.py` 或 `python utils/test_instagram_graph.py kirby`
+
+**IG / FB 上傳除錯**：`python utils/test_ig_fb_upload.py [角色名] [媒體1] [媒體2] ...`，需至少 2 個媒體檔案測試輪播，不帶媒體時僅測試連線。
+
 ### GIF 優化功能
 
 系統在生成 LINE 貼圖 GIF 時會自動進行優化：
