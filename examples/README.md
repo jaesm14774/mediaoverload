@@ -31,33 +31,40 @@ jupyter notebook examples/all_strategies_examples.ipynb
 ```
 
 **特色功能**：
-- ✅ 8 種策略完整範例（Text2Image, Image2Image, Text2Image2Image, Text2Video, Text2Image2Video, Text2LongVideo, Text2LongVideoFirstFrame, StickerPack）
+- ✅ 7 種策略完整範例（Text2Image, Image2Image, Text2Image2Image, Text2Video, Text2Image2Video, Text2LongVideo, StickerPack）
 - ✅ 每個策略支援自定義 Prompt 和從資料庫獲取 News
-- ✅ 支援批量生成（可指定數量，如 30 張、50 張等）
+- ✅ **依不同新聞繪製多次**：`run_all_strategies_multi_news()` 可指定每策略輪數
 - ✅ 自動執行生成，無需手動干預
-- ✅ **🆕 長影片直接模式**：不保存中間圖片，只輸出最終完整影片（含 TTS）
 
-**批量生成範例**：
+**全策略批量生成範例**：
 
 ```python
-# 批量生成 30 張圖片
-results = batch_generate_by_count(
-    strategy_type='text2image',
-    num_total=30,
-    use_news=True,
-    character="kirby",
-    num_images=4
+# 依不同新聞對全策略繪製多次
+results = run_all_strategies_multi_news(
+    rounds_per_strategy={
+        'text2image': 5,
+        'text2video': 2,
+        'text2image2video': 2,
+        'text2longvideo': 1,
+        'sticker_pack': 2
+    },
+    character='kirby',
+    days_back=30
 )
 
-# 🆕 批量生成長影片（直接模式）
-results = batch_generate_by_count(
-    strategy_type='text2longvideo',
-    num_total=2,
-    use_news=True,
-    character="kirby",
-    skip_candidate_stage=True,  # 不保存中間圖片
-    segment_count=3,
-    use_tts=True
+# 僅對 text2image 依不同新聞繪製 20 輪
+results = run_all_strategies_multi_news(
+    rounds_per_strategy={'text2image': 20},
+    character='kirby'
+)
+
+# 指定工作流（覆蓋預設 nova-anime-xl）
+results = run_all_strategies_multi_news(
+    rounds_per_strategy={'text2image': 2},
+    workflows={
+        'text2image': 'z_image_plus_nova_model_anime.json',
+        'text2image2image': {'first_stage': 'z_image_plus_nova_model_anime.json', 'second_stage': 'z_image_i2i_anime.json'}
+    }
 )
 ```
 
@@ -101,13 +108,12 @@ result = service.generate_content(config)
 4. Text2VideoStrategy - 文生影片
 5. Text2Image2VideoStrategy - 文生圖 → 圖生影片
 6. Text2LongVideoStrategy - 文生長影片（尾幀驅動）
-7. Text2LongVideoFirstFrameStrategy - 文生長影片（首幀驅動）
-8. StickerPackStrategy - 貼圖包生成
+7. StickerPackStrategy - 貼圖包生成
 
 **每個策略都包含**：
 - ✅ 自定義 Prompt 範例
 - ✅ 從資料庫獲取 News 範例
-- ✅ 批量生成範例（可指定數量）
+- ✅ 依不同新聞繪製多次（`run_all_strategies_multi_news`）
 
 **優點**：
 - 最全面的範例集合

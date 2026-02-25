@@ -138,6 +138,28 @@ class SimpleContentGenerationService:
             
             self.logger.info(f"影片生成完成，共生成 {len(media_files)} 個影片")
             return media_files
+        elif generation_type == 'text2image2image':
+            self.logger.info("開始 Text2Image2Image 生成流程")
+            self.strategy.generate_media()
+            if hasattr(self.strategy, 'first_stage_images') and self.strategy.first_stage_images:
+                indices = list(range(len(self.strategy.first_stage_images)))
+                self.strategy.handle_review_result(
+                    selected_indices=indices,
+                    output_dir=config.output_dir,
+                    selected_paths=self.strategy.first_stage_images
+                )
+            if self.strategy.needs_user_review():
+                second_stage_dir = os.path.join(config.output_dir, 'second_stage')
+                items = glob.glob(os.path.join(second_stage_dir, '*.png')) + glob.glob(os.path.join(second_stage_dir, '*.jpg'))
+                indices = list(range(min(len(items), 10)))
+                self.strategy.handle_review_result(selected_indices=indices, output_dir=config.output_dir)
+            second_stage_dir = os.path.join(config.output_dir, 'second_stage')
+            image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.webp']
+            media_files = []
+            for ext in image_extensions:
+                media_files.extend(glob.glob(os.path.join(second_stage_dir, ext)))
+            self.logger.info(f"文生圖→圖生圖完成，共 {len(media_files)} 張")
+            return media_files
         elif generation_type == 'text2longvideo':
             self.logger.info("開始 Text2LongVideo 生成流程")
             

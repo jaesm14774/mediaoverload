@@ -1,0 +1,338 @@
+{
+  "67": {
+    "inputs": {
+      "value": "Kirby emerging through drifting veils of snow haze, where soft flurries swirl in shallow focus around quiet forms. Frame with cinematic contrast—cool ivory highlights catching diffused light, pale blue shadows receding into soft grain. Emphasize the suspended moment between motion and stillness across a wintry expanse, where every snowflake traces visible paths through cold air."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "68": {
+    "inputs": {
+      "value": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "69": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "width"
+    }
+  },
+  "70": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "height"
+    }
+  },
+  "73": {
+    "inputs": {
+      "ckpt_name": "sdxl\\waiIllustriousSDXL_v150.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "80:42": {
+    "inputs": {
+      "conditioning": [
+        "80:45",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "80:47": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "80:81",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "80:41": {
+    "inputs": {
+      "width": [
+        "69",
+        0
+      ],
+      "height": [
+        "70",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "80:43": {
+    "inputs": {
+      "samples": [
+        "80:44",
+        0
+      ],
+      "vae": [
+        "80:81",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "80:80": {
+    "inputs": {
+      "images": [
+        "80:43",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "80:45": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "80:81",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "80:44": {
+    "inputs": {
+      "seed": 52,
+      "steps": 9,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "80:47",
+        0
+      ],
+      "positive": [
+        "80:45",
+        0
+      ],
+      "negative": [
+        "80:42",
+        0
+      ],
+      "latent_image": [
+        "80:41",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "80:81": {
+    "inputs": {
+      "ckpt_name": "z_image\\zImageTurboAnime_aioBF16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "81:79": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "73",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "81:75": {
+    "inputs": {
+      "text": [
+        "68",
+        0
+      ],
+      "clip": [
+        "73",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "81:77": {
+    "inputs": {
+      "samples": [
+        "81:76",
+        0
+      ],
+      "vae": [
+        "73",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "81:78": {
+    "inputs": {
+      "filename_prefix": "zimage_with_nova_i2i",
+      "images": [
+        "81:77",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "81:92": {
+    "inputs": {
+      "width": [
+        "69",
+        0
+      ],
+      "height": [
+        "70",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "81:107": {
+    "inputs": {
+      "image": [
+        "80:43",
+        0
+      ],
+      "vae": [
+        "73",
+        2
+      ],
+      "latent_size": [
+        "81:92",
+        0
+      ]
+    },
+    "class_type": "ACN_ReferencePreprocessor",
+    "_meta": {
+      "title": "Reference Preproccessor"
+    }
+  },
+  "81:105": {
+    "inputs": {
+      "reference_type": "reference_attn",
+      "style_fidelity": 0.5,
+      "ref_weight": 1
+    },
+    "class_type": "ACN_ReferenceControlNet",
+    "_meta": {
+      "title": "Reference ControlNet"
+    }
+  },
+  "81:76": {
+    "inputs": {
+      "seed": 93,
+      "steps": 25,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.9,
+      "model": [
+        "73",
+        0
+      ],
+      "positive": [
+        "81:88",
+        0
+      ],
+      "negative": [
+        "81:88",
+        1
+      ],
+      "latent_image": [
+        "81:92",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "81:88": {
+    "inputs": {
+      "strength": 0.7,
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "81:79",
+        0
+      ],
+      "negative": [
+        "81:75",
+        0
+      ],
+      "control_net": [
+        "81:105",
+        0
+      ],
+      "image": [
+        "81:107",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  }
+}

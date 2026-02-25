@@ -3,6 +3,9 @@ import yaml
 import numpy as np
 from typing import Dict, Any
 from lib.media_auto.character_config import CharacterConfig
+from utils.logger import setup_logger
+
+_logger = setup_logger(__name__)
 
 
 class ConfigLoader:
@@ -51,9 +54,11 @@ class ConfigLoader:
 
         generation_type = generation_info.get('generation_type', 'text2img')
         if 'generation_type_weights' in generation_info:
-            generation_type = ConfigLoader.process_weighted_choice(
-                generation_info['generation_type_weights']
-            )
+            weights = generation_info['generation_type_weights']
+            filtered = {k: v for k, v in weights.items() if v is not None and v > 0}
+            if filtered:
+                generation_type = ConfigLoader.process_weighted_choice(filtered)
+                _logger.info(f"依權重隨機選擇策略: {generation_type} (權重: {filtered})")
 
         workflow_path = generation_info.get('workflow_path', '')
         if 'workflows' in generation_info and generation_type in generation_info['workflows']:
