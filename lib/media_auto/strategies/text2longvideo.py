@@ -750,9 +750,15 @@ class Text2LongVideoStrategy(ContentStrategy):
             self.logger.info(f"放大圖片: {path}")
             filename = self.media_generator.upload_image(path)
             
+            load_image_node = self.node_manager.resolve_alias(upscale_workflow, "load_image")
+            if not load_image_node:
+                self.logger.warning(f"找不到 upscale workflow 的 load_image alias，跳過: {path}")
+                upscaled_paths.append(path)
+                continue
+            
             updates = [{
                 "type": "direct_update",
-                "node_id": "225",
+                "node_id": load_image_node,
                 "inputs": {"image": filename}
             }]
             

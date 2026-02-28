@@ -112,21 +112,20 @@ class NodeManager:
         return {}
     
     @staticmethod
-    def _get_workflow_exclude_config(workflow: Dict[str, Any], workflow_path: Optional[str] = None) -> Optional[List[int]]:
+    def _match_workflow_config(workflow_path: str) -> Optional[Dict[str, Any]]:
         """
-        從 workflow 配置文件中讀取 exclude_sampler_indices 配置
+        根據 workflow_path 查找對應的配置
         
-        根據 workflow_path 查找對應的配置，支援多種路徑匹配方式：
+        支援多種路徑匹配方式：
         1. 完整路徑匹配
-        2. 相對路徑匹配
+        2. 相對路徑後綴匹配
         3. 文件名匹配
         
         Args:
-            workflow: 工作流配置（用於轉換 node_id 到索引）
             workflow_path: workflow 文件路徑
         
         Returns:
-            要排除的節點索引列表，如果沒有配置則返回 None
+            匹配到的配置字典，找不到則返回 None
         """
         if not workflow_path:
             return None
@@ -135,37 +134,55 @@ class NodeManager:
         if not workflow_configs:
             return None
         
-        # 標準化路徑（統一使用正斜杠）
         normalized_path = workflow_path.replace('\\', '/')
-        print(f"Looking up workflow config for path: {normalized_path}")
-        print(f"Available config keys: {list(workflow_configs.keys())}")
         
-        # 嘗試多種匹配方式
-        config = None
-        
-        # 1. 完整路徑匹配
         if normalized_path in workflow_configs:
-            config = workflow_configs[normalized_path]
-            print(f"Matched via full path: {normalized_path}")
-        # 2. 相對路徑匹配（移除前綴）
-        elif any(normalized_path.endswith(key) for key in workflow_configs.keys()):
-            for key in workflow_configs.keys():
-                if normalized_path.endswith(key):
-                    config = workflow_configs[key]
-                    print(f"Matched via suffix: {normalized_path} ends with {key}")
-                    break
-        # 3. 文件名匹配
-        else:
-            filename = os.path.basename(normalized_path)
-            if filename in workflow_configs:
-                config = workflow_configs[filename]
-                print(f"Matched via filename: {filename}")
+            return workflow_configs[normalized_path]
         
+        for key in workflow_configs.keys():
+            if normalized_path.endswith(key):
+                return workflow_configs[key]
+        
+        filename = os.path.basename(normalized_path)
+        if filename in workflow_configs:
+            return workflow_configs[filename]
+        
+        return None
+    
+    @staticmethod
+    def resolve_alias(workflow_path: str, alias_name: str) -> Optional[str]:
+        """
+        從 workflow_config.yaml 中解析 node alias 為實際 node_id
+        
+        Args:
+            workflow_path: workflow 文件路徑
+            alias_name: 邏輯別名（如 "load_image", "positive_prompt"）
+        
+        Returns:
+            對應的 node_id 字串，找不到則返回 None
+        """
+        config = NodeManager._match_workflow_config(workflow_path)
         if not config:
-            print(f"No matching config found for workflow path: {normalized_path}")
             return None
         
-        print(f"Found config: {config}")
+        aliases = config.get('node_aliases', {})
+        return aliases.get(alias_name)
+
+    @staticmethod
+    def _get_workflow_exclude_config(workflow: Dict[str, Any], workflow_path: Optional[str] = None) -> Optional[List[int]]:
+        """
+        從 workflow 配置文件中讀取 exclude_sampler_indices 配置
+        
+        Args:
+            workflow: 工作流配置（用於轉換 node_id 到索引）
+            workflow_path: workflow 文件路徑
+        
+        Returns:
+            要排除的節點索引列表，如果沒有配置則返回 None
+        """
+        config = NodeManager._match_workflow_config(workflow_path)
+        if not config:
+            return None
         
         # 優先使用 node_id 列表（更精確）
         exclude_node_ids = config.get('exclude_sampler_node_ids')

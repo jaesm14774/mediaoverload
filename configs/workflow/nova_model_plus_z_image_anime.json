@@ -1,0 +1,352 @@
+{
+  "67": {
+    "inputs": {
+      "value": " A breathtaking Pixar-cinematography-inspired photograph of an old, well-loved teddy bear with one button eye missing and patches of threadbare velvet revealing the cotton stuffing beneath, sitting upright on a dusty wooden attic shelf beside a stack of yellowed children's picture books. The object is bathed in a single shaft of warm afternoon sunlight (color temperature 3800K) streaming through a nearby window, the beam made visible by thousands of tiny golden dust motes drifting in slow, silent suspension — the light wraps around the object like liquid amber, casting a long, soft shadow that glows faintly at the edges.  THE MAGICAL ELEMENT — from the teddy bear's surface, a delicate, warm golden-white luminescence radiates outward like a quiet heartbeat, pulsing so gently it is almost imperceptible. Within this soft aura, a translucent, ghostly silhouette of a small child hugging the teddy bear tightly against their chest appears hovering just above and behind the bear — the child-phantom is rendered in soft, warm sepia tones with slightly blurred edges like a fading photograph coming to life, their expression one of absolute contentment, eyes closed, cheek pressed against the bear's head. The memory-phantoms are NOT solid — they are made of warm light particles and soft bokeh orbs that slowly drift and disperse at the edges, like dandelion seeds caught in a sunbeam.  Atmosphere & Sensory Details: The surrounding environment is rendered in warm, slightly desaturated tones — aged wood grain with visible knots and patina, soft dust on surfaces catching the light, the faint texture of old wallpaper with a barely-visible pattern in the background. The air itself feels thick with warmth and stillness. A single green ivy tendril growing through a crack in the attic window frame catches a pinprick of light, signifying that life continues quietly around this forgotten treasure.  Technical specs: Shot on medium format camera, 4:5 portrait composition, f/1.8 shallow depth of field keeping the teddy bear razor-sharp while the memory-phantom child and background dissolve into creamy golden bokeh, volumetric god rays through the window, warm color grading (amber highlights, soft brown shadows, no cool tones), lens flare from the bear's golden aura, 8K resolution, the mood is profoundly nostalgic and healing — a quiet moment where an old, forgotten teddy bear remembers being loved, and glows with that memory."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "68": {
+    "inputs": {
+      "value": "ugly, blurry, low quality, bad anatomy, mutated, disfigured, deformed, poorly drawn, extra limbs, duplicate, text, watermark, signature, logo, unrealistic, monochrome, greyscale"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "69": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "width"
+    }
+  },
+  "70": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "height"
+    }
+  },
+  "126": {
+    "inputs": {
+      "filename_prefix": "nova_plus_z_image_anime",
+      "images": [
+        "127:118",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "80:80": {
+    "inputs": {
+      "images": [
+        "80:86",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "80:82": {
+    "inputs": {
+      "width": [
+        "69",
+        0
+      ],
+      "height": [
+        "70",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "80:83": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "80:90",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive prompt"
+    }
+  },
+  "80:84": {
+    "inputs": {
+      "text": [
+        "68",
+        0
+      ],
+      "clip": [
+        "80:90",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative prompt"
+    }
+  },
+  "80:85": {
+    "inputs": {
+      "seed": 199,
+      "steps": 20,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "80:90",
+        0
+      ],
+      "positive": [
+        "80:83",
+        0
+      ],
+      "negative": [
+        "80:84",
+        0
+      ],
+      "latent_image": [
+        "80:82",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "80:86": {
+    "inputs": {
+      "samples": [
+        "80:85",
+        0
+      ],
+      "vae": [
+        "80:90",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "80:90": {
+    "inputs": {
+      "ckpt_name": "sdxl\\waiIllustriousSDXL_v150.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "127:114": {
+    "inputs": {
+      "text": [
+        "67",
+        0
+      ],
+      "clip": [
+        "127:124",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "127:115": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "127:124",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "127:116": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 47447417949530,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 4,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "127:119",
+        0
+      ],
+      "positive": [
+        "127:114",
+        0
+      ],
+      "negative": [
+        "127:114",
+        0
+      ],
+      "latent_image": [
+        "127:121",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "127:117": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 4,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "127:115",
+        0
+      ],
+      "positive": [
+        "127:114",
+        0
+      ],
+      "negative": [
+        "127:114",
+        0
+      ],
+      "latent_image": [
+        "127:116",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "127:118": {
+    "inputs": {
+      "samples": [
+        "127:117",
+        0
+      ],
+      "vae": [
+        "127:124",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "127:119": {
+    "inputs": {
+      "strength": 0.7,
+      "model": [
+        "127:115",
+        0
+      ],
+      "model_patch": [
+        "127:120",
+        0
+      ],
+      "vae": [
+        "127:124",
+        2
+      ],
+      "image": [
+        "127:127",
+        0
+      ]
+    },
+    "class_type": "QwenImageDiffsynthControlnet",
+    "_meta": {
+      "title": "QwenImageDiffsynthControlnet"
+    }
+  },
+  "127:120": {
+    "inputs": {
+      "name": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-8steps.safetensors"
+    },
+    "class_type": "ModelPatchLoader",
+    "_meta": {
+      "title": "ModelPatchLoader"
+    }
+  },
+  "127:121": {
+    "inputs": {
+      "width": [
+        "69",
+        0
+      ],
+      "height": [
+        "70",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "127:124": {
+    "inputs": {
+      "ckpt_name": "z_image\\zImageTurboAnime_aioBF16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "127:127": {
+    "inputs": {
+      "ckpt_name": "depth_anything_v2_vitl.pth",
+      "resolution": 512,
+      "image": [
+        "80:86",
+        0
+      ]
+    },
+    "class_type": "DepthAnythingV2Preprocessor",
+    "_meta": {
+      "title": "Depth Anything V2 - Relative"
+    }
+  }
+}

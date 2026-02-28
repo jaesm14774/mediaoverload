@@ -1,8 +1,9 @@
 # Installation Guide
 
-This guide covers the complete setup process for the MediaOverload system, from prerequisites to verification.
+This guide covers the complete setup process for MediaOverload, from prerequisites to verification.
 
 ## Table of Contents
+
 - [Prerequisites](#prerequisites)
 - [Quick Install (Docker)](#quick-install-docker)
 - [Manual Installation](#manual-installation)
@@ -16,26 +17,26 @@ This guide covers the complete setup process for the MediaOverload system, from 
 
 ## Prerequisites
 
-Before you begin, ensure you have the following:
-
 ### System Requirements
-- [ ] **OS**: Windows, Linux, or macOS
-- [ ] **Python**: Version 3.12 or higher
-- [ ] **GPU**: NVIDIA GPU with 8GB+ VRAM (Recommended for video generation)
-- [ ] **Disk Space**: 10GB+ free space
+
+- **OS**: Windows, Linux, or macOS
+- **Python**: 3.12 or higher
+- **GPU**: NVIDIA GPU with 8GB+ VRAM (recommended for video generation)
+- **Disk Space**: 10GB+ free
 
 ### Required Services
-- [ ] **Docker & Docker Compose** (for containerized setup)
-- [ ] **ComfyUI**: Running locally on port 8188
-- [ ] **Ollama** (or a cloud LLM key): For text generation
-- [ ] **Database**: MySQL or PostgreSQL
-- [ ] **Discord Account**: For the review workflow
+
+- **Docker & Docker Compose** (for containerized setup)
+- **ComfyUI**: Running locally on port 8188
+- **Ollama** (or a cloud LLM key): For text generation
+- **Database**: MySQL or PostgreSQL
+- **Discord Account**: For the review workflow
 
 ---
 
 ## Quick Install (Docker)
 
-The fastest way to get started is using Docker.
+**Docker is the fastest way to get started.**
 
 ```bash
 # 1. Clone the repository
@@ -46,12 +47,12 @@ cd mediaoverload
 cp media_overload.env.example media_overload.env
 cp configs/social_media/discord/Discord.env.example configs/social_media/discord/Discord.env
 
-# 3. Setup character credentials (example for 'kirby')
+# 3. Set up character credentials (example for 'kirby')
 mkdir -p configs/social_media/credentials/kirby
 cp configs/social_media/credentials/ig.env.example configs/social_media/credentials/kirby/ig.env
 cp configs/social_media/credentials/twitter.env.example configs/social_media/credentials/kirby/twitter.env
 
-# 4. Edit environment files with your actual credentials
+# 4. Edit environment files with actual credentials
 # Windows: notepad media_overload.env
 # Linux/Mac: nano media_overload.env
 
@@ -63,52 +64,52 @@ docker-compose up --build -d
 
 ## Manual Installation
 
-If you prefer running directly on your host machine:
-
 ### 1. Install Python Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**Key Packages:**
-- `PyYAML`: Configuration management
-- `schedule`: Task scheduling
-- `python-dotenv`: Environment variable loading
-- `SQLAlchemy`: Database ORM
-- `Pillow`: Image processing
-- `ollama`: Local LLM interface
+**Key packages:**
 
-### 2. Setup ComfyUI
+| Package | Purpose |
+|---------|---------|
+| `PyYAML` | Configuration management |
+| `schedule` | Task scheduling |
+| `python-dotenv` | Environment variable loading |
+| `SQLAlchemy` | Database ORM |
+| `Pillow` | Image processing |
+| `ollama` | Local LLM interface |
 
-1.  **Install ComfyUI**:
+### 2. Set Up ComfyUI
+
+1. **Install ComfyUI**:
     ```bash
     git clone https://github.com/comfyanonymous/ComfyUI.git
     cd ComfyUI
     pip install -r requirements.txt
     ```
-2.  **Start ComfyUI**:
+2. **Start ComfyUI**:
     ```bash
     python main.py --listen 0.0.0.0 --port 8188
     ```
-3.  **Install Models**: Place your SDXL/Flux checkpoints in `ComfyUI/models/checkpoints/`.
+3. **Install models**: Place SDXL/Flux checkpoints in `ComfyUI/models/checkpoints/`.
 
-### 3. Setup Ollama
+### 3. Set Up Ollama
 
-1.  **Install**: [Download Ollama](https://ollama.com/download)
-2.  **Start Service**: `ollama serve`
-3.  **Pull Models**:
+1. **Install**: [Download Ollama](https://ollama.com/download)
+2. **Start the service**: `ollama serve`
+3. **Pull models**:
     ```bash
     ollama pull llama3.2:latest
     ollama pull llama3.2-vision:latest
     ```
 
-### 4. Setup Database
+### 4. Set Up Database
 
-**MySQL Example:**
+**MySQL example:**
 
 ```bash
-# Create database and user
 mysql -u root -p
 ```
 
@@ -119,7 +120,7 @@ GRANT ALL PRIVILEGES ON mediaoverload.* TO 'mediauser'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-**Run Migrations:**
+**Create tables:**
 
 ```sql
 -- Character table
@@ -175,6 +176,7 @@ OPEN_ROUTER_TOKEN=your_openrouter_api_key
 ### Character Credentials
 
 **Instagram** (`configs/social_media/credentials/{character}/ig.env`):
+
 ```env
 IG_USERNAME=your_instagram_username
 IG_PASSWORD=your_instagram_password
@@ -183,6 +185,7 @@ IG_ACCOUNT_COOKIE_FILE_PATH=ig_account.json
 ```
 
 **Twitter** (`configs/social_media/credentials/{character}/twitter.env`):
+
 ```env
 TWITTER_API_KEY=your_api_key
 TWITTER_API_SECRET=your_api_secret
@@ -195,33 +198,33 @@ TWITTER_BEARER_TOKEN=your_bearer_token
 
 ## Discord Bot Setup
 
-1.  **Create Bot**: Go to the [Discord Developer Portal](https://discord.com/developers/applications), create a new application, and add a bot.
-2.  **Get Token**: Copy the token to `DISCORD_REVIEW_BOT_TOKEN`.
-3.  **Set Permissions**: Enable "Message Content Intent" under "Privileged Gateway Intents".
-4.  **Invite Bot**: Use the OAuth2 URL Generator (scopes: `bot`, `applications.commands`; permissions: `Send Messages`, `Attach Files`, `Add Reactions`, `View Channels`).
-5.  **Get Channel ID**: Enable Developer Mode in Discord, right-click your review channel, and select "Copy ID". Paste this into `DISCORD_REVIEW_CHANNEL_ID`.
+1. **Create a bot**: Go to the [Discord Developer Portal](https://discord.com/developers/applications), create a new application, and add a bot.
+2. **Copy the token**: Paste it into `DISCORD_REVIEW_BOT_TOKEN`.
+3. **Enable intents**: Turn on "Message Content Intent" under "Privileged Gateway Intents".
+4. **Invite the bot**: Use the OAuth2 URL Generator with scopes `bot` and `applications.commands`. Grant permissions: `Send Messages`, `Attach Files`, `Add Reactions`, `View Channels`.
+5. **Get the channel ID**: Enable Developer Mode in Discord, right-click the review channel, and select "Copy ID". Paste the ID into `DISCORD_REVIEW_CHANNEL_ID`.
 
 ---
 
 ## Twitter API Setup
 
-**CRITICAL STEP: Permissions**
+**Permissions are the most common source of errors.** Follow the steps carefully.
 
-1.  Apply for a [Twitter Developer Account](https://developer.twitter.com).
-2.  Create an App in the portal.
-3.  **Navigate to "User authentication settings".**
-4.  **Set App permissions to "Read and Write".** (Default is often "Read only").
-5.  **Save changes.**
-6.  **Regenerate your Access Token and Secret.** (Old tokens created before the permission change will NOT work).
+1. Apply for a [Twitter Developer Account](https://developer.twitter.com).
+2. Create an app in the developer portal.
+3. Navigate to "User authentication settings".
+4. **Set app permissions to "Read and Write".** The default is often "Read only".
+5. Save changes.
+6. **Regenerate the Access Token and Secret.** Tokens created before the permission change will not work.
 
 ---
 
 ## Verification
 
-Run these commands to verify your setup:
+Run the following commands to verify the setup:
 
 ```bash
-# 1. Test Database
+# 1. Test database connection
 python -c "from lib.database import db_pool; print('DB OK')"
 
 # 2. Test Ollama
@@ -230,7 +233,7 @@ curl http://localhost:11434/api/tags
 # 3. Test ComfyUI
 curl http://localhost:8188/system_stats
 
-# 4. Generate Test Content
+# 4. Generate test content
 python run_media_interface.py --character kirby --prompt "Test image"
 ```
 
@@ -238,8 +241,10 @@ python run_media_interface.py --character kirby --prompt "Test image"
 
 ## Troubleshooting
 
-- **ComfyUI not responding?** Check if it's running on port 8188 and that the firewall allows connections.
-- **Twitter 403 Forbidden?** You likely didn't set "Read and Write" permissions or forgot to regenerate tokens afterwards.
-- **Database connection failed?** Verify your credentials in `.env` and ensure the database service is running.
+| Problem | Solution |
+|---------|----------|
+| ComfyUI not responding | Check if ComfyUI is running on port 8188 and that the firewall allows connections. |
+| Twitter 403 Forbidden | Set "Read and Write" permissions in the developer portal, then regenerate tokens. |
+| Database connection failed | Verify credentials in `.env` and ensure the database service is running. |
 
-For more detailed solutions, see the [Troubleshooting Guide](troubleshooting.md).
+For detailed solutions, see the [Troubleshooting Guide](troubleshooting.md).

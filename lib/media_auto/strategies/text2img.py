@@ -240,13 +240,17 @@ class Text2ImageStrategy(ContentStrategy):
                 upscaled_paths.append(path)
                 continue
                 
-            # Upload image first
             filename = self.media_generator.upload_image(path)
             
-            # Update workflow
+            load_image_node = self.node_manager.resolve_alias(upscale_workflow, "load_image")
+            if not load_image_node:
+                print(f"⚠️ 找不到 upscale workflow 的 load_image alias，跳過: {path}")
+                upscaled_paths.append(path)
+                continue
+            
             updates = [{
                 "type": "direct_update",
-                "node_id": "225", # Assuming fixed node ID for loader in this specific workflow
+                "node_id": load_image_node,
                 "inputs": {"image": filename}
             }]
             

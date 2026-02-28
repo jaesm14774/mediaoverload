@@ -200,9 +200,15 @@ class Text2Image2VideoStrategy(ContentStrategy):
             print(f"放大圖片: {path}")
             filename = self.media_generator.upload_image(path)
             
+            load_image_node = self.node_manager.resolve_alias(upscale_workflow, "load_image")
+            if not load_image_node:
+                print(f"⚠️ 找不到 upscale workflow 的 load_image alias，跳過: {path}")
+                upscaled_paths.append(path)
+                continue
+            
             updates = [{
                 "type": "direct_update",
-                "node_id": "225",
+                "node_id": load_image_node,
                 "inputs": {"image": filename}
             }]
             
@@ -256,11 +262,16 @@ class Text2Image2VideoStrategy(ContentStrategy):
             for i in range(videos_per_image):
                 seed = random.randint(1, 999999999999)
                 
-                # Custom updates for I2V
                 custom_updates = video_config.get('custom_node_updates', []).copy()
                 custom_updates.append({"node_type": "LoadImage", "node_index": 0, "inputs": {"image": img_filename}})
-                custom_updates.append({"node_id": "70", "inputs": {"value": vid_desc}}) # Positive prompt
-                custom_updates.append({"node_id": "94", "inputs": {"value": audio_desc}}) # Audio prompt
+                
+                prompt_node = self.node_manager.resolve_alias(i2v_workflow_path, "positive_prompt")
+                if prompt_node:
+                    custom_updates.append({"node_id": prompt_node, "inputs": {"value": vid_desc}})
+                
+                audio_node = self.node_manager.resolve_alias(i2v_workflow_path, "audio_prompt")
+                if audio_node:
+                    custom_updates.append({"node_id": audio_node, "inputs": {"value": audio_desc}})
                 
                 # Merge additional_params with video_config for node_manager
                 merged_params = self._merge_node_manager_params(video_config)

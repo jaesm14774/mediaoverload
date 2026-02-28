@@ -3,13 +3,14 @@
 This guide explains how to configure characters, workflows, and generation strategies for MediaOverload.
 
 ## Table of Contents
+
 - [Character Configuration](#character-configuration)
 - [Generation Type Weights](#generation-type-weights)
 - [Workflow Configuration](#workflow-configuration)
 - [Prompt Generation Methods](#prompt-generation-methods)
 - [Image System Prompts](#image-system-prompts)
 - [Style Weights](#style-weights)
-- [Social Media Configuration](#social_media-configuration)
+- [Social Media Configuration](#social-media-configuration)
 - [Generation Parameters](#generation-parameters)
 - [Quality Control](#quality-control)
 - [Creating New Characters](#creating-new-characters)
@@ -22,7 +23,7 @@ This guide explains how to configure characters, workflows, and generation strat
 
 ## Character Configuration
 
-**Characters are the core of MediaOverload.** Each character is defined by a YAML config file located in `configs/characters/`.
+**Characters are the core unit of MediaOverload.** Each character is defined by a YAML config file in `configs/characters/`.
 
 ### Basic Structure
 
@@ -49,8 +50,6 @@ additional_params:
   video: {...}
 ```
 
-### Complete Example
-
 For a fully documented example with inline comments, see [kirby.yaml](../configs/characters/kirby.yaml).
 
 ---
@@ -67,9 +66,10 @@ generation_type_weights:
   text2video: 0.1              # 10% - Text to video
 ```
 
-**Key Points:**
+**Key points:**
+
 - **Set a weight to 0 to disable a type.**
-- Weights are automatically normalized; they do not need to sum to 1.0.
+- Weights are automatically normalized. They do not need to sum to 1.0.
 
 ---
 
@@ -85,18 +85,21 @@ workflows:
   text2image2image: /app/configs/workflow/nova-anime-xl.json  # First stage
 ```
 
-**Available Workflows:**
-- `nova-anime-xl.json`: Anime style (SDXL).
-- `flux_krea_dev.json`: Fast generation (Flux).
-- `flux_dev.json`: High quality (Flux).
-- `image_to_image.json`: Image transformation.
-- `wan2.1_t2v_audio.json`: Video with audio.
+**Available workflows:**
+
+| Workflow | Description |
+|----------|-------------|
+| `nova-anime-xl.json` | Anime style (SDXL) |
+| `flux_krea_dev.json` | Fast generation (Flux) |
+| `flux_dev.json` | High quality (Flux) |
+| `image_to_image.json` | Image transformation |
+| `wan2.1_t2v_audio.json` | Video with audio |
 
 ---
 
 ## Prompt Generation Methods
 
-**These methods control how text prompts are created.**
+**Prompt methods control how text prompts are created.**
 
 ```yaml
 prompt_method_weights:
@@ -104,9 +107,10 @@ prompt_method_weights:
   news: 0.9                   # Based on news articles
 ```
 
-**Methods:**
-- `arbitrary`: LLM generates creative prompts.
-- `news`: System fetches news from the database, and the LLM creates related scenes.
+| Method | Description |
+|--------|-------------|
+| `arbitrary` | LLM generates creative prompts |
+| `news` | System fetches news from the database; LLM creates related scenes |
 
 ---
 
@@ -123,14 +127,17 @@ image_system_prompt_weights:
   sticker_prompt_system_prompt: 0.25              # Sticker/emoji style
 ```
 
-**Available Prompts:**
-- `stable_diffusion_prompt`: Optimized for SDXL.
-- `conceptual_logo_design_prompt`: Minimalist logos/icons.
-- `two_character_interaction_generate_system_prompt`: Two characters interacting.
-- `warm_scene_description_system_prompt`: Emotional/wholesome scenes.
-- `sticker_prompt_system_prompt`: Chibi sticker expressions.
-- `black_humor_system_prompt`: Dark comedy scenarios.
-- `cinematic_stable_diffusion_prompt`: Film-quality cinematography.
+**Available prompts:**
+
+| Prompt | Description |
+|--------|-------------|
+| `stable_diffusion_prompt` | Optimized for SDXL |
+| `conceptual_logo_design_prompt` | Minimalist logos/icons |
+| `two_character_interaction_generate_system_prompt` | Two characters interacting |
+| `warm_scene_description_system_prompt` | Emotional/wholesome scenes |
+| `sticker_prompt_system_prompt` | Chibi sticker expressions |
+| `black_humor_system_prompt` | Dark comedy scenarios |
+| `cinematic_stable_diffusion_prompt` | Film-quality cinematography |
 
 For all available prompts, see [image_system_guide.py](../configs/prompt/image_system_guide.py).
 
@@ -182,9 +189,14 @@ platforms:
     enabled: true
 ```
 
-**Credential Files:**
-- Instagram: `ig.env`
-- Twitter: `twitter.env`
+**Credential files:**
+
+| Platform | File |
+|----------|------|
+| Instagram | `ig.env` |
+| Twitter | `twitter.env` |
+| Facebook | `facebook.env` |
+| Instagram Graph API | `instagram_graph.env` |
 
 ---
 
@@ -205,8 +217,6 @@ additional_params:
 
 ### Image-to-Image Strategy
 
-**Use this when `generation_type` is `image2image`.**
-
 ```yaml
 additional_params:
   image:
@@ -214,14 +224,15 @@ additional_params:
     denoise: 0.6               # Denoising strength (0.5-0.7)
 ```
 
-**Denoise Values:**
-- `0.5`: More similar to original.
-- `0.6`: Balanced (recommended).
-- `0.7`: More creative freedom.
+**Denoise values:**
 
-### Text→Image→Image Two-Stage
+| Value | Effect |
+|-------|--------|
+| `0.5` | More similar to original |
+| `0.6` | Balanced (recommended) |
+| `0.7` | More creative freedom |
 
-**Use this when `generation_type` is `text2image2image`.**
+### Text-to-Image-to-Image Two-Stage
 
 ```yaml
 additional_params:
@@ -237,6 +248,7 @@ additional_params:
 ```
 
 **Process:**
+
 1. Generate 4 images from text (`first_stage`).
 2. AI selects best images based on `similarity_threshold`.
 3. Refine selected images with image-to-image (`second_stage`).
@@ -270,9 +282,12 @@ similarity_threshold: 0.7  # 0.0-1.0
 ```
 
 **Guidelines:**
-- `0.5-0.6`: Loose (more results).
-- `0.7-0.8`: Balanced (recommended).
-- `0.9+`: Strict (fewer but higher quality).
+
+| Range | Effect |
+|-------|--------|
+| `0.5–0.6` | Loose (more results) |
+| `0.7–0.8` | Balanced (recommended) |
+| `0.9+` | Strict (fewer but higher quality) |
 
 ---
 
@@ -288,7 +303,7 @@ cp configs/characters/kirby.yaml configs/characters/newchar.yaml
 nano configs/characters/newchar.yaml
 ```
 
-### 2. Setup Credentials
+### 2. Set Up Credentials
 
 ```bash
 # Create credentials directory
@@ -306,7 +321,7 @@ nano configs/social_media/credentials/newchar/ig.env
 nano configs/social_media/credentials/newchar/twitter.env
 ```
 
-### 3. Test Character
+### 3. Test the Character
 
 ```bash
 python run_media_interface.py \
@@ -330,7 +345,7 @@ VALUES
   ('Waddle Dee', 'Kirby', 1, 8);
 ```
 
-### Use in Config
+### Usage in Config
 
 ```yaml
 character:
@@ -338,21 +353,23 @@ character:
   group_name: Kirby  # System can randomly select from this group
 ```
 
-**How it works:** When `group_name` is set, the system can randomly pick any character from that group in the database.
+**How group selection works:** When `group_name` is set, the system randomly picks any character from the group in the database, weighted by the `weight` column.
 
 ---
 
 ## ComfyUI Workflow Customization
 
 ### 1. Design Workflow
-- Open ComfyUI web interface.
-- Design your node graph.
+
+- Open the ComfyUI web interface.
+- Design the node graph.
 - Test with sample prompts.
 
 ### 2. Export Workflow
+
 - Click "Save (API Format)".
-- Save as JSON file.
-- Place in `configs/workflow/`.
+- Save as a JSON file.
+- Place the file in `configs/workflow/`.
 
 ### 3. Reference in Config
 
@@ -363,7 +380,7 @@ workflows:
 
 ### 4. Parameter Overrides
 
-**Override specific node parameters directly in the config.**
+**Override specific node parameters directly in the character config.**
 
 ```yaml
 custom_node_updates:
@@ -394,7 +411,7 @@ OPEN_ROUTER_TOKEN=your_openrouter_key
 
 ### News-Based Prompts
 
-**This feature requires a `news` table in the database.**
+**News-based prompts require a `news` table in the database.**
 
 ```sql
 CREATE TABLE news (
@@ -406,30 +423,29 @@ CREATE TABLE news (
 );
 ```
 
-**How it works:** The system fetches recent news and generates character-related scenes based on current events.
+The system fetches recent news and generates character-related scenes based on current events.
 
 ---
 
 ## Configuration Best Practices
 
-- **Start Simple:** Use `text2img` only at first. Add complexity after testing works.
-- **Test Weights:** Set all weights to 0 except one for testing. Gradually enable more options.
-- **Monitor Quality:** Start with a high `similarity_threshold` (0.8+). Lower it if too many images are filtered out.
-- **Manage Costs:** Use Ollama for local/free generation, OpenRouter for occasional cloud use, and Gemini for vision analysis only.
+- **Start simple.** Use `text2img` only at first. Add complexity after confirming the basic setup works.
+- **Test weights.** Set all weights to 0 except one during testing. Gradually enable more options.
+- **Monitor quality.** Start with a high `similarity_threshold` (0.8+). Lower the threshold if too many images are filtered out.
+- **Manage costs.** Use Ollama for local/free generation, OpenRouter for occasional cloud use, and Gemini for vision analysis only.
 
 ---
 
 ## Example Configurations
 
-**See `configs/characters/` for complete examples.**
+See `configs/characters/` for complete examples.
 
-- `kirby.yaml`: Balanced configuration with multiple styles.
-- Check for other character examples in the directory.
+- `kirby.yaml` — Balanced configuration with multiple styles.
 
 ---
 
 ## Next Steps
 
-- [Installation Guide](installation.md): Setup environment.
-- [Architecture Overview](architecture.md): System design.
-- [Troubleshooting](troubleshooting.md): Common issues.
+- [Installation Guide](installation.md) — Set up the environment.
+- [Architecture Overview](architecture.md) — Understand system design.
+- [Troubleshooting](troubleshooting.md) — Solve common issues.

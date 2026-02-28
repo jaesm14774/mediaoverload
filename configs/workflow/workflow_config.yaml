@@ -1,21 +1,30 @@
 # Workflow 配置映射文件
-# 將 workflow 路徑映射到對應的 seed 排除配置
-# 這樣當更換 workflow 時，配置會自動跟隨 workflow 路徑
+# 將 workflow 路徑映射到對應的配置（seed 排除、node 別名等）
+# 路徑匹配支援：完整路徑、相對路徑後綴、純文件名
+#
+# node_aliases: 將邏輯名稱映射到實際 node_id，避免策略代碼中硬編碼
+#   - load_image: LoadImage 節點
+#   - positive_prompt: 正面提示詞節點
+#   - audio_prompt: 音訊提示詞節點
 
 workflows:
-  # z_image_plus_nova_model.json 的配置
-  # z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機
-  "/app/configs/workflow/z_image_plus_nova_model.json":
-    exclude_sampler_node_ids: ["80:44"]
-    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
-  
-  # 相對路徑也支援
-  "configs/workflow/z_image_plus_nova_model.json":
-    exclude_sampler_node_ids: ["80:44"]
-    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
-  
-  # 也可以只使用文件名（會匹配所有包含該文件名的路徑）
+  # z_image_plus_nova_model.json
   "z_image_plus_nova_model.json":
     exclude_sampler_node_ids: ["80:44"]
-    description: "z-image 的 KSampler (80:44) 保持 seed 固定，nova 的 KSampler (81:76) seed 隨機"
+
+  # nova_model_plus_z_image_anime.json（kirby 等使用）
+  # 若 nova 與 z-image 的 KSampler node_id 與非 anime 版不同，請更新以下值
+  "nova_model_plus_z_image_anime.json":
+    exclude_sampler_node_ids: ["80:85"]
+
+  # Tile Upscaler SDXL - 圖片放大 workflow
+  "Tile Upscaler SDXL.json":
+    node_aliases:
+      load_image: "225"
+
+  # wan2.2 I2V + Audio workflow
+  "wan2.2_gguf_i2v_audio.json":
+    node_aliases:
+      positive_prompt: "70"
+      audio_prompt: "94"
 
