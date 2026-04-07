@@ -1,0 +1,17 @@
+{
+  "name": "z_image_i2i_anime",
+  "media_types": ["image_refine"],
+  "workflow_path": "../configs/workflow/z_image_i2i_anime.json",
+  "summary": "Legacy anime-focused Z-Image image-to-image workflow.",
+  "required_assets": [
+    {
+      "name": "zImageTurboAnime_aioBF16.safetensors",
+      "kind": "checkpoint",
+      "target_dir": "ComfyUI/models/checkpoints/z_image",
+      "source": "comfyui_model_store"
+    }
+  ],
+  "recommended_defaults": {
+    "denoise": 0.7
+  }
+}

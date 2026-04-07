@@ -1,0 +1,71 @@
+{
+  "name": "wan2.2_gguf_i2v_audio",
+  "media_types": ["image_to_video", "image_to_video_audio"],
+  "workflow_path": "../configs/workflow/wan2.2_gguf_i2v_audio.json",
+  "summary": "Legacy WAN 2.2 image-to-video workflow with audio generation.",
+  "required_assets": [
+    {
+      "name": "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf",
+      "kind": "unet",
+      "target_dir": "ComfyUI/models/unet/wan",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf",
+      "kind": "unet",
+      "target_dir": "ComfyUI/models/unet/wan",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "wan_2.1_vae.safetensors",
+      "kind": "vae",
+      "target_dir": "ComfyUI/models/vae/wan",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "kind": "clip",
+      "target_dir": "ComfyUI/models/text_encoders",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "wan2.2_high_noise_model.safetensors",
+      "kind": "lora",
+      "target_dir": "ComfyUI/models/loras/wan",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "wan2.2_low_noise_model.safetensors",
+      "kind": "lora",
+      "target_dir": "ComfyUI/models/loras/wan",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "mmaudio_large_44k_v2_fp16.safetensors",
+      "kind": "audio_model",
+      "target_dir": "ComfyUI/models/mmaudio",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "mmaudio_vae_44k_fp16.safetensors",
+      "kind": "audio_vae",
+      "target_dir": "ComfyUI/models/mmaudio",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "mmaudio_synchformer_fp16.safetensors",
+      "kind": "audio_sync",
+      "target_dir": "ComfyUI/models/mmaudio",
+      "source": "comfyui_model_store"
+    },
+    {
+      "name": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+      "kind": "audio_clip",
+      "target_dir": "ComfyUI/models/mmaudio",
+      "source": "comfyui_model_store"
+    }
+  ],
+  "recommended_defaults": {
+    "frame_rate": 16
+  }
+}

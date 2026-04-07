@@ -1,0 +1,397 @@
+routing:
+  enabled: true
+  strategy_candidates:
+    - text2img
+    # - text2video
+    - text2image2video
+    - text2longvideo
+    - text2image2image
+    - sticker_pack
+
+  workflow_stage_candidates:
+    text2img:
+      image_workflow_name:
+        - anima_anime
+        - nova_model_plus_z_image_anime
+        - nova-anime-xl
+    text2video:
+      image_workflow_name:
+        - nova_model_plus_z_image_anime
+        - nova-anime-xl
+      video_workflow_name:
+        - wan2.2_gguf_i2v
+        - wan2.2_gguf_i2v_audio
+    text2image2video:
+      image_workflow_name:
+        - nova_model_plus_z_image_anime
+        - nova-anime-xl
+      video_workflow_name:
+        - wan2.2_gguf_i2v
+        - wan2.2_gguf_i2v_audio
+      upscale_workflow_name:
+        - Tile Upscaler SDXL
+    text2longvideo:
+      image_workflow_name:
+        - nova_model_plus_z_image_anime
+        - nova-anime-xl
+      video_workflow_name:
+        - wan2.2_gguf_i2v
+        - wan2.2_gguf_i2v_audio
+      transition_workflow_name:
+        - image_to_image
+        - z_image_i2i_anime
+    text2image2image:
+      image_workflow_name:
+        - nova_model_plus_z_image_anime
+        - nova-anime-xl
+      refine_workflow_name:
+        - image_to_image
+        - z_image_i2i_anime
+    sticker_pack:
+      image_workflow_name:
+        - anima_anime
+        - nova-anime-xl
+        - nova_model_plus_z_image_anime
+      video_workflow_name:
+        - wan2.2_gguf_i2v
+        - wan2.2_gguf_i2v_audio
+
+  count_policies:
+    text2img:
+      image_count:
+        min: 1
+        max: 4
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2video:
+      image_count:
+        min: 1
+        max: 4
+      video_count:
+        min: 1
+        max: 4
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2image2video:
+      image_count:
+        min: 1
+        max: 4
+      video_count:
+        min: 1
+        max: 4
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2longvideo:
+      image_count:
+        min: 1
+        max: 3
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 2
+        max: 8
+      review_selection_limit:
+        min: 1
+        max: 6
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2image2image:
+      image_count:
+        min: 1
+        max: 4
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    sticker_pack:
+      image_count:
+        min: 1
+        max: 1
+      video_count:
+        min: 1
+        max: 2
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 6
+      sticker_expression_count:
+        min: 4
+        max: 12
+      images_per_prompt:
+        min: 1
+        max: 4
+
+  routing_hints:
+    strategy_preferences:
+      sticker_pack:
+        - sticker
+        - sticker pack
+        - reaction
+        - emotions
+        - line sticker
+        - messenger sticker
+        - emoji pack
+        - expression sheet
+        - chat reaction
+      text2longvideo:
+        - story
+        - episode
+        - narration
+        - long video
+        - multi scene
+        - storyboard
+        - sequence
+        - plot beat
+      text2image2video:
+        - short clip
+        - short video
+        - animated shot
+        - turn still image into video
+        - key visual with motion
+        - cinematic reveal
+      text2video:
+        - motion
+        - animated
+        - moving scene
+        - camera movement
+        - looping motion
+        - dynamic shot
+    strategy_descriptions:
+      text2img:
+        summary: "用於單張或少量高品質靜態圖，適合角色立繪、封面圖、主視覺、海報感插圖與定裝圖。"
+        best_for:
+          - "需求重點是角色外觀、服裝、表情、姿勢、構圖與畫面精緻度，不要求影片。"
+          - "需要先產多張候選圖，再人工挑選最好的一張。"
+          - "要做 sticker 母圖、影片首幀或後續動畫的 key visual。"
+        avoid_when:
+          - "使用者明確要影片、鏡頭運動、長故事或聲音。"
+          - "需求明確是保留既有圖片後微調，這時比較像 text2image2image。"
+      text2video:
+        summary: "用於單一短動態片段，適合短秒數、單鏡頭、單重點的 motion 展示。"
+        best_for:
+          - "需求是短片、loop、角色小動作、簡單運鏡或單場景展示。"
+          - "使用者要畫面動起來，但沒有明確多段故事結構。"
+        avoid_when:
+          - "需求有明顯分鏡、章節、旁白或多段敘事，應改選 text2longvideo。"
+          - "使用者其實只想先確認靜態造型，應改選 text2img。"
+      text2image2video:
+        summary: "先產首圖再轉影片，適合先鎖定角色外觀與構圖，再延伸成短片。"
+        best_for:
+          - "角色長相、配色、服裝需要先被固定，再加 motion。"
+          - "需求像是把插畫動起來、把海報做成短動畫、由 key visual 延伸短片。"
+          - "想兼顧首幀質感與後續動態穩定度。"
+        avoid_when:
+          - "只要純靜態圖。"
+          - "需要長篇故事、多段轉場與段落銜接，應改選 text2longvideo。"
+      text2longvideo:
+        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡，會同時考慮首圖、片段與轉場。"
+        best_for:
+          - "需求有起承轉合、腳本段落、章節、旁白、storyboard 或多個 scene beat。"
+          - "使用者提到 story、episode、narration、multi-scene 這類語意。"
+          - "需要透過 segment_count 控制故事拆分密度。"
+        avoid_when:
+          - "只有單一鏡頭或單一動作。"
+          - "只是要 sticker 或單張海報。"
+      text2image2image:
+        summary: "先出圖再做 img2img refine，適合保留原構圖與角色辨識度，同時重繪細節、換風格或修正局部。"
+        best_for:
+          - "需求像是同一張圖再修一下、保留構圖但更精緻、換風格但不要整張重來。"
+          - "首輪生成不錯，但臉、手、服裝、背景一致性需要修。"
+          - "需要 transition frame、風格統一或角色定稿後微調。"
+        avoid_when:
+          - "需求本質是影片。"
+          - "使用者想要大量不同構圖候選圖，直接 text2img 更適合。"
+      sticker_pack:
+        summary: "專門給多表情聊天貼圖使用，重點是角色一致性、情緒區隔清楚、可批量產出。"
+        best_for:
+          - "需求出現 sticker、reaction、line sticker、emoji pack、表情包。"
+          - "同一角色要做多個情緒版本，例如開心、生氣、無奈、驚訝、哭泣。"
+          - "需要透過 sticker_expression_count 與 images_per_prompt 批次出圖。"
+        avoid_when:
+          - "目標是單張高完成度插圖或完整故事影片。"
+    selection_rules:
+      - "若使用者明確要求 sticker、line 貼圖、reaction pack、聊天表情包，優先選 sticker_pack。"
+      - "若需求包含連續故事、旁白、章節、分鏡、episode、multi-scene，優先選 text2longvideo。"
+      - "若需求是短影片，但角色外觀必須先鎖定，優先選 text2image2video。"
+      - "若需求只有單鏡頭動態或展示型 motion，沒有長篇敘事，優先選 text2video。"
+      - "若使用者描述保留原圖、原構圖、原角色，只做修圖或風格微調，優先選 text2image2image。"
+      - "若需求重點是單張高品質畫面、角色立繪、封面、海報、概念圖，優先選 text2img。"
+    workflow_preferences:
+      anima_anime:
+        - anime character
+        - line sticker
+        - expressive face
+        - clean anime line art
+        - simple background
+        - mascot style
+      nova-anime-xl:
+        - anime character
+        - line sticker
+        - detailed illustration
+        - scenic background
+        - polished key visual
+        - fantasy scene
+        - 2.5d anime
+      nova_model_plus_z_image_anime:
+        - anime character
+        - fast ideation
+        - multiple candidates
+        - quick anime render
+        - dynamic composition
+      wan2.2_gguf_i2v:
+        - image to video
+        - animate still image
+        - cinematic motion
+        - camera move
+        - short sequence
+      wan2.2_gguf_i2v_audio:
+        - image to video with sound
+        - ambient audio
+        - sound effect
+        - synced audio
+        - foley
+      image_to_image:
+        - preserve composition
+        - refine existing image
+        - redraw with same layout
+        - fix anatomy
+      z_image_i2i_anime:
+        - anime refine
+        - preserve anime identity
+        - expressive anime cleanup
+        - style-consistent redraw
+      Tile Upscaler SDXL:
+        - upscale final image
+        - recover details
+        - higher resolution
+        - texture enhancement
+    workflow_descriptions:
+      anima_anime:
+        summary: "Anima Preview 2 路線的 anime 生圖 workflow，內建 anime upscaling，偏乾淨線條、角色表情與純二次元視覺。"
+        strengths:
+          - "manifest 顯示使用 `anima-preview2`、`qwen_image_vae`、`qwen_3_06b_base` 與 `4x-AnimeSharp`，適合 anime 角色主體明確的出圖。"
+          - "相對適合 line sticker、角色立繪、Q 版或簡潔背景場景。"
+          - "推薦預設有固定 steps 與 cfg，適合穩定產生角色母圖。"
+        tradeoffs:
+          - "對超複雜背景、厚塗質感、封面級大場景不一定比 SDXL 類 anime checkpoint 強。"
+      nova-anime-xl:
+        summary: "以 SDXL anime checkpoint 為主的高完成度插畫 workflow，適合精緻角色圖、背景完整的場景圖與主視覺。"
+        strengths:
+          - "manifest 顯示依賴 `novaAnimeXL_ilV140`、`reiXL_NB11`、`waiIllustriousSDXL_v150`，偏向高完成度角色與插畫感。"
+          - "更適合 detailed illustration、奇幻場景、封面圖、主視覺與背景敘事。"
+          - "當需求提到高細節、精緻背景、2.5D anime 時可優先考慮。"
+        tradeoffs:
+          - "若目標是快速多輪試稿，速度通常不如 turbo 類流程。"
+      nova_model_plus_z_image_anime:
+        summary: "結合 Nova 與 Z-Image Turbo Anime 的快速 anime workflow，偏 8-step、快速試稿、多候選探索與 prompt 迭代。"
+        strengths:
+          - "manifest 顯示依賴 `zImageTurboAnime_aioBF16` 與 8-step control 類資產，定位偏快而不是極限精修。"
+          - "適合先看方向、做多張候選、快速 A/B 測試。"
+          - "較適合拿來做第一輪 key visual 或影片首幀探索。"
+        tradeoffs:
+          - "若要單張最終成品感與高細節堆疊，常常仍會輸給 nova-anime-xl。"
+      wan2.2_gguf_i2v:
+        summary: "WAN 2.2 image-to-video workflow，適合把已定稿圖片轉成短影片，重點是動態延續、鏡頭感與穩定 motion。"
+        strengths:
+          - "manifest 顯示 high-noise 與 low-noise 兩套 unet，定位就是 image-conditioned video。"
+          - "適合 animate still image、camera move、short sequence、cinematic motion。"
+          - "在 text2image2video 與 text2longvideo 都很適合做片段動畫核心。"
+        tradeoffs:
+          - "本身不含音訊；若需求提到環境聲、效果音或同步聲音，應改選 wan2.2_gguf_i2v_audio。"
+      wan2.2_gguf_i2v_audio:
+        summary: "WAN 2.2 I2V 加上 MMAudio 的有聲短片 workflow，適合需要畫面與環境音效一起產出的片段。"
+        strengths:
+          - "manifest 顯示額外依賴 `mmaudio_large`、`mmaudio_vae`、`mmaudio_synchformer`、`audio_clip`，可補上有聲版本。"
+          - "適合 ambience、SFX、foley 類短音訊需求。"
+          - "當需求是有聲短片、動態貼圖帶聲、氛圍感小片段時更對口。"
+        tradeoffs:
+          - "若只要無聲影片，這條 workflow 成本通常高於 `wan2.2_gguf_i2v`。"
+          - "較適合效果音與氛圍聲，不應假設能自然完成高控制對白。"
+      image_to_image:
+        summary: "通用 img2img refine workflow，適合保留原圖構圖與主體後，做較明顯的風格重繪與細節修正。"
+        strengths:
+          - "manifest 推薦 `denoise: 0.7`，代表不是只做輕微修飾，而是允許中度改寫。"
+          - "適合修手、修臉、補背景、統一畫風或做 transition frame。"
+        tradeoffs:
+          - "若需求強調 anime identity 延續，通常不如 `z_image_i2i_anime` 對口。"
+      z_image_i2i_anime:
+        summary: "anime 向 img2img refine workflow，適合維持 anime 語彙、角色 identity 與色彩一致性。"
+        strengths:
+          - "manifest 直接綁定 `zImageTurboAnime_aioBF16`，更偏 anime 角色修圖。"
+          - "適合 anime 化重繪、角色一致化、表情修正與局部 cleanup。"
+        tradeoffs:
+          - "若要跨風格或偏寫實重構，泛用 `image_to_image` 可能更彈性。"
+      Tile Upscaler SDXL:
+        summary: "最終放大與細節回填 workflow，適合交付前提升解析度、紋理細節與局部清晰度。"
+        strengths:
+          - "manifest 顯示依賴 SDXL checkpoint、lightning lora 與 tile controlnet，定位是交付前 quality lift。"
+          - "適合 higher resolution、detail enhancement、final upscale。"
+        tradeoffs:
+          - "這不是重做構圖的 workflow，應放在成品後段而不是創作前段。"
+    count_guidance:
+      text2img:
+        image_count_rule: "單張主視覺預設 1；若需求包含 variants、options、AB test、挑圖，可提高到 2-4。"
+      text2video:
+        image_count_rule: "若需要先挑首幀可用 2-4；若只是單支短片，通常 1 張首幀就夠。"
+        video_count_rule: "單一需求預設 1；只有要不同 motion 版本時再增加到 2-4。"
+      text2image2video:
+        image_count_rule: "建議先用 1-3 張首圖做篩選，再從最佳首圖延伸影片。"
+        video_count_rule: "通常 1 支影片就夠；只有要多種動作版本時才增加。"
+      text2longvideo:
+        segment_count_rule: "只有需求具備多段敘事時才提高 segment_count；2-4 適合短故事，5-8 適合明確分章節內容。"
+      text2image2image:
+        image_count_rule: "通常 1-2 張 refine 結果已足夠；只有要比對不同修圖方向時才拉到 3-4。"
+      sticker_pack:
+        sticker_expression_count_rule: "基本貼圖組可用 4-6 個表情；完整聊天貼圖組可用 8-12。"
+        images_per_prompt_rule: "每個表情 1 張適合高一致性；若想為同表情挑版本，可提高到 2-4。"

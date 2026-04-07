@@ -1,14 +1,7 @@
-character:
-  name: Kirby
-  group_name: Kirby
-
-generation:
-  output_dir: /app/output_media
-
 social_media:
   default_hashtags:
-    - kirby
     - mediaoverload
+    - kirby
 
   platforms:
     instagram_graph:

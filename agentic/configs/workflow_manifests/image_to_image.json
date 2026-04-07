@@ -1,0 +1,17 @@
+{
+  "name": "image_to_image",
+  "media_types": ["image_refine"],
+  "workflow_path": "../configs/workflow/image_to_image.json",
+  "summary": "Legacy ComfyUI img2img workflow.",
+  "required_assets": [
+    {
+      "name": "waiIllustriousSDXL_v150.safetensors",
+      "kind": "checkpoint",
+      "target_dir": "ComfyUI/models/checkpoints/sdxl",
+      "source": "comfyui_model_store"
+    }
+  ],
+  "recommended_defaults": {
+    "denoise": 0.7
+  }
+}
