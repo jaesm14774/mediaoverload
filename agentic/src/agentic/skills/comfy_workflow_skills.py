@@ -15,7 +15,7 @@ class ComfyWorkflowSkills:
         self.output_root.mkdir(parents=True, exist_ok=True)
 
     def refine_image(self, context: SkillContext) -> SkillResult:
-        image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context, ("saved_files",))
+        image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context)
         prompt = context.node.inputs.get("prompt") or self._resolve_prompt(context)
         negative_prompt = context.node.inputs.get("negative_prompt") or self._resolve_negative_prompt(context)
         result = self.tools.call(
@@ -30,7 +30,7 @@ class ComfyWorkflowSkills:
         return SkillResult(status="success", outputs=result, logs=["Refined image with ComfyUI image-to-image workflow."])
 
     def upscale_image(self, context: SkillContext) -> SkillResult:
-        image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context, ("saved_files",))
+        image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context)
         result = self.tools.call(
             "comfy.workflow.image_upscale",
             {
@@ -41,7 +41,7 @@ class ComfyWorkflowSkills:
         return SkillResult(status="success", outputs=result, logs=["Upscaled image with ComfyUI workflow."])
 
     def image_to_video(self, context: SkillContext) -> SkillResult:
-        image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context, ("saved_files",))
+        image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context)
         prompt = context.node.inputs.get("prompt") or self._resolve_prompt(context)
         result = self.tools.call(
             "comfy.workflow.image_to_video",
@@ -58,15 +58,18 @@ class ComfyWorkflowSkills:
         slug = slug[:32] or "workflow"
         return self.output_root / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{suffix}_{slug}"
 
-    @staticmethod
-    def _resolve_first_file(context: SkillContext, candidate_keys: tuple[str, ...]) -> str:
+    _FILE_KEYS: tuple[str, ...] = ("saved_files", "selected_assets", "media_paths", "image_path")
+
+    @classmethod
+    def _resolve_first_file(cls, context: SkillContext, candidate_keys: tuple[str, ...] | None = None) -> str:
+        keys = candidate_keys if candidate_keys is not None else cls._FILE_KEYS
         for dependency in reversed(context.node.depends_on):
             dependency_output = context.state[dependency]
-            for key in candidate_keys:
+            for key in keys:
                 value = dependency_output.get(key)
                 if isinstance(value, list) and value:
                     return str(value[0])
-                if isinstance(value, str):
+                if isinstance(value, str) and value.strip():
                     return value
         raise RuntimeError(f"No dependency output found for node '{context.node.node_id}'")
 

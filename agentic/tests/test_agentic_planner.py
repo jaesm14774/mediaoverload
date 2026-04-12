@@ -12,7 +12,6 @@ class AgenticPlannerTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.project_root = Path(__file__).resolve().parents[1]
         cls.asset_registry = AssetRegistry(
-            cls.project_root / "configs" / "workflow_manifests",
             cls.project_root,
             asset_root=cls.project_root,
         )
@@ -261,6 +260,8 @@ class AgenticPlannerTests(unittest.TestCase):
                 "agent.summary.persist",
             ],
         )
+        review_select = next(node for node in plan.nodes if node.node_id == "review-select")
+        self.assertEqual(review_select.inputs["limit"], 10)
         prepare_caption = next(node for node in plan.nodes if node.node_id == "prepare-caption")
         self.assertEqual(prepare_caption.depends_on, ["review-select", "process-media"])
         persist_summary = next(node for node in plan.nodes if node.node_id == "persist-publish-review-summary")

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from agentic.tools.comfy_backend import AgenticComfyCommunicator
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.media_services import MediaServiceTools
+from agentic.tools.social_native import InstagramGraphPlatform, MediaPost
 from agentic.tools.social_services import SocialServiceTools
 from agentic.tools.tts_adapter import TTSAdapter
 
@@ -115,7 +116,8 @@ class SocialServiceToolsTests(unittest.TestCase):
 
             def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
                 self.published.append((post, platforms))
-                return {"instagram": True}
+                platform_name = (platforms or ["instagram"])[0]
+                return {platform_name: True}
 
         fake = FakePublishing()
         tools._publishing = fake  # type: ignore[assignment]
@@ -139,6 +141,169 @@ class SocialServiceToolsTests(unittest.TestCase):
         self.assertEqual(post.caption, "launch")
         self.assertEqual(post.hashtags, "#kirby")
         self.assertEqual(post.media_paths, ["clip.mp4"])
+
+    def test_publish_social_uses_platform_bundle_payloads(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+
+        class FakePublishing:
+            def __init__(self) -> None:
+                self.registered: list[tuple[str, dict[str, object]]] = []
+                self.published: list[tuple[object, list[str] | None]] = []
+
+            def process_media(self, media_paths: list[str], output_dir: str) -> list[str]:
+                return media_paths
+
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                self.registered.append((platform_name, platform_config))
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                self.published.append((post, platforms))
+                platform_name = (platforms or ["instagram_graph"])[0]
+                return {platform_name: True}
+
+        fake = FakePublishing()
+        tools._publishing = fake  # type: ignore[assignment]
+
+        result = tools.publish_social(
+            {
+                "media_paths": ["shared-a.jpg", "shared-b.jpg"],
+                "caption": "generic",
+                "hashtags": "#generic",
+                "platforms": ["instagram_graph", "facebook"],
+                "platform_configs": {
+                    "instagram_graph": {"config_folder_path": "configs/ig"},
+                    "facebook": {"config_folder_path": "configs/fb"},
+                },
+                "platform_bundle": {
+                    "instagram_graph": {
+                        "caption": "ig caption",
+                        "hashtags": "#ig",
+                        "media_paths": ["ig-a.jpg", "ig-b.jpg"],
+                    },
+                    "facebook": {
+                        "caption": "fb caption",
+                        "hashtags": "#fb",
+                        "media_paths": ["fb-a.jpg", "fb-b.jpg"],
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["results"], {"instagram_graph": True, "facebook": True})
+        self.assertEqual(len(fake.published), 2)
+        ig_post = fake.published[0][0]
+        fb_post = fake.published[1][0]
+        self.assertEqual(ig_post.caption, "ig caption")
+        self.assertEqual(ig_post.hashtags, "#ig")
+        self.assertEqual(ig_post.media_paths, ["ig-a.jpg", "ig-b.jpg"])
+        self.assertEqual(fb_post.caption, "fb caption")
+        self.assertEqual(fb_post.hashtags, "#fb")
+        self.assertEqual(fb_post.media_paths, ["fb-a.jpg", "fb-b.jpg"])
+
+    def test_publish_social_collects_partial_failures(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                del post
+                platform_name = (platforms or ["instagram_graph"])[0]
+                if platform_name == "twitter":
+                    raise RuntimeError("404 Not Found")
+                return {platform_name: True}
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+
+        result = tools.publish_social(
+            {
+                "media_paths": ["clip.mp4"],
+                "caption": "launch",
+                "hashtags": "#kirby",
+                "platforms": ["instagram_graph", "twitter"],
+                "platform_configs": {
+                    "instagram_graph": {"config_folder_path": "configs/ig"},
+                    "twitter": {"config_folder_path": "configs/twitter"},
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "partial_failure")
+        self.assertEqual(result["results"], {"instagram_graph": True, "twitter": False})
+        self.assertIn("twitter", result["errors"])
+
+    def test_publish_social_treats_false_result_as_failure(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                del post
+                platform_name = (platforms or ["instagram_graph"])[0]
+                return {platform_name: False}
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+
+        result = tools.publish_social(
+            {
+                "media_paths": ["clip.mp4"],
+                "caption": "launch",
+                "hashtags": "#kirby",
+                "platforms": ["instagram_graph"],
+                "platform_configs": {
+                    "instagram_graph": {"config_folder_path": "configs/ig"},
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "partial_failure")
+        self.assertEqual(result["results"], {"instagram_graph": False})
+        self.assertIn("instagram_graph", result["errors"])
+
+
+class InstagramGraphPlatformTests(unittest.TestCase):
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_publish_image_raises_clear_error_without_public_media_url(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ig_user_id = "123"
+        platform.access_token = "token"
+        platform.media_base_url = None
+        platform.cloudinary = type("CloudinaryStub", (), {"upload": staticmethod(lambda _: None)})()
+
+        with self.assertRaisesRegex(RuntimeError, "configure Cloudinary or IG_GRAPH_MEDIA_BASE_URL"):
+            platform._publish_image_url("sample.jpg", "caption")
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_upload_post_truncates_caption_to_instagram_limit(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        long_caption = "a" * 2300
+
+        tmpdir = Path.cwd() / "agentic" / ".tmp-tests" / "ig-caption-limit"
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        image_path = str(tmpdir / "frame.jpg")
+        Path(image_path).write_bytes(b"test")
+
+        captured: dict[str, str] = {}
+
+        def fake_publish_image(path: str, caption: str) -> bool:
+            captured["path"] = path
+            captured["caption"] = caption
+            return True
+
+        platform._publish_image_url = fake_publish_image  # type: ignore[method-assign]
+        result = platform.upload_post(MediaPost(media_paths=[image_path], caption=long_caption))
+
+        self.assertTrue(result)
+        self.assertEqual(captured["path"], image_path)
+        self.assertEqual(len(captured["caption"]), platform.CAPTION_MAX)
 
 
 if __name__ == "__main__":

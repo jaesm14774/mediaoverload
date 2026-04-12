@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -37,10 +38,27 @@ class SocialMediaManager:
     def upload_to_platform(self, platform_name: str, post: MediaPost) -> bool:
         if platform_name not in self.platforms:
             raise ValueError(f"Platform {platform_name} not registered")
-        return self.platforms[platform_name].upload_post(post)
+        try:
+            return self.platforms[platform_name].upload_post(post)
+        except Exception as exc:
+            raise RuntimeError(f"Publishing failed for {platform_name}: {_describe_publish_exception(exc)}") from exc
 
     def upload_to_all(self, post: MediaPost) -> dict[str, bool]:
-        return {platform_name: platform.upload_post(post) for platform_name, platform in self.platforms.items()}
+        results: dict[str, bool] = {}
+        for platform_name in self.platforms:
+            results[platform_name] = self.upload_to_platform(platform_name, post)
+        return results
+
+
+def _describe_publish_exception(exc: Exception) -> str:
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        response = exc.response
+        body = (response.text or "").strip().replace("\n", " ")
+        if len(body) > 300:
+            body = body[:297] + "..."
+        request_url = response.request.url if response.request is not None else response.url
+        return f"HTTP {response.status_code} {response.reason} | url={request_url} | body={body}"
+    return f"{type(exc).__name__}: {exc}"
 
 
 class CloudinaryUploadService:
@@ -215,12 +233,7 @@ class FacebookPlatform(BaseConfigPlatform):
             return False
         if len(valid_paths) == 1:
             return self._upload_single(valid_paths[0], caption)
-        success = False
-        for media_path in valid_paths[:10]:
-            if self._upload_single(media_path, caption if not success else ""):
-                success = True
-        self._cleanup_temp()
-        return success
+        return self._upload_multiple(valid_paths[:10], caption)
 
     def _upload_single(self, media_path: str, caption: str) -> bool:
         ext = Path(media_path).suffix.lower()
@@ -237,6 +250,85 @@ class FacebookPlatform(BaseConfigPlatform):
             data = {text_key: caption, "access_token": self.page_access_token}
             response = requests.post(url, files=files, data=data, timeout=300)
             response.raise_for_status()
+        return True
+
+    def _upload_multiple(self, media_paths: list[str], caption: str) -> bool:
+        image_paths: list[str] = []
+        video_paths: list[str] = []
+        for media_path in media_paths:
+            ext = Path(media_path).suffix.lower()
+            if ext in {".jpg", ".jpeg", ".png", ".webp"}:
+                image_paths.append(media_path)
+            elif ext == ".gif":
+                video_paths.append(self._gif_to_mp4(media_path))
+            elif ext in {".mp4", ".avi", ".mov", ".webm"}:
+                video_paths.append(media_path)
+
+        success = False
+        caption_used = False
+        if len(image_paths) >= 2:
+            success = self._post_images_album(image_paths, caption) or success
+            caption_used = True
+        elif len(image_paths) == 1 and not video_paths:
+            return self._upload_single(image_paths[0], caption)
+
+        if len(video_paths) >= 2:
+            success = self._post_videos_album(video_paths, caption if not caption_used else "") or success
+            caption_used = True
+        elif len(video_paths) == 1:
+            success = self._upload_single(video_paths[0], caption if not caption_used else "") or success
+            caption_used = True
+
+        if len(image_paths) == 1 and video_paths:
+            success = self._upload_single(image_paths[0], caption if not caption_used else "") or success
+
+        self._cleanup_temp()
+        return success
+
+    def _post_images_album(self, image_paths: list[str], caption: str) -> bool:
+        media_fbids: list[str] = []
+        upload_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/photos"
+        for path in image_paths:
+            with open(path, "rb") as handle:
+                files = {"source": (Path(path).name, handle)}
+                data = {"published": "false", "access_token": self.page_access_token}
+                response = requests.post(upload_url, files=files, data=data, timeout=120)
+                response.raise_for_status()
+                photo_id = response.json().get("id")
+                if photo_id:
+                    media_fbids.append(str(photo_id))
+            time.sleep(1)
+        if not media_fbids:
+            return False
+        feed_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/feed"
+        data = {"message": caption, "access_token": self.page_access_token}
+        for index, media_fbid in enumerate(media_fbids):
+            data[f"attached_media[{index}]"] = json.dumps({"media_fbid": media_fbid})
+        response = requests.post(feed_url, data=data, timeout=60)
+        response.raise_for_status()
+        return True
+
+    def _post_videos_album(self, video_paths: list[str], caption: str) -> bool:
+        media_fbids: list[str] = []
+        upload_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/videos"
+        for path in video_paths:
+            with open(path, "rb") as handle:
+                files = {"source": (Path(path).name, handle)}
+                data = {"published": "false", "access_token": self.page_access_token}
+                response = requests.post(upload_url, files=files, data=data, timeout=300)
+                response.raise_for_status()
+                video_id = response.json().get("id") or response.json().get("video_id")
+                if video_id:
+                    media_fbids.append(str(video_id))
+            time.sleep(2)
+        if not media_fbids:
+            return False
+        feed_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/feed"
+        data = {"message": caption, "access_token": self.page_access_token}
+        for index, media_fbid in enumerate(media_fbids):
+            data[f"attached_media[{index}]"] = json.dumps({"media_fbid": media_fbid})
+        response = requests.post(feed_url, data=data, timeout=60)
+        response.raise_for_status()
         return True
 
     def _gif_to_mp4(self, gif_path: str) -> str:
@@ -256,6 +348,7 @@ class FacebookPlatform(BaseConfigPlatform):
 class InstagramGraphPlatform(BaseConfigPlatform):
     GRAPH_API_VERSION = "v25.0"
     GRAPH_API_BASE = "https://graph.instagram.com"
+    CAPTION_MAX = 2200
 
     def __init__(self, config_folder_path: str, prefix: str = "") -> None:
         super().__init__(config_folder_path, prefix)
@@ -264,6 +357,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         self.media_base_url: str | None = None
         self.cloudinary = CloudinaryUploadService()
         self.temp_files: list[str] = []
+        self._url_cache: dict[str, str] = {}
         self.load_config()
         self.authenticate()
 
@@ -289,12 +383,21 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         caption = post.caption or ""
         if post.hashtags:
             caption = f"{caption}\n{post.hashtags}" if caption else str(post.hashtags)
+        if len(caption) > self.CAPTION_MAX:
+            caption = caption[: self.CAPTION_MAX - 3] + "..."
         valid_paths = [path for path in post.media_paths if Path(path).exists()]
         if not valid_paths:
             return False
+        self._url_cache = {}
         if len(valid_paths) == 1:
-            return self._upload_single(valid_paths[0], caption)
-        return self._upload_carousel(valid_paths[:10], caption)
+            try:
+                return self._upload_single(valid_paths[0], caption)
+            finally:
+                self._cleanup_temp()
+        try:
+            return self._upload_carousel(valid_paths[:10], caption)
+        finally:
+            self._cleanup_temp()
 
     def _upload_single(self, media_path: str, caption: str) -> bool:
         ext = Path(media_path).suffix.lower()
@@ -306,9 +409,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         return self._publish_image_url(media_path, caption)
 
     def _publish_image_url(self, image_path: str, caption: str) -> bool:
-        media_url = self._get_media_url(image_path)
-        if not media_url:
-            return False
+        media_url = self._require_media_url(image_path)
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media"
         response = requests.post(
             url,
@@ -317,12 +418,12 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         )
         response.raise_for_status()
         container_id = response.json().get("id")
-        return bool(container_id and self._publish_container(str(container_id)))
+        if not container_id:
+            raise RuntimeError(f"Instagram Graph did not return an image container id for {Path(image_path).name}")
+        return self._publish_container(str(container_id))
 
     def _publish_video_url(self, video_path: str, caption: str) -> bool:
-        media_url = self._get_media_url(video_path)
-        if not media_url:
-            return False
+        media_url = self._require_media_url(video_path)
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media"
         response = requests.post(
             url,
@@ -336,8 +437,10 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         )
         response.raise_for_status()
         container_id = str(response.json().get("id", ""))
-        if not container_id or not self._wait_container_ready(container_id):
-            return False
+        if not container_id:
+            raise RuntimeError(f"Instagram Graph did not return a video container id for {Path(video_path).name}")
+        if not self._wait_container_ready(container_id):
+            raise RuntimeError(f"Instagram Graph video container was not ready: {container_id}")
         return self._publish_container(container_id)
 
     def _upload_carousel(self, media_paths: list[str], caption: str) -> bool:
@@ -347,9 +450,8 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             if child:
                 children.append(child)
             time.sleep(1)
-        if not children:
-            self._cleanup_temp()
-            return False
+        if len(children) < 2:
+            raise RuntimeError("Instagram Graph carousel requires at least two ready child containers")
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media"
         response = requests.post(
             url,
@@ -363,9 +465,11 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         )
         response.raise_for_status()
         container_id = str(response.json().get("id", ""))
-        success = bool(container_id and self._wait_container_ready(container_id) and self._publish_container(container_id))
-        self._cleanup_temp()
-        return success
+        if not container_id:
+            raise RuntimeError("Instagram Graph did not return a carousel container id")
+        if not self._wait_container_ready(container_id):
+            raise RuntimeError(f"Instagram Graph carousel container was not ready: {container_id}")
+        return self._publish_container(container_id)
 
     def _create_carousel_item(self, media_path: str) -> str | None:
         ext = Path(media_path).suffix.lower()
@@ -375,9 +479,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             is_video = True
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media"
         if is_video:
-            media_url = self._get_media_url(media_path)
-            if not media_url:
-                return None
+            media_url = self._require_media_url(media_path)
             response = requests.post(
                 url,
                 data={
@@ -390,17 +492,22 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             )
             response.raise_for_status()
             container_id = str(response.json().get("id", ""))
-            return container_id if container_id and self._wait_container_ready(container_id) else None
-        media_url = self._get_media_url(media_path)
-        if not media_url:
-            return None
+            if not container_id:
+                raise RuntimeError(f"Instagram Graph did not return a carousel video container id for {Path(media_path).name}")
+            if not self._wait_container_ready(container_id):
+                raise RuntimeError(f"Instagram Graph carousel video container was not ready: {container_id}")
+            return container_id
+        media_url = self._require_media_url(media_path)
         response = requests.post(
             url,
             data={"image_url": media_url, "is_carousel_item": "true", "access_token": self.access_token},
             timeout=60,
         )
         response.raise_for_status()
-        return str(response.json().get("id", ""))
+        container_id = str(response.json().get("id", ""))
+        if not container_id:
+            raise RuntimeError(f"Instagram Graph did not return a carousel image container id for {Path(media_path).name}")
+        return container_id
 
     def _publish_container(self, container_id: str) -> bool:
         response = requests.post(
@@ -436,12 +543,27 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         return str(user_id) if user_id else None
 
     def _get_media_url(self, local_path: str) -> str | None:
+        cached = self._url_cache.get(local_path)
+        if cached:
+            return cached
         uploaded = self.cloudinary.upload(local_path)
         if uploaded:
+            self._url_cache[local_path] = uploaded
             return uploaded
         if self.media_base_url:
-            return f"{self.media_base_url}/{Path(local_path).name}"
+            resolved = f"{self.media_base_url}/{Path(local_path).name}"
+            self._url_cache[local_path] = resolved
+            return resolved
         return None
+
+    def _require_media_url(self, local_path: str) -> str:
+        media_url = self._get_media_url(local_path)
+        if media_url:
+            return media_url
+        raise RuntimeError(
+            f"Instagram Graph requires a public media URL for {Path(local_path).name}; "
+            "configure Cloudinary or IG_GRAPH_MEDIA_BASE_URL"
+        )
 
     def _gif_to_mp4(self, gif_path: str) -> str:
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
@@ -483,7 +605,7 @@ class PublishingService:
                     pass
             else:
                 processed_paths.append(media_path)
-        return processed_paths
+        return list(dict.fromkeys(processed_paths))
 
     def publish_to_social_media(self, post: MediaPost, platforms: list[str] | None = None) -> dict[str, bool]:
         if platforms:

@@ -12,19 +12,19 @@ routing:
     text2img:
       image_workflow_name:
         - anima_anime
-        - nova_model_plus_z_image_anime
+        - z_image_plus_nova_model
         - nova-anime-xl
     text2video:
       image_workflow_name:
-        - nova_model_plus_z_image_anime
+        - z_image_plus_nova_model
         - nova-anime-xl
       video_workflow_name:
         - wan2.2_gguf_i2v
         - wan2.2_gguf_i2v_audio
     text2image2video:
       image_workflow_name:
-        - nova_model_plus_z_image_anime
-        - nova-anime-xl
+        - z_image_plus_nova_model
+        - anima_anime
       video_workflow_name:
         - wan2.2_gguf_i2v
         - wan2.2_gguf_i2v_audio
@@ -32,7 +32,7 @@ routing:
         - Tile Upscaler SDXL
     text2longvideo:
       image_workflow_name:
-        - nova_model_plus_z_image_anime
+        - z_image_plus_nova_model
         - nova-anime-xl
       video_workflow_name:
         - wan2.2_gguf_i2v
@@ -283,7 +283,7 @@ routing:
         - polished key visual
         - fantasy scene
         - 2.5d anime
-      nova_model_plus_z_image_anime:
+      z_image_plus_nova_model:
         - anime character
         - fast ideation
         - multiple candidates

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from agentic.runtime.contracts import GoalRequest
@@ -11,14 +12,17 @@ from agentic.runtime.llm_engine import LLMPromptEngine
 class _FakeTextModel:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
+        self.calls: list[dict[str, object]] = []
 
     def chat_completion(self, messages: list[dict], **kwargs) -> str:
+        self.calls.append({"messages": messages, "kwargs": kwargs})
         return self.responses.pop(0)
 
 
 class _FakeManager:
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(self, responses: list[str], vision_responses: list[str] | None = None) -> None:
         self.text_model = _FakeTextModel(responses)
+        self.vision_model = _FakeTextModel(list(vision_responses or []))
 
 
 class LLMEngineTests(unittest.TestCase):
@@ -114,6 +118,57 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["count_plan"]["images_per_prompt"], 2)
         self.assertEqual(result["count_plan"]["review_selection_limit"], 3)
         self.assertEqual(result["prompt_mode"], "llm")
+
+    def test_route_generation_strategy_schema_locks_unavailable_sticker_stages(self) -> None:
+        manager = _FakeManager(
+            [
+                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2.2_gguf_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+
+        engine.route_generation_strategy(
+            prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
+            character="Kirby",
+            style="LINE sticker",
+            generation_type_candidates=["text2img", "sticker_pack"],
+            workflow_stage_candidates={
+                "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
+                "sticker_pack": {
+                    "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
+                    "video_workflow_name": ["wan2.2_gguf_i2v"],
+                },
+            },
+            count_policies={
+                "text2img": {"image_count": {"min": 1, "max": 4}},
+                "sticker_pack": {
+                    "image_count": {"min": 1, "max": 1},
+                    "video_count": {"min": 1, "max": 2},
+                    "segment_count": {"min": 1, "max": 1},
+                    "review_selection_limit": {"min": 1, "max": 6},
+                    "sticker_expression_count": {"min": 4, "max": 12},
+                    "images_per_prompt": {"min": 1, "max": 4},
+                },
+            },
+        )
+
+        schema = manager.text_model.calls[0]["kwargs"]["response_format"]["json_schema"]["schema"]
+        sticker_branch = next(
+            branch for branch in schema["oneOf"] if branch["properties"]["generation_type"]["const"] == "sticker_pack"
+        )
+
+        self.assertEqual(
+            sticker_branch["properties"]["workflow_plan"]["properties"]["refine_workflow_name"],
+            {"const": ""},
+        )
+        self.assertEqual(
+            sticker_branch["properties"]["workflow_plan"]["properties"]["transition_workflow_name"],
+            {"const": ""},
+        )
+        self.assertEqual(
+            sticker_branch["properties"]["workflow_plan"]["properties"]["upscale_workflow_name"],
+            {"const": ""},
+        )
 
     def test_route_generation_strategy_raises_when_manager_unavailable(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)
@@ -326,6 +381,48 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["selection_rationale"], "Best matches stronger motion.")
         self.assertEqual(result["prompt_mode"], "llm")
 
+    def test_review_asset_candidates_vision_prefilters_to_top_ten(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-prefilter"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        media_paths = []
+        created_paths: list[Path] = []
+        for index in range(12):
+            path = temp_dir / f"asset_{index:02d}.png"
+            path.write_bytes(b"fake")
+            created_paths.append(path)
+            media_paths.append(str(path))
+
+        try:
+            vision_responses = [
+                f'{{"score": {100 - index}, "rationale": "match {index}"}}'
+                for index in range(12)
+            ]
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [
+                        '{"selected_assets":[],"ranked_candidates":[],"selection_rationale":"Fallback ranking used.","regeneration_notes":"None."}',
+                    ],
+                    vision_responses=vision_responses,
+                ),
+            )
+            goal = GoalRequest(prompt="review kirby assets", media_type="publish_review", style="social promo")
+
+            result = engine.review_asset_candidates(
+                goal,
+                media_paths=media_paths,
+                review_notes="match the prompt closely",
+                selection_limit=10,
+            )
+        finally:
+            for path in created_paths:
+                path.unlink(missing_ok=True)
+
+        self.assertEqual(len(result["selected_assets"]), 10)
+        self.assertNotIn(media_paths[10], result["selected_assets"])
+        self.assertNotIn(media_paths[11], result["selected_assets"])
+        self.assertEqual(result["selected_assets"][0], media_paths[0])
+
     def test_expand_goal_falls_back_when_manager_unavailable(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)
         goal = GoalRequest(prompt="kirby runs", media_type="long_video", style="anime")
@@ -405,26 +502,44 @@ class LLMEngineTests(unittest.TestCase):
                 "AGENTIC_TEXT_MODEL": "",
                 "AGENTIC_VISION_MODEL_PROVIDER": "",
                 "AGENTIC_VISION_MODEL": "",
-                "AGENTIC_RANDOM_MODELS": "",
+                "AGENTIC_RANDOM_MODELS": "false",
+                "AGENTIC_TEXT_FALLBACK_PROVIDER": "",
+                "AGENTIC_TEXT_FALLBACK_MODEL": "",
+                "AGENTIC_OPENROUTER_TEXT_MODEL_STRATEGY": "",
+                "AGENTIC_OPENROUTER_VISION_MODEL_STRATEGY": "",
             },
             clear=False,
         ):
-            for key in (
-                "AGENTIC_TEXT_MODEL_PROVIDER",
-                "AGENTIC_TEXT_MODEL",
-                "AGENTIC_VISION_MODEL_PROVIDER",
-                "AGENTIC_VISION_MODEL",
-                "AGENTIC_RANDOM_MODELS",
-            ):
-                os.environ.pop(key, None)
             engine = LLMPromptEngine(mode="llm")
             backend = engine.backend_info()
 
         self.assertEqual(backend["text_provider"], "openrouter")
         self.assertEqual(backend["text_model"], "qwen/qwen3.6-plus:free")
+        self.assertEqual(backend["text_model_raw"], "qwen/qwen3.6-plus:free")
+        self.assertFalse(backend["openrouter_text_pool_mode"])
         self.assertEqual(backend["vision_provider"], "openrouter")
         self.assertEqual(backend["vision_model"], "qwen/qwen3.6-plus:free")
+        self.assertEqual(backend["vision_model_raw"], "qwen/qwen3.6-plus:free")
+        self.assertFalse(backend["openrouter_vision_pool_mode"])
         self.assertFalse(backend["random_models"])
+        self.assertEqual(backend.get("text_fallback_provider"), "")
+
+    def test_backend_info_openrouter_free_pool_when_text_model_empty(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "AGENTIC_TEXT_MODEL_PROVIDER": "openrouter",
+                "AGENTIC_TEXT_MODEL": "",
+                "AGENTIC_VISION_MODEL_PROVIDER": "openrouter",
+                "AGENTIC_VISION_MODEL": "qwen/qwen3.6-plus:free",
+                "AGENTIC_OPENROUTER_TEXT_MODEL_STRATEGY": "free_pool",
+            },
+            clear=False,
+        ):
+            engine = LLMPromptEngine(mode="llm")
+            backend = engine.backend_info()
+        self.assertTrue(backend["openrouter_text_pool_mode"])
+        self.assertEqual(backend["text_model"], "free_pool")
 
     def test_manager_creation_goes_through_agentic_adapter(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)

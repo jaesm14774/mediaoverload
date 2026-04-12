@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_manager_adapter import build_llm_manager
+from agentic.runtime.model_backends import _load_project_env
 from agentic.runtime.prompting import (
     LONG_VIDEO_SYSTEM_PROMPT,
     STICKER_SYSTEM_PROMPT,
@@ -49,6 +51,12 @@ class LLMPromptEngine:
         enriched = dict(self._backend_info)
         if self._manager_error:
             enriched["manager_error"] = self._manager_error
+        if self._manager is not None:
+            tm = self._manager.text_model
+            primary = getattr(tm, "_primary", tm)
+            last = getattr(primary, "last_success_model", "") or getattr(tm, "last_success_model", "")
+            if last:
+                enriched["openrouter_last_text_model"] = last
         return enriched
 
     def route_generation_strategy(
@@ -66,14 +74,10 @@ class LLMPromptEngine:
         if not normalized_candidates:
             raise ValueError("generation_type_candidates cannot be empty for LLM routing.")
         manager = self._require_manager()
-        all_workflow_candidates = sorted(
-            {
-                workflow_name
-                for stages in workflow_stage_candidates.values()
-                for items in stages.values()
-                for workflow_name in items
-                if str(workflow_name).strip()
-            }
+        route_schema = self._build_generation_strategy_schema(
+            generation_type_candidates=normalized_candidates,
+            workflow_stage_candidates=workflow_stage_candidates,
+            count_policies=count_policies,
         )
         user_prompt = "\n".join(
             [
@@ -97,53 +101,7 @@ class LLMPromptEngine:
                 LONG_VIDEO_SYSTEM_PROMPT,
                 user_prompt,
                 schema_name="generation_strategy_route",
-                schema={
-                    "type": "object",
-                    "properties": {
-                        "generation_type": {"type": "string", "enum": normalized_candidates},
-                        "workflow_plan": {
-                            "type": "object",
-                            "properties": {
-                                "image_workflow_name": {"type": "string", "enum": all_workflow_candidates + [""]},
-                                "video_workflow_name": {"type": "string", "enum": all_workflow_candidates + [""]},
-                                "refine_workflow_name": {"type": "string", "enum": all_workflow_candidates + [""]},
-                                "transition_workflow_name": {"type": "string", "enum": all_workflow_candidates + [""]},
-                                "upscale_workflow_name": {"type": "string", "enum": all_workflow_candidates + [""]},
-                            },
-                            "required": [
-                                "image_workflow_name",
-                                "video_workflow_name",
-                                "refine_workflow_name",
-                                "transition_workflow_name",
-                                "upscale_workflow_name",
-                            ],
-                            "additionalProperties": False,
-                        },
-                        "count_plan": {
-                            "type": "object",
-                            "properties": {
-                                "image_count": {"type": "integer", "minimum": 1, "maximum": 32},
-                                "video_count": {"type": "integer", "minimum": 1, "maximum": 32},
-                                "segment_count": {"type": "integer", "minimum": 1, "maximum": 32},
-                                "review_selection_limit": {"type": "integer", "minimum": 1, "maximum": 32},
-                                "sticker_expression_count": {"type": "integer", "minimum": 1, "maximum": 32},
-                                "images_per_prompt": {"type": "integer", "minimum": 1, "maximum": 32},
-                            },
-                            "required": [
-                                "image_count",
-                                "video_count",
-                                "segment_count",
-                                "review_selection_limit",
-                                "sticker_expression_count",
-                                "images_per_prompt",
-                            ],
-                            "additionalProperties": False,
-                        },
-                        "reason": {"type": "string"},
-                    },
-                    "required": ["generation_type", "workflow_plan", "count_plan", "reason"],
-                    "additionalProperties": False,
-                },
+                schema=route_schema,
             )
             selected_generation_type = str(payload.get("generation_type") or "").strip()
             if selected_generation_type not in normalized_candidates:
@@ -209,6 +167,84 @@ class LLMPromptEngine:
             )
         except Exception as exc:
             raise self._generation_error("route_generation_strategy", exc) from exc
+
+    @staticmethod
+    def _build_generation_strategy_schema(
+        *,
+        generation_type_candidates: list[str],
+        workflow_stage_candidates: dict[str, dict[str, list[str]]],
+        count_policies: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        branches: list[dict[str, Any]] = []
+        for generation_type in generation_type_candidates:
+            branches.append(
+                {
+                    "type": "object",
+                    "properties": {
+                        "generation_type": {"const": generation_type},
+                        "workflow_plan": LLMPromptEngine._build_workflow_plan_schema(
+                            workflow_stage_candidates.get(generation_type, {})
+                        ),
+                        "count_plan": LLMPromptEngine._build_count_plan_schema(
+                            count_policies.get(generation_type, {})
+                        ),
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["generation_type", "workflow_plan", "count_plan", "reason"],
+                    "additionalProperties": False,
+                }
+            )
+        return {"oneOf": branches}
+
+    @staticmethod
+    def _build_workflow_plan_schema(stage_candidates: dict[str, list[str]]) -> dict[str, Any]:
+        properties: dict[str, Any] = {}
+        for stage_key in WORKFLOW_STAGE_KEYS:
+            allowed_workflows = [
+                str(item).strip()
+                for item in stage_candidates.get(stage_key, [])
+                if str(item).strip()
+            ]
+            if allowed_workflows:
+                properties[stage_key] = {"type": "string", "enum": allowed_workflows + [""]}
+            else:
+                properties[stage_key] = {"const": ""}
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(WORKFLOW_STAGE_KEYS),
+            "additionalProperties": False,
+        }
+
+    @staticmethod
+    def _build_count_plan_schema(count_policy: dict[str, Any]) -> dict[str, Any]:
+        properties: dict[str, Any] = {}
+        required_keys = (
+            "image_count",
+            "video_count",
+            "segment_count",
+            "review_selection_limit",
+            "sticker_expression_count",
+            "images_per_prompt",
+        )
+        for count_key in required_keys:
+            policy = count_policy.get(count_key)
+            if isinstance(policy, dict):
+                minimum = int(policy.get("min", 1))
+                maximum = int(policy.get("max", minimum))
+                properties[count_key] = {
+                    "type": "integer",
+                    "minimum": minimum,
+                    "maximum": max(minimum, maximum),
+                }
+            else:
+                properties[count_key] = {"type": "integer", "minimum": 1, "maximum": 32}
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(required_keys),
+            "additionalProperties": False,
+        }
 
     def generate_autonomous_scene_prompt(
         self,
@@ -862,9 +898,13 @@ class LLMPromptEngine:
                 f"Prefix: {prefix}",
                 f"Review notes: {review_notes}",
                 f"Media count: {len(media_paths or [])}",
-                f"Requested hashtags: {', '.join(normalized_hashtags)}",
+                f"Required hashtags to include: {', '.join(normalized_hashtags)}",
                 "Return JSON with keys: caption, hashtags, platform_captions.",
-                "Keep the caption concise, publish-ready, and adapted per platform when platforms are supplied.",
+                "Write a concise publish-ready social caption, not a review note or metadata dump.",
+                "Generate a fresh hashtag line that fits the scene and character instead of echoing only the required hashtags.",
+                "If required hashtags are provided, include them naturally inside the final hashtag line.",
+                "Keep hashtags space-separated and prefixed with #.",
+                "Adapt platform_captions per platform when platforms are supplied.",
             ]
         )
         try:
@@ -890,15 +930,37 @@ class LLMPromptEngine:
             platform_captions = payload.get("platform_captions")
             if not isinstance(platform_captions, dict):
                 platform_captions = fallback["platform_captions"]
+            normalized_caption = str(payload.get("caption") or fallback["caption"]).strip()
+            normalized_hashtag_text = self._normalize_hashtag_text(
+                str(payload.get("hashtags") or fallback["hashtags"]).strip(),
+                required_hashtags=normalized_hashtags,
+            )
             return self._mark_llm_payload(
                 {
-                "caption": str(payload.get("caption") or fallback["caption"]),
-                "hashtags": str(payload.get("hashtags") or fallback["hashtags"]),
-                "platform_captions": {str(key): str(value) for key, value in platform_captions.items()},
+                "caption": normalized_caption,
+                "hashtags": normalized_hashtag_text,
+                "platform_captions": {str(key): str(value).strip() for key, value in platform_captions.items()},
                 }
             )
         except Exception as exc:
             raise self._generation_error("prepare_publish_caption", exc) from exc
+
+    @staticmethod
+    def _normalize_hashtag_text(hashtags: str, *, required_hashtags: list[str]) -> str:
+        seen: list[str] = []
+        for token in str(hashtags or "").replace("\n", " ").split():
+            cleaned = token.strip().rstrip(".,;")
+            if not cleaned:
+                continue
+            if not cleaned.startswith("#"):
+                cleaned = f"#{cleaned.lstrip('#')}"
+            if cleaned not in seen:
+                seen.append(cleaned)
+        for tag in required_hashtags:
+            cleaned = tag if str(tag).startswith("#") else f"#{str(tag).lstrip('#')}"
+            if cleaned and cleaned not in seen:
+                seen.append(cleaned)
+        return " ".join(seen)
 
     def review_asset_candidates(
         self,
@@ -907,8 +969,10 @@ class LLMPromptEngine:
         review_notes: str,
         selection_limit: int,
     ) -> dict[str, Any]:
+        ranked_media_paths = self._rank_media_by_prompt_match(goal, media_paths)
+        candidate_pool = ranked_media_paths[: max(selection_limit, min(len(ranked_media_paths), 10))]
         fallback_candidates = []
-        for index, media_path in enumerate(media_paths):
+        for index, media_path in enumerate(candidate_pool):
             fallback_candidates.append(
                 {
                     "media_path": media_path,
@@ -932,7 +996,7 @@ class LLMPromptEngine:
                 f"Style: {goal.style}",
                 f"Review notes: {review_notes}",
                 f"Selection limit: {selection_limit}",
-                f"Candidate media paths: {json.dumps(media_paths, ensure_ascii=False)}",
+                f"Candidate media paths: {json.dumps(candidate_pool, ensure_ascii=False)}",
                 "Return JSON with keys: selected_assets, ranked_candidates, selection_rationale, regeneration_notes.",
                 "Each ranked_candidates item must include: media_path, score, rationale.",
                 "Prefer assets that look strongest for publishing and best satisfy the review notes based on filenames and ordering signals.",
@@ -980,7 +1044,7 @@ class LLMPromptEngine:
             if not isinstance(ranked_candidates, list):
                 ranked_candidates = fallback["ranked_candidates"]
             normalized_ranked: list[dict[str, Any]] = []
-            valid_paths = {str(path) for path in media_paths}
+            valid_paths = {str(path) for path in candidate_pool}
             for item in ranked_candidates:
                 if not isinstance(item, dict):
                     continue
@@ -1012,6 +1076,60 @@ class LLMPromptEngine:
             )
         except Exception as exc:
             raise self._generation_error("review_asset_candidates", exc) from exc
+
+    def _rank_media_by_prompt_match(self, goal: GoalRequest, media_paths: list[str]) -> list[str]:
+        existing_paths = [str(path) for path in media_paths if Path(str(path)).exists()]
+        missing_paths = [str(path) for path in media_paths if not Path(str(path)).exists()]
+        if not existing_paths:
+            return [str(path) for path in media_paths]
+
+        fallback_ranked = existing_paths + missing_paths
+        manager = self._manager_or_none()
+        if manager is None:
+            return fallback_ranked
+
+        try:
+            analyses: list[dict[str, Any]] = []
+            character = str(goal.constraints.get("character", "") or "").strip()
+            for media_path in existing_paths:
+                payload = self._chat_json(
+                    manager,
+                    LONG_VIDEO_SYSTEM_PROMPT,
+                    "\n".join(
+                        [
+                            f"Goal: {goal.prompt}",
+                            f"Style: {goal.style}",
+                            f"Character: {character}",
+                            "Score how well this image matches the goal and character identity.",
+                            "Return JSON with keys: score, rationale.",
+                            "Score must be an integer from 0 to 100.",
+                            "Penalize images that clearly mismatch the requested subject, action, setting, or character.",
+                        ]
+                    ),
+                    schema_name="media_prompt_match",
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                            "rationale": {"type": "string"},
+                        },
+                        "required": ["score", "rationale"],
+                        "additionalProperties": False,
+                    },
+                    model="vision",
+                    images=[media_path],
+                )
+                analyses.append(
+                    {
+                        "media_path": media_path,
+                        "score": int(payload.get("score", 0)),
+                        "rationale": str(payload.get("rationale", "")).strip(),
+                    }
+                )
+            analyses.sort(key=lambda item: (-int(item["score"]), str(item["media_path"])))
+            return [str(item["media_path"]) for item in analyses] + missing_paths
+        except Exception:
+            return fallback_ranked
 
     def _template_fallback(
         self,
@@ -1070,18 +1188,64 @@ class LLMPromptEngine:
             return None
 
     def _resolve_backend_info(self) -> dict[str, Any]:
-        text_provider = os.environ.get("AGENTIC_TEXT_MODEL_PROVIDER", "openrouter")
-        text_model = os.environ.get("AGENTIC_TEXT_MODEL", "qwen/qwen3.6-plus:free")
-        vision_provider = os.environ.get("AGENTIC_VISION_MODEL_PROVIDER", text_provider)
-        vision_model = os.environ.get("AGENTIC_VISION_MODEL", "qwen/qwen3.6-plus:free")
+        _load_project_env()
+        text_provider = str(os.environ.get("AGENTIC_TEXT_MODEL_PROVIDER", "openrouter") or "openrouter").strip() or "openrouter"
+        text_model_raw = str(os.environ.get("AGENTIC_TEXT_MODEL", "qwen/qwen3.6-plus:free") or "qwen/qwen3.6-plus:free").strip() or "qwen/qwen3.6-plus:free"
+        vision_provider = str(os.environ.get("AGENTIC_VISION_MODEL_PROVIDER", text_provider) or text_provider).strip() or text_provider
+        vision_model_raw = str(os.environ.get("AGENTIC_VISION_MODEL", "qwen/qwen3.6-plus:free") or "qwen/qwen3.6-plus:free").strip() or "qwen/qwen3.6-plus:free"
         random_models = os.environ.get("AGENTIC_RANDOM_MODELS", "").lower() in {"1", "true", "yes"}
+
+        text_strategy = os.environ.get("AGENTIC_OPENROUTER_TEXT_MODEL_STRATEGY", "").strip().lower()
+        openrouter_text_pool_mode = text_strategy == "free_pool" or (
+            text_provider.lower() == "openrouter" and text_model_raw.strip() == ""
+        )
+        vision_strategy = os.environ.get("AGENTIC_OPENROUTER_VISION_MODEL_STRATEGY", "").strip().lower()
+        openrouter_vision_pool_mode = vision_strategy == "free_pool" or (
+            vision_provider.lower() == "openrouter" and vision_model_raw.strip() == ""
+        )
+
+        if openrouter_text_pool_mode:
+            text_model_display = "free_pool"
+        else:
+            text_model_display = text_model_raw.strip() or "qwen/qwen3.6-plus:free"
+
+        if openrouter_vision_pool_mode:
+            vision_model_display = "free_pool"
+        else:
+            vision_model_display = vision_model_raw.strip() or "qwen/qwen3.6-plus:free"
+
+        rotate_text = os.environ.get("AGENTIC_OPENROUTER_ROTATE_TEXT_MODELS", "true").lower() in {"1", "true", "yes"}
+        rotate_vision = os.environ.get("AGENTIC_OPENROUTER_ROTATE_VISION_MODELS", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+        max_text_s = os.environ.get("AGENTIC_OPENROUTER_MAX_TEXT_MODELS_PER_CALL", "").strip()
+        max_vision_s = os.environ.get("AGENTIC_OPENROUTER_MAX_VISION_MODELS_PER_CALL", "").strip()
+        max_text_models = int(max_text_s) if max_text_s.isdigit() else 0
+        max_vision_models = int(max_vision_s) if max_vision_s.isdigit() else 0
+
+        text_fallback_provider = os.environ.get("AGENTIC_TEXT_FALLBACK_PROVIDER", "").strip()
+        text_fallback_model = os.environ.get("AGENTIC_TEXT_FALLBACK_MODEL", "").strip()
+
         return {
             "mode": self.mode,
             "text_provider": text_provider,
-            "text_model": text_model,
+            "text_model": text_model_display,
+            "text_model_raw": text_model_raw,
             "vision_provider": vision_provider,
-            "vision_model": vision_model,
+            "vision_model": vision_model_display,
+            "vision_model_raw": vision_model_raw,
             "random_models": random_models,
+            "openrouter_text_pool_mode": openrouter_text_pool_mode,
+            "openrouter_vision_pool_mode": openrouter_vision_pool_mode,
+            "openrouter_rotate_text_models": rotate_text,
+            "openrouter_rotate_vision_models": rotate_vision,
+            "openrouter_max_text_models_per_call": max_text_models,
+            "openrouter_max_vision_models_per_call": max_vision_models,
+            "text_fallback_provider": text_fallback_provider,
+            "text_fallback_model": text_fallback_model,
         }
 
     def _require_manager(self) -> Any:
@@ -1108,12 +1272,17 @@ class LLMPromptEngine:
         user_prompt: str,
         schema_name: str,
         schema: dict[str, Any],
+        *,
+        model: str = "text",
+        images: list[str] | None = None,
     ) -> Any:
-        response = manager.text_model.chat_completion(
+        chat_model = manager.vision_model if model == "vision" else manager.text_model
+        response = chat_model.chat_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            images=images,
             response_format={
                 "type": "json_schema",
                 "json_schema": {

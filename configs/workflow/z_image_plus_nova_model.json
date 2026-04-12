@@ -1,7 +1,7 @@
 {
   "67": {
     "inputs": {
-      "value": "A cute kawaii-style illustration featuring a towering stack of waddle dee characters.   Composition: Multiple waddle dee are playfully stacked on top of each other in a precarious Christmas tree-shaped pyramid formation, each with different adorable expressions and poses.  Some are sleeping with a small \"Zzz\" bubble, some are beaming with happy closed-eye smiles,  one at the bottom looks slightly squished and grumpy, and the waddle dee at the very top is stretching its arms out like a bright star.   Characters & Details: The stack includes waddle dee in various festive holiday hats, such as tiny Santa caps, reindeer antlers, and green elf hats. Some waddle dee are holding small colorful ornaments or striped candy canes. A few waddle dee are \"inhaling\" (pouty cheeks) to try and balance the stack.  Art Style: Soft pastel colors (pinks, mint greens, and warm reds), rounded shapes, chibi proportions, thick outlines, mobile game illustration style. Clean and polished digital art with a glossy, slightly 3D appearance, making them look like soft marshmallows.  Background: Simple pale icy blue gradient background with fluffy white clouds and sparkling golden stars and gently falling snowflakes. Minimal background to keep focus on the character stack.   Mood: Playful, cheerful, wholesome, stress-relieving, perfect for a casual mobile puzzle game aesthetic."
+      "value": "[主要神明組合 with: Kirby Mazu (卡比媽祖) — a perfectly spherical blush-pink Kirby wearing a miniature phoenix crown three sizes too large that slides down over one eye every few seconds, surfing a curling smoke wave on her tiny stubby feet with inexplicable grace, her ornate robes reskinned as a soft pink and gold Kirby-style cape billowing behind her — she has inhaled the ocean wind (吸入技能：海風) and is exhaling it as a directed blessing-beam of silver smoke toward the prayers below with the focused expression of a Kirby boss fight finisher — two Waddle Dee versions of Qianliyan and Shunfenger jog behind her on the wave, one wearing enormous googly-eye glasses to see a thousand miles, the other with a cardboard ear trumpet the size of his entire body, both absolutely failing to keep up with Kirby Mazu's effortless surf speed]. Additional background deities scattered throughout the rising smoke at various heights: a chibi Kitchen God (灶君) roasting a tiny smoke-marshmallow over a joss stick ember; a chibi Door God (門神) pair standing guard on two parallel smoke columns like tiny angry bouncers with their arms crossed; a chibi Jade Emperor (玉皇大帝) sitting on a throne-shaped smoke formation at the very top, looking down at the chaos below with a resigned \"why did I hire these people\" expression. THE HUMAN ELEMENT: At the base of the frame, partially visible, a small child tugging at their grandmother's sleeve and pointing excitedly at the smoke deities while grandma, eyes closed in prayer, doesn't notice — Kirby Mazu has spotted the child, stopped surfing entirely, and is hovering at the smoke boundary doing the classic Kirby victorious arm-raise (✋🌟) directly at them. The human occupies only the bottom 20% of the frame — this is the deities' show. Visual Style: The temple background is rendered in warm, slightly desaturated photorealistic tones — vermillion pillars, dark wooden beams, golden altar decorations, red lanterns casting warm ambient glow. The Kirby deities are rendered in a contrasting style: soft luminous cel-shading with HAL Laboratory's signature puffy-round aesthetic, their smoke-bodies having visible swirling internal texture like living clouds shaped into adorable Kirby forms — every deity maintains the iconic Kirby silhouette (perfect sphere, stubby arms, blush marks, dot eyes) while wearing divine Chinese regalia. Each deity emits a faint golden aura that casts tiny warm highlights on the real bronze censer and surrounding smoke. Volumetric god rays from high temple windows illuminate the smoke, making the Kirby deities glow where the light hits them. The contrast between the SACRED realistic temple and the ADORABLE Kirby deities is the entire point — divine beings are cuter than anyone expected. Technical specs: Shot on medium format, 4:5 portrait, f/2.8 for the censer sharp and smoke-deities at various focus planes creating dreamy depth layering, warm color temperature (3800K temple + golden deity glow), 8K resolution, the mood is equal parts sacred and hilarious — a temple where the gods are real, tiny, and having the time of their lives in your incense smoke."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -132,7 +132,7 @@
       "title": "VAE Decode"
     }
   },
-  "80:80": {
+  "80:97": {
     "inputs": {
       "images": [
         "80:43",
@@ -240,7 +240,7 @@
   },
   "81:78": {
     "inputs": {
-      "filename_prefix": "i2i",
+      "filename_prefix": "zimage_with_nova_i2i",
       "images": [
         "81:77",
         0
@@ -301,7 +301,7 @@
   },
   "81:76": {
     "inputs": {
-      "seed": 65,
+      "seed": 96,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",

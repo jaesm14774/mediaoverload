@@ -63,7 +63,7 @@ class ComfyWorkflowToolset:
             except KeyError:
                 continue
         requested = ", ".join(workflow_names)
-        raise KeyError(f"None of the preferred workflow manifests are available: {requested}")
+        raise KeyError(f"None of the preferred workflows are available (configs/workflow): {requested}")
 
     def register_tools(self, tool_registry: ToolRegistry) -> None:
         for spec_name in self.specs:
@@ -134,12 +134,17 @@ class ComfyWorkflowToolset:
         }
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        return {
+        result: dict[str, object] = {
             "run_dir": str(run_dir),
             "saved_files": saved_files,
             "summary_path": str(summary_path),
             "workflow_name": manifest.name,
         }
+        if not saved_files:
+            fallback = merged_payload.get("image_path") or merged_payload.get("input_image_path")
+            if fallback:
+                result["image_path"] = str(fallback)
+        return result
 
     def _build_updates(
         self,

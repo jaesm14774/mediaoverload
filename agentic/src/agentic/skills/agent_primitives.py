@@ -13,6 +13,28 @@ from agentic.runtime.prompting import (
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 
 
+def _asset_check_result(result: dict[str, object], success_log: str) -> SkillResult:
+    asset_status = result.get("asset_status", [])
+    if not isinstance(asset_status, list):
+        return SkillResult(status="success", outputs=result, logs=[success_log])
+
+    missing_assets = [
+        str(item.get("asset", "")).strip()
+        for item in asset_status
+        if isinstance(item, dict) and str(item.get("status", "")).lower() != "ready"
+    ]
+    if not missing_assets:
+        return SkillResult(status="success", outputs=result, logs=[success_log])
+
+    workflow_name = str(result.get("workflow_name", "")).strip()
+    details = ", ".join(asset for asset in missing_assets if asset) or "unknown assets"
+    return SkillResult(
+        status="failed",
+        outputs=result,
+        logs=[f"Workflow assets missing for '{workflow_name}': {details}"],
+    )
+
+
 class AgentPlanningSkills:
     def __init__(self, prompt_engine: PromptEngine | None = None) -> None:
         self.prompt_engine = prompt_engine or PromptEngine()
@@ -225,7 +247,7 @@ class AgentMediaSkills:
                 "auto_download": context.node.inputs.get("auto_download", False),
             },
         )
-        return SkillResult(status="success", outputs=result, logs=["Checked workflow assets for an agent step."])
+        return _asset_check_result(result, "Checked workflow assets for an agent step.")
 
     def refine_image(self, context: SkillContext) -> SkillResult:
         result = self.tools.call(
@@ -641,7 +663,9 @@ class AgentMediaSkills:
         image_path = context.node.inputs.get("image_path") or context.node.inputs.get("input_image_path")
         if isinstance(image_path, str) and image_path:
             return image_path
-        resolved = self._resolve_first(context, ("image_path", "frame_path", "saved_files", "media_paths"))
+        resolved = self._resolve_first(
+            context, ("image_path", "frame_path", "saved_files", "selected_assets", "media_paths")
+        )
         if not resolved:
             raise RuntimeError(f"No image path available for node '{context.node.node_id}'")
         return resolved

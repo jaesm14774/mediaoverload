@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import textwrap
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -155,6 +156,7 @@ class HumanReviewDecision:
     review_mode: str = "auto"
     session_id: str = ""
     session_path: str = ""
+    fallback_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -165,6 +167,7 @@ class HumanReviewDecision:
             "review_mode": self.review_mode,
             "session_id": self.session_id,
             "session_path": self.session_path,
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -199,45 +202,68 @@ class DiscordHumanReviewService:
                 selected_paths=filtered_media_paths,
                 edited_text=text,
                 review_mode="auto",
+                fallback_reason="discord review is not configured or no candidate files were found",
             )
 
         _logger().info("discord.review.start | candidate_count=%s | timeout_seconds=%s", len(filtered_media_paths), timeout_seconds)
-        decision = asyncio.run(
-            _run_discord_file_feedback_process(
-                token=str(os.getenv("discord_review_bot_token")),
-                channel_id=int(str(os.getenv("discord_review_channel_id"))),
-                text=text,
-                filepaths=filtered_media_paths,
-                timeout=float(timeout_seconds),
+        discord_text = _fit_discord_message(text, max_length=1900)
+        try:
+            decision = asyncio.run(
+                _run_discord_file_feedback_process(
+                    token=str(os.getenv("discord_review_bot_token")),
+                    channel_id=int(str(os.getenv("discord_review_channel_id"))),
+                    text=discord_text,
+                    filepaths=filtered_media_paths,
+                    timeout=float(timeout_seconds),
+                )
             )
-        )
+        except Exception as exc:
+            _logger().exception("discord.review.error | error=%s", exc)
+            decision = ("error", None, text, None)
         status, reviewer, edited_text, selected_indices = decision
         if edited_text is None:
             edited_text = text
         selected_paths = filtered_media_paths
-        if isinstance(selected_indices, list) and selected_indices:
-            selected_paths = [
-                filtered_media_paths[index]
-                for index in selected_indices
-                if isinstance(index, int) and 0 <= index < len(filtered_media_paths)
-            ]
+        fallback_reason = ""
+        review_mode = "discord"
+        normalized_status = "approved"
+        if status in {"accept", "edit"}:
+            if isinstance(selected_indices, list) and selected_indices:
+                selected_paths = [
+                    filtered_media_paths[index]
+                    for index in selected_indices
+                    if isinstance(index, int) and 0 <= index < len(filtered_media_paths)
+                ]
+        elif status == "reject":
+            normalized_status = "rejected"
+            selected_paths = []
+        else:
+            fallback_reason = {
+                "timeout": "discord review timed out before any decision was received",
+                "channel_unavailable": "discord review channel could not be resolved",
+                "error": "discord review failed before a decision was received",
+            }.get(str(status), "discord review did not return a valid human decision")
+            normalized_status = "failed"
         session_id = uuid.uuid4().hex
         session_path = self.review_root / f"{session_id}.json"
         payload = {
             "created_at": datetime.now().isoformat(),
             "text": text,
+            "discord_text": discord_text,
             "edited_text": edited_text,
             "media_paths": filtered_media_paths,
             "selected_paths": selected_paths,
             "status": status,
             "reviewer": reviewer or "",
-            "review_mode": "discord",
+            "review_mode": review_mode,
+            "normalized_status": normalized_status,
+            "fallback_reason": fallback_reason,
         }
         session_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        normalized_status = "approved" if status in {"accept", "edit"} else "rejected"
         _logger().info(
-            "discord.review.end | status=%s | selected_count=%s | reviewer=%s | session=%s",
+            "discord.review.end | status=%s | raw_status=%s | selected_count=%s | reviewer=%s | session=%s",
             normalized_status,
+            str(status),
             len(selected_paths),
             str(reviewer or ""),
             session_id,
@@ -247,10 +273,42 @@ class DiscordHumanReviewService:
             selected_paths=selected_paths,
             edited_text=str(edited_text),
             reviewer=str(reviewer or ""),
-            review_mode="discord",
+            review_mode=review_mode,
             session_id=session_id,
             session_path=str(session_path),
+            fallback_reason=fallback_reason,
         )
+
+
+def _fit_discord_message(text: str, *, max_length: int = 1900) -> str:
+    normalized = str(text or "").strip()
+    if len(normalized) <= max_length:
+        return normalized
+
+    lines = normalized.splitlines()
+    compact_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        compact = " ".join(stripped.split())
+        if compact.lower().startswith("goal:"):
+            compact = "Goal: " + textwrap.shorten(compact[5:].strip(), width=280, placeholder="...")
+        elif compact.lower().startswith("selection limit:"):
+            compact = compact
+        elif compact.lower().startswith("suggested ranking:"):
+            compact = "Suggested picks:"
+        elif compact[:2].isdigit() and ". " in compact:
+            compact = textwrap.shorten(compact, width=220, placeholder="...")
+        else:
+            compact = textwrap.shorten(compact, width=180, placeholder="...")
+        compact_lines.append(compact)
+
+    compact_lines.append("Use Accept to keep shown assets, Edit to choose assets, Reject to stop.")
+    compact_text = "\n".join(compact_lines)
+    if len(compact_text) <= max_length:
+        return compact_text
+    return textwrap.shorten(compact_text, width=max_length, placeholder="...")
 
 
 async def _run_discord_file_feedback_process(
@@ -370,9 +428,13 @@ async def _run_discord_file_feedback_process(
         try:
             channel = bot.get_channel(channel_id)
             if channel is None:
-                result = (None, None, None, None)
-                completed.set()
-                return
+                try:
+                    channel = await bot.fetch_channel(channel_id)
+                except Exception:
+                    _logger().exception("discord.review.fetch_channel.error | channel_id=%s", channel_id)
+                    result = ("channel_unavailable", None, text, None)
+                    completed.set()
+                    return
             files = [discord.File(path) for path in filepaths]
             view = ResponseView(files, text or "Review request", timeout=timeout)
             message = await channel.send(content=text or "Review request", files=files, view=view)
@@ -381,16 +443,43 @@ async def _run_discord_file_feedback_process(
                 await asyncio.wait_for(view.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 await message.edit(content=f"{text}\n\nTimed out.", view=None)
-                result = (None, None, None, None)
+                result = ("timeout", None, text, None)
             else:
                 result = (view.result, view.user_name, view.content, view.selected_files)
+        except Exception:
+            _logger().exception("discord.review.on_ready.error")
+            result = ("error", None, text, None)
         finally:
             completed.set()
 
     task = asyncio.create_task(bot.start(token))
+    completed_wait = asyncio.create_task(completed.wait())
     try:
-        await asyncio.wait_for(completed.wait(), timeout=timeout)
+        done, _pending = await asyncio.wait(
+            {task, completed_wait},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if completed_wait in done:
+            await completed_wait
+        elif task in done:
+            try:
+                await task
+            except Exception:
+                _logger().exception("discord.review.bot.start.error")
+            if not completed.is_set():
+                result = ("error", None, text, None)
+                completed.set()
+        else:
+            result = ("timeout", None, text, None)
+            completed.set()
     finally:
+        if not completed_wait.done():
+            completed_wait.cancel()
+            try:
+                await completed_wait
+            except asyncio.CancelledError:
+                pass
         if not bot.is_closed():
             await bot.close()
         if not task.done():

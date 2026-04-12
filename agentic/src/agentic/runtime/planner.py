@@ -22,7 +22,7 @@ class TaskPlanner:
             except KeyError:
                 continue
         requested = ", ".join(workflow_names)
-        raise KeyError(f"None of the preferred workflow manifests are available: {requested}")
+        raise KeyError(f"None of the preferred workflows are available (configs/workflow): {requested}")
 
     def _manifest_from_goal_constraints(
         self,
@@ -730,9 +730,9 @@ class TaskPlanner:
                     stage="review",
                 )
             )
-        animate_dependencies = ["idea-brief", "upscale-image", "video-asset-check"]
+        animate_dependencies = ["idea-brief", "render-image", "upscale-image", "video-asset-check"]
         if stage_review_enabled:
-            animate_dependencies = ["idea-brief", "stage-review-select", "video-asset-check"]
+            animate_dependencies = ["idea-brief", "render-image", "stage-review-select", "video-asset-check"]
         nodes.extend(
             [
             ExecutionNode(
@@ -1678,7 +1678,7 @@ class TaskPlanner:
     def _build_publish_review_plan(self, goal: GoalRequest) -> ExecutionPlan:
         platforms = goal.constraints.get("platforms") or []
         dry_run = bool(goal.constraints.get("dry_run", True))
-        selection_limit = int(goal.constraints.get("selection_limit") or 4)
+        selection_limit = int(goal.constraints.get("selection_limit") or 10)
         nodes = [
             ExecutionNode(
                 node_id="ingest-media",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,23 +13,33 @@ class AssetRequirement:
     kind: str
     target_dir: str
     source: str | None = None
+    alternate_target_dirs: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AssetRequirement":
+        raw_alt = data.get("alternate_target_dirs") or []
+        if isinstance(raw_alt, list):
+            alternate = tuple(item.strip() for item in map(str, raw_alt) if item.strip())
+        else:
+            alternate = ()
         return cls(
             name=data["name"],
             kind=data["kind"],
             target_dir=data["target_dir"],
             source=data.get("source"),
+            alternate_target_dirs=alternate,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "name": self.name,
             "kind": self.kind,
             "target_dir": self.target_dir,
             "source": self.source,
         }
+        if self.alternate_target_dirs:
+            payload["alternate_target_dirs"] = list(self.alternate_target_dirs)
+        return payload
 
 
 @dataclass(slots=True)
@@ -39,21 +50,10 @@ class WorkflowManifest:
     summary: str
     required_assets: list[AssetRequirement] = field(default_factory=list)
     recommended_defaults: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WorkflowManifest":
-        assets = [AssetRequirement.from_dict(item) for item in data.get("required_assets", [])]
-        return cls(
-            name=data["name"],
-            media_types=data.get("media_types", []),
-            workflow_path=data["workflow_path"],
-            summary=data.get("summary", ""),
-            required_assets=assets,
-            recommended_defaults=data.get("recommended_defaults", {}),
-        )
+    asset_extra_roots: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "name": self.name,
             "media_types": self.media_types,
             "workflow_path": self.workflow_path,
@@ -61,41 +61,106 @@ class WorkflowManifest:
             "required_assets": [asset.to_dict() for asset in self.required_assets],
             "recommended_defaults": self.recommended_defaults,
         }
+        if self.asset_extra_roots:
+            payload["asset_extra_roots"] = list(self.asset_extra_roots)
+        return payload
+
+
+_WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
+    "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
+    "z_image_i2i_anime": {"denoise": 0.7},
+    "wan2.2_gguf_i2v": {"frame_rate": 16},
+    "wan2.2_gguf_i2v_audio": {"frame_rate": 16},
+}
+
+
+def _workflow_json_dir(project_root: Path) -> Path:
+    """Prefer repo-level configs/workflow when project_root is the agentic package dir."""
+    parent_wf = project_root.parent / "configs" / "workflow"
+    nested_wf = project_root / "configs" / "workflow"
+    if parent_wf.is_dir() and any(parent_wf.glob("*.json")):
+        return parent_wf
+    if nested_wf.is_dir():
+        return nested_wf
+    return parent_wf
+
+
+def _relative_to_project(project_root: Path, absolute_file: Path) -> str:
+    root = project_root.resolve()
+    wf = absolute_file.resolve()
+    try:
+        return str(wf.relative_to(root))
+    except ValueError:
+        return str(Path(os.path.relpath(str(wf), str(root))))
+
+
+def _infer_media_types(stem: str) -> list[str]:
+    lower = stem.lower()
+    shared_image = [
+        "image",
+        "storyboard",
+        "animated_sticker",
+        "carousel",
+        "sticker_pack",
+        "text2img2img",
+    ]
+    if "upscal" in lower or "tile" in lower:
+        return ["image_upscale"]
+    if "i2i" in lower or lower == "image_to_image":
+        return ["image_refine"]
+    if "i2v" in lower or ("wan" in lower and "gguf" in lower):
+        return ["image_to_video", "image_to_video_audio", "long_video"]
+    return shared_image + ["text2video", "text2img2video", "video_narrate"]
+
+
+def _synthetic_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
+    return WorkflowManifest(
+        name=name,
+        media_types=_infer_media_types(name),
+        workflow_path=workflow_rel_path,
+        summary="",
+        required_assets=[],
+        recommended_defaults=dict(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
+        asset_extra_roots=[],
+    )
 
 
 class AssetRegistry:
-    def __init__(self, manifest_dir: Path, project_root: Path, asset_root: Path | None = None) -> None:
-        self.manifest_dir = manifest_dir
+    def __init__(self, project_root: Path, asset_root: Path | None = None) -> None:
         self.project_root = project_root
-        self.asset_root = asset_root or project_root
-        self._manifests = self._load_manifests()
+        self.asset_root = asset_root or project_root.parent
+        self._workflow_dir = _workflow_json_dir(project_root)
+        self._manifests = self._discover_workflows()
 
-    def _load_manifests(self) -> dict[str, WorkflowManifest]:
+    def _discover_workflows(self) -> dict[str, WorkflowManifest]:
         manifests: dict[str, WorkflowManifest] = {}
-        if not self.manifest_dir.exists():
+        if not self._workflow_dir.is_dir():
             return manifests
-        for path in sorted(self.manifest_dir.glob("*.json")):
-            data = json.loads(path.read_text(encoding="utf-8"))
-            manifest = WorkflowManifest.from_dict(data)
-            manifests[manifest.name] = manifest
+        for path in sorted(self._workflow_dir.glob("*.json")):
+            stem = path.stem
+            rel = _relative_to_project(self.project_root, path)
+            manifests[stem] = _synthetic_manifest(stem, rel)
         return manifests
 
     def all_manifests(self) -> list[WorkflowManifest]:
         return list(self._manifests.values())
 
     def refresh(self) -> None:
-        self._manifests = self._load_manifests()
+        self._workflow_dir = _workflow_json_dir(self.project_root)
+        self._manifests = self._discover_workflows()
 
     def get_manifest(self, name: str) -> WorkflowManifest:
         if name not in self._manifests:
-            raise KeyError(f"Unknown workflow manifest: {name}")
+            raise KeyError(
+                f"Unknown workflow: {name!r}. Expected a JSON file in {self._workflow_dir} (stem matches name)."
+            )
         return self._manifests[name]
 
     def pick_workflow(self, media_type: str) -> WorkflowManifest:
         recommendations = self.recommend_workflows(media_type, limit=1)
         if recommendations:
             return self.get_manifest(str(recommendations[0]["workflow_name"]))
-        raise LookupError(f"No workflow manifest supports media type: {media_type}")
+        raise LookupError(f"No workflow JSON supports media type: {media_type} (under {self._workflow_dir})")
 
     def recommend_workflows(
         self,
@@ -254,7 +319,7 @@ class AssetRegistry:
     def ensure_requirements(self, manifest: WorkflowManifest, auto_download: bool) -> list[dict[str, Any]]:
         statuses: list[dict[str, Any]] = []
         for requirement in manifest.required_assets:
-            candidate_paths = self._candidate_asset_paths(requirement)
+            candidate_paths = self._candidate_asset_paths(manifest, requirement)
             existing_path = next((path for path in candidate_paths if path.exists()), None)
             target_path = existing_path or candidate_paths[0]
             exists = existing_path is not None
@@ -280,34 +345,50 @@ class AssetRegistry:
             )
         return statuses
 
-    def _candidate_asset_paths(self, requirement: AssetRequirement) -> list[Path]:
-        target_dir = Path(requirement.target_dir)
-        candidate_dirs: list[Path] = [self.asset_root / target_dir]
+    @staticmethod
+    def _dedupe_search_bases(bases: list[Path]) -> list[Path]:
+        seen: set[str] = set()
+        ordered: list[Path] = []
+        for base in bases:
+            expanded = base.expanduser()
+            key = os.path.normcase(os.path.abspath(str(expanded)))
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(expanded)
+        return ordered
 
+    @staticmethod
+    def _expand_candidate_dirs(base: Path, target_dir: Path) -> list[Path]:
+        candidate_dirs: list[Path] = [base / target_dir]
         if target_dir.parts and target_dir.parts[0].lower() == "comfyui":
             trimmed_dir = Path(*target_dir.parts[1:]) if len(target_dir.parts) > 1 else Path()
-            candidate_dirs.append(self.asset_root / trimmed_dir)
-
-        if self.asset_root.name.lower() != "comfyui":
-            candidate_dirs.append(self.asset_root / "ComfyUI" / target_dir)
+            candidate_dirs.append(base / trimmed_dir)
+        if base.name.lower() != "comfyui":
+            candidate_dirs.append(base / "ComfyUI" / target_dir)
             if target_dir.parts and target_dir.parts[0].lower() == "comfyui":
                 trimmed_dir = Path(*target_dir.parts[1:]) if len(target_dir.parts) > 1 else Path()
-                candidate_dirs.append(self.asset_root / "ComfyUI" / trimmed_dir)
+                candidate_dirs.append(base / "ComfyUI" / trimmed_dir)
+        return candidate_dirs
 
+    def _candidate_asset_paths(self, manifest: WorkflowManifest, requirement: AssetRequirement) -> list[Path]:
+        target_dirs = (Path(requirement.target_dir), *[Path(item) for item in requirement.alternate_target_dirs])
+        extra_roots = [Path(item) for item in manifest.asset_extra_roots]
+        bases = self._dedupe_search_bases([self.asset_root, *extra_roots])
         unique_dirs: list[Path] = []
         seen: set[str] = set()
-        for path in candidate_dirs:
-            resolved_key = str(path)
-            if resolved_key in seen:
-                continue
-            seen.add(resolved_key)
-            unique_dirs.append(path)
-
+        for base in bases:
+            for target_dir in target_dirs:
+                for dir_path in self._expand_candidate_dirs(base, target_dir):
+                    key = str(dir_path)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    unique_dirs.append(dir_path)
         return [path / requirement.name for path in unique_dirs]
 
     def materialize_workflow(self, manifest: WorkflowManifest) -> Path:
-        workflow_path = self.project_root / manifest.workflow_path
-        return workflow_path
+        return (self.project_root / manifest.workflow_path).resolve()
 
     def load_workflow_template(self, manifest: WorkflowManifest) -> dict[str, Any]:
         path = self.materialize_workflow(manifest)
@@ -319,4 +400,3 @@ class AssetRegistry:
     def _tokenize(text: str) -> set[str]:
         normalized = "".join(character.lower() if character.isalnum() else " " for character in text)
         return {part for part in normalized.split() if len(part) >= 3}
-

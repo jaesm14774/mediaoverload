@@ -404,6 +404,34 @@ def _route_generation_from_character_config(
         generation_type_candidates,
     )
     count_policies = _collect_count_policies(merged_routing, generation_type_candidates)
+    if preferred_generation_type:
+        selected_generation_type = str(preferred_generation_type).strip()
+        workflow_plan = {
+            stage_key: (workflow_stage_candidates.get(selected_generation_type, {}).get(stage_key, [""])[0] or "")
+            for stage_key in (
+                "image_workflow_name",
+                "video_workflow_name",
+                "refine_workflow_name",
+                "transition_workflow_name",
+                "upscale_workflow_name",
+            )
+        }
+        count_plan = {
+            count_key: _pick_policy_value(policy)
+            for count_key, policy in dict(count_policies.get(selected_generation_type, {}) or {}).items()
+        }
+        return {
+            "generation_type": selected_generation_type,
+            "workflow_name": _primary_workflow_name(selected_generation_type, workflow_plan),
+            "workflow_plan": workflow_plan,
+            "count_plan": count_plan,
+            "reason": "preferred_generation_type override",
+            "prompt_mode": "override",
+            "llm_backend": {},
+            "workflow_stage_candidates": workflow_stage_candidates,
+            "generation_type_candidates": generation_type_candidates,
+            "count_policies": count_policies,
+        }
     route_prompt = str(prompt).strip() or character_name
     engine = LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
     routing_hints = merged_routing.get("routing_hints", {})
@@ -611,6 +639,14 @@ def _collect_count_policies(
     return policies
 
 
+def _pick_policy_value(policy: dict[str, Any]) -> int:
+    if not isinstance(policy, dict):
+        return 1
+    minimum = int(policy.get("min", 1))
+    maximum = int(policy.get("max", minimum))
+    return minimum if minimum <= maximum else maximum
+
+
 def _load_global_routing_config(repo_root: Path) -> dict[str, Any]:
     routing_path = repo_root / "configs" / "routing.yaml"
     if not routing_path.exists():
@@ -633,43 +669,45 @@ def _merge_routing_config(base: dict[str, Any], override: dict[str, Any]) -> dic
     return merged
 
 
+def _workflow_definitions_dir(repo_root: Path) -> Path:
+    return repo_root / "configs" / "workflow"
+
+
+def _list_workflow_stems(repo_root: Path) -> set[str]:
+    wf_dir = _workflow_definitions_dir(repo_root)
+    if not wf_dir.is_dir():
+        return set()
+    return {path.stem for path in wf_dir.glob("*.json")}
+
+
 def _resolve_workflow_references(repo_root: Path, references: list[Any]) -> list[str]:
-    manifest_index = _load_workflow_manifest_index(repo_root)
+    stems = _list_workflow_stems(repo_root)
+    wf_dir = _workflow_definitions_dir(repo_root)
     resolved: list[str] = []
     for reference in references:
-        name = _resolve_manifest_name_from_reference(repo_root, manifest_index, reference)
+        name = _resolve_workflow_name_from_reference(repo_root, stems, wf_dir, reference)
         if name and name not in resolved:
             resolved.append(name)
     return resolved
 
 
-def _load_workflow_manifest_index(repo_root: Path) -> dict[str, dict[str, Any]]:
-    manifest_dir = repo_root / "agentic" / "configs" / "workflow_manifests"
-    manifests: dict[str, dict[str, Any]] = {}
-    if not manifest_dir.exists():
-        return manifests
-    for manifest_path in sorted(manifest_dir.glob("*.json")):
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifests[str(data["name"])] = data
-    return manifests
-
-
-def _resolve_manifest_name_from_reference(
+def _resolve_workflow_name_from_reference(
     repo_root: Path,
-    manifests: dict[str, dict[str, Any]],
+    stems: set[str],
+    wf_dir: Path,
     reference: Any,
 ) -> str | None:
     normalized = str(reference or "").strip()
     if not normalized:
         return None
-    if normalized in manifests:
+    if normalized in stems:
         return normalized
     resolved_reference = _resolve_repo_path(repo_root, normalized).resolve()
-    agentic_root = repo_root / "agentic"
-    for manifest_name, manifest in manifests.items():
-        workflow_path = (agentic_root / str(manifest.get("workflow_path", ""))).resolve()
-        if workflow_path == resolved_reference:
-            return manifest_name
+    if not wf_dir.is_dir():
+        return None
+    for path in sorted(wf_dir.glob("*.json")):
+        if path.resolve() == resolved_reference:
+            return path.stem
     return None
 
 

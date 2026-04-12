@@ -1,4 +1,4 @@
-"""Asset registries and manifests."""
+"""Asset registry and workflow discovery (configs/workflow JSON)."""
 
 from .catalog import CatalogLoader, LegacyCapability, WorkflowToolSpec
 from .registry import AssetRegistry, AssetRequirement, WorkflowManifest

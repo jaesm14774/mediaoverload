@@ -35,12 +35,6 @@ class SocialServiceTools:
             platforms=platforms,
             platform_bundle=platform_bundle if isinstance(platform_bundle, dict) else {},
         )
-        post = MediaPost(
-            media_paths=media_paths,
-            caption=caption,
-            hashtags=hashtags_str,
-            additional_params=dict(payload.get("additional_params", {}) or {}),
-        )
         if dry_run:
             return {
                 "status": "dry_run",
@@ -54,10 +48,30 @@ class SocialServiceTools:
         service = self._publishing_service()
         for platform_name, platform_config in platform_configs.items():
             service.register_platform(str(platform_name), dict(platform_config))
-        results = service.publish(post=post, platforms=platforms or None)
+        effective_platforms = platforms or list(dispatch_plan.keys())
+        results: dict[str, bool] = {}
+        errors: dict[str, str] = {}
+        for platform in effective_platforms:
+            platform_plan = dispatch_plan.get(platform, {})
+            platform_media_paths = [str(path) for path in platform_plan.get("media_paths", media_paths)]
+            platform_post = MediaPost(
+                media_paths=platform_media_paths,
+                caption=str(platform_plan.get("caption") or caption),
+                hashtags=str(platform_plan.get("hashtags") or hashtags_str or ""),
+                additional_params=dict(payload.get("additional_params", {}) or {}),
+            )
+            try:
+                platform_result = service.publish(post=platform_post, platforms=[platform])
+                results[platform] = bool(platform_result.get(platform))
+                if not results[platform]:
+                    errors[platform] = f"RuntimeError: Publishing returned false for {platform}"
+            except Exception as exc:
+                results[platform] = False
+                errors[platform] = f"{type(exc).__name__}: {exc}"
         return {
-            "status": "success",
+            "status": "success" if not errors else "partial_failure",
             "results": results,
+            "errors": errors,
             "media_paths": media_paths,
             "caption": caption,
             "hashtags": hashtags_str,
@@ -88,17 +102,18 @@ class SocialServiceTools:
                 bundle = {}
             platform_caption = str(bundle.get("caption") or caption)
             platform_hashtags = str(bundle.get("hashtags") or hashtags)
+            platform_media_paths = [str(path) for path in bundle.get("media_paths", media_paths)]
             validation = bundle.get("validation", {})
             if not isinstance(validation, dict):
                 validation = {}
             dispatch_plan[platform] = {
                 "caption": platform_caption,
                 "hashtags": platform_hashtags,
-                "media_paths": [str(path) for path in media_paths],
+                "media_paths": platform_media_paths,
                 "validation": {
                     "has_caption": bool(validation.get("has_caption", platform_caption)),
-                    "has_media": bool(validation.get("has_media", media_paths)),
-                    "is_publish_ready": bool(validation.get("is_publish_ready", bool(platform_caption) and bool(media_paths))),
+                    "has_media": bool(validation.get("has_media", platform_media_paths)),
+                    "is_publish_ready": bool(validation.get("is_publish_ready", bool(platform_caption) and bool(platform_media_paths))),
                 },
             }
         return dispatch_plan

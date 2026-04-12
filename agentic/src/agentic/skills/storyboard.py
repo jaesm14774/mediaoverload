@@ -4,6 +4,28 @@ from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 
 
+def _asset_check_result(result: dict[str, object], success_log: str) -> SkillResult:
+    asset_status = result.get("asset_status", [])
+    if not isinstance(asset_status, list):
+        return SkillResult(status="success", outputs=result, logs=[success_log])
+
+    missing_assets = [
+        str(item.get("asset", "")).strip()
+        for item in asset_status
+        if isinstance(item, dict) and str(item.get("status", "")).lower() != "ready"
+    ]
+    if not missing_assets:
+        return SkillResult(status="success", outputs=result, logs=[success_log])
+
+    workflow_name = str(result.get("workflow_name", "")).strip()
+    details = ", ".join(asset for asset in missing_assets if asset) or "unknown assets"
+    return SkillResult(
+        status="failed",
+        outputs=result,
+        logs=[f"Workflow assets missing for '{workflow_name}': {details}"],
+    )
+
+
 class StoryboardSkills:
     def __init__(self, tools: ToolRegistry) -> None:
         self.tools = tools
@@ -43,7 +65,7 @@ class StoryboardSkills:
                 "auto_download": False,
             },
         )
-        return SkillResult(status="success", outputs=result, logs=["Validated local storyboard workflow."])
+        return _asset_check_result(result, "Validated local storyboard workflow.")
 
     def render_frames(self, context: SkillContext) -> SkillResult:
         script = context.state["script-plan"]

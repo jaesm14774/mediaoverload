@@ -28,6 +28,7 @@ from agentic.tools.authoring import register_authoring_tools
 from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
 from agentic.tools.local import register_local_tools
 from agentic.tools.media_services import register_media_service_tools
+from agentic.tools.model_resolver import register_model_resolver_tools
 from agentic.tools.social_services import register_social_service_tools
 
 
@@ -40,7 +41,6 @@ def build_runtime(
     run_id: str | None = None,
 ) -> tuple[TaskPlanner, WorkflowRunner, RunMemory]:
     asset_registry = AssetRegistry(
-        root / "configs" / "workflow_manifests",
         root,
         asset_root=comfy_root or root.parent,
     )
@@ -66,6 +66,7 @@ def build_runtime(
     )
     register_media_service_tools(tool_registry, resolved_output_root)
     register_social_service_tools(tool_registry, resolved_output_root)
+    register_model_resolver_tools(tool_registry, comfy_host=comfy_host, comfy_port=comfy_port)
     register_agent_primitive_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_agent_social_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_comfy_image_skills(skill_registry, tool_registry, resolved_output_root)

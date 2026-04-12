@@ -71,7 +71,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     self.repo_root,
                     self.kirby_config,
                     prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
-                    preferred_generation_type="sticker_pack",
                 )
 
     def test_build_goal_payload_generates_prompt_from_news_when_prompt_missing(self) -> None:

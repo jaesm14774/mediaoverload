@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import textwrap
 
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
@@ -29,6 +30,40 @@ class AgentSocialSkills:
             media_paths=selected_media,
             review_notes=str(context.plan.goal.constraints.get("review_notes", "") or ""),
         )
+        review_select = context.state[context.node.depends_on[0]] if context.node.depends_on else {}
+        edited_review_text = str(review_select.get("edited_review_text") or "").strip()
+        if edited_review_text:
+            caption_override, hashtags_override = self._split_review_caption_and_hashtags(edited_review_text)
+            if caption_override:
+                bundle["caption"] = caption_override
+            if hashtags_override:
+                bundle["hashtags"] = hashtags_override
+            platform_captions = bundle.get("platform_captions", {})
+            if not isinstance(platform_captions, dict):
+                platform_captions = {}
+            effective_platforms = platforms or list(platform_captions.keys())
+            for platform in effective_platforms:
+                platform_captions[str(platform)] = caption_override or str(platform_captions.get(platform) or bundle["caption"])
+            bundle["platform_captions"] = platform_captions
+            platform_bundle = bundle.get("platform_bundle", {})
+            if isinstance(platform_bundle, dict):
+                for platform in effective_platforms:
+                    payload = platform_bundle.get(str(platform), {})
+                    if not isinstance(payload, dict):
+                        payload = {}
+                    payload["caption"] = caption_override or str(payload.get("caption") or bundle["caption"])
+                    payload["hashtags"] = hashtags_override or str(payload.get("hashtags") or bundle.get("hashtags", ""))
+                    payload["character_count"] = len(str(payload["caption"]))
+                    validation = payload.get("validation", {})
+                    if not isinstance(validation, dict):
+                        validation = {}
+                    validation["has_caption"] = bool(payload["caption"])
+                    validation["has_media"] = bool(selected_media)
+                    validation["is_publish_ready"] = bool(payload["caption"]) and bool(selected_media)
+                    payload["validation"] = validation
+                    platform_bundle[str(platform)] = payload
+                bundle["platform_bundle"] = platform_bundle
+            bundle["dispatch_ready"] = bool(selected_media) and bool(bundle.get("caption"))
         return SkillResult(
             status="success",
             outputs={
@@ -40,6 +75,7 @@ class AgentSocialSkills:
                 "dispatch_ready": bool(bundle.get("dispatch_ready", False)),
                 "prompt_mode": str(bundle.get("prompt_mode", "template")),
                 "selected_assets": selected_media,
+                "edited_review_text": edited_review_text,
             },
             logs=["Prepared a reusable social caption bundle."],
         )
@@ -174,11 +210,24 @@ class AgentSocialSkills:
         selected = [path for path in bundle.get("selected_assets", []) if path in ranked][:limit]
         if not selected:
             selected = ranked[:limit]
+        hashtags = context.plan.goal.constraints.get("hashtags") or []
+        platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or [])]
+        caption_bundle = self.prompt_engine.prepare_publish_caption(
+            context.plan.goal,
+            prefix="",
+            hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
+            platforms=platforms,
+            media_paths=selected or ranked[:limit],
+            review_notes=str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
+        )
         review_text = self._build_review_text(
             prompt=context.plan.goal.prompt,
             review_notes=str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
             ranked_candidates=bundle.get("ranked_candidates", heuristic_ranked),
             selection_limit=limit,
+            draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
+            draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
+            platforms=platforms,
         )
         decision = self.discord_review.review_candidates(
             text=review_text,
@@ -205,6 +254,26 @@ class AgentSocialSkills:
                     },
                     logs=["Blocked workflow because the Discord reviewer rejected the candidate set."],
                 )
+            if decision.status == "failed":
+                return SkillResult(
+                    status="blocked",
+                    outputs={
+                        "media_paths": [],
+                        "selected_assets": [],
+                        "selected_count": 0,
+                        "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
+                        "rejected_assets": [],
+                        "selection_rationale": "Discord review did not complete.",
+                        "regeneration_notes": decision.edited_text or str(context.node.inputs.get("review_notes") or ""),
+                        "review_mode": decision.review_mode,
+                        "reviewer": decision.reviewer,
+                        "review_session_id": decision.session_id,
+                        "review_session_path": decision.session_path,
+                        "prompt_mode": str(bundle.get("prompt_mode", "template")),
+                        "fallback_reason": getattr(decision, "fallback_reason", ""),
+                    },
+                    logs=["Blocked workflow because Discord review did not complete successfully."],
+                )
             if decision.selected_paths:
                 selected = [path for path in decision.selected_paths if path in ranked]
         rejected = [path for path in ranked if path not in selected]
@@ -230,6 +299,7 @@ class AgentSocialSkills:
                 "review_session_id": decision.session_id,
                 "review_session_path": decision.session_path,
                 "edited_review_text": decision.edited_text,
+                "fallback_reason": getattr(decision, "fallback_reason", ""),
             },
             metrics={"selected_count": len(selected)},
             logs=["Selected a best-effort shortlist of candidate assets."],
@@ -242,21 +312,51 @@ class AgentSocialSkills:
         review_notes: str,
         ranked_candidates: list[dict[str, object]],
         selection_limit: int,
+        draft_caption: str,
+        draft_hashtags: str,
+        platforms: list[str],
     ) -> str:
-        lines = [
-            f"Goal: {prompt}",
-            f"Selection limit: {selection_limit}",
-        ]
-        if review_notes:
-            lines.append(f"Review notes: {review_notes}")
-        if ranked_candidates:
-            lines.append("Suggested ranking:")
-            for index, candidate in enumerate(ranked_candidates[:selection_limit], start=1):
-                lines.append(
-                    f"{index}. {candidate.get('media_path', '')} | score={candidate.get('score', '')} | {candidate.get('rationale', '')}"
-                )
-        lines.append("Accept to continue, Reject to stop, or Edit to change review notes and chosen assets.")
-        return "\n".join(lines)
+        return AgentSocialSkills._format_review_post(
+            caption=str(draft_caption or prompt),
+            hashtags=str(draft_hashtags or ""),
+            platforms=platforms,
+        )
+
+    @staticmethod
+    def _candidate_label(media_path: str) -> str:
+        if not media_path:
+            return "unknown"
+        path = Path(media_path)
+        parts = [part for part in (path.parent.parent.name, path.name) if part]
+        label = "/".join(parts) if parts else path.name
+        return textwrap.shorten(label, width=80, placeholder="...")
+
+    @staticmethod
+    def _format_review_post(*, caption: str, hashtags: str, platforms: list[str]) -> str:
+        del platforms
+        lines = [str(caption).strip()]
+        if hashtags.strip():
+            lines.extend(["", hashtags.strip()])
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _split_review_caption_and_hashtags(review_text: str) -> tuple[str, str]:
+        lines = [line.rstrip() for line in review_text.splitlines()]
+        content_lines: list[str] = []
+        hashtag_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.lower().startswith("draft post:") or stripped.lower().startswith("platforms:"):
+                continue
+            if stripped.startswith("#"):
+                hashtag_lines.append(stripped)
+                continue
+            if stripped.lower().startswith("accept to publish with these assets"):
+                continue
+            content_lines.append(stripped)
+        return "\n".join(content_lines).strip(), "\n".join(hashtag_lines).strip()
 
     @staticmethod
     def _collect_media_from_dependencies(context: SkillContext) -> list[str]:
@@ -292,15 +392,16 @@ class AgentSocialSkills:
                 bundle_validation = {}
             platform_caption = str(bundle.get("caption") or caption)
             platform_hashtags = str(bundle.get("hashtags") or hashtags)
+            platform_media_paths = [str(path) for path in bundle.get("media_paths", media_paths)]
             validation = {
                 "has_caption": bool(platform_caption),
-                "has_media": bool(media_paths),
-                "is_publish_ready": bool(bundle_validation.get("is_publish_ready", bool(platform_caption) and bool(media_paths))),
+                "has_media": bool(platform_media_paths),
+                "is_publish_ready": bool(bundle_validation.get("is_publish_ready", bool(platform_caption) and bool(platform_media_paths))),
             }
             dispatch_plan[platform] = {
                 "caption": platform_caption,
                 "hashtags": platform_hashtags,
-                "media_paths": [str(path) for path in media_paths],
+                "media_paths": platform_media_paths,
                 "validation": validation,
             }
         return dispatch_plan

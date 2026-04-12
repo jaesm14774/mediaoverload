@@ -29,6 +29,24 @@ class ChatModel(Protocol):
     def chat_completion(self, messages: list[dict], images: list[str] | None = None, **kwargs) -> str: ...
 
 
+class FallbackChatModel:
+    def __init__(self, primary: ChatModel, fallback: ChatModel) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def chat_completion(self, messages: list[dict], images: list[str] | None = None, **kwargs) -> str:
+        try:
+            return self._primary.chat_completion(messages, images=images, **kwargs)
+        except Exception as primary_exc:
+            try:
+                return self._fallback.chat_completion(messages, images=images, **kwargs)
+            except Exception as fallback_exc:
+                raise ValueError(
+                    f"Fallback LLM failed after primary error ({type(primary_exc).__name__}: {primary_exc}). "
+                    f"Fallback: {type(fallback_exc).__name__}: {fallback_exc}"
+                ) from fallback_exc
+
+
 class OllamaModel:
     def __init__(self, config: ModelConfig) -> None:
         import ollama
@@ -103,6 +121,7 @@ class OpenRouterModel:
     def __init__(self, config: ModelConfig) -> None:
         _load_project_env()
         self.config = config
+        self.last_success_model: str = ""
         self.api_key = (
             os.environ.get("open_router_token")
             or os.environ.get("OPENROUTER_API_KEY")
@@ -128,16 +147,17 @@ class OpenRouterModel:
     def get_random_free_vision_model(cls) -> str:
         return random.choice(cls.FREE_VISION_MODELS)
 
-    def chat_completion(
+    def chat_completion_single_model(
         self,
+        model_name: str,
         messages: list[dict],
         images: list[str] | None = None,
         max_retries: int = 5,
         initial_retry_delay: float = 3.0,
-        **kwargs,
+        **kwargs: object,
     ) -> str:
         payload = {
-            "model": self.config.model_name,
+            "model": model_name,
             "messages": self._process_messages_with_images(messages, images),
             "temperature": self.config.temperature,
         }
@@ -152,7 +172,9 @@ class OpenRouterModel:
                 response.raise_for_status()
                 body = response.json()
                 message = body["choices"][0]["message"]
-                return self._extract_message_text(message)
+                text = self._extract_message_text(message)
+                self.last_success_model = model_name
+                return text
             except (requests.RequestException, KeyError, ValueError) as exc:
                 last_error = exc
                 if attempt >= max_retries - 1:
@@ -160,7 +182,26 @@ class OpenRouterModel:
                 import time
 
                 time.sleep(initial_retry_delay * (1.5**attempt))
-        raise ValueError(f"OpenRouter API call failed after {max_retries} attempts: {last_error}")
+        raise ValueError(
+            f"OpenRouter API call failed for model {model_name!r} after {max_retries} attempts: {last_error}"
+        )
+
+    def chat_completion(
+        self,
+        messages: list[dict],
+        images: list[str] | None = None,
+        max_retries: int = 5,
+        initial_retry_delay: float = 3.0,
+        **kwargs: object,
+    ) -> str:
+        return self.chat_completion_single_model(
+            self.config.model_name,
+            messages,
+            images=images,
+            max_retries=max_retries,
+            initial_retry_delay=initial_retry_delay,
+            **kwargs,
+        )
 
     @staticmethod
     def _extract_message_text(message: dict[str, object]) -> str:
@@ -227,6 +268,46 @@ class OpenRouterModel:
         mime_type = mime_types.get(suffix, "image/jpeg")
         encoded = base64.b64encode(Path(image_path).read_bytes()).decode("utf-8")
         return f"data:{mime_type};base64,{encoded}"
+
+
+class OpenRouterRotatingModel:
+    """同一請求內：單一 model 重試後仍失敗則換池中下一個 model。"""
+
+    def __init__(
+        self,
+        config: ModelConfig,
+        candidate_models: list[str],
+        *,
+        max_models_per_call: int | None = None,
+    ) -> None:
+        if not candidate_models:
+            raise ValueError("OpenRouterRotatingModel requires a non-empty candidate_models list.")
+        limit = max_models_per_call if max_models_per_call and max_models_per_call > 0 else len(candidate_models)
+        self._candidates = candidate_models[:limit]
+        self._inner = OpenRouterModel(ModelConfig(model_name=self._candidates[0], temperature=config.temperature))
+        self.last_success_model: str = ""
+
+    def chat_completion(
+        self,
+        messages: list[dict],
+        images: list[str] | None = None,
+        **kwargs: object,
+    ) -> str:
+        last_error: Exception | None = None
+        for model_name in self._candidates:
+            try:
+                text = self._inner.chat_completion_single_model(
+                    model_name,
+                    messages,
+                    images=images,
+                    **kwargs,
+                )
+                self.last_success_model = model_name
+                return text
+            except ValueError as exc:
+                last_error = exc
+                continue
+        raise ValueError(f"OpenRouter: exhausted text model candidates. Last error: {last_error}")
 
 
 @dataclass(slots=True)

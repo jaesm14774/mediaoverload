@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import unittest
+import uuid
+import shutil
+from pathlib import Path
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, SkillContext, SkillResult
 from agentic.runtime.registry import SkillRegistry
 from agentic.runtime.runner import WorkflowRunner
+from agentic.skills.agent_primitives import AgentMediaSkills
 
 
 class WorkflowRunnerTests(unittest.TestCase):
+    def make_workspace_tempdir(self) -> Path:
+        base_dir = Path(__file__).resolve().parents[1] / ".tmp-tests"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = base_dir / f"workflow-runner-{uuid.uuid4().hex}"
+        temp_dir.mkdir()
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        return temp_dir
+
     def test_runner_records_prompt_modes_and_lineage(self) -> None:
         registry = SkillRegistry()
 
@@ -136,6 +148,41 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.records[0].status, "failed")
         self.assertIn("RuntimeError: llm unavailable", result.records[0].logs[0])
+
+    def test_agent_media_asset_check_fails_when_required_assets_are_missing(self) -> None:
+        class FakeTools:
+            @staticmethod
+            def call(name: str, payload: dict[str, object]) -> dict[str, object]:
+                self.assertEqual(name, "asset.ensure_workflow_ready")
+                self.assertEqual(payload["workflow_name"], "wan2.2_gguf_i2v")
+                return {
+                    "workflow_name": "wan2.2_gguf_i2v",
+                    "asset_status": [
+                        {"asset": "wan2.2_high_noise_model.safetensors", "status": "missing", "action": "manual_setup"},
+                        {"asset": "wan2.2_low_noise_model.safetensors", "status": "missing", "action": "manual_setup"},
+                    ],
+                }
+
+        skills = AgentMediaSkills(FakeTools(), self.make_workspace_tempdir())
+        context = SkillContext(
+            plan=ExecutionPlan(
+                goal=GoalRequest(prompt="kirby push-in shot"),
+                workflow_name="text2img2video_v1",
+                nodes=[],
+            ),
+            node=ExecutionNode(
+                node_id="video-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={"workflow_name": "wan2.2_gguf_i2v", "auto_download": False},
+            ),
+            state={},
+        )
+
+        result = skills.ensure_workflow(context)
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("wan2.2_high_noise_model.safetensors", result.logs[0])
+        self.assertIn("wan2.2_low_noise_model.safetensors", result.logs[0])
 
 
 if __name__ == "__main__":
