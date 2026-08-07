@@ -8,7 +8,7 @@ from unittest.mock import patch
 from agentic.tools.comfy_backend import AgenticComfyCommunicator
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.media_services import MediaServiceTools
-from agentic.tools.social_native import InstagramGraphPlatform, MediaPost
+from agentic.tools.social_native import InstagramGraphPlatform, MediaPost, YouTubePlatform
 from agentic.tools.social_services import SocialServiceTools
 from agentic.tools.tts_adapter import TTSAdapter
 
@@ -304,6 +304,130 @@ class InstagramGraphPlatformTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(captured["path"], image_path)
         self.assertEqual(len(captured["caption"]), platform.CAPTION_MAX)
+
+
+class SocialServiceToolsYouTubeTests(unittest.TestCase):
+    def test_publish_social_passes_platform_bundle_additional_params_to_youtube(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+
+        captured_posts: dict[str, object] = {}
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def process_media(self, media_paths: list[str], output_dir: str) -> list[str]:
+                return media_paths
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                platform_name = (platforms or ["youtube"])[0]
+                captured_posts[platform_name] = post
+                return {platform_name: True}
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+
+        result = tools.publish_social(
+            {
+                "media_paths": ["video.mp4"],
+                "caption": "Generic caption",
+                "hashtags": "#kirby",
+                "platforms": ["youtube", "instagram_graph"],
+                "platform_configs": {
+                    "youtube": {"config_folder_path": "configs/yt"},
+                    "instagram_graph": {"config_folder_path": "configs/ig"},
+                },
+                "platform_bundle": {
+                    "youtube": {
+                        "caption": "YouTube caption",
+                        "hashtags": "#kirby #youtube",
+                        "media_paths": ["video.mp4"],
+                        "additional_params": {
+                            "youtube_title": "Kirby Neon Adventure",
+                            "youtube_tags": ["kirby", "animation"],
+                        },
+                    },
+                    "instagram_graph": {
+                        "caption": "IG caption",
+                        "hashtags": "#kirby",
+                        "media_paths": ["video.mp4"],
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "success")
+        yt_post = captured_posts["youtube"]
+        self.assertEqual(yt_post.additional_params.get("youtube_title"), "Kirby Neon Adventure")  # type: ignore[union-attr]
+        self.assertEqual(yt_post.additional_params.get("youtube_tags"), ["kirby", "animation"])  # type: ignore[union-attr]
+        ig_post = captured_posts["instagram_graph"]
+        self.assertNotIn("youtube_title", ig_post.additional_params or {})  # type: ignore[operator]
+
+    def test_publish_social_platform_bundle_additional_params_merged_with_global(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+
+        captured_posts: dict[str, object] = {}
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def process_media(self, media_paths: list[str], output_dir: str) -> list[str]:
+                return media_paths
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                platform_name = (platforms or ["youtube"])[0]
+                captured_posts[platform_name] = post
+                return {platform_name: True}
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+
+        tools.publish_social(
+            {
+                "media_paths": ["video.mp4"],
+                "caption": "caption",
+                "hashtags": "#kirby",
+                "platforms": ["youtube"],
+                "platform_configs": {"youtube": {"config_folder_path": "configs/yt"}},
+                "additional_params": {"youtube_made_for_kids": False},
+                "platform_bundle": {
+                    "youtube": {
+                        "caption": "YT caption",
+                        "media_paths": ["video.mp4"],
+                        "additional_params": {"youtube_title": "Title Override"},
+                    }
+                },
+            }
+        )
+
+        yt_post = captured_posts["youtube"]
+        self.assertEqual(yt_post.additional_params.get("youtube_title"), "Title Override")  # type: ignore[union-attr]
+        self.assertFalse(yt_post.additional_params.get("youtube_made_for_kids"))  # type: ignore[union-attr]
+
+
+class YouTubePlatformTests(unittest.TestCase):
+    @patch.object(YouTubePlatform, "authenticate")
+    @patch.object(YouTubePlatform, "load_config")
+    def test_build_video_request_derives_metadata_from_caption(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = YouTubePlatform("configs/social_media/credentials/kirby")
+        platform.default_privacy_status = "private"
+        platform.default_category_id = "22"
+        platform.default_notify_subscribers = False
+        platform.default_made_for_kids = False
+        platform.default_contains_synthetic_media = True
+
+        body, notify_subscribers = platform._build_video_request(
+            MediaPost(media_paths=["clip.mp4"], caption="Kirby launch\nWith neon rain", hashtags="#kirby #mediaoverload"),
+            "clip.mp4",
+        )
+
+        self.assertEqual(body["snippet"]["title"], "Kirby launch")
+        self.assertIn("With neon rain", body["snippet"]["description"])
+        self.assertEqual(body["snippet"]["categoryId"], "22")
+        self.assertEqual(body["status"]["privacyStatus"], "private")
+        self.assertTrue(body["status"]["containsSyntheticMedia"])
+        self.assertEqual(body["snippet"]["tags"], ["kirby", "mediaoverload"])
+        self.assertFalse(notify_subscribers)
 
 
 if __name__ == "__main__":

@@ -889,6 +889,26 @@ class LLMPromptEngine:
         }
         manager = self._require_manager()
 
+        include_youtube = "youtube" in [p.lower() for p in platforms]
+        youtube_instructions = (
+            [
+                "For youtube: also return youtube_title (max 100 chars, catchy standalone video title) "
+                "and youtube_tags (list of short keyword strings without #).",
+            ]
+            if include_youtube
+            else []
+        )
+        schema_properties: dict[str, Any] = {
+            "caption": {"type": "string"},
+            "hashtags": {"type": "string"},
+            "platform_captions": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+        }
+        if include_youtube:
+            schema_properties["youtube_title"] = {"type": "string"}
+            schema_properties["youtube_tags"] = {"type": "array", "items": {"type": "string"}}
         user_prompt = "\n".join(
             [
                 f"Goal: {goal.prompt}",
@@ -905,6 +925,7 @@ class LLMPromptEngine:
                 "If required hashtags are provided, include them naturally inside the final hashtag line.",
                 "Keep hashtags space-separated and prefixed with #.",
                 "Adapt platform_captions per platform when platforms are supplied.",
+                *youtube_instructions,
             ]
         )
         try:
@@ -915,14 +936,7 @@ class LLMPromptEngine:
                 schema_name="publish_caption",
                 schema={
                     "type": "object",
-                    "properties": {
-                        "caption": {"type": "string"},
-                        "hashtags": {"type": "string"},
-                        "platform_captions": {
-                            "type": "object",
-                            "additionalProperties": {"type": "string"},
-                        },
-                    },
+                    "properties": schema_properties,
                     "required": ["caption", "hashtags", "platform_captions"],
                     "additionalProperties": False,
                 },
@@ -935,13 +949,17 @@ class LLMPromptEngine:
                 str(payload.get("hashtags") or fallback["hashtags"]).strip(),
                 required_hashtags=normalized_hashtags,
             )
-            return self._mark_llm_payload(
-                {
+            result: dict[str, Any] = {
                 "caption": normalized_caption,
                 "hashtags": normalized_hashtag_text,
                 "platform_captions": {str(key): str(value).strip() for key, value in platform_captions.items()},
-                }
-            )
+            }
+            if include_youtube:
+                raw_yt_title = payload.get("youtube_title")
+                raw_yt_tags = payload.get("youtube_tags")
+                result["youtube_title"] = str(raw_yt_title or "").strip()
+                result["youtube_tags"] = [str(tag).strip() for tag in (raw_yt_tags or []) if str(tag).strip()]
+            return self._mark_llm_payload(result)
         except Exception as exc:
             raise self._generation_error("prepare_publish_caption", exc) from exc
 

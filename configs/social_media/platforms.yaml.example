@@ -14,6 +14,11 @@ social_media:
       prefix: ""
       enabled: true
 
+    youtube:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+
     twitter:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""

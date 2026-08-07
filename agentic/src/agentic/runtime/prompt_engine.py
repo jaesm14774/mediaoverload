@@ -166,7 +166,7 @@ class PromptEngine:
         platform_bundle: dict[str, dict[str, Any]] = {}
         for platform in effective_platforms:
             caption = str(platform_captions.get(platform) or bundle.get("caption", "")).strip()
-            platform_bundle[str(platform)] = {
+            entry: dict[str, Any] = {
                 "caption": caption,
                 "hashtags": normalized_hashtags,
                 "character_count": len(caption),
@@ -176,6 +176,17 @@ class PromptEngine:
                     "is_publish_ready": bool(caption) and bool(media_paths),
                 },
             }
+            if str(platform).lower() == "youtube":
+                yt_title = str(bundle.get("youtube_title") or "").strip()
+                if not yt_title:
+                    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
+                    yt_title = first_line[:100]
+                yt_tags = list(bundle.get("youtube_tags") or [])
+                entry["additional_params"] = {
+                    "youtube_title": yt_title,
+                    "youtube_tags": yt_tags,
+                }
+            platform_bundle[str(platform)] = entry
         bundle["platform_bundle"] = platform_bundle
         bundle["caption_strategy"] = "platform_adapted" if platform_bundle else "generic"
         bundle["dispatch_ready"] = bool(media_paths) and bool(bundle.get("caption"))

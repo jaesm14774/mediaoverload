@@ -579,6 +579,201 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         self.temp_files = []
 
 
+class YouTubePlatform(BaseConfigPlatform):
+    TOKEN_URI = "https://oauth2.googleapis.com/token"
+    UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+    VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".webm", ".mkv", ".m4v"}
+    TITLE_MAX = 100
+    DESCRIPTION_MAX = 5000
+
+    def __init__(self, config_folder_path: str, prefix: str = "") -> None:
+        super().__init__(config_folder_path, prefix)
+        self.client_id: str | None = None
+        self.client_secret: str | None = None
+        self.refresh_token: str | None = None
+        self.channel_id: str | None = None
+        self.default_privacy_status = "private"
+        self.default_category_id = "22"
+        self.default_notify_subscribers = False
+        self.default_made_for_kids = False
+        self.default_contains_synthetic_media = True
+        self.service = None
+        self.load_config()
+        self.authenticate()
+
+    def load_config(self) -> None:
+        load_dotenv(self._config_path() / "youtube.env")
+
+    def authenticate(self) -> None:
+        self.client_id = os.getenv("YOUTUBE_CLIENT_ID")
+        self.client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
+        self.refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN")
+        self.channel_id = os.getenv("YOUTUBE_CHANNEL_ID")
+        self.default_privacy_status = str(os.getenv("YOUTUBE_PRIVACY_STATUS", "private")).strip().lower() or "private"
+        self.default_category_id = str(os.getenv("YOUTUBE_CATEGORY_ID", "22")).strip() or "22"
+        self.default_notify_subscribers = _coerce_bool(os.getenv("YOUTUBE_NOTIFY_SUBSCRIBERS"), default=False)
+        self.default_made_for_kids = _coerce_bool(os.getenv("YOUTUBE_MADE_FOR_KIDS"), default=False)
+        self.default_contains_synthetic_media = _coerce_bool(
+            os.getenv("YOUTUBE_CONTAINS_SYNTHETIC_MEDIA"),
+            default=True,
+        )
+        missing = [
+            key
+            for key, value in {
+                "YOUTUBE_CLIENT_ID": self.client_id,
+                "YOUTUBE_CLIENT_SECRET": self.client_secret,
+                "YOUTUBE_REFRESH_TOKEN": self.refresh_token,
+            }.items()
+            if not value
+        ]
+        if missing:
+            raise ValueError(f"Missing YouTube credentials: {', '.join(missing)}")
+        self.service = self._build_service()
+
+    def upload_post(self, post: MediaPost) -> bool:
+        video_path = next(
+            (
+                path
+                for path in post.media_paths
+                if Path(path).exists() and Path(path).suffix.lower() in self.VIDEO_EXTENSIONS
+            ),
+            "",
+        )
+        if not video_path:
+            raise ValueError("YouTube publishing requires at least one local video file")
+
+        body, notify_subscribers = self._build_video_request(post, video_path)
+        media_body = self._build_media_upload(video_path)
+        request = self.service.videos().insert(  # type: ignore[union-attr]
+            part="snippet,status",
+            body=body,
+            notifySubscribers=notify_subscribers,
+            media_body=media_body,
+        )
+        response = None
+        while response is None:
+            _, response = request.next_chunk()
+        if self.channel_id and str(response.get("snippet", {}).get("channelId", "")).strip():
+            uploaded_channel = str(response["snippet"]["channelId"]).strip()
+            if uploaded_channel != self.channel_id:
+                raise RuntimeError(
+                    f"YouTube upload landed on unexpected channel: expected={self.channel_id} actual={uploaded_channel}"
+                )
+        return bool(response.get("id"))
+
+    def _build_service(self):
+        try:
+            from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+        except ImportError as exc:
+            raise RuntimeError(
+                "Missing YouTube client dependencies; install google-api-python-client and google-auth-oauthlib"
+            ) from exc
+
+        credentials = Credentials(
+            token=None,
+            refresh_token=self.refresh_token,
+            token_uri=self.TOKEN_URI,
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            scopes=[self.UPLOAD_SCOPE],
+        )
+        credentials.refresh(Request())
+        return build("youtube", "v3", credentials=credentials, cache_discovery=False)
+
+    @staticmethod
+    def _build_media_upload(video_path: str):
+        try:
+            from googleapiclient.http import MediaFileUpload
+        except ImportError as exc:
+            raise RuntimeError(
+                "Missing YouTube client dependencies; install google-api-python-client and google-auth-oauthlib"
+            ) from exc
+        return MediaFileUpload(video_path, chunksize=-1, resumable=True)
+
+    def _build_video_request(self, post: MediaPost, video_path: str) -> tuple[dict[str, Any], bool]:
+        additional = dict(post.additional_params or {})
+        title = str(additional.get("youtube_title") or self._derive_title(post.caption, video_path)).strip()
+        description = str(
+            additional.get("youtube_description")
+            or self._derive_description(post.caption, post.hashtags)
+        ).strip()
+        tags = self._derive_tags(additional.get("youtube_tags"), post.hashtags)
+        privacy_status = str(additional.get("youtube_privacy_status") or self.default_privacy_status).strip().lower()
+        category_id = str(additional.get("youtube_category_id") or self.default_category_id).strip() or "22"
+        notify_subscribers = _coerce_bool(
+            additional.get("youtube_notify_subscribers"),
+            default=self.default_notify_subscribers,
+        )
+        made_for_kids = _coerce_bool(
+            additional.get("youtube_made_for_kids"),
+            default=self.default_made_for_kids,
+        )
+        contains_synthetic_media = _coerce_bool(
+            additional.get("youtube_contains_synthetic_media"),
+            default=self.default_contains_synthetic_media,
+        )
+        publish_at = str(additional.get("youtube_publish_at") or "").strip()
+
+        snippet: dict[str, Any] = {
+            "title": title[: self.TITLE_MAX] or Path(video_path).stem[: self.TITLE_MAX],
+            "description": description[: self.DESCRIPTION_MAX],
+            "categoryId": category_id,
+        }
+        if tags:
+            snippet["tags"] = tags
+        status: dict[str, Any] = {
+            "privacyStatus": privacy_status or "private",
+            "selfDeclaredMadeForKids": made_for_kids,
+            "containsSyntheticMedia": contains_synthetic_media,
+        }
+        if publish_at and status["privacyStatus"] == "private":
+            status["publishAt"] = publish_at
+        return {"snippet": snippet, "status": status}, notify_subscribers
+
+    @staticmethod
+    def _derive_title(caption: str, video_path: str) -> str:
+        lines = [line.strip() for line in str(caption or "").splitlines() if line.strip()]
+        if lines:
+            return lines[0]
+        return Path(video_path).stem.replace("_", " ").replace("-", " ")
+
+    @staticmethod
+    def _derive_description(caption: str, hashtags: str | None) -> str:
+        parts = [str(caption or "").strip(), str(hashtags or "").strip()]
+        return "\n\n".join(part for part in parts if part)
+
+    @staticmethod
+    def _derive_tags(raw_tags: Any, hashtags: str | None) -> list[str]:
+        tags: list[str] = []
+        if isinstance(raw_tags, list):
+            tags.extend(str(tag).strip().lstrip("#") for tag in raw_tags if str(tag).strip())
+        elif isinstance(raw_tags, str):
+            tags.extend(token.strip().lstrip("#") for token in raw_tags.replace(",", " ").split() if token.strip())
+        if hashtags:
+            tags.extend(token.strip().lstrip("#") for token in str(hashtags).split() if token.strip())
+        deduped: list[str] = []
+        for tag in tags:
+            normalized = tag.strip()
+            if normalized and normalized not in deduped:
+                deduped.append(normalized)
+        return deduped[:500]
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 class PublishingService:
     def __init__(self) -> None:
         self.social_media_manager = SocialMediaManager()
@@ -620,6 +815,8 @@ class PublishingService:
             platform = FacebookPlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
         elif normalized == "instagram_graph":
             platform = InstagramGraphPlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
+        elif normalized == "youtube":
+            platform = YouTubePlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
         else:
             raise ValueError(f"Unsupported agentic-native publishing platform: {platform_name}")
         self.social_media_manager.register_platform(platform_name, platform)

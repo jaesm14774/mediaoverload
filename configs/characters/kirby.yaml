@@ -4,6 +4,9 @@ character:
 
 generation:
   output_dir: /app/output_media
+  generation_type_weights:
+    text2image2video: 1
+    text2longvideo: 1
 
 social_media:
   default_hashtags:
@@ -17,6 +20,11 @@ social_media:
       enabled: true
 
     facebook:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+
+    youtube:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""
       enabled: true

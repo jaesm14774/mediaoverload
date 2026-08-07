@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import yaml
@@ -134,6 +134,10 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "social_media": {
                     "default_hashtags": ["global_tag"],
                     "platforms": {
+                        "youtube": {
+                            "config_folder_path": "/app/configs/social_media/credentials/kirby",
+                            "enabled": True,
+                        },
                         "twitter": {
                             "config_folder_path": "/app/configs/social_media/credentials/kirby",
                             "enabled": True,
@@ -171,12 +175,16 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
         self.assertIn("twitter", payload["constraints"]["platforms"])
         self.assertIn("instagram_graph", payload["constraints"]["platforms"])
+        self.assertIn("youtube", payload["constraints"]["platforms"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "Kirby")
         self.assertIn("twitter", payload["character_config_summary"]["enabled_platforms"])
 
     def test_build_goal_payload_skips_disabled_and_unsupported_platforms(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "character.yaml"
+        temp_dir = self.repo_root / ".tmp-tests" / "character-workflow"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        config_path = temp_dir / "character.yaml"
+        try:
             config_path.write_text(
                 yaml.safe_dump(
                     {
@@ -235,6 +243,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     config_path,
                     prompt="kirby social clip",
                 )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
         self.assertEqual(payload["constraints"]["platforms"], ["instagram_graph", "twitter"])
         self.assertEqual(payload["constraints"]["platform_aliases"]["instagram"], "instagram_graph")

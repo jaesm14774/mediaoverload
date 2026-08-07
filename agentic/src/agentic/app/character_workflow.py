@@ -14,7 +14,7 @@ from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.step_logger import create_run_logger
 from agentic.tools.context_services import NewsContextService
 
-SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph"}
+SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube"}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm"}
 
 CONFIG_MEDIA_TYPE_MAP = {

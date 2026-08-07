@@ -51,14 +51,20 @@ class SocialServiceTools:
         effective_platforms = platforms or list(dispatch_plan.keys())
         results: dict[str, bool] = {}
         errors: dict[str, str] = {}
+        global_additional_params = dict(payload.get("additional_params", {}) or {})
         for platform in effective_platforms:
             platform_plan = dispatch_plan.get(platform, {})
             platform_media_paths = [str(path) for path in platform_plan.get("media_paths", media_paths)]
+            platform_bundle_entry = platform_bundle.get(platform, {}) if isinstance(platform_bundle, dict) else {}
+            platform_additional_params = {
+                **global_additional_params,
+                **dict(platform_bundle_entry.get("additional_params", {}) or {}),
+            }
             platform_post = MediaPost(
                 media_paths=platform_media_paths,
                 caption=str(platform_plan.get("caption") or caption),
                 hashtags=str(platform_plan.get("hashtags") or hashtags_str or ""),
-                additional_params=dict(payload.get("additional_params", {}) or {}),
+                additional_params=platform_additional_params,
             )
             try:
                 platform_result = service.publish(post=platform_post, platforms=[platform])
