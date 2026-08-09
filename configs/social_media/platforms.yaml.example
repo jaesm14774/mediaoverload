@@ -22,4 +22,5 @@ social_media:
     twitter:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""
-      enabled: true
+      # X API requires paid credits; enable explicitly after billing validation.
+      enabled: false

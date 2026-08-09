@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,12 @@ from agentic.runtime.prompting import (
     build_goal_brief,
     build_sticker_prompt,
     build_story_segments,
+)
+from agentic.storyboard import (
+    evaluate_native_h3_story_quality,
+    native_h3_duration_from_times,
+    native_h3_shot_times,
+    validate_native_h3_shot_timing,
 )
 
 WORKFLOW_STAGE_KEYS = (
@@ -307,6 +314,467 @@ class LLMPromptEngine:
             fallback["news_context"] = dict(news_context or {})
             return fallback
 
+    def generate_native_h3_storyboard(
+        self,
+        *,
+        character: str,
+        style: str,
+        duration_seconds: int,
+        base_storyboard: dict[str, Any],
+        news_context: dict[str, Any],
+        creative_brief: str = "",
+    ) -> dict[str, Any]:
+        """Generate the complete causal story consumed by native H3.
+
+        This intentionally has no template fallback. Native H3 must either
+        receive a valid news-grounded storyboard from the configured LLM or
+        fail before any keyframe/video workflow is submitted.
+        """
+        manager = self._require_manager()
+        expected_times = native_h3_shot_times(base_storyboard)
+        if int(duration_seconds) not in {15, 20}:
+            raise PromptGenerationError("Native H3 storyboard generation currently supports duration_seconds=15 or 20.")
+        world = dict(base_storyboard.get("world") or {})
+        continuity_rules = world.get("continuity_rules") or []
+        if not isinstance(continuity_rules, list) or not continuity_rules:
+            raise PromptGenerationError(
+                "Native H3 base storyboard must define non-empty world.continuity_rules."
+            )
+        for key, value in news_context.items():
+            if isinstance(value, str) and len(value) > 2000:
+                raise PromptGenerationError(f"Native H3 news_context.{key} exceeds 2000 characters.")
+        if len(str(creative_brief or "")) > 2000:
+            raise PromptGenerationError("Native H3 creative_brief exceeds 2000 characters.")
+        schema = {
+            "type": "object",
+            "properties": {
+                "story": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "base_prompt": {"type": "string"},
+                        "opening_keyframe_prompt": {"type": "string"},
+                        "ending_keyframe_prompt": {"type": "string"},
+                        "negative_prompt": {"type": "string"},
+                        "story_spine": {
+                            "type": "object",
+                            "properties": {
+                                "premise": {"type": "string"},
+                                "objective": {"type": "string"},
+                                "obstacle": {"type": "string"},
+                                "stakes": {"type": "string"},
+                                "emotional_arc": {"type": "string"},
+                                "climax": {"type": "string"},
+                                "resolution": {"type": "string"},
+                            },
+                            "required": [
+                                "premise",
+                                "objective",
+                                "obstacle",
+                                "stakes",
+                                "emotional_arc",
+                                "climax",
+                                "resolution",
+                            ],
+                            "additionalProperties": False,
+                        },
+                        "world": {
+                            "type": "object",
+                            "properties": {
+                                "setting": {"type": "string"},
+                                "visual_language": {"type": "string"},
+                                "continuity_rules": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "minItems": 1,
+                                    "maxItems": 12,
+                                },
+                            },
+                            "required": ["setting", "visual_language", "continuity_rules"],
+                            "additionalProperties": False,
+                        },
+                        "native_audio": {"type": "string"},
+                        "native_shots": {
+                            "type": "array",
+                            "minItems": len(expected_times),
+                            "maxItems": len(expected_times),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "time": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "action": {"type": "string"},
+                                    "camera": {"type": "string"},
+                                    "state_change": {"type": "string"},
+                                },
+                                "required": ["time", "title", "action", "camera", "state_change"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": [
+                        "name",
+                        "base_prompt",
+                        "opening_keyframe_prompt",
+                        "ending_keyframe_prompt",
+                        "negative_prompt",
+                        "story_spine",
+                        "world",
+                        "native_audio",
+                        "native_shots",
+                    ],
+                    "additionalProperties": False,
+                },
+                "creative_seed": {"type": "string"},
+                "source": {"type": "string"},
+            },
+            "required": ["story", "creative_seed", "source"],
+            "additionalProperties": False,
+        }
+        self._apply_native_h3_schema_limits(schema)
+        safe_creative_brief = self._sanitize_native_h3_creative_brief(creative_brief)
+        user_prompt = "\n".join(
+            [
+                f"Character: {character}",
+                f"Style: {style}",
+                f"Duration seconds: {int(duration_seconds)}",
+                f"Creative brief: {safe_creative_brief}",
+                f"News context JSON: {json.dumps(news_context, ensure_ascii=False)}",
+                f"Generate a new, original, publishable short-form story for one continuous native H3 clip with {len(expected_times)} causal beats.",
+                "The news context is mandatory creative input: translate it into concrete visual motifs, a tension, or a prop; do not recreate the headline literally.",
+                "The character must remain the clear protagonist and the story must be complete within the requested duration.",
+                "base_prompt is an identity-and-animation-style anchor only: keep it concise, do not describe a calm/peaceful opening, fixed camera, or a posed character, and do not let it conflict with the first shot's disruption.",
+                "Write the positive video description in MiniMax H3's integrated multimodal order: each shot has a timestamp, visible action, camera movement, and state change; keep overall_soundscape and non_diegetic_music as separate audio directions.",
+                "Attach the camera instruction to the action it controls. Prefer one concrete camera movement per beat (follow, push in, pan, tilt, pull out, or a deliberate static hold after motion), and use a readable physical handoff between beats.",
+                f"Return exactly {len(expected_times)} causal native_shots. Use these recommended beat windows as a pacing guide: {', '.join(expected_times)}. You may adjust internal boundaries, but the numeric ranges must be contiguous from 0s to {int(duration_seconds)}s with no gaps or overlap. Use the beat order hook, promise, escalation, reversal, payoff when five beats are requested; each beat must change the mission state and hand off visibly to the next beat.",
+                "Story quality contract: the hook must show a striking disruption within the first second and create one concrete question; the protagonist must visibly want one thing and risk losing something specific.",
+                "The middle must contain a visible setback or reversal that costs the protagonist something and changes the plan; do not describe a smooth journey with no price.",
+                "The final beat must resolve the same objective introduced in the hook and show physical evidence of the resolution; do not introduce a new quest or end on an unexplained spectacle.",
+                "Short-video rhythm contract: every beat has one dominant physical action, one visible composition change, one visible state change, and one reason to keep watching; avoid an atmospheric opening with no problem.",
+                "Prefer one simple, readable threat that can be seen in silhouette (for example a strong gust, collapsing surface, rolling object, or spreading shadow). Avoid complex machines, distant facilities, extra characters, or background lore that the video model may ignore.",
+                "Write actions as visible cause-and-effect: the threat must displace the central prop, Kirby must visibly fail or lose ground, the plan must change, and the payoff must visibly restore the prop or world. Do not let the character merely look at, hold, or pose with the prop across multiple beats.",
+                "Use concrete verbs and consequences in state_change. Avoid vague phrases such as Kirby reacts, the mood shifts, the scene becomes exciting, or the story progresses.",
+                "Do not use readable words, letters, numbers, signs, labels, subtitles, headlines, or written symbols anywhere in the visuals; communicate the idea through shape, color, gesture, and physical props only.",
+                "Do not use writing-bearing props or marked surfaces such as documents, reports, newspapers, ledgers, charts, screens, interfaces, glyphs, runes, or financial symbols. Translate news into unmarked physical shapes, color, light, motion, and environmental change.",
+                "The first shot must show visible character or camera motion within the first second and must not hold the opening pose; every beat must change composition and mission state rather than repeating a setup.",
+                "Do not reuse the base storyboard's plot, props, setting, or ending. The base storyboard only supplies character and continuity rules.",
+                f"Character identity rule: one {character} only; preserve its identity, proportions, silhouette, and palette in every shot.",
+                "Do not add humans, extra named characters, subtitles, logos, or written news text.",
+            ]
+        )
+        payload = self._chat_json(
+            manager,
+            LONG_VIDEO_SYSTEM_PROMPT,
+            user_prompt,
+            schema_name="native_h3_storyboard",
+            schema=schema,
+        )
+        story: dict[str, Any] | None = None
+        validation_error: PromptGenerationError | None = None
+        for repair_round in range(4):
+            try:
+                story = self._validate_native_h3_story_payload(
+                    payload,
+                    expected_times=expected_times,
+                    duration_seconds=duration_seconds,
+                )
+                break
+            except PromptGenerationError as error:
+                validation_error = error
+                if repair_round >= 3:
+                    raise
+            repaired_payload = self._chat_json(
+                manager,
+                LONG_VIDEO_SYSTEM_PROMPT,
+                self._build_native_h3_repair_prompt(
+                    user_prompt,
+                    validation_error,
+                    expected_times=expected_times,
+                    duration_seconds=duration_seconds,
+                ),
+                schema_name=f"native_h3_storyboard_repair_{repair_round + 1}",
+                schema=schema,
+            )
+            payload = repaired_payload
+        if story is None:
+            raise validation_error or PromptGenerationError("Native H3 story validation did not produce a story.")
+        return self._mark_llm_payload(
+            {
+                "story": story,
+                "creative_seed": str(payload.get("creative_seed") or "").strip(),
+                "source": str(payload.get("source") or "native_h3_llm").strip(),
+                "news_context": dict(news_context),
+                "story_quality": evaluate_native_h3_story_quality(story, expected_times=expected_times),
+            }
+        )
+
+    @staticmethod
+    def _sanitize_native_h3_creative_brief(creative_brief: str) -> str:
+        text = " ".join(str(creative_brief or "").split()).strip()
+        if not text:
+            return ""
+        risky_patterns = (
+            r"\d",
+            r"%",
+            r"ticker",
+            r"document",
+            r"report",
+            r"newspaper",
+            r"ledger",
+            r"chart",
+            r"graph",
+            r"screen",
+            r"interface",
+            r"symbol",
+            r"數字",
+            r"報表",
+            r"圖表",
+            r"股票",
+            r"營收",
+            r"台股",
+        )
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in risky_patterns):
+            return (
+                "Use only abstract atmosphere, color, weather, and emotional emphasis from the supplied brief; "
+                "do not copy its objects, text-bearing props, figures, named locations, or literal reporting."
+            )
+        return text[:600]
+
+    @staticmethod
+    def _build_native_h3_repair_prompt(
+        user_prompt: str,
+        validation_error: PromptGenerationError,
+        *,
+        expected_times: tuple[str, ...] | list[str] | None = None,
+        duration_seconds: int | float | None = None,
+    ) -> str:
+        """Build a repair request without echoing forbidden cue vocabulary.
+
+        The first implementation appended the complete validation error and the
+        original prohibition list to the repair request. That gave the LLM the
+        exact words the validator rejects and could make it copy them into
+        positive visual fields again. Keep structural instructions, replace the
+        text-cue rules with an abstract repair instruction, and preserve the
+        no-fallback behavior if the replacement still fails validation.
+        """
+        error_text = str(validation_error)
+        repair_times = tuple(expected_times or ("0-4s", "4-10s", "10-15s"))
+        repair_duration = int(duration_seconds or native_h3_duration_from_times(repair_times))
+        visual_repair = "forbidden readable-text visual cues" in error_text
+        retained_lines = []
+        for line in str(user_prompt).splitlines():
+            if line.startswith("Do not use readable words"):
+                continue
+            if line.startswith("Do not use writing-bearing props"):
+                continue
+            if line.startswith("Do not add humans"):
+                continue
+            if visual_repair and (
+                line.startswith("Creative brief:") or line.startswith("News context JSON:")
+            ):
+                continue
+            retained_lines.append(line)
+        if visual_repair:
+            retained_lines.append(
+                "Use the news only as an abstract emotional or environmental cue; do not reproduce headline wording, figures, names, marks, or text-bearing objects."
+            )
+        if visual_repair:
+            issue = (
+                "The positive visual fields contain a writing or signage cue, or a copied rule about such a cue. "
+                "Rewrite those fields using only visible action, camera, environment, lighting, and physical props. "
+                "Put all exclusions only in negative_prompt; do not mention the validation rule in any positive field."
+            )
+        elif "story_spine missing required values:" in error_text:
+            missing_fields = error_text.split("story_spine missing required values:", 1)[1].strip()
+            issue = (
+                f"Fill these missing story_spine fields with concrete story content: {missing_fields}. "
+                "They must be non-empty consequences or stakes tied to this story, not placeholders. "
+                "Do not omit any other story_spine field."
+            )
+        elif "base_prompt must be an identity" in error_text:
+            issue = (
+                "Rewrite base_prompt as a concise character identity and animation-style anchor only. "
+                "Remove calm, peaceful, serene, static, fixed-camera, or posed-opening language; the first shot must begin with visible disruption."
+            )
+        elif "native_shots item" in error_text and "missing values:" in error_text:
+            issue = (
+                f"Repair the incomplete shot described by this validation issue: {error_text}. "
+                f"Return exactly {len(repair_times)} shots using {', '.join(repair_times)} as recommended windows. Their numeric ranges must be contiguous from 0s to {repair_duration}s. Every shot must contain a non-empty time, title, action, camera, and state_change."
+            )
+        elif "hook must contain a visible disruption or motion in the opening beat" in error_text:
+            issue = (
+                "Repair the opening beat specifically. Rewrite both native_shots[0].action and native_shots[0].camera, "
+                "while preserving the same protagonist, objective, setting, and visual identity. The first second must show "
+                "one unmistakable physical event that changes screen position or physical state: name the obstacle or central prop, "
+                "show what moves or is displaced, and show Kirby reacting to it. Use a concrete visible motion verb such as "
+                "forms, whips, tears loose, rushes, grabs, slides, falls, bursts, or flies. Do not open on a static pose, "
+                "observation, waiting, or an atmosphere-only establishing frame. The camera must also describe motion or a motivated "
+                "reframe that follows this event. Keep every later shot causal and make the second shot a consequential setback."
+            )
+        elif "story quality is insufficient:" in error_text:
+            beat_contract = (
+                "make the second shot a costly setback or reversal that changes the plan; "
+                "make the final shot resolve the same objective"
+            )
+            issue = (
+                "Rewrite the causal story, not just the wording. Make the first shot a visible disruption with a clear protagonist goal; "
+                f"{beat_contract} with a concrete visible result. Use specific physical verbs and consequences in every state_change."
+            )
+        else:
+            issue = f"Repair the structural validation issue: {error_text}"
+        retained_lines.extend(
+            [
+                "QUALITY REPAIR: The previous JSON parsed but failed native H3 story validation.",
+                issue,
+                "Return a complete replacement JSON object, not a patch. The story_spine must contain non-empty premise, objective, obstacle, stakes, emotional_arc, climax, and resolution fields.",
+                f"Also include exactly {len(repair_times)} distinct native_shots with contiguous numeric ranges covering 0s to {repair_duration}s; each shot needs non-empty time, title, action, camera, and state_change.",
+                "Self-check every required field before returning JSON. If a field is not relevant, rewrite the story so it is relevant; never omit or leave it blank.",
+            ]
+        )
+        return "\n".join(retained_lines)
+
+    @staticmethod
+    def _apply_native_h3_schema_limits(schema: dict[str, Any], max_length: int = 1600) -> None:
+        def visit(node: Any) -> None:
+            if isinstance(node, dict):
+                if node.get("type") == "string":
+                    node["maxLength"] = max_length
+                for child in node.values():
+                    visit(child)
+            elif isinstance(node, list):
+                for child in node:
+                    visit(child)
+
+        visit(schema)
+
+    @staticmethod
+    def _validate_native_h3_story_payload(
+        payload: Any,
+        *,
+        expected_times: tuple[str, ...] | list[str] | None = None,
+        duration_seconds: int | float | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict) or not isinstance(payload.get("story"), dict):
+            raise PromptGenerationError("Native H3 LLM response did not contain a story object.")
+        story = payload["story"]
+        spine = story.get("story_spine")
+        shots = story.get("native_shots")
+        shot_times = tuple(expected_times or ("0-4s", "4-10s", "10-15s"))
+        if not isinstance(spine, dict) or not isinstance(shots, list) or len(shots) != len(shot_times):
+            raise PromptGenerationError(
+                f"Native H3 LLM response must contain story_spine and exactly {len(shot_times)} native_shots."
+            )
+        required_spine = (
+            "premise",
+            "objective",
+            "obstacle",
+            "stakes",
+            "emotional_arc",
+            "climax",
+            "resolution",
+        )
+        missing_spine = [key for key in required_spine if not str(spine.get(key) or "").strip()]
+        if missing_spine:
+            raise PromptGenerationError(
+                "Native H3 LLM story_spine missing required values: " + ", ".join(missing_spine)
+            )
+        required_shot = ("time", "title", "action", "camera", "state_change")
+        shot_titles: list[str] = []
+        state_changes: list[str] = []
+        for index, shot in enumerate(shots, start=1):
+            if not isinstance(shot, dict):
+                raise PromptGenerationError(f"Native H3 native_shots item {index} is not an object.")
+            missing = [key for key in required_shot if not str(shot.get(key) or "").strip()]
+            if missing:
+                raise PromptGenerationError(
+                    f"Native H3 native_shots item {index} missing values: " + ", ".join(missing)
+                )
+            shot_titles.append(str(shot["title"]).strip().lower())
+            state_changes.append(str(shot["state_change"]).strip().lower())
+        timing_ok, timing_error = validate_native_h3_shot_timing(
+            shots,
+            duration_seconds=float(duration_seconds or native_h3_duration_from_times(shot_times)),
+        )
+        if not timing_ok:
+            raise PromptGenerationError("Native H3 native_shots timing is invalid: " + timing_error)
+        if len(set(shot_titles)) != len(shot_times):
+            raise PromptGenerationError("Native H3 native_shots titles must be distinct across all beats.")
+        if len(set(state_changes)) != len(shot_times):
+            raise PromptGenerationError("Native H3 native_shots must contain distinct state changes for every beat.")
+        quality = evaluate_native_h3_story_quality(story, expected_times=shot_times)
+        if not quality["passed"]:
+            raise PromptGenerationError(
+                "Native H3 story quality is insufficient: " + "; ".join(str(error) for error in quality["errors"])
+            )
+        visual_fields: list[str] = []
+        for key in ("base_prompt", "opening_keyframe_prompt", "ending_keyframe_prompt"):
+            value = story.get(key)
+            if isinstance(value, str):
+                visual_fields.append(value)
+        base_prompt = str(story.get("base_prompt") or "")
+        if re.search(r"\b(?:calm|peaceful|serene|no immediate threats|fixed camera|posed character)\b", base_prompt, flags=re.IGNORECASE):
+            raise PromptGenerationError(
+                "Native H3 base_prompt must be an identity-and-style anchor and must not establish a calm or posed opening."
+            )
+        world = story.get("world")
+        if isinstance(world, dict):
+            for key in ("setting", "visual_language"):
+                value = world.get(key)
+                if isinstance(value, str):
+                    visual_fields.append(value)
+        for shot in shots:
+            for key in ("title", "action", "camera", "state_change"):
+                value = shot.get(key)
+                if isinstance(value, str):
+                    visual_fields.append(value)
+        visual_story_text = "\n".join(visual_fields).lower()
+        forbidden_visual_patterns = (
+            ("reads", r"\breads\b"),
+            ("written", r"\bwritten\b"),
+            ("readable word", r"\breadable\s+word\b"),
+            ("readable text", r"\breadable\s+text\b"),
+            ("letters", r"\bletters?\b"),
+            ("numbers", r"\bnumbers?\b"),
+            ("sign says", r"\bsign\s+says\b"),
+            ("sign reads", r"\bsign\s+reads\b"),
+            ("subtitle", r"\bsubtitles?\b"),
+            ("headline", r"\bheadlines?\b"),
+            ("ticker", r"\btickers?\b"),
+            ("document", r"\bdocuments?\b"),
+            ("report", r"\breports?\b"),
+            ("newspaper", r"\bnewspapers?\b"),
+            ("ledger", r"\bledgers?\b"),
+            ("chart", r"\bcharts?\b"),
+            ("graph", r"\bgraphs?\b"),
+            ("screen", r"\bscreens?\b"),
+            ("interface", r"\binterfaces?\b"),
+            ("signage", r"\bsignage\b"),
+            ("glyph", r"\bglyphs?\b"),
+            ("rune", r"\brunes?\b"),
+            ("symbol", r"\bsymbols?\b"),
+        )
+        violations = [label for label, pattern in forbidden_visual_patterns if re.search(pattern, visual_story_text)]
+        if violations:
+            raise PromptGenerationError(
+                "Native H3 story contains forbidden readable-text visual cues: " + ", ".join(violations)
+            )
+        LLMPromptEngine._validate_native_h3_text_lengths(story)
+        return story
+
+    @staticmethod
+    def _validate_native_h3_text_lengths(story: dict[str, Any], max_length: int = 1600) -> None:
+        def visit(value: Any, path: str) -> None:
+            if isinstance(value, str) and len(value) > max_length:
+                raise PromptGenerationError(f"Native H3 {path} exceeds {max_length} characters.")
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    visit(child, f"{path}.{key}")
+            elif isinstance(value, list):
+                for index, child in enumerate(value):
+                    visit(child, f"{path}[{index}]")
+
+        visit(story, "story")
+
     def expand_goal(self, goal: GoalRequest, selected_style: str, idea_variants: list[dict[str, Any]]) -> dict[str, Any]:
         fallback = build_goal_brief(goal, selected_style, idea_variants)
         try:
@@ -320,7 +788,10 @@ class LLMPromptEngine:
                     f"Duration seconds: {goal.duration_seconds}",
                     f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                     "Return JSON with keys: creative_brief, prompt, negative_prompt.",
-                    "The prompt must be generation-ready for diffusion and image-to-video models.",
+                    "Build the prompt in this order: Subject, Scene, Action, Environment, Camera, Style and lighting, Quality.",
+                    "The prompt must be generation-ready for diffusion and image-to-video models; use concrete visible nouns and verbs rather than abstract mood words.",
+                    "For image-to-video, describe how the supplied image starts moving and evolves; do not spend the prompt redrawing the static image.",
+                    "For text-to-video, establish the subject inside the first moving action instead of opening on a character sheet or posed portrait.",
                     "If news context exists, treat it as inspiration for props, tension, environment, or symbols only.",
                     "Do not make the output look like literal news coverage unless the user explicitly asked for that.",
                 ]
@@ -375,10 +846,12 @@ class LLMPromptEngine:
                 f"Prefix: {prefix}",
                 f"Suffix: {suffix}",
                 f"Character: {goal.constraints.get('character', '')}",
-                f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
-                "Return JSON with keys: prompt, negative_prompt.",
-                "Create a concise generation-ready prompt for the requested workflow.",
-                "If news context exists, merge only a few concrete visual motifs into the scene instead of recreating the headline.",
+                    f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
+                    "Return JSON with keys: prompt, negative_prompt.",
+                    "Create a concise generation-ready prompt using this order: Subject, Scene, Action, Environment, Camera, Style and lighting, Quality.",
+                    "Use one primary physical action with a visible beginning, change, and end; place the camera instruction next to the action it controls.",
+                    "When a prior/first frame is supplied, treat it as authoritative and describe motion/evolution from that frame rather than restating its appearance.",
+                    "If news context exists, merge only a few concrete visual motifs into the scene instead of recreating the headline.",
             ]
         )
         try:
@@ -427,8 +900,9 @@ class LLMPromptEngine:
                 f"Segment count: {segment_count}",
                 f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                 "Return JSON object with key: segments.",
-                "segments must be an array where each item has keys: segment_id, visual, narration.",
-                "Every segment must preserve identity, escalate or progress action, and avoid static micro-motion.",
+                "segments must be an array where each item has keys: segment_id, visual, narration; when possible also provide action, camera, start_state, end_state, cause, and effect.",
+                "Every segment must preserve identity, use one primary physical action, include a concrete camera instruction beside that action, and visibly hand off its end_state to the next segment.",
+                "The opening must create a question immediately; the middle must change the plan or cost the protagonist something; the final segment must visibly answer the opening question.",
                 "Use news only as symbolic or environmental inspiration when provided.",
             ]
         )
@@ -451,6 +925,12 @@ class LLMPromptEngine:
                                     "segment_id": {"type": "string"},
                                     "visual": {"type": "string"},
                                     "narration": {"type": "string"},
+                                    "action": {"type": "string"},
+                                    "camera": {"type": "string"},
+                                    "start_state": {"type": "string"},
+                                    "end_state": {"type": "string"},
+                                    "cause": {"type": "string"},
+                                    "effect": {"type": "string"},
                                 },
                                 "required": ["segment_id", "visual", "narration"],
                                 "additionalProperties": False,
@@ -470,8 +950,13 @@ class LLMPromptEngine:
                             "segment_id": str(item.get("segment_id") or f"segment-{index + 1}"),
                             "visual": str(item.get("visual") or fallback[index]["visual"]),
                             "narration": str(item.get("narration") or fallback[index]["narration"]),
+                            "action": str(item.get("action") or fallback[index].get("action") or ""),
+                            "camera": str(item.get("camera") or fallback[index].get("camera") or ""),
+                            "start_state": str(item.get("start_state") or fallback[index].get("start_state") or ""),
+                            "end_state": str(item.get("end_state") or fallback[index].get("end_state") or ""),
+                            "cause": str(item.get("cause") or fallback[index].get("cause") or ""),
+                            "effect": str(item.get("effect") or fallback[index].get("effect") or ""),
                             "stage": fallback[index].get("stage"),
-                            "camera": fallback[index].get("camera"),
                             "creative_brief": creative_brief,
                         }
                     )
@@ -632,7 +1117,7 @@ class LLMPromptEngine:
             f"Style: {goal.style}",
             f"Character: {goal.constraints.get('character', '')}",
             f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
-            f"Has prior frame path: {'yes' if prior_frame else 'no'}",
+                    f"Has prior frame path: {'yes' if prior_frame else 'no'}",
         ]
         if previous_segment:
             continuity_lines.extend(
@@ -644,7 +1129,9 @@ class LLMPromptEngine:
         continuity_lines.extend(
                 [
                     "Return JSON with keys: prompt, narration.",
-                    "The prompt must preserve character identity, continue scene geography, and add meaningful motion.",
+                    "Use the MiniMax temporal order: subject continuity, current scene state, one primary physical action, camera movement attached to that action, visible end state, then audio or style.",
+                    "Preserve character identity and scene geography; make the first half-second active and make the next state visibly different from the previous segment.",
+                    "If a prior frame exists, describe only how the frame comes alive and evolves; do not replace it with a new composition.",
                     "If news exists, keep it as stylized motifs or atmosphere rather than literal reporting.",
                 ]
             )
@@ -700,6 +1187,8 @@ class LLMPromptEngine:
                     f"Selected media count: {len(media_paths or [])}",
                     "Return JSON with keys: prompt, negative_prompt.",
                     "Improve the prompt while preserving the original intent and character identity.",
+                    "Rewrite it in the order Subject, Scene, Action, Environment, Camera, Style and lighting, Quality; convert review notes into concrete visible changes.",
+                    "If motion was weak, add one primary physical action with a clear start-to-end change and attach an explicit camera movement to it.",
                 ]
             )
             payload = self._chat_json(
@@ -1208,10 +1697,10 @@ class LLMPromptEngine:
     def _resolve_backend_info(self) -> dict[str, Any]:
         _load_project_env()
         text_provider = str(os.environ.get("AGENTIC_TEXT_MODEL_PROVIDER", "openrouter") or "openrouter").strip() or "openrouter"
-        text_model_raw = str(os.environ.get("AGENTIC_TEXT_MODEL", "qwen/qwen3.6-plus:free") or "qwen/qwen3.6-plus:free").strip() or "qwen/qwen3.6-plus:free"
+        text_model_raw = str(os.environ.get("AGENTIC_TEXT_MODEL", "") or "").strip()
         vision_provider = str(os.environ.get("AGENTIC_VISION_MODEL_PROVIDER", text_provider) or text_provider).strip() or text_provider
-        vision_model_raw = str(os.environ.get("AGENTIC_VISION_MODEL", "qwen/qwen3.6-plus:free") or "qwen/qwen3.6-plus:free").strip() or "qwen/qwen3.6-plus:free"
-        random_models = os.environ.get("AGENTIC_RANDOM_MODELS", "").lower() in {"1", "true", "yes"}
+        vision_model_raw = str(os.environ.get("AGENTIC_VISION_MODEL", "") or "").strip()
+        random_models = os.environ.get("AGENTIC_RANDOM_MODELS", "true").lower() in {"1", "true", "yes"}
 
         text_strategy = os.environ.get("AGENTIC_OPENROUTER_TEXT_MODEL_STRATEGY", "").strip().lower()
         openrouter_text_pool_mode = text_strategy == "free_pool" or (
@@ -1225,12 +1714,12 @@ class LLMPromptEngine:
         if openrouter_text_pool_mode:
             text_model_display = "free_pool"
         else:
-            text_model_display = text_model_raw.strip() or "qwen/qwen3.6-plus:free"
+            text_model_display = text_model_raw.strip() or "free_pool"
 
         if openrouter_vision_pool_mode:
             vision_model_display = "free_pool"
         else:
-            vision_model_display = vision_model_raw.strip() or "qwen/qwen3.6-plus:free"
+            vision_model_display = vision_model_raw.strip() or "free_pool"
 
         rotate_text = os.environ.get("AGENTIC_OPENROUTER_ROTATE_TEXT_MODELS", "true").lower() in {"1", "true", "yes"}
         rotate_vision = os.environ.get("AGENTIC_OPENROUTER_ROTATE_VISION_MODELS", "true").lower() in {
@@ -1243,9 +1732,33 @@ class LLMPromptEngine:
         max_vision_s = os.environ.get("AGENTIC_OPENROUTER_MAX_VISION_MODELS_PER_CALL", "").strip()
         max_text_models = int(max_text_s) if max_text_s.isdigit() else 0
         max_vision_models = int(max_vision_s) if max_vision_s.isdigit() else 0
+        discover_models = os.environ.get("AGENTIC_OPENROUTER_DISCOVER_MODELS", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        text_models = [
+            item.strip()
+            for item in os.environ.get("AGENTIC_OPENROUTER_TEXT_MODELS", "").split(",")
+            if item.strip()
+        ]
+        vision_models = [
+            item.strip()
+            for item in os.environ.get("AGENTIC_OPENROUTER_VISION_MODELS", "").split(",")
+            if item.strip()
+        ]
+        free_pool_s = os.environ.get("AGENTIC_OPENROUTER_FREE_POOL_SIZE", "5").strip()
+        free_pool_size = int(free_pool_s) if free_pool_s.isdigit() else 5
+        cache_ttl_s = os.environ.get("AGENTIC_OPENROUTER_MODEL_CACHE_TTL_SECONDS", "21600").strip()
+        cache_ttl_seconds = int(cache_ttl_s) if cache_ttl_s.isdigit() else 21600
 
         text_fallback_provider = os.environ.get("AGENTIC_TEXT_FALLBACK_PROVIDER", "").strip()
         text_fallback_model = os.environ.get("AGENTIC_TEXT_FALLBACK_MODEL", "").strip()
+        allow_text_fallback = os.environ.get("AGENTIC_TEXT_ALLOW_FALLBACK", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
 
         return {
             "mode": self.mode,
@@ -1262,8 +1775,14 @@ class LLMPromptEngine:
             "openrouter_rotate_vision_models": rotate_vision,
             "openrouter_max_text_models_per_call": max_text_models,
             "openrouter_max_vision_models_per_call": max_vision_models,
+            "openrouter_discover_models": discover_models,
+            "openrouter_text_models": text_models,
+            "openrouter_vision_models": vision_models,
+            "openrouter_free_pool_size": max(0, free_pool_size),
+            "openrouter_model_cache_ttl_seconds": max(0, cache_ttl_seconds),
             "text_fallback_provider": text_fallback_provider,
             "text_fallback_model": text_fallback_model,
+            "allow_text_fallback": allow_text_fallback,
         }
 
     def _require_manager(self) -> Any:
@@ -1295,22 +1814,88 @@ class LLMPromptEngine:
         images: list[str] | None = None,
     ) -> Any:
         chat_model = manager.vision_model if model == "vision" else manager.text_model
-        response = chat_model.chat_completion(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            images=images,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema,
-                },
+        expected_json = "JSON array" if schema.get("type") == "array" else "JSON object"
+        opening = "[" if expected_json == "JSON array" else "{"
+        closing = "]" if expected_json == "JSON array" else "}"
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{system_prompt}\n\n"
+                    f"OUTPUT CONTRACT: Return exactly one valid {expected_json} that matches the supplied schema. "
+                    "Do not return markdown, code fences, XML tags, explanations, analysis, or a second object. "
+                    f"Put the JSON value directly in the final answer, starting with {opening} and ending with {closing}."
+                ),
             },
-        )
-        return LLMPromptEngine._parse_json(response)
+            {
+                "role": "user",
+                "content": (
+                    f"{user_prompt}\n\n"
+                    "FINAL FORMAT: output JSON only. Before sending, silently validate that it parses as one complete "
+                    f"{expected_json} and that all required fields are present."
+                ),
+            },
+        ]
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "strict": True,
+                "schema": schema,
+            },
+        }
+        first_error: Exception | None = None
+        try:
+            response = chat_model.chat_completion(
+                messages=messages,
+                images=images,
+                response_format=response_format,
+            )
+            return LLMPromptEngine._parse_json(response)
+        except Exception as exc:
+            first_error = exc
+
+        repair_errors: list[Exception] = []
+        for repair_round in range(2):
+            repair_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{system_prompt}\n\n"
+                        "JSON REPAIR MODE: Your previous answer did not satisfy the JSON parser. "
+                        f"Return only one complete {expected_json} matching the schema. No markdown, no code fences, "
+                        "no reasoning, no comments, no prose, and no trailing text. "
+                        f"This is repair pass {repair_round + 1} of 2."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"{user_prompt}\n\n"
+                        "This is a strict parser repair attempt. Silently correct formatting and missing required "
+                        f"fields, then output the complete {expected_json} only."
+                    ),
+                },
+            ]
+            try:
+                repaired = chat_model.chat_completion(
+                    messages=repair_messages,
+                    images=images,
+                )
+                return LLMPromptEngine._parse_json(repaired)
+            except Exception as repair_error:
+                repair_errors.append(repair_error)
+
+        if first_error is not None:
+            for repair_error in repair_errors:
+                try:
+                    first_error.add_note(
+                        f"JSON repair attempt also failed: {type(repair_error).__name__}: {repair_error}"
+                    )
+                except AttributeError:
+                    pass
+            raise first_error from (repair_errors[-1] if repair_errors else None)
+        raise repair_errors[-1]
 
     @staticmethod
     def _parse_json(response: str) -> Any:
@@ -1323,6 +1908,8 @@ class LLMPromptEngine:
             cleaned = cleaned.split("```", 1)[1].split("```", 1)[0]
         if "</think>" in cleaned:
             cleaned = cleaned.split("</think>")[-1]
+        if "<think>" in cleaned:
+            cleaned = cleaned.split("<think>", 1)[-1]
         cleaned = cleaned.strip()
         try:
             return json.loads(cleaned)

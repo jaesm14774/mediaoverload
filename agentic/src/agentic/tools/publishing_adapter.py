@@ -33,3 +33,6 @@ class PublishingAdapter:
             additional_params=post.additional_params,
         )
         return self._service.publish_to_social_media(post=native_post, platforms=platforms)
+
+    def get_publish_receipts(self) -> dict[str, dict[str, Any]]:
+        return self._service.get_publish_receipts()

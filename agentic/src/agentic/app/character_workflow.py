@@ -22,6 +22,8 @@ CONFIG_MEDIA_TYPE_MAP = {
     "text2video": "text2video",
     "text2image2video": "text2img2video",
     "text2longvideo": "long_video",
+    "native_h3_story": "native_h3_story",
+    "native_h3_t2v_story": "native_h3_t2v_story",
     "image2image": "image",
     "text2image2image": "text2img2img",
     "sticker_pack": "sticker_pack",
@@ -64,6 +66,8 @@ def build_goal_payload_from_character_config(
     temperature: float = 1.0,
     preferred_generation_type: str | None = None,
     dry_run_publish: bool = False,
+    publish_mode: str = "",
+    publish_platforms: list[str] | None = None,
     publish_after_generate: bool = True,
     output_dir: str | None = None,
     enable_review_loop: bool = False,
@@ -110,12 +114,26 @@ def build_goal_payload_from_character_config(
     duration_seconds = _resolve_duration_seconds(
         config_generation_type,
         strategies,
+        generation=generation,
         routed_segment_count=routing.get("count_plan", {}).get("segment_count"),
     )
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
         social_media.get("platforms"),
     )
+    if publish_platforms:
+        selected_platforms: list[str] = []
+        for requested in publish_platforms:
+            normalized = str(requested).lower().strip()
+            if normalized == "instagram":
+                normalized = "instagram_graph"
+            if normalized not in SUPPORTED_PUBLISH_PLATFORMS:
+                raise ValueError(f"Unsupported publish platform: {requested}")
+            if normalized not in selected_platforms:
+                selected_platforms.append(normalized)
+        platform_configs = {
+            name: config for name, config in platform_configs.items() if name in selected_platforms
+        }
     hashtags = [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag]
     use_tts = bool(
         (
@@ -125,15 +143,31 @@ def build_goal_payload_from_character_config(
         ).get("use_tts", False)
     )
 
+    native_recipe = _native_recipe_for_generation(generation, config_generation_type)
     constraints = {
         "character": character_name,
+        "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
+        "h3_video_defaults": dict(generation.get("video_defaults") or {}),
+        "keyframe_workflow_name": str(generation.get("keyframe_workflow_name") or ""),
+        "identity_refine_workflow_name": str(generation.get("identity_refine_workflow_name") or ""),
+        "storyboard_path": str(generation.get("storyboard_path") or ""),
+        "native_h3_storyboard_path": str(
+            native_recipe.get("storyboard_path")
+            or generation.get("storyboard_path")
+            or ""
+        ),
+        "native_h3_recipe": native_recipe,
+        "input_gate": str(generation.get("input_gate") or ""),
         "hashtags": hashtags,
         "platforms": list(platform_configs.keys()),
         "platform_configs": platform_configs,
         "dry_run": dry_run_publish,
+        "publish_mode": str(publish_mode or "").strip().lower(),
         "selection_limit": routing.get("count_plan", {}).get("review_selection_limit"),
         "enable_review_loop": enable_review_loop,
         "review_notes": review_notes,
+        "native_h3_keyframe_candidate_count": max(1, int(native_recipe.get("keyframe_candidate_count") or 1)),
+        "require_human_review": bool(native_recipe.get("require_human_review", False)),
         "output_dir": str(resolved_output_dir),
         "use_tts": use_tts if agentic_media_type == "long_video" else False,
         "source_temperature": temperature,
@@ -165,11 +199,38 @@ def build_goal_payload_from_character_config(
         "news_context": autonomous_prompt.get("news_context", {}),
         "fallback_reason": autonomous_prompt.get("fallback_reason", ""),
         "enable_stage_review": bool(
+            enable_review_loop
+            and
             os.getenv("discord_review_bot_token")
             and os.getenv("discord_review_channel_id")
-            and agentic_media_type in {"text2video", "text2img2video", "long_video"}
+            and agentic_media_type in {"text2video", "text2img2video", "long_video", "native_h3_story", "native_h3_t2v_story"}
         ),
     }
+    constraints.update(
+        {
+            "native_h3_workflow_name": str(native_recipe.get("workflow_name") or ""),
+            "native_h3_keyframe_workflow_name": str(
+                native_recipe.get("keyframe_workflow_name")
+                or generation.get("keyframe_workflow_name")
+                or ""
+            ),
+            "native_h3_refine_workflow_name": str(
+                native_recipe.get("identity_refine_workflow_name")
+                or generation.get("identity_refine_workflow_name")
+                or ""
+            ),
+            "native_h3_duration_seconds": int(native_recipe.get("duration_seconds") or duration_seconds),
+            "native_h3_width": int(native_recipe.get("width") or dict(generation.get("video_defaults", {}) or {}).get("width", 608)),
+            "native_h3_height": int(native_recipe.get("height") or dict(generation.get("video_defaults", {}) or {}).get("height", 352)),
+            "native_h3_length": int(native_recipe.get("length") or dict(generation.get("video_defaults", {}) or {}).get("length", 362)),
+            "native_h3_steps": int(native_recipe.get("steps") or dict(generation.get("video_defaults", {}) or {}).get("steps", 16)),
+            "native_h3_frame_rate": int(native_recipe.get("frame_rate") or dict(generation.get("video_defaults", {}) or {}).get("frame_rate", 24)),
+            "native_h3_render_mode": str(
+                native_recipe.get("render_mode")
+                or ("text_to_video" if config_generation_type == "native_h3_t2v_story" else "image_to_video")
+            ),
+        }
+    )
     return {
         "prompt": resolved_prompt,
         "media_type": agentic_media_type,
@@ -211,6 +272,8 @@ def run_character_workflow(
     temperature: float = 1.0,
     preferred_generation_type: str | None = None,
     dry_run_publish: bool = False,
+    publish_mode: str = "",
+    publish_platforms: list[str] | None = None,
     publish_after_generate: bool = True,
     output_dir: str | None = None,
     enable_review_loop: bool = False,
@@ -233,6 +296,8 @@ def run_character_workflow(
         temperature=temperature,
         preferred_generation_type=preferred_generation_type,
         dry_run_publish=dry_run_publish,
+        publish_mode=publish_mode,
+        publish_platforms=publish_platforms,
         publish_after_generate=publish_after_generate,
         output_dir=output_dir,
         enable_review_loop=enable_review_loop,
@@ -277,8 +342,12 @@ def run_character_workflow(
         platform_configs = payload["constraints"].get("platform_configs", {})
         if media_paths and isinstance(platform_configs, dict) and platform_configs:
             logger.info("publish.start | media_count=%s | platforms=%s", len(media_paths), list(platform_configs.keys()))
+            publish_prompt, publish_prompt_source = _resolve_publish_prompt(
+                generation_dict,
+                fallback_prompt=str(payload["prompt"]),
+            )
             publish_goal = planner.create_goal(
-                prompt=payload["prompt"],
+                prompt=publish_prompt,
                 media_type="publish_review",
                 duration_seconds=0,
                 style=str(payload["style"]),
@@ -290,9 +359,13 @@ def run_character_workflow(
                     "hashtags": list(payload["constraints"].get("hashtags", [])),
                     "character": payload["character_name"],
                     "dry_run": dry_run_publish,
+                    "publish_mode": str(payload["constraints"].get("publish_mode") or ""),
                     "output_dir": str(Path(payload["resolved_output_dir"]) / "publish_ready"),
                     "selection_limit": 4,
                     "review_notes": review_notes,
+                    "require_human_review": bool(payload["constraints"].get("require_human_review", False)),
+                    "review_scope": "final_video",
+                    "publish_prompt_source": publish_prompt_source,
                 },
             )
             publish_plan = planner.build_plan(publish_goal)
@@ -304,10 +377,15 @@ def run_character_workflow(
                 "result": publish_result_dict,
                 "prompt_summary": _build_prompt_summary(publish_result_dict.get("state", {})),
             }
-    logger.info("workflow.end | run_id=%s | status=%s | log_path=%s", run_id, generation_result.status, log_path)
+    overall_status = "success" if generation_result.status == "success" else "failed"
+    if publish_dict:
+        publish_result_status = str((publish_dict.get("result") or {}).get("status") or "").lower()
+        if publish_result_status not in {"success"}:
+            overall_status = "failed"
+    logger.info("workflow.end | run_id=%s | status=%s | log_path=%s", run_id, overall_status, log_path)
 
     return {
-        "status": "success" if generation_result.status == "success" else "failed",
+        "status": overall_status,
         "run_id": run_id,
         "log_path": str(log_path),
         "config_path": str(Path(config_path).resolve()),
@@ -341,6 +419,24 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             elif isinstance(value, str) and _is_media_file(value):
                 collected.append(value)
     return list(dict.fromkeys(collected))
+
+
+def _resolve_publish_prompt(generation_result: dict[str, Any], *, fallback_prompt: str) -> tuple[str, str]:
+    """Use the story actually rendered by generation when preparing publish copy."""
+    state = generation_result.get("state") or {}
+    node_outputs = state.get("node_outputs") if isinstance(state, dict) else {}
+    if isinstance(node_outputs, dict):
+        native_story = node_outputs.get("native-story-prompt")
+        if isinstance(native_story, dict):
+            native_prompt = str(native_story.get("prompt") or "").strip()
+            if native_prompt:
+                return native_prompt, "native_h3_story"
+        native_render = node_outputs.get("native-h3-render")
+        if isinstance(native_render, dict):
+            native_prompt = str(native_render.get("native_h3_prompt") or "").strip()
+            if native_prompt:
+                return native_prompt, "native_h3_render"
+    return str(fallback_prompt or "").strip(), "goal_prompt"
 
 
 def dumps_result(payload: dict[str, Any]) -> str:
@@ -565,6 +661,33 @@ def _collect_workflow_stage_candidates(
                     _nested_get(strategy, "frame_transition", "workflow_path"),
                 ],
             }
+        elif generation_type == "native_h3_story":
+            native_recipe = dict(generation.get("native_h3_story", {}) or {})
+            inferred = {
+                "image_workflow_name": [
+                    native_recipe.get("keyframe_workflow_name"),
+                    generation.get("keyframe_workflow_name"),
+                    generation_workflows.get("text2img"),
+                ],
+                "video_workflow_name": [
+                    native_recipe.get("workflow_name"),
+                    generation_workflows.get("native_h3_story"),
+                    generation_workflows.get("text2image2video"),
+                ],
+                "refine_workflow_name": [
+                    native_recipe.get("identity_refine_workflow_name"),
+                    generation.get("identity_refine_workflow_name"),
+                ],
+            }
+        elif generation_type == "native_h3_t2v_story":
+            native_recipe = dict(generation.get("native_h3_t2v_story", {}) or {})
+            inferred = {
+                "video_workflow_name": [
+                    native_recipe.get("workflow_name"),
+                    generation_workflows.get("native_h3_t2v_story"),
+                    generation_workflows.get("text2video"),
+                ],
+            }
         elif generation_type == "image2image":
             inferred = {
                 "refine_workflow_name": [
@@ -607,7 +730,40 @@ def _collect_workflow_stage_candidates(
             if resolved:
                 workflow_stage_candidates.setdefault(generation_type, {})[stage_key] = resolved
         workflow_stage_candidates.setdefault(generation_type, {})
+    _prioritize_h3_profile(repo_root, generation, workflow_stage_candidates, generation_type_candidates)
     return workflow_stage_candidates
+
+
+def _prioritize_h3_profile(
+    repo_root: Path,
+    generation: dict[str, Any],
+    workflow_stage_candidates: dict[str, dict[str, list[str]]],
+    generation_type_candidates: list[str],
+) -> None:
+    profile_to_slug = {
+        "balanced-lowvram": "lowvram",
+        "ultra-lowvram": "ultra_lowvram",
+        "native-quality": "native",
+    }
+    profile = str(generation.get("h3_profile") or "balanced-lowvram").strip().lower()
+    slug = profile_to_slug.get(profile, profile_to_slug["balanced-lowvram"])
+    for generation_type in generation_type_candidates:
+        if generation_type not in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_t2v_story", "sticker_pack"}:
+            continue
+        if generation_type in {"text2video", "native_h3_t2v_story"}:
+            suffix = "t2v"
+        elif generation_type == "native_h3_story":
+            suffix = "15s_fl2va_i2v"
+        else:
+            suffix = "i2v"
+        preferred = f"minimax_h3_{slug}_{suffix}"
+        workflow_path = repo_root / "configs" / "workflow" / f"{preferred}.json"
+        if not workflow_path.exists():
+            continue
+        stage_candidates = workflow_stage_candidates.setdefault(generation_type, {})
+        candidates = list(stage_candidates.get("video_workflow_name", []))
+        candidates = [candidate for candidate in candidates if candidate != preferred]
+        stage_candidates["video_workflow_name"] = [preferred, *candidates]
 
 
 def _collect_count_policies(
@@ -718,6 +874,8 @@ def _primary_workflow_name(generation_type: str, workflow_plan: dict[str, str]) 
         "text2image2video": ("image_workflow_name", "video_workflow_name", "upscale_workflow_name"),
         "text2image2image": ("image_workflow_name", "refine_workflow_name"),
         "text2longvideo": ("image_workflow_name", "video_workflow_name", "transition_workflow_name"),
+        "native_h3_story": ("video_workflow_name", "image_workflow_name", "refine_workflow_name"),
+        "native_h3_t2v_story": ("video_workflow_name",),
         "sticker_pack": ("image_workflow_name", "video_workflow_name"),
         "image2image": ("refine_workflow_name",),
     }
@@ -726,6 +884,15 @@ def _primary_workflow_name(generation_type: str, workflow_plan: dict[str, str]) 
         if value:
             return value
     return ""
+
+
+def _native_recipe_for_generation(generation: dict[str, Any], generation_type: str) -> dict[str, Any]:
+    if generation_type in {"native_h3_story", "native_h3_t2v_story"}:
+        selected = dict(generation.get(generation_type, {}) or {})
+        if selected:
+            return selected
+        return dict(generation.get("native_h3_story", {}) or {})
+    return dict(generation.get("native_h3_story", {}) or {})
 
 
 def _nested_get(data: dict[str, Any], *keys: str) -> Any:
@@ -740,8 +907,12 @@ def _nested_get(data: dict[str, Any], *keys: str) -> Any:
 def _resolve_duration_seconds(
     config_generation_type: str,
     strategies: dict[str, Any],
+    generation: dict[str, Any] | None = None,
     routed_segment_count: Any | None = None,
 ) -> int:
+    if config_generation_type in {"native_h3_story", "native_h3_t2v_story"}:
+        native_recipe = _native_recipe_for_generation(dict(generation or {}), config_generation_type)
+        return max(1, int(native_recipe.get("duration_seconds", 15)))
     if config_generation_type != "text2longvideo":
         return 30
     longvideo = dict(strategies.get("text2longvideo", {}) or {})

@@ -9,7 +9,11 @@ configs/social_media/discord/*.env
 configs/social_media/credentials/**/*.env
 
 # 輸出目錄
+output/
 output_media/
+.tmp-tests/
+agentic/.tmp-tests/
+agentic/agentic/
 instagrapi/
 __pycache__/
 *.pyc

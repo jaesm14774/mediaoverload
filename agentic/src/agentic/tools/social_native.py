@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from dotenv import load_dotenv
@@ -30,18 +31,40 @@ class SocialPlatform(Protocol):
 class SocialMediaManager:
     def __init__(self) -> None:
         self.platforms: dict[str, SocialPlatform] = {}
+        self.publish_receipts: dict[str, dict[str, Any]] = {}
 
     def register_platform(self, name: str, platform: SocialPlatform) -> None:
         self.platforms[name] = platform
+        self.publish_receipts.pop(name, None)
         platform.authenticate()
 
     def upload_to_platform(self, platform_name: str, post: MediaPost) -> bool:
         if platform_name not in self.platforms:
             raise ValueError(f"Platform {platform_name} not registered")
+        platform = self.platforms[platform_name]
+        if hasattr(platform, "last_publish_receipt"):
+            platform.last_publish_receipt = None  # type: ignore[attr-defined]
         try:
-            return self.platforms[platform_name].upload_post(post)
+            result = bool(platform.upload_post(post))
+            receipt = getattr(platform, "last_publish_receipt", None)
+            if isinstance(receipt, dict):
+                self.publish_receipts[platform_name] = dict(receipt)
+            if platform_name.lower() in {"facebook", "youtube"}:
+                if not result:
+                    raise RuntimeError(f"{platform_name} publisher returned false")
+                if not isinstance(receipt, dict) or not receipt.get("verified"):
+                    raise RuntimeError(
+                        f"{platform_name} upload returned without a verified external artifact"
+                    )
+            return result
         except Exception as exc:
+            receipt = getattr(platform, "last_publish_receipt", None)
+            if isinstance(receipt, dict):
+                self.publish_receipts[platform_name] = dict(receipt)
             raise RuntimeError(f"Publishing failed for {platform_name}: {_describe_publish_exception(exc)}") from exc
+
+    def get_publish_receipts(self) -> dict[str, dict[str, Any]]:
+        return {name: dict(receipt) for name, receipt in self.publish_receipts.items()}
 
     def upload_to_all(self, post: MediaPost) -> dict[str, bool]:
         results: dict[str, bool] = {}
@@ -57,8 +80,19 @@ def _describe_publish_exception(exc: Exception) -> str:
         if len(body) > 300:
             body = body[:297] + "..."
         request_url = response.request.url if response.request is not None else response.url
+        request_url = _redact_url_credentials(request_url)
         return f"HTTP {response.status_code} {response.reason} | url={request_url} | body={body}"
     return f"{type(exc).__name__}: {exc}"
+
+
+def _redact_url_credentials(url: str) -> str:
+    parsed = urlsplit(str(url))
+    sensitive_keys = {"access_token", "refresh_token", "client_secret", "api_key", "token"}
+    query = [
+        (key, "<redacted>" if key.lower() in sensitive_keys else value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+    ]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
 
 
 class CloudinaryUploadService:
@@ -100,6 +134,28 @@ class BaseConfigPlatform:
         self.config_folder_path = config_folder_path
         self.prefix = prefix
         self.ffmpeg = FFmpegAdapter()
+        self.last_publish_receipt: dict[str, Any] | None = None
+
+    def _record_publish_receipt(
+        self,
+        *,
+        platform: str,
+        external_id: str,
+        status: str,
+        verified: bool,
+        visibility: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        receipt = {
+            "platform": platform,
+            "external_id": str(external_id),
+            "status": status,
+            "verified": bool(verified),
+            "visibility": visibility,
+            "details": details or {},
+        }
+        self.last_publish_receipt = receipt
+        return receipt
 
     def _config_path(self) -> Path:
         return Path(self.config_folder_path) / self.prefix if self.prefix else Path(self.config_folder_path)
@@ -200,7 +256,7 @@ class TwitterPlatform(BaseConfigPlatform):
 
 
 class FacebookPlatform(BaseConfigPlatform):
-    GRAPH_API_VERSION = "v24.0"
+    GRAPH_API_VERSION = "v25.0"
     GRAPH_API_BASE = "https://graph.facebook.com"
 
     def __init__(self, config_folder_path: str, prefix: str = "") -> None:
@@ -231,9 +287,224 @@ class FacebookPlatform(BaseConfigPlatform):
         valid_paths = [path for path in post.media_paths if Path(path).exists()]
         if not valid_paths:
             return False
+        additional = dict(post.additional_params or {})
+        use_reels = _coerce_bool(
+            additional.get("facebook_use_reels"),
+            default=_coerce_bool(os.getenv("FB_USE_REELS"), default=False),
+        )
+        if use_reels:
+            video_path = next(
+                (
+                    path
+                    for path in valid_paths
+                    if Path(path).suffix.lower() in {".mp4", ".avi", ".mov", ".webm", ".mkv", ".m4v", ".gif"}
+                ),
+                "",
+            )
+            if not video_path:
+                raise ValueError("Facebook Reels publishing requires a local video file")
+            try:
+                return self._upload_reel(video_path, caption, additional)
+            finally:
+                self._cleanup_temp()
         if len(valid_paths) == 1:
             return self._upload_single(valid_paths[0], caption)
         return self._upload_multiple(valid_paths[:10], caption)
+
+    def _upload_reel(self, media_path: str, caption: str, additional: dict[str, Any]) -> bool:
+        upload_path = media_path
+        if Path(media_path).suffix.lower() == ".gif":
+            upload_path = self._gif_to_mp4(media_path)
+        probe = self.ffmpeg.probe_media(upload_path)
+        duration = float(probe.get("duration") or 0.0)
+        if duration < 4 or duration > 60:
+            raise ValueError(f"Facebook Reels video duration must be 4-60 seconds, got {duration:.3f}")
+        width = int(probe.get("width") or 0)
+        height = int(probe.get("height") or 0)
+        if width <= 0 or height <= 0:
+            raise ValueError(f"Facebook Reels video has no readable dimensions: {Path(upload_path).name}")
+        if abs((width / height) - (9 / 16)) > 0.02:
+            vertical_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            vertical_path = vertical_file.name
+            vertical_file.close()
+            self.ffmpeg.pad_video_to_aspect(upload_path, vertical_path, target_width=540, target_height=960)
+            self.temp_files.append(vertical_path)
+            upload_path = vertical_path
+
+        video_state = str(additional.get("facebook_video_state") or "PUBLISHED").strip().upper()
+        if video_state not in {"DRAFT", "SCHEDULED", "PUBLISHED"}:
+            raise ValueError(f"Unsupported Facebook Reels video_state: {video_state}")
+
+        start_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/video_reels"
+        start_response = requests.post(
+            start_url,
+            params={"access_token": self.page_access_token, "upload_phase": "start"},
+            timeout=60,
+        )
+        start_response.raise_for_status()
+        start_body = start_response.json()
+        video_id = str(start_body.get("video_id") or "")
+        upload_url = str(start_body.get("upload_url") or "")
+        if not video_id or not upload_url:
+            raise RuntimeError("Facebook Reels start phase did not return video_id and upload_url")
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=video_id,
+            status="uploading",
+            verified=False,
+            visibility=video_state.lower(),
+            details={"start_response": {"video_id": video_id, "upload_url": upload_url}},
+        )
+
+        file_size = Path(upload_path).stat().st_size
+        with open(upload_path, "rb") as handle:
+            upload_response = requests.post(
+                upload_url,
+                headers={
+                    "Authorization": f"OAuth {self.page_access_token}",
+                    "offset": "0",
+                    "file_size": str(file_size),
+                    "Content-Type": "application/octet-stream",
+                },
+                data=handle,
+                timeout=600,
+            )
+        upload_response.raise_for_status()
+        upload_body = upload_response.json()
+        if upload_body.get("success") is not True:
+            self._record_publish_receipt(
+                platform="facebook",
+                external_id=video_id,
+                status="upload_failed",
+                verified=False,
+                details={"upload_response": upload_body},
+            )
+            raise RuntimeError(f"Facebook Reels upload did not confirm success for video_id={video_id}")
+
+        # Facebook documents status polling as optional and requires the finish
+        # phase to end the upload and start assembly/encoding. Waiting for READY
+        # here deadlocks because processing_phase remains not_started until the
+        # finish request is sent.
+        finish_params = {
+            "access_token": self.page_access_token,
+            "video_id": video_id,
+            "upload_phase": "finish",
+            "video_state": video_state,
+            "description": caption,
+        }
+        title = str(additional.get("facebook_title") or "").strip()
+        if title:
+            finish_params["title"] = title[:100]
+        finish_response = requests.post(start_url, params=finish_params, timeout=60)
+        finish_error: dict[str, Any] | None = None
+        try:
+            finish_response.raise_for_status()
+            finish_body = finish_response.json()
+        except requests.RequestException as exc:
+            finish_body = {}
+            try:
+                response_body = finish_response.json()
+            except ValueError:
+                response_body = {}
+            finish_error = {
+                "error_type": type(exc).__name__,
+                "status_code": finish_response.status_code,
+                "body": response_body if isinstance(response_body, dict) else {},
+            }
+            verified, status_body = self._wait_for_reel_ready(video_id, video_state=video_state)
+            if verified:
+                receipt_status = "draft_ready" if video_state == "DRAFT" else "published_ready"
+                self._record_publish_receipt(
+                    platform="facebook",
+                    external_id=video_id,
+                    status=receipt_status,
+                    verified=True,
+                    visibility=video_state.lower(),
+                    details={
+                        "finish_error": finish_error,
+                        "status_response": status_body,
+                        "reconciled_after_finish_error": True,
+                    },
+                )
+                return True
+            self._record_publish_receipt(
+                platform="facebook",
+                external_id=video_id,
+                status="finish_failed",
+                verified=False,
+                visibility=video_state.lower(),
+                details={"finish_error": finish_error, "status_response": status_body},
+            )
+            raise RuntimeError(f"Facebook Reels finish failed for video_id={video_id}") from exc
+        if finish_body.get("success") is not True:
+            self._record_publish_receipt(
+                platform="facebook",
+                external_id=video_id,
+                status="finish_failed",
+                verified=False,
+                visibility=video_state.lower(),
+                details={"finish_response": finish_body},
+            )
+            raise RuntimeError(f"Facebook Reels finish did not confirm success for video_id={video_id}")
+
+        verified, status_body = self._wait_for_reel_ready(video_id, video_state=video_state)
+        receipt_status = "draft_ready" if video_state == "DRAFT" else "published_ready"
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=video_id,
+            status=receipt_status if verified else "processing_timeout",
+            verified=verified,
+            visibility=video_state.lower(),
+            details={"finish_response": finish_body, "status_response": status_body},
+        )
+        if not verified:
+            raise RuntimeError(
+                f"Facebook Reels artifact was not verified after finish: video_id={video_id}"
+            )
+        return True
+
+    def _wait_for_reel_ready(
+        self,
+        video_id: str,
+        *,
+        video_state: str,
+    ) -> tuple[bool, dict[str, Any]]:
+        timeout_seconds = max(1, int(os.getenv("FACEBOOK_VERIFY_TIMEOUT_SECONDS", "180")))
+        interval_seconds = max(0.5, float(os.getenv("FACEBOOK_VERIFY_INTERVAL_SECONDS", "3")))
+        started = time.monotonic()
+        last_body: dict[str, Any] = {}
+        status_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{video_id}"
+        while time.monotonic() - started < timeout_seconds:
+            response = requests.get(
+                status_url,
+                params={"fields": "status", "access_token": self.page_access_token},
+                timeout=30,
+            )
+            response.raise_for_status()
+            last_body = response.json()
+            status = last_body.get("status") or {}
+            processing_phase = status.get("processing_phase") or {}
+            publishing_phase = status.get("publishing_phase") or {}
+            video_status = str(status.get("video_status") or "").lower()
+            processing_status = str(processing_phase.get("status") or "").lower()
+            publishing_status = str(publishing_phase.get("status") or "").lower()
+            publish_status = str(publishing_phase.get("publish_status") or "").lower()
+
+            if video_status in {"failed", "error", "rejected"}:
+                return False, last_body
+            if processing_status in {"failed", "error", "rejected"}:
+                return False, last_body
+
+            processing_ready = processing_status in {"complete", "completed"} or video_status in {"ready", "published"}
+            if processing_ready:
+                if video_state == "DRAFT":
+                    return True, last_body
+                if video_state == "PUBLISHED" and (publishing_status in {"complete", "completed"} or publish_status == "published"):
+                    return True, last_body
+                if video_state == "SCHEDULED" and (publishing_status in {"complete", "completed"} or publish_status == "scheduled"):
+                    return True, last_body
+            time.sleep(interval_seconds)
+        return False, last_body
 
     def _upload_single(self, media_path: str, caption: str) -> bool:
         ext = Path(media_path).suffix.lower()
@@ -371,11 +642,15 @@ class InstagramGraphPlatform(BaseConfigPlatform):
 
     def authenticate(self) -> None:
         self.access_token = os.getenv("IG_GRAPH_ACCESS_TOKEN")
-        self.ig_user_id = os.getenv("IG_USER_ID") or os.getenv("IG_GRAPH_USER_ID")
+        configured_user_id = os.getenv("IG_USER_ID") or os.getenv("IG_GRAPH_USER_ID")
         if not self.access_token:
             raise ValueError("Missing IG_GRAPH_ACCESS_TOKEN")
-        if not self.ig_user_id:
-            self.ig_user_id = self._fetch_ig_user_id_from_me()
+        fetched_user_id = self._fetch_ig_user_id_from_me()
+        if configured_user_id and fetched_user_id and str(configured_user_id) != fetched_user_id:
+            raise RuntimeError(
+                f"Instagram token belongs to unexpected user: expected={configured_user_id} actual={fetched_user_id}"
+            )
+        self.ig_user_id = fetched_user_id or configured_user_id
         if not self.ig_user_id:
             raise ValueError("Missing IG user id for Instagram Graph")
 
@@ -388,6 +663,23 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         valid_paths = [path for path in post.media_paths if Path(path).exists()]
         if not valid_paths:
             return False
+        additional = dict(post.additional_params or {})
+        publish_mode = str(additional.get("instagram_publish_mode") or "").strip().lower()
+        if publish_mode == "container_only":
+            video_path = next(
+                (
+                    path
+                    for path in valid_paths
+                    if Path(path).suffix.lower() in {".mp4", ".avi", ".mov", ".webm", ".mkv", ".m4v", ".gif"}
+                ),
+                "",
+            )
+            if not video_path:
+                raise ValueError("Instagram container-only POC requires a local video file")
+            try:
+                return self._upload_single(video_path, caption, publish=False)
+            finally:
+                self._cleanup_temp()
         self._url_cache = {}
         if len(valid_paths) == 1:
             try:
@@ -399,13 +691,13 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         finally:
             self._cleanup_temp()
 
-    def _upload_single(self, media_path: str, caption: str) -> bool:
+    def _upload_single(self, media_path: str, caption: str, *, publish: bool = True) -> bool:
         ext = Path(media_path).suffix.lower()
         if ext == ".gif":
             media_path = self._gif_to_mp4(media_path)
             ext = ".mp4"
         if ext in {".mp4", ".avi", ".mov", ".webm"}:
-            return self._publish_video_url(media_path, caption)
+            return self._publish_video_url(media_path, caption, publish=publish)
         return self._publish_image_url(media_path, caption)
 
     def _publish_image_url(self, image_path: str, caption: str) -> bool:
@@ -420,9 +712,18 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         container_id = response.json().get("id")
         if not container_id:
             raise RuntimeError(f"Instagram Graph did not return an image container id for {Path(image_path).name}")
-        return self._publish_container(str(container_id))
+        media_id = self._publish_container(str(container_id))
+        self._record_publish_receipt(
+            platform="instagram_graph",
+            external_id=media_id,
+            status="published",
+            verified=True,
+            visibility="published",
+            details={"container_id": str(container_id)},
+        )
+        return True
 
-    def _publish_video_url(self, video_path: str, caption: str) -> bool:
+    def _publish_video_url(self, video_path: str, caption: str, *, publish: bool = True) -> bool:
         media_url = self._require_media_url(video_path)
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media"
         response = requests.post(
@@ -441,7 +742,26 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             raise RuntimeError(f"Instagram Graph did not return a video container id for {Path(video_path).name}")
         if not self._wait_container_ready(container_id):
             raise RuntimeError(f"Instagram Graph video container was not ready: {container_id}")
-        return self._publish_container(container_id)
+        if not publish:
+            self._record_publish_receipt(
+                platform="instagram_graph",
+                external_id=container_id,
+                status="container_ready",
+                verified=True,
+                visibility="container_only",
+                details={"container_id": container_id},
+            )
+            return True
+        media_id = self._publish_container(container_id)
+        self._record_publish_receipt(
+            platform="instagram_graph",
+            external_id=media_id,
+            status="published",
+            verified=True,
+            visibility="published",
+            details={"container_id": container_id},
+        )
+        return True
 
     def _upload_carousel(self, media_paths: list[str], caption: str) -> bool:
         children: list[str] = []
@@ -469,7 +789,16 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             raise RuntimeError("Instagram Graph did not return a carousel container id")
         if not self._wait_container_ready(container_id):
             raise RuntimeError(f"Instagram Graph carousel container was not ready: {container_id}")
-        return self._publish_container(container_id)
+        media_id = self._publish_container(container_id)
+        self._record_publish_receipt(
+            platform="instagram_graph",
+            external_id=media_id,
+            status="published",
+            verified=True,
+            visibility="published",
+            details={"container_id": container_id},
+        )
+        return True
 
     def _create_carousel_item(self, media_path: str) -> str | None:
         ext = Path(media_path).suffix.lower()
@@ -509,14 +838,17 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             raise RuntimeError(f"Instagram Graph did not return a carousel image container id for {Path(media_path).name}")
         return container_id
 
-    def _publish_container(self, container_id: str) -> bool:
+    def _publish_container(self, container_id: str) -> str:
         response = requests.post(
             f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media_publish",
             data={"creation_id": container_id, "access_token": self.access_token},
             timeout=60,
         )
         response.raise_for_status()
-        return True
+        media_id = str(response.json().get("id") or "")
+        if not media_id:
+            raise RuntimeError(f"Instagram Graph publish did not return a media id for container={container_id}")
+        return media_id
 
     def _wait_container_ready(self, container_id: str, max_wait: int = 120) -> bool:
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{container_id}"
@@ -582,6 +914,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
 class YouTubePlatform(BaseConfigPlatform):
     TOKEN_URI = "https://oauth2.googleapis.com/token"
     UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+    READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
     VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".webm", ".mkv", ".m4v"}
     TITLE_MAX = 100
     DESCRIPTION_MAX = 5000
@@ -653,13 +986,90 @@ class YouTubePlatform(BaseConfigPlatform):
         response = None
         while response is None:
             _, response = request.next_chunk()
+        video_id = str(response.get("id") or "").strip()
+        if not video_id:
+            self._record_publish_receipt(
+                platform="youtube",
+                external_id="",
+                status="upload_failed",
+                verified=False,
+                visibility=body.get("status", {}).get("privacyStatus"),
+                details={"insert_response": response},
+            )
+            raise RuntimeError("YouTube videos.insert did not return a video id")
+        privacy_status = str(body.get("status", {}).get("privacyStatus") or "private")
+        self._record_publish_receipt(
+            platform="youtube",
+            external_id=video_id,
+            status="uploaded_unverified",
+            verified=False,
+            visibility=privacy_status,
+            details={"insert_response": response},
+        )
         if self.channel_id and str(response.get("snippet", {}).get("channelId", "")).strip():
             uploaded_channel = str(response["snippet"]["channelId"]).strip()
             if uploaded_channel != self.channel_id:
+                self._record_publish_receipt(
+                    platform="youtube",
+                    external_id=video_id,
+                    status="unexpected_channel",
+                    verified=False,
+                    visibility=privacy_status,
+                    details={
+                        "expected_channel_id": self.channel_id,
+                        "actual_channel_id": uploaded_channel,
+                        "insert_response": response,
+                    },
+                )
                 raise RuntimeError(
                     f"YouTube upload landed on unexpected channel: expected={self.channel_id} actual={uploaded_channel}"
                 )
-        return bool(response.get("id"))
+        verified, verification_body = self._wait_for_uploaded_video(video_id, privacy_status=privacy_status)
+        self._record_publish_receipt(
+            platform="youtube",
+            external_id=video_id,
+            status="processed" if verified else "processing_timeout",
+            verified=verified,
+            visibility=privacy_status,
+            details={"insert_response": response, "verification_response": verification_body},
+        )
+        if not verified:
+            raise RuntimeError(f"YouTube uploaded video was not verified: video_id={video_id}")
+        return True
+
+    def _wait_for_uploaded_video(
+        self,
+        video_id: str,
+        *,
+        privacy_status: str,
+    ) -> tuple[bool, dict[str, Any]]:
+        timeout_seconds = max(1, int(os.getenv("YOUTUBE_VERIFY_TIMEOUT_SECONDS", "180")))
+        interval_seconds = max(0.5, float(os.getenv("YOUTUBE_VERIFY_INTERVAL_SECONDS", "5")))
+        started = time.monotonic()
+        last_body: dict[str, Any] = {}
+        while time.monotonic() - started < timeout_seconds:
+            response = self.service.videos().list(  # type: ignore[union-attr]
+                part="id,snippet,status,processingDetails",
+                id=video_id,
+            ).execute()
+            items = response.get("items") or []
+            if not items:
+                return False, response
+            item = items[0]
+            last_body = item
+            status = item.get("status") or {}
+            processing = item.get("processingDetails") or {}
+            upload_status = str(status.get("uploadStatus") or "").lower()
+            actual_privacy = str(status.get("privacyStatus") or "").lower()
+            processing_status = str(processing.get("processingStatus") or "").lower()
+            if upload_status in {"failed", "rejected", "deleted"} or processing_status in {"failed", "terminated"}:
+                return False, last_body
+            if actual_privacy != privacy_status.lower():
+                return False, last_body
+            if upload_status in {"uploaded", "processed"} and processing_status in {"", "succeeded"}:
+                return True, last_body
+            time.sleep(interval_seconds)
+        return False, last_body
 
     def _build_service(self):
         try:
@@ -677,7 +1087,7 @@ class YouTubePlatform(BaseConfigPlatform):
             token_uri=self.TOKEN_URI,
             client_id=self.client_id,
             client_secret=self.client_secret,
-            scopes=[self.UPLOAD_SCOPE],
+            scopes=[self.UPLOAD_SCOPE, self.READ_SCOPE],
         )
         credentials.refresh(Request())
         return build("youtube", "v3", credentials=credentials, cache_discovery=False)
@@ -806,6 +1216,9 @@ class PublishingService:
         if platforms:
             return {platform: self.social_media_manager.upload_to_platform(platform, post) for platform in platforms}
         return self.social_media_manager.upload_to_all(post)
+
+    def get_publish_receipts(self) -> dict[str, dict[str, Any]]:
+        return self.social_media_manager.get_publish_receipts()
 
     def register_platform(self, platform_name: str, platform_config: dict[str, Any]) -> None:
         normalized = platform_name.lower()

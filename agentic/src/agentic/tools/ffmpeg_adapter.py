@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +29,79 @@ class FFmpegAdapter:
                 "1",
                 "-q:v",
                 "2",
+                "-y",
+                output_path,
+            ]
+        )
+        return output_path
+
+    def probe_media(self, media_path: str) -> dict[str, object]:
+        self._ensure_binaries()
+        raw = self._run_capture(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_streams",
+                "-show_format",
+                "-of",
+                "json",
+                media_path,
+            ]
+        )
+        payload = json.loads(raw or "{}")
+        streams = payload.get("streams", []) if isinstance(payload, dict) else []
+        if not isinstance(streams, list):
+            streams = []
+        video_stream = next((stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "video"), {})
+        audio_stream = next((stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"), {})
+        format_info = payload.get("format", {}) if isinstance(payload, dict) else {}
+        if not isinstance(format_info, dict):
+            format_info = {}
+        duration_raw = format_info.get("duration") or video_stream.get("duration") or audio_stream.get("duration")
+        try:
+            duration = float(duration_raw)
+        except (TypeError, ValueError):
+            duration = 0.0
+        return {
+            "path": str(media_path),
+            "duration": duration,
+            "format": str(format_info.get("format_name") or ""),
+            "has_video": bool(video_stream),
+            "has_audio": bool(audio_stream),
+            "width": int(video_stream.get("width") or 0),
+            "height": int(video_stream.get("height") or 0),
+            "video_codec": str(video_stream.get("codec_name") or ""),
+            "audio_codec": str(audio_stream.get("codec_name") or ""),
+            "stream_count": len(streams),
+        }
+
+    def make_contact_sheet(
+        self,
+        video_path: str,
+        output_path: str,
+        *,
+        frame_count: int = 6,
+        columns: int = 3,
+        scale_width: int = 320,
+    ) -> str:
+        self._ensure_binaries()
+        self._ensure_parent(output_path)
+        frame_count = max(1, int(frame_count))
+        columns = max(1, min(int(columns), frame_count))
+        rows = max(1, (frame_count + columns - 1) // columns)
+        interval = max(0.5, 15.0 / frame_count)
+        self._run(
+            [
+                "ffmpeg",
+                "-i",
+                video_path,
+                "-vf",
+                f"fps=1/{interval:.3f},scale={int(scale_width)}:-2,tile={columns}x{rows}",
+                "-frames:v",
+                "1",
+                "-q:v",
+                "3",
                 "-y",
                 output_path,
             ]
@@ -204,6 +278,41 @@ class FFmpegAdapter:
         )
         return output_path
 
+    def pad_video_to_aspect(
+        self,
+        video_path: str,
+        output_path: str,
+        *,
+        target_width: int,
+        target_height: int,
+        background: str = "#15151f",
+    ) -> str:
+        """Fit a video inside a platform canvas without cropping the story."""
+        self._ensure_binaries()
+        self._ensure_parent(output_path)
+        self._run(
+            [
+                "ffmpeg",
+                "-i",
+                video_path,
+                "-vf",
+                (
+                    f"scale={int(target_width)}:{int(target_height)}:force_original_aspect_ratio=decrease,"
+                    f"pad={int(target_width)}:{int(target_height)}:(ow-iw)/2:(oh-ih)/2:color={background},"
+                    "format=yuv420p"
+                ),
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                "-y",
+                output_path,
+            ]
+        )
+        return output_path
+
     def _concat_demuxer(self, video_paths: list[str], output_path: str) -> str:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as handle:
             list_path = handle.name
@@ -277,6 +386,25 @@ class FFmpegAdapter:
             )
         except FileNotFoundError as exc:
             binary = command[0] if command else "ffmpeg"
+            raise RuntimeError(f"{binary} is not installed or not available in PATH.") from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            joined = " ".join(command)
+            raise RuntimeError(f"Command failed: {joined}\n{stderr}") from exc
+
+    @staticmethod
+    def _run_capture(command: list[str]) -> str:
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+            return completed.stdout
+        except FileNotFoundError as exc:
+            binary = command[0] if command else "ffprobe"
             raise RuntimeError(f"{binary} is not installed or not available in PATH.") from exc
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()

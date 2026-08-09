@@ -113,6 +113,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--text", help="Text payload for TTS-style workflows")
     parser.add_argument("--character", help="Optional character or subject identity for agentic planning")
     parser.add_argument("--platform", action="append", dest="platforms", help="Target publish platform; repeatable")
+    parser.add_argument(
+        "--publish-mode",
+        choices=("live", "safe_poc"),
+        default="",
+        help="Publishing policy: live or safe_poc (YouTube private, Facebook draft, Instagram container-only)",
+    )
     parser.add_argument("--hashtag", action="append", dest="hashtags", help="Hashtag for publish captions; repeatable")
     parser.add_argument("--caption-prefix", help="Optional caption prefix for publish workflows")
     parser.add_argument("--selection-limit", type=int, help="Review selection cap for publish/review workflows")
@@ -175,6 +181,7 @@ def main() -> None:
             "text": args.text,
             "character": args.character,
             "platforms": args.platforms or [],
+            "publish_mode": args.publish_mode,
             "hashtags": args.hashtags or [],
             "caption_prefix": args.caption_prefix,
             "selection_limit": args.selection_limit,

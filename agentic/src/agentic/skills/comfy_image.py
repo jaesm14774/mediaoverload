@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.minimax_prompting import structured_visual_prompt
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 
 
@@ -39,7 +40,15 @@ class ComfyImageSkills:
     def expand_idea(self, context: SkillContext) -> SkillResult:
         prompt = context.node.inputs["prompt"]
         style = context.node.inputs["style"]
-        creative_prompt = f"{prompt}, {style}, highly detailed, cinematic lighting"
+        creative_prompt = structured_visual_prompt(
+            subject=str(prompt),
+            scene=str(prompt),
+            action="a clear focal action or expression that is readable in one glance",
+            environment="layered but uncluttered supporting environment",
+            camera="clear focal composition with intentional framing",
+            style=str(style),
+            quality="high detail, cinematic lighting, clean silhouette, coherent anatomy",
+        )
         negative_prompt = "ugly, blurry, low quality, bad anatomy, deformed, duplicate, watermark, text"
         return SkillResult(
             status="success",

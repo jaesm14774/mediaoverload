@@ -466,6 +466,36 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertEqual(payload, ["happy", "angry", "sleepy"])
 
+    def test_chat_json_repairs_invalid_json_with_stricter_prompt(self) -> None:
+        fake_manager = _FakeManager(["not json", '```json\n{"ok":true}\n```'])
+
+        result = LLMPromptEngine._chat_json(
+            fake_manager,
+            "You are a story planner.",
+            "Return the plan.",
+            "plan",
+            {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(len(fake_manager.text_model.calls), 2)
+        self.assertIn("JSON REPAIR MODE", fake_manager.text_model.calls[1]["messages"][0]["content"])
+        self.assertNotIn("response_format", fake_manager.text_model.calls[1]["kwargs"])
+
+    def test_chat_json_uses_array_contract_for_array_schema(self) -> None:
+        fake_manager = _FakeManager(['[{"ok":true}]'])
+
+        result = LLMPromptEngine._chat_json(
+            fake_manager,
+            "You are a story planner.",
+            "Return the list.",
+            "items",
+            {"type": "array", "items": {"type": "object"}},
+        )
+
+        self.assertEqual(result, [{"ok": True}])
+        self.assertIn("JSON array", fake_manager.text_model.calls[0]["messages"][0]["content"])
+
     def test_sticker_expressions_fall_back_when_llm_returns_empty(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=_FakeManager([""]))
         goal = GoalRequest(prompt="Kirby sticker emotions: happy, angry, crying, sleepy", media_type="sticker_pack")
@@ -514,13 +544,13 @@ class LLMEngineTests(unittest.TestCase):
             backend = engine.backend_info()
 
         self.assertEqual(backend["text_provider"], "openrouter")
-        self.assertEqual(backend["text_model"], "qwen/qwen3.6-plus:free")
-        self.assertEqual(backend["text_model_raw"], "qwen/qwen3.6-plus:free")
-        self.assertFalse(backend["openrouter_text_pool_mode"])
+        self.assertEqual(backend["text_model"], "free_pool")
+        self.assertEqual(backend["text_model_raw"], "")
+        self.assertTrue(backend["openrouter_text_pool_mode"])
         self.assertEqual(backend["vision_provider"], "openrouter")
-        self.assertEqual(backend["vision_model"], "qwen/qwen3.6-plus:free")
-        self.assertEqual(backend["vision_model_raw"], "qwen/qwen3.6-plus:free")
-        self.assertFalse(backend["openrouter_vision_pool_mode"])
+        self.assertEqual(backend["vision_model"], "free_pool")
+        self.assertEqual(backend["vision_model_raw"], "")
+        self.assertTrue(backend["openrouter_vision_pool_mode"])
         self.assertFalse(backend["random_models"])
         self.assertEqual(backend.get("text_fallback_provider"), "")
 
@@ -531,7 +561,7 @@ class LLMEngineTests(unittest.TestCase):
                 "AGENTIC_TEXT_MODEL_PROVIDER": "openrouter",
                 "AGENTIC_TEXT_MODEL": "",
                 "AGENTIC_VISION_MODEL_PROVIDER": "openrouter",
-                "AGENTIC_VISION_MODEL": "qwen/qwen3.6-plus:free",
+                "AGENTIC_VISION_MODEL": "google/gemma-4-31b-it:free",
                 "AGENTIC_OPENROUTER_TEXT_MODEL_STRATEGY": "free_pool",
             },
             clear=False,

@@ -32,6 +32,18 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature parameter")
     parser.add_argument("--generation-type", type=str, help="Override legacy generation type, for example text2longvideo")
     parser.add_argument("--dry-run-publish", action="store_true", help="Run publish stage in dry-run mode")
+    parser.add_argument(
+        "--publish-mode",
+        choices=("live", "safe_poc"),
+        default="",
+        help="Publishing policy: live or safe_poc (YouTube private, Facebook draft, Instagram container-only)",
+    )
+    parser.add_argument(
+        "--publish-platform",
+        action="append",
+        dest="publish_platforms",
+        help="Restrict publishing to a platform; repeat for multiple platforms",
+    )
     parser.add_argument("--no-publish", action="store_true", help="Skip publish stage after generation")
     parser.add_argument("--enable-review-loop", action="store_true", help="Enable retry/review branches where supported")
     parser.add_argument("--review-notes", type=str, default="", help="Review notes for planner retry branches")
@@ -50,6 +62,8 @@ def main() -> None:
         temperature=args.temperature,
         preferred_generation_type=args.generation_type,
         dry_run_publish=args.dry_run_publish,
+        publish_mode=args.publish_mode,
+        publish_platforms=args.publish_platforms,
         publish_after_generate=not args.no_publish,
         output_dir=args.output_dir,
         enable_review_loop=args.enable_review_loop,

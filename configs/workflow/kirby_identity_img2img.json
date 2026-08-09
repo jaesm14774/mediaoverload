@@ -1,0 +1,14 @@
+{
+  "1": {"inputs": {"image": "kirby_keyframe_seed.png"}, "class_type": "LoadImage", "_meta": {"title": "Kirby continuity frame"}},
+  "2": {"inputs": {"unet_name": "anima\\anima-preview2.safetensors", "weight_dtype": "default"}, "class_type": "UNETLoader", "_meta": {"title": "Kirby identity refine model"}},
+  "3": {"inputs": {"clip_name": "anima\\qwen_3_06b_base.safetensors", "type": "stable_diffusion", "device": "cpu"}, "class_type": "CLIPLoader", "_meta": {"title": "Kirby identity text encoder"}},
+  "4": {"inputs": {"vae_name": "anima\\qwen_image_vae.safetensors"}, "class_type": "VAELoader", "_meta": {"title": "Kirby identity VAE"}},
+  "5": {"inputs": {"value": "Preserve the exact same Kirby character from the input frame: round pink body, bright red feet, oval blue eyes, tiny smiling mouth, same simple 2D anime design. Recompose only the meadow action and camera framing for the next shot. Kirby is the only character, no humans, no other mascots, no text."}, "class_type": "PrimitiveString", "_meta": {"title": "positive_prompt"}},
+  "6": {"inputs": {"text": ["5", 0], "clip": ["3", 0]}, "class_type": "CLIPTextEncode", "_meta": {"title": "positive prompt"}},
+  "7": {"inputs": {"value": "human, girl, boy, person, face, humanoid, Sonic, Pikachu, Waddle Dee, other mascot, multiple characters, identity drift, different color, missing red feet, text, watermark, logo, duplicate, deformed, blurry, low quality"}, "class_type": "PrimitiveString", "_meta": {"title": "negative_prompt"}},
+  "8": {"inputs": {"text": ["7", 0], "clip": ["3", 0]}, "class_type": "CLIPTextEncode", "_meta": {"title": "negative prompt"}},
+  "9": {"inputs": {"pixels": ["1", 0], "vae": ["4", 0]}, "class_type": "VAEEncode", "_meta": {"title": "Encode previous Kirby tail frame"}},
+  "10": {"inputs": {"seed": 20260808, "steps": 15, "cfg": 3.5, "sampler_name": "dpmpp_2m_sde_gpu", "scheduler": "sgm_uniform", "denoise": 0.35, "model": ["2", 0], "positive": ["6", 0], "negative": ["8", 0], "latent_image": ["9", 0]}, "class_type": "KSampler", "_meta": {"title": "Kirby identity lock sampler"}},
+  "11": {"inputs": {"samples": ["10", 0], "vae": ["4", 0]}, "class_type": "VAEDecode", "_meta": {"title": "Decode Kirby continuity keyframe"}},
+  "12": {"inputs": {"filename_prefix": "kirby_identity_refined", "images": ["11", 0]}, "class_type": "SaveImage", "_meta": {"title": "Save Kirby identity keyframe"}}
+}

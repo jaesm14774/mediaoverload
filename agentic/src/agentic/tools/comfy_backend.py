@@ -12,12 +12,13 @@ import yaml
 
 
 class AgenticComfyCommunicator:
-    def __init__(self, host: str | None = None, port: int | None = None, timeout: int = 900) -> None:
-        self.host = host or os.environ.get("COMFYUI_HOST", "host.docker.internal")
+    def __init__(self, host: str | None = None, port: int | None = None, timeout: int | None = None) -> None:
+        self.host = host or os.environ.get("COMFYUI_HOST", "127.0.0.1")
         self.port = port or int(os.environ.get("COMFYUI_PORT", "8188"))
         self.client_id = str(uuid.uuid4())
         self.server_address = f"{self.host}:{self.port}"
-        self.timeout = timeout
+        configured_timeout = os.environ.get("COMFYUI_TIMEOUT_SECONDS", "1800")
+        self.timeout = int(timeout if timeout is not None else configured_timeout)
         self.ws: websocket.WebSocket | None = None
 
     def connect_websocket(self) -> None:

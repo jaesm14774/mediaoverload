@@ -1,0 +1,165 @@
+name: kirby_meadow_adventure
+character: Kirby
+segment_duration_seconds: 5
+default_segment_count: 2
+base_prompt: >-
+  Kirby is the only protagonist in a polished 2D anime short film. Preserve his
+  round pink body, bright red feet, oval blue eyes, tiny arms, and readable silhouette.
+opening_keyframe_prompt: >-
+  Kirby stands in a meadow that is visibly losing its color at dawn. A brilliant
+  golden star seed has just landed in a small crater beside him, while a dark
+  circular rift hangs in the sky and the last fireflies fade. Kirby looks toward
+  the rift with urgent curiosity, centered full body, clean 2D anime illustration,
+  one character only, no text.
+story_spine:
+  premise: A fallen star seed is draining the meadow's light because it no longer belongs in the sky.
+  objective: Kirby must carry the fallen star seed to the dark sky rift and return it before the meadow goes completely dark.
+  obstacle: The sky rift is unstable and collapses while the seed loses power, leaving Kirby only one safe attempt.
+  stakes: The meadow is visibly losing color and its last fireflies will go dark if the seed is not returned.
+  emotional_arc: surprise becomes commitment, then fear, courage, relief, and peaceful satisfaction.
+  climax: Kirby carries the fading seed through the collapsing light gate and releases it into the dark sky rift.
+  resolution: The seed becomes a small steady star above the meadow, restoring its color and light while Kirby rests below.
+world:
+  setting: a meadow losing its light because a fallen star seed is out of place
+  visual_language: saturated emerald grass fading into cyan twilight, gold sparks, clean anime outlines, cinematic depth, simple readable shapes
+  continuity_rules:
+    - Kirby remains the only character and keeps the same proportions and palette.
+    - The golden star seed is a persistent story prop in every later segment.
+    - The dark sky rift remains the single destination and never becomes a new unrelated location.
+    - Screen direction stays left-to-right while Kirby pursues the rift.
+    - Each segment must visibly change the mission state and serve the same objective.
+    - The gate is made of transparent gold and cyan light; never turn it into wood, stone, brick, or a solid building.
+    - The story resolves in the final segment; do not add a new quest or cliffhanger.
+segments:
+  - id: star_seed_falls
+    act: 1
+    phase: hook
+    act_goal: Make the problem and the objective immediately visible.
+    spine_beat: The meadow's light is fading because the fallen star is out of place.
+    title: The fallen star makes the meadow fade
+    narrative_goal: Kirby sees the meadow losing light and understands that the fallen star seed must be returned.
+    cause: The meadow loses its last warm lights, causing the star seed to fall beneath the dark sky rift.
+    action_beats:
+      - A brilliant golden star seed streaks down and lands beside Kirby as the meadow visibly dims.
+      - Kirby looks from the fading fireflies to the dark rift and locks onto it as the only destination.
+    effect: Kirby has a clear mission and the dark rift is established as the single story destination.
+    must_show:
+      - the meadow visibly losing color or light
+      - the golden star seed in a small crater beside Kirby
+      - the dark sky rift above the meadow
+    start_state: Kirby stands at the meadow edge while the grass and fireflies are already beginning to lose their light.
+    end_state: Kirby stands beside the glowing star seed, facing the dark sky rift while the last fireflies fade around him.
+    next_hook: The seed gives one urgent pulse, showing Kirby that the path to the rift is still open.
+    camera: fast but readable push-in from the dark sky rift to the falling seed and Kirby, ending in a medium-wide frame
+    environment: emerald meadow visibly fading toward cyan gray, tiny fireflies going dark, dark circular rift overhead
+    audio: bright impact chime, fading meadow ambience, one urgent seed pulse, and a restrained rising note
+  - id: choose_the_mission
+    act: 1
+    phase: commitment
+    act_goal: Turn the problem into an explicit mission with a directional commitment.
+    spine_beat: Kirby chooses to return the seed instead of simply following a mysterious signal.
+    title: Kirby chooses to return the star
+    narrative_goal: Kirby picks up the seed and commits to carrying it back to the dark sky rift before the meadow goes dark.
+    cause: Kirby sees the meadow fading and the seed pulsing toward the rift, so he chooses the return mission.
+    action_beats:
+      - Kirby lifts the seed close to his chest and the rift answers with a thin golden beam.
+      - Kirby takes the first deliberate steps right as the beam paints one continuous path across the fading meadow.
+    effect: Kirby is moving toward the one destination, and the mission is no longer a vague discovery.
+    must_show:
+      - Kirby holding the seed close to his chest
+      - one continuous beam connecting seed, meadow path, and sky rift
+      - Kirby clearly moving toward the rift on screen right
+    start_state: Kirby stands beside the glowing seed while the meadow fades and the dark sky rift remains overhead.
+    end_state: Kirby is moving right with the seed held near his chest, following one golden path that reaches the rift.
+    next_hook: The beam reaches the rift and tears open an unstable gate before it can collapse.
+    camera: smooth side-tracking shot from left to right, keeping Kirby, the seed, and the connected rift in one composition
+    environment: the grass dims behind Kirby while a narrow golden path restores a strip of color ahead of him
+    audio: two light footsteps, pulsing signal, fading ambience behind Kirby, and a steady ticking shimmer
+  - id: gate_collapse
+    act: 2
+    phase: obstacle
+    act_goal: Put the mission under pressure with one visible obstacle.
+    spine_beat: The only route to the sky rift opens as a gate, but the gate immediately begins to collapse.
+    title: The only route is collapsing
+    narrative_goal: Kirby reaches the rift and realizes the unstable light gate will close before he can return the seed.
+    cause: Kirby's golden path reaches the rift, forcing it open into a gate that cannot hold its shape.
+    action_beats:
+      - The dark rift tears into a transparent gold and cyan light gate that pulls the remaining fireflies inward.
+      - Kirby braces at the threshold as the gate narrows and the seed's glow weakens in his hands.
+    effect: "The mission gains a hard deadline: Kirby must cross now or the seed and meadow will be lost."
+    must_show:
+      - a transparent gold and cyan light gate, not a building or wooden doorway
+      - fireflies and light being pulled toward the gate
+      - the seed visibly dimming while Kirby stands at the threshold
+    start_state: Kirby reaches the hill with the seed in hand while the golden path touches the dark sky rift.
+    end_state: Kirby stands at the shrinking light gate threshold with the seed dimmer than before and the meadow behind him fading.
+    next_hook: Kirby must cross the collapsing gate and put the fading seed back into the sky rift.
+    camera: forward dolly toward the gate with a brief close-up of the dimming seed, then hold on Kirby at the threshold
+    environment: dawn green meadow fades behind Kirby, cyan light fills the transparent gate, sparks pull inward
+    audio: deep magical pulse, rushing air, flickering light shimmer, and a restrained suspense chord
+  - id: cross_the_gate
+    act: 2
+    phase: choice
+    act_goal: Make the protagonist take the irreversible action required by the mission.
+    spine_beat: Kirby chooses courage and crosses the collapsing gate with the fading seed.
+    title: Kirby crosses before it closes
+    narrative_goal: Kirby carries the fading seed through the gate and reaches the sky-side opening before it seals.
+    cause: The gate is shrinking and the seed is losing power, leaving Kirby only one safe attempt to cross.
+    action_beats:
+      - Kirby takes one deliberate step through the transparent light gate and lifts the seed toward the rift's center.
+      - The gate briefly stabilizes around Kirby, revealing the dark sky-side opening directly above the cyan meadow.
+    effect: Kirby is on the far side of the gate with the seed aligned to the rift, ready for the climax.
+    must_show:
+      - Kirby physically crossing the transparent light gate
+      - the seed held toward the dark rift's center
+      - the gate visibly stabilizing just long enough for the next action
+    start_state: Kirby stands at the shrinking transparent light gate with the dim seed raised in both hands.
+    end_state: Kirby stands just beyond the gate with the seed aligned beneath the dark rift and the gate closing behind him.
+    next_hook: Kirby must release the seed into the rift before the last light leaves it.
+    camera: smooth follow-through shot across the transparent threshold, ending behind Kirby with the rift centered above
+    environment: cyan sky-side meadow, transparent gold rim light around Kirby, dark rift directly overhead, no solid architecture
+    audio: portal swell, one clear footstep, bright tension hit, and a breath of quiet before the climax
+  - id: return_the_star
+    act: 3
+    phase: climax
+    act_goal: Deliver the single decisive action that fulfills the protagonist objective.
+    spine_beat: Kirby releases the fading seed into the sky rift and returns the missing light to the sky.
+    title: The star returns to the sky
+    narrative_goal: Kirby releases the fading seed into the dark rift and watches it become a steady star.
+    cause: Kirby has reached the rift with the seed aligned, but the seed will go dark unless he releases it now.
+    action_beats:
+      - Kirby raises the seed into the center of the rift and releases it in one clear upward motion.
+      - The seed travels through the rift and ignites as a small steady star while a warm wave moves across the meadow.
+    effect: "The central mission succeeds: the star is back in the sky and the meadow begins to recover its color."
+    must_show:
+      - the seed leaving Kirby's hands and moving upward
+      - the dark rift becoming a small steady star
+      - one visible wave of color and light returning across the meadow
+    start_state: Kirby stands beyond the gate with the fading seed held beneath the dark rift and the gate closing behind him.
+    end_state: A small steady star shines where the rift was, and a warm wave of color is returning through the meadow.
+    next_hook: With the mission complete, Kirby can settle beneath the restored star and let the meadow become peaceful.
+    camera: upward tilt following the seed into the rift, then a wide reveal of the warm restoration wave across the meadow
+    environment: dark cyan sky warms around the new star, emerald color travels through the grass, remaining sparks return
+    audio: clear release chime, rising star tone, broad warm swell, and the first calm meadow ambience
+  - id: resolved_star_meadow
+    act: 3
+    phase: resolution
+    act_goal: Show the completed result and give the audience a satisfying final image.
+    spine_beat: The restored star holds the meadow's light, and Kirby rests after completing the mission.
+    title: The meadow is safe again
+    narrative_goal: Kirby sees the restored star holding the meadow's light and rests in a complete peaceful ending.
+    cause: The fallen seed has become a steady star, allowing the meadow's color and fireflies to return fully.
+    action_beats:
+      - The new star glows steadily above the meadow as the last gray patches turn emerald and gold.
+      - Kirby sits beneath the restored star, smiles, and gives one small wave while the fireflies settle into a calm pattern.
+    effect: The story resolves with the meadow safe, the objective complete, and no new quest or unresolved threat.
+    must_show:
+      - the small steady star above the meadow
+      - the meadow fully restored with warm lights and fireflies
+      - Kirby resting in a final peaceful pose
+    start_state: The new star shines above the meadow while a warm restoration wave is still moving through the grass.
+    end_state: Kirby rests beneath the steady star in a fully restored meadow, with no unresolved threat or new quest.
+    next_hook: The story resolves here with the returned star keeping the meadow bright.
+    camera: gentle pull-back from Kirby beneath the star to a clean final wide shot, holding the ending pose
+    environment: peaceful emerald meadow under a cyan-to-gold sky, one steady star overhead, warm fireflies everywhere
+    audio: resolved melodic cadence, soft firefly sparkle, calm meadow ambience, and a gentle final breath

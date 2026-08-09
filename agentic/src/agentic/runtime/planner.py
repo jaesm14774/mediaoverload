@@ -9,7 +9,7 @@ class TaskPlanner:
     DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
     DEFAULT_REFINE_WORKFLOWS = ("image_to_image", "z_image_i2i_anime")
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
-    DEFAULT_I2V_WORKFLOWS = ("wan2.2_gguf_i2v", "wan2.2_gguf_i2v_audio")
+    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "wan2.2_gguf_i2v", "wan2.2_gguf_i2v_audio")
 
     def __init__(self, asset_registry: AssetRegistry, idea_director: IdeaDirector | None = None) -> None:
         self.asset_registry = asset_registry
@@ -95,6 +95,10 @@ class TaskPlanner:
             return self._build_text2video_plan(goal)
         if goal.media_type == "text2img2video":
             return self._build_text2img2video_plan(goal)
+        if goal.media_type == "native_h3_story":
+            return self._build_native_h3_story_plan(goal)
+        if goal.media_type == "native_h3_t2v_story":
+            return self._build_native_h3_t2v_story_plan(goal)
         if goal.media_type == "video_narrate":
             return self._build_video_narrate_plan(goal)
         workflow_manifest = self._pick_goal_workflow(goal)
@@ -105,6 +109,327 @@ class TaskPlanner:
         if goal.media_type in {"image_refine", "image_upscale", "image_to_video"}:
             return self._build_comfy_primitive_plan(goal, workflow_manifest)
         return self._build_long_video_plan(goal, workflow_manifest)
+
+    def _build_native_h3_story_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        """Build one causal native H3 clip through the normal skill graph.
+
+        The story prompt and both continuity anchors are generated as graph nodes,
+        so scheduled runs can swap the storyboard or topic without introducing a
+        second execution mechanism.
+        """
+        image_manifest = self._manifest_from_goal_constraints(
+            goal,
+            *self.DEFAULT_IMAGE_WORKFLOWS,
+            constraint_keys=("native_h3_keyframe_workflow_name", "keyframe_workflow_name", "image_workflow_name"),
+            allowed_media_types={"image"},
+        )
+        video_manifest = self._manifest_from_goal_constraints(
+            goal,
+            *self.DEFAULT_I2V_WORKFLOWS,
+            constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
+            allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
+        )
+        h3_defaults = dict(video_manifest.recommended_defaults or {})
+        width = int(goal.constraints.get("native_h3_width") or h3_defaults.get("width", 608))
+        height = int(goal.constraints.get("native_h3_height") or h3_defaults.get("height", 352))
+        length = int(goal.constraints.get("native_h3_length") or h3_defaults.get("length", 362))
+        steps = int(goal.constraints.get("native_h3_steps") or h3_defaults.get("steps", 16))
+        video_count = self._constraint_int(goal, "video_count", 1)
+        keyframe_candidate_count = self._constraint_int(goal, "native_h3_keyframe_candidate_count", 1)
+        require_human_review = bool(goal.constraints.get("require_human_review", False))
+        if keyframe_candidate_count > 1 and not require_human_review:
+            raise ValueError(
+                "Native H3 multiple keyframe candidates require require_human_review=true; refusing to select one automatically."
+            )
+        storyboard_path = str(
+            goal.constraints.get("native_h3_storyboard_path")
+            or goal.constraints.get("storyboard_path")
+            or ""
+        )
+        if not storyboard_path:
+            raise ValueError("native_h3_story requires native_h3_storyboard_path or storyboard_path")
+
+        nodes = [
+            ExecutionNode(
+                node_id="native-story-prompt",
+                skill_name="longvideo.prepare_native_h3_story",
+                inputs={
+                    "storyboard_path": storyboard_path,
+                    "duration_seconds": int(goal.duration_seconds),
+                    "style": goal.style,
+                },
+                tags=["creative", "story", "native-h3"],
+                stage="prompting",
+            ),
+            ExecutionNode(
+                node_id="native-image-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                    "auto_download": goal.auto_download_assets,
+                },
+                depends_on=["native-story-prompt"],
+                tags=["assets", "image", "native-h3"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="native-video-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={
+                    "workflow_name": video_manifest.name,
+                    "auto_download": goal.auto_download_assets,
+                },
+                depends_on=["native-story-prompt"],
+                tags=["assets", "video", "native-h3"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="native-opening-keyframe",
+                skill_name="media.image.generate_keyframe",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                    "prompt_key": "opening_keyframe_prompt",
+                    "width": width,
+                    "height": height,
+                    "image_count": keyframe_candidate_count,
+                    "suffix": "native_h3_opening",
+                },
+                depends_on=["native-story-prompt", "native-image-asset-check"],
+                tags=["render", "image", "continuity", "native-h3"],
+                tool_name="comfy.workflow.text_to_image",
+                stage="render",
+            ),
+        ]
+        opening_source_node = "native-opening-keyframe"
+        if require_human_review:
+            opening_review_node = "native-opening-review"
+            nodes.append(
+                ExecutionNode(
+                    node_id=opening_review_node,
+                    skill_name="review.assets.select",
+                    inputs={
+                        "limit": 1,
+                        "review_all_candidates": True,
+                        "review_scope": "first_frame",
+                        "review_notes": (
+                            "首幀人工審核：請從附件中選出 1 張最適合 MiniMax H3 I2V 的 Kirby 開場首幀。 "
+                            "優先檢查 Kirby 是否清楚且只有一個、首眼是否看得到衝突或任務、構圖是否有明確焦點、 "
+                            "背景是否足夠簡潔可動畫化、是否沒有文字或水印。請按附件順序使用 Asset 1–6 選擇； "
+                            "若六張都不合格請按 Reject，不要勉強選擇。"
+                        ),
+                    },
+                    depends_on=["native-opening-keyframe"],
+                    tags=["review", "first-frame", "native-h3"],
+                    stage="review",
+                )
+            )
+            opening_source_node = opening_review_node
+        nodes.extend(
+            [
+            ExecutionNode(
+                node_id="native-ending-keyframe",
+                skill_name="media.image.generate_keyframe",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                    "prompt_key": "ending_keyframe_prompt",
+                    "width": width,
+                    "height": height,
+                    "image_count": 1,
+                    "suffix": "native_h3_ending",
+                },
+                depends_on=[opening_source_node, "native-story-prompt", "native-image-asset-check"],
+                tags=["render", "image", "continuity", "native-h3"],
+                tool_name="comfy.workflow.text_to_image",
+                stage="render",
+            ),
+            ExecutionNode(
+                node_id="native-keyframe-gate",
+                skill_name="media.image.validate_character",
+                inputs={
+                    "character": str(goal.constraints.get("character") or ""),
+                    "opening_node": opening_source_node,
+                    "ending_node": "native-ending-keyframe",
+                    "opening_prompt_key": "opening_keyframe_prompt",
+                    "ending_prompt_key": "ending_keyframe_prompt",
+                    "preserve_opening_frame": require_human_review,
+                    "workflow_name": image_manifest.name,
+                    "width": width,
+                    "height": height,
+                    "max_regenerations": 0,
+                },
+                depends_on=[opening_source_node, "native-ending-keyframe"],
+                tags=["quality", "identity", "native-h3"],
+                stage="quality",
+            ),
+            ExecutionNode(
+                node_id="native-h3-render",
+                skill_name="longvideo.render_native_h3",
+                inputs={
+                    "workflow_name": video_manifest.name,
+                    "width": width,
+                    "height": height,
+                    "length": length,
+                    "steps": steps,
+                    "video_count": video_count,
+                },
+                depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-gate"],
+                tags=["render", "video", "native-h3"],
+                tool_name="comfy.workflow.image_to_video",
+                stage="render",
+            ),
+            ExecutionNode(
+                node_id="native-h3-qa",
+                skill_name="longvideo.qa_native_h3",
+                inputs={"mode": "bypass_until_final_discord_review"},
+                depends_on=["native-h3-render"],
+                tags=["quality-bypass", "manual-review", "native-h3"],
+                stage="quality",
+            ),
+            ExecutionNode(
+                node_id="native-h3-preview",
+                skill_name="media.video.gif_preview",
+                inputs={"fps": 8, "scale_width": 512},
+                depends_on=["native-h3-render"],
+                tags=["preview", "native-h3"],
+                tool_name="media.video_to_gif",
+                stage="package",
+            ),
+            ExecutionNode(
+                node_id="native-h3-package",
+                skill_name="longvideo.package_native_h3",
+                inputs={"render_node": "native-h3-render", "qa_node": "native-h3-qa", "preview_node": "native-h3-preview"},
+                depends_on=["native-h3-render", "native-h3-qa", "native-h3-preview", "native-keyframe-gate"],
+                tags=["artifact", "summary", "native-h3"],
+                stage="package",
+            ),
+            ]
+        )
+        metadata = {
+            "recipe": "native_h3_story",
+            "storyboard_path": storyboard_path,
+            "selected_workflow": video_manifest.name,
+            "keyframe_workflow": image_manifest.name,
+            "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review},
+            "graph_overview": [node.node_id for node in nodes],
+        }
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name=video_manifest.name,
+            nodes=nodes,
+            metadata=metadata,
+            description=f"Native H3 causal story from storyboard '{storyboard_path}'",
+        )
+
+    def _build_native_h3_t2v_story_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        """Build one continuous native H3 text-to-video story without keyframes."""
+        video_manifest = self._manifest_from_goal_constraints(
+            goal,
+            "minimax_h3_lowvram_t2v",
+            "minimax_h3_ultra_lowvram_t2v",
+            "minimax_h3_native_t2v",
+            constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
+            allowed_media_types={"text2video", "long_video"},
+        )
+        h3_defaults = dict(video_manifest.recommended_defaults or {})
+        width = int(goal.constraints.get("native_h3_width") or h3_defaults.get("width", 608))
+        height = int(goal.constraints.get("native_h3_height") or h3_defaults.get("height", 352))
+        length = int(goal.constraints.get("native_h3_length") or h3_defaults.get("length", 362))
+        steps = int(goal.constraints.get("native_h3_steps") or h3_defaults.get("steps", 16))
+        video_count = self._constraint_int(goal, "video_count", 1)
+        storyboard_path = str(
+            goal.constraints.get("native_h3_storyboard_path")
+            or goal.constraints.get("storyboard_path")
+            or ""
+        )
+        if not storyboard_path:
+            raise ValueError("native_h3_t2v_story requires native_h3_storyboard_path or storyboard_path")
+
+        nodes = [
+            ExecutionNode(
+                node_id="native-story-prompt",
+                skill_name="longvideo.prepare_native_h3_story",
+                inputs={
+                    "storyboard_path": storyboard_path,
+                    "duration_seconds": int(goal.duration_seconds),
+                    "style": goal.style,
+                    "render_mode": "text_to_video",
+                },
+                tags=["creative", "story", "native-h3", "t2v"],
+                stage="prompting",
+            ),
+            ExecutionNode(
+                node_id="native-video-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={
+                    "workflow_name": video_manifest.name,
+                    "auto_download": goal.auto_download_assets,
+                },
+                depends_on=["native-story-prompt"],
+                tags=["assets", "video", "native-h3", "t2v"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="native-h3-render",
+                skill_name="longvideo.render_native_h3_t2v",
+                inputs={
+                    "workflow_name": video_manifest.name,
+                    "width": width,
+                    "height": height,
+                    "length": length,
+                    "steps": steps,
+                    "video_count": video_count,
+                },
+                depends_on=["native-story-prompt", "native-video-asset-check"],
+                tags=["render", "video", "native-h3", "t2v"],
+                tool_name="comfy.workflow.text_to_video",
+                stage="render",
+            ),
+            ExecutionNode(
+                node_id="native-h3-qa",
+                skill_name="longvideo.qa_native_h3",
+                inputs={"mode": "bypass_until_final_discord_review"},
+                depends_on=["native-h3-render"],
+                tags=["quality-bypass", "manual-review", "native-h3", "t2v"],
+                stage="quality",
+            ),
+            ExecutionNode(
+                node_id="native-h3-preview",
+                skill_name="media.video.gif_preview",
+                inputs={"fps": 8, "scale_width": 512},
+                depends_on=["native-h3-render"],
+                tags=["preview", "native-h3", "t2v"],
+                tool_name="media.video_to_gif",
+                stage="package",
+            ),
+            ExecutionNode(
+                node_id="native-h3-package",
+                skill_name="longvideo.package_native_h3",
+                inputs={"render_node": "native-h3-render", "qa_node": "native-h3-qa", "preview_node": "native-h3-preview"},
+                depends_on=["native-h3-render", "native-h3-qa", "native-h3-preview"],
+                tags=["artifact", "summary", "native-h3", "t2v"],
+                stage="package",
+            ),
+        ]
+        metadata = {
+            "recipe": "native_h3_t2v_story",
+            "storyboard_path": storyboard_path,
+            "selected_workflow": video_manifest.name,
+            "required_assets": [asset.to_dict() for asset in video_manifest.required_assets],
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds)},
+            "render_mode": "text_to_video",
+            "graph_overview": [node.node_id for node in nodes],
+        }
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name=video_manifest.name,
+            nodes=nodes,
+            metadata=metadata,
+            description=f"Native H3 text-to-video causal story from storyboard '{storyboard_path}'",
+        )
 
     @staticmethod
     def _review_loop_enabled(goal: GoalRequest) -> bool:
@@ -1690,7 +2015,10 @@ class TaskPlanner:
             ExecutionNode(
                 node_id="review-select",
                 skill_name="review.assets.select",
-                inputs={"limit": selection_limit},
+                inputs={
+                    "limit": selection_limit,
+                    "review_scope": str(goal.constraints.get("review_scope") or "final_video"),
+                },
                 depends_on=["ingest-media"],
                 tags=["review", "publish"],
                 stage="review",
@@ -1723,6 +2051,7 @@ class TaskPlanner:
                     "platforms": platforms,
                     "platform_configs": goal.constraints.get("platform_configs", {}),
                     "additional_params": goal.constraints.get("additional_params", {}),
+                    "publish_mode": goal.constraints.get("publish_mode", ""),
                     "dry_run": dry_run,
                 },
                 depends_on=["process-media", "prepare-caption"],
@@ -1743,6 +2072,7 @@ class TaskPlanner:
             "graph_overview": [node.node_id for node in nodes],
             "platforms": list(platforms),
             "dry_run": dry_run,
+            "publish_mode": str(goal.constraints.get("publish_mode") or ""),
         }
         return ExecutionPlan(
             goal=goal,
@@ -1751,4 +2081,3 @@ class TaskPlanner:
             metadata=metadata,
             description=f"Agentic publish/review chain for goal '{goal.prompt}'",
         )
-

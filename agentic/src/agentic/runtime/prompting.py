@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agentic.storyboard import build_storyboard_segments, load_storyboard, story_state_contract
+
 from agentic.runtime.contracts import GoalRequest
+from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt
 
 
 LONG_VIDEO_SYSTEM_PROMPT = """
@@ -18,7 +21,11 @@ Non-negotiable rules:
 - Prefer tangible visuals over abstract summaries: props, architecture, lighting, weather, symbols, motion.
 - Prefer substantial actions that can sustain a full clip, not tiny repetitive motions.
 - Each shot must visibly progress from the previous one.
-- Describe concrete camera framing, environment, lighting, motion, and mood.
+- Describe prompts in this order: subject continuity, scene, primary action, environment, camera movement, lighting/style, audio, and end state.
+- Put the camera instruction beside the action it controls; use concrete camera language such as follow, push in, pan, tilt, or pull out.
+- For image-to-video, treat the first frame as authoritative and describe how it starts moving and evolves instead of redrawing it.
+- For text-to-video, establish the identity inside the first moving action instead of opening on a posed portrait.
+- When a clip has multiple beats, write timestamped shot progression in chronological order and include the cause/effect handoff.
 - Make the result generation-ready for diffusion and image-to-video models.
 """.strip()
 
@@ -41,18 +48,14 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     news_context = _news_context(goal)
     action_directive = _action_directive(goal.media_type, goal.duration_seconds)
     continuity_directive = _continuity_directive(goal.media_type)
-    visual_prompt = ", ".join(
-        part
-        for part in (
-            _hero_subject_clause(subject_anchor),
-            _core_scene_clause(goal.prompt, goal.media_type, news_context),
-            _news_fusion_clause(news_context),
-            action_directive,
-            continuity_directive,
-            _style_directive(selected_style),
-            _quality_clause(goal.media_type),
-        )
-        if part
+    visual_prompt = structured_visual_prompt(
+        subject=_hero_subject_clause(subject_anchor),
+        scene=_core_scene_clause(goal.prompt, goal.media_type, news_context),
+        action=action_directive,
+        environment=f"{_news_fusion_clause(news_context)}; {continuity_directive}",
+        camera=_camera_beat(0, 2) if goal.media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "image_to_video"} else "clear focal composition",
+        style=_style_directive(selected_style),
+        quality=_quality_clause(goal.media_type),
     )
     negative_prompt = ", ".join(
         [
@@ -90,6 +93,16 @@ def build_story_segments(
     segment_count: int,
     tone: str,
 ) -> list[dict[str, Any]]:
+    storyboard_path = str(goal.constraints.get("storyboard_path", "") or "").strip()
+    if storyboard_path:
+        storyboard = load_storyboard(storyboard_path)
+        return build_storyboard_segments(
+            storyboard,
+            segment_count=segment_count,
+            tone=tone,
+            style=goal.style,
+            creative_brief=creative_brief,
+        )
     character = str(goal.constraints.get("character", "") or "").strip()
     subject_anchor = character or goal.prompt
     news_context = _news_context(goal)
@@ -101,20 +114,14 @@ def build_story_segments(
         motion = _motion_beat(index, segment_count)
         environment = _environment_beat(goal.prompt, index, segment_count, motif_pool)
         motif_clause = _segment_motif_clause(motif_pool, index)
-        visual = ", ".join(
-            part
-            for part in (
-                _hero_subject_clause(subject_anchor),
-                motion,
-                environment,
-                motif_clause,
-                camera,
-                f"story stage: {stage}",
-                f"tone: {tone}",
-                _style_directive(goal.style),
-                _quality_clause(goal.media_type),
-            )
-            if part
+        visual = structured_visual_prompt(
+            subject=_hero_subject_clause(subject_anchor),
+            scene=f"story stage: {stage}; tone: {tone}",
+            action=motion,
+            environment=f"{environment}; {motif_clause}" if motif_clause else environment,
+            camera=camera,
+            style=_style_directive(goal.style),
+            quality=_quality_clause(goal.media_type),
         )
         narration = (
             f"{subject_anchor} {motion.lower()}, pushing the story into the {stage.lower()} beat with clear visual progression."
@@ -136,17 +143,16 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
     character = str(goal.constraints.get("character", "") or "").strip()
     subject_anchor = character or "same main subject"
     news_context = _news_context(goal)
-    prompt = ", ".join(
-        part
-        for part in (
-            str(segment.get("visual", "")),
-            _hero_subject_clause(subject_anchor),
-            _news_fusion_clause(news_context),
-            "preserve facial features, costume, proportions, palette, and iconic character read",
-            "substantial action with visible start-to-end motion",
-            "coherent scene geography and camera continuity",
-        )
-        if part
+    prompt = structured_visual_prompt(
+        subject=_hero_subject_clause(subject_anchor),
+        scene=str(segment.get("visual", "")),
+        action=str(segment.get("action") or "substantial action with visible start-to-end motion"),
+        environment=(
+            f"{_news_fusion_clause(news_context)}; preserve facial features, costume, proportions, palette, and iconic character read"
+        ),
+        camera=str(segment.get("camera") or "coherent scene geography with camera continuity"),
+        style=str(goal.style or "stylized cinematic animation"),
+        quality="clear motion path, strong silhouette, spatial depth, no documentary text overlays",
     )
     outputs = {
         "segment_id": segment["segment_id"],
@@ -156,6 +162,56 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
     if prior_frame:
         outputs["prior_frame_path"] = prior_frame
     return outputs
+
+
+def build_minimax_h3_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame: str | None = None) -> dict[str, Any]:
+    """Build an H3-ready audiovisual prompt while preserving Kirby continuity."""
+    base = build_segment_prompt(goal, segment, prior_frame=prior_frame)
+    character = str(goal.constraints.get("character", "") or "").strip() or "the main character"
+    audio_direction = str(
+        goal.constraints.get(
+            "h3_audio_direction",
+            "native stereo audio: playful foot taps, soft environmental ambience, one readable impact accent, "
+            "light melodic motif, no subtitles or text overlays",
+        )
+    )
+    story_contract = story_state_contract(segment)
+    duration = max(1, int(goal.duration_seconds or 5))
+    shot = {
+        "time": f"0-{duration}s",
+        "title": str(segment.get("narrative_goal") or segment.get("segment_id") or "primary story beat"),
+        "action": str(segment.get("visual") or base["prompt"]),
+        "camera": str(segment.get("camera") or "camera follows the primary action with a readable change in framing"),
+        "state_change": str(segment.get("end_state") or "the primary action reaches a visible next state"),
+        "cause": str(segment.get("cause") or "the protagonist acts on the immediate objective"),
+        "effect": str(segment.get("effect") or segment.get("next_hook") or "the next story beat becomes possible"),
+    }
+    prompt = compose_minimax_h3_prompt(
+        duration_seconds=duration,
+        character=character,
+        style=goal.style,
+        base_prompt="",
+        story_spine=segment.get("story_spine") if isinstance(segment.get("story_spine"), dict) else {},
+        shots=[shot],
+        audio=audio_direction,
+        render_mode="image_to_video" if prior_frame else "text_to_video",
+        prior_frame=bool(prior_frame),
+    )
+    prompt = "\n".join(
+        [
+            prompt,
+            f"Story progression contract: {story_contract}" if story_contract else "",
+            "Character lock: preserve the same protagonist from the supplied identity anchor.",
+            "Motion direction: advance from the declared start state to the declared end state with one continuous readable primary event.",
+            f"Audio direction: {audio_direction}",
+        ]
+    )
+    return {
+        **base,
+        "prompt": prompt,
+        "audio_direction": audio_direction,
+        "prompt_format": "minimax_h3_context_ir_local",
+    }
 
 
 def build_sticker_prompt(character: str, expression: str, prompt_prefix: str, style: str) -> str:
@@ -199,7 +255,7 @@ def build_autonomous_scene_prompt(
     news_context: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     normalized_news = dict(news_context or {})
-    duration_hint = 8 if media_type in {"text2video", "text2img2video", "image_to_video"} else 16
+    duration_hint = 15 if media_type == "native_h3_story" else (8 if media_type in {"text2video", "text2img2video", "image_to_video"} else 16)
     prompt = ", ".join(
         part
         for part in (
@@ -225,13 +281,13 @@ def _style_directive(style: str) -> str:
 
 
 def _action_directive(media_type: str, duration_seconds: int) -> str:
-    if media_type in {"long_video", "text2video", "text2img2video", "animated_sticker", "image_to_video"}:
+    if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "animated_sticker", "image_to_video"}:
         return f"meaningful action sequence that can sustain {duration_seconds} seconds"
     return "clear action and visual intent"
 
 
 def _continuity_directive(media_type: str) -> str:
-    if media_type in {"long_video", "text2video", "text2img2video", "image_to_video", "animated_sticker"}:
+    if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "image_to_video", "animated_sticker"}:
         return "strict continuity of subject identity, pose logic, and scene progression"
     return "consistent subject identity and composition"
 
@@ -299,7 +355,7 @@ def _core_scene_clause(prompt: str, media_type: str, news_context: dict[str, Any
     if explicit_prompt:
         return explicit_prompt
     category = str(news_context.get("category") or "").strip()
-    if media_type in {"long_video", "text2video", "text2img2video", "image_to_video"}:
+    if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "image_to_video"}:
         if category:
             return f"playful cinematic scene inspired by {category} news energy rather than literal reporting"
         return "playful cinematic scene with a clear story beat rather than a static pose"
@@ -328,7 +384,7 @@ def _segment_motif_clause(motif_pool: list[str], index: int) -> str:
 
 
 def _quality_clause(media_type: str) -> str:
-    if media_type in {"long_video", "text2video", "text2img2video", "image_to_video"}:
+    if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "image_to_video"}:
         return "cinematic lighting, strong silhouette, spatial depth, clear motion path, no documentary text overlays"
     if media_type in {"sticker_pack", "animated_sticker"}:
         return "simple high-contrast silhouette, clean read at thumbnail size, no clutter"

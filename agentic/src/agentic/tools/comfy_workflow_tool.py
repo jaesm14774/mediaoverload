@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agentic.assets.registry import AssetRegistry
+from agentic.assets.kirby_input import assert_kirby_input
 from agentic.runtime.registry import ToolRegistry
 from agentic.tools.comfy_adapter import ComfyAdapter
 
@@ -35,22 +36,25 @@ class ComfyWorkflowSpec:
     negative_prompt_binding: NodeBinding | None = None
     width_binding: NodeBinding | None = None
     height_binding: NodeBinding | None = None
+    length_binding: NodeBinding | None = None
+    steps_binding: NodeBinding | None = None
     image_binding: NodeBinding | None = None
+    last_image_binding: NodeBinding | None = None
     seed_enabled: bool = True
     default_payload: dict[str, Any] = field(default_factory=dict)
 
 
 class ComfyWorkflowToolset:
     DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
-    DEFAULT_REFINE_WORKFLOWS = ("image_to_image", "z_image_i2i_anime")
+    DEFAULT_REFINE_WORKFLOWS = ("kirby_identity_img2img", "z_image_i2i_anime", "image_to_image")
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
-    DEFAULT_I2V_WORKFLOWS = ("wan2.2_gguf_i2v", "wan2.2_gguf_i2v_audio")
+    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "wan2.2_gguf_i2v", "wan2.2_gguf_i2v_audio")
 
     def __init__(self, asset_registry: AssetRegistry, output_root: Path, comfy_host: str | None = None, comfy_port: int | None = None) -> None:
         self.asset_registry = asset_registry
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
-        self.comfy_host = comfy_host or os.environ.get("COMFYUI_HOST")
+        self.comfy_host = comfy_host or os.environ.get("COMFYUI_HOST") or "127.0.0.1"
         self.comfy_port = comfy_port or self._read_port(os.environ.get("COMFYUI_PORT"))
         self.adapter = ComfyAdapter()
         self.specs = self._build_specs()
@@ -76,6 +80,8 @@ class ComfyWorkflowToolset:
         tool_registry.register("comfy.render_image_to_image", self._build_handler("comfy.workflow.image_to_image"), "Render a real image-to-image workflow through ComfyUI")
         tool_registry.register("comfy.upscale_image", self._build_handler("comfy.workflow.image_upscale"), "Upscale an image through ComfyUI")
         tool_registry.register("comfy.render_image_to_video", self._build_handler("comfy.workflow.image_to_video"), "Render a real image-to-video workflow through ComfyUI")
+        if "comfy.workflow.text_to_video" in self.specs:
+            tool_registry.register("comfy.render_text_to_video", self._build_handler("comfy.workflow.text_to_video"), "Render a native H3 text-to-video workflow through ComfyUI")
 
     def _build_handler(self, spec_name: str):
         def handler(payload: dict[str, object]) -> dict[str, object]:
@@ -163,11 +169,34 @@ class ComfyWorkflowToolset:
             updates.append(self._binding_update(spec.width_binding, int(payload["width"]), str(workflow_path)))
         if spec.height_binding and payload.get("height") is not None:
             updates.append(self._binding_update(spec.height_binding, int(payload["height"]), str(workflow_path)))
+        if spec.length_binding and payload.get("length") is not None:
+            updates.append(self._binding_update(spec.length_binding, int(payload["length"]), str(workflow_path)))
+        if spec.steps_binding and payload.get("steps") is not None:
+            updates.append(self._binding_update(spec.steps_binding, int(payload["steps"]), str(workflow_path)))
 
         image_path = payload.get("image_path") or payload.get("input_image_path")
+        requested_workflow = str(payload.get("workflow_name") or spec.workflow_name)
+        if image_path and spec.name == "comfy.workflow.image_to_video" and requested_workflow.startswith("minimax_h3_"):
+            prompt_text = str(payload.get("prompt") or "").lower()
+            if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
+                assert_kirby_input(
+                    image_path,
+                    allow_external=bool(payload.get("allow_external_reference", False)),
+                )
         if spec.image_binding and image_path:
             image_filename = generator.upload_image(str(image_path))
             updates.append(self._binding_update(spec.image_binding, image_filename, str(workflow_path)))
+
+        last_image_path = payload.get("last_image_path") or payload.get("last_frame_path")
+        if last_image_path and spec.last_image_binding and requested_workflow.startswith("minimax_h3_"):
+            prompt_text = str(payload.get("prompt") or "").lower()
+            if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
+                assert_kirby_input(
+                    last_image_path,
+                    allow_external=bool(payload.get("allow_external_reference", False)),
+                )
+            last_image_filename = generator.upload_image(str(last_image_path))
+            updates.append(self._binding_update(spec.last_image_binding, last_image_filename, str(workflow_path)))
 
         seed = payload.get("seed")
         if seed is None and spec.seed_enabled:
@@ -241,8 +270,29 @@ class ComfyWorkflowToolset:
                 output_folder="videos",
                 file_prefix="agentic_i2v",
                 count_payload_key="video_count",
-                prompt_binding=NodeBinding(kind="prompt", alias="positive_prompt", node_type="PrimitiveString", title="positive", input_key="value"),
+                prompt_binding=(
+                    NodeBinding(kind="prompt", node_type="MiniMaxH3ImageToVideo", input_key="prompt")
+                    if i2v_workflow.startswith("minimax_h3_")
+                    else NodeBinding(kind="prompt", alias="positive_prompt", node_type="PrimitiveString", title="positive", input_key="value")
+                ),
+                width_binding=NodeBinding(kind="width", node_type="MiniMaxH3ImageToVideo", input_key="width") if i2v_workflow.startswith("minimax_h3_") else None,
+                height_binding=NodeBinding(kind="height", node_type="MiniMaxH3ImageToVideo", input_key="height") if i2v_workflow.startswith("minimax_h3_") else None,
+                length_binding=NodeBinding(kind="length", node_type="MiniMaxH3ImageToVideo", input_key="length") if i2v_workflow.startswith("minimax_h3_") else None,
+                steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps") if i2v_workflow.startswith("minimax_h3_") else None,
                 image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
+                last_image_binding=NodeBinding(kind="last_image", node_type="LoadImage", title="native 15s last frame", input_key="image") if i2v_workflow.startswith("minimax_h3_") else None,
+            ),
+            "comfy.workflow.text_to_video": ComfyWorkflowSpec(
+                name="comfy.workflow.text_to_video",
+                workflow_name="minimax_h3_lowvram_t2v",
+                output_folder="videos",
+                file_prefix="agentic_h3_t2v",
+                count_payload_key="video_count",
+                prompt_binding=NodeBinding(kind="prompt", node_type="MiniMaxH3ImageToVideo", input_key="prompt"),
+                width_binding=NodeBinding(kind="width", node_type="MiniMaxH3ImageToVideo", input_key="width"),
+                height_binding=NodeBinding(kind="height", node_type="MiniMaxH3ImageToVideo", input_key="height"),
+                length_binding=NodeBinding(kind="length", node_type="MiniMaxH3ImageToVideo", input_key="length"),
+                steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps"),
             ),
         }
 

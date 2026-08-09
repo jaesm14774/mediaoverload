@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from agentic.assets.registry import AssetRegistry
+from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile
 from agentic.runtime.registry import ToolRegistry
 
 
@@ -21,7 +22,36 @@ class AgentAuthoringTools:
 
     def acquire_missing_assets(self, payload: dict[str, object]) -> dict[str, object]:
         workflow_name = str(payload["workflow_name"])
+        if bool(payload.get("execute_download", False)) and workflow_name.startswith("minimax_h3_"):
+            profile_name = {
+                "minimax_h3_lowvram_i2v": "balanced-lowvram",
+                "minimax_h3_lowvram_t2v": "balanced-lowvram",
+                "minimax_h3_ultra_lowvram_i2v": "ultra-lowvram",
+                "minimax_h3_ultra_lowvram_t2v": "ultra-lowvram",
+                "minimax_h3_native_i2v": "native-quality",
+                "minimax_h3_native_t2v": "native-quality",
+            }.get(workflow_name, "balanced-lowvram")
+            comfy_root = Path(str(payload.get("comfy_root") or self.asset_registry.asset_root))
+            return download_profile(
+                profile_name,
+                comfy_root,
+                dry_run=bool(payload.get("dry_run", False)),
+            )
         return self.asset_registry.acquire_missing_assets(workflow_name)
+
+    def minimax_h3_status(self, payload: dict[str, object]) -> dict[str, object]:
+        profile = get_profile(str(payload.get("profile") or "balanced-lowvram"))
+        comfy_root = Path(str(payload.get("comfy_root") or self.asset_registry.asset_root))
+        return inspect_profile(profile, comfy_root)
+
+    def minimax_h3_download(self, payload: dict[str, object]) -> dict[str, object]:
+        profile = get_profile(str(payload.get("profile") or "balanced-lowvram"))
+        comfy_root = Path(str(payload.get("comfy_root") or self.asset_registry.asset_root))
+        return download_profile(
+            profile,
+            comfy_root,
+            dry_run=bool(payload.get("dry_run", False)),
+        )
 
     def create_workflow_draft(self, payload: dict[str, object]) -> dict[str, object]:
         workflow_name = str(payload["workflow_name"])
@@ -94,6 +124,8 @@ def register_authoring_tools(tool_registry: ToolRegistry, asset_registry: AssetR
     tools = AgentAuthoringTools(asset_registry=asset_registry, root=root)
     tool_registry.register("asset.plan_acquisition", tools.plan_asset_acquisition, "Describe missing workflow assets")
     tool_registry.register("asset.acquire_missing", tools.acquire_missing_assets, "Prepare missing workflow asset targets")
+    tool_registry.register("model.minimax_h3.status", tools.minimax_h3_status, "Inspect MiniMax H3 model files and profile readiness")
+    tool_registry.register("model.minimax_h3.download", tools.minimax_h3_download, "Download and verify a MiniMax H3 profile into ComfyUI")
     tool_registry.register("workflow.recommend", tools.recommend_workflows, "Recommend workflows under configs/workflow for a media goal")
     tool_registry.register("workflow.validate_manifest", tools.validate_workflow, "Validate a workflow JSON template")
     tool_registry.register("workflow.author.create_draft", tools.create_workflow_draft, "Create a mutable workflow draft from a base workflow")

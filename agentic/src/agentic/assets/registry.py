@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agentic.assets.minimax_h3 import profile_manifest
+
 
 @dataclass(slots=True)
 class AssetRequirement:
@@ -14,6 +16,8 @@ class AssetRequirement:
     target_dir: str
     source: str | None = None
     alternate_target_dirs: tuple[str, ...] = ()
+    expected_size: int | None = None
+    sha256: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AssetRequirement":
@@ -28,6 +32,8 @@ class AssetRequirement:
             target_dir=data["target_dir"],
             source=data.get("source"),
             alternate_target_dirs=alternate,
+            expected_size=int(data["expected_size"]) if data.get("expected_size") not in {None, ""} else None,
+            sha256=str(data["sha256"]) if data.get("sha256") else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -39,6 +45,10 @@ class AssetRequirement:
         }
         if self.alternate_target_dirs:
             payload["alternate_target_dirs"] = list(self.alternate_target_dirs)
+        if self.expected_size is not None:
+            payload["expected_size"] = self.expected_size
+        if self.sha256:
+            payload["sha256"] = self.sha256
         return payload
 
 
@@ -71,6 +81,14 @@ _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "z_image_i2i_anime": {"denoise": 0.7},
     "wan2.2_gguf_i2v": {"frame_rate": 16},
     "wan2.2_gguf_i2v_audio": {"frame_rate": 16},
+    "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
+    "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_ultra_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_ultra_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
+    "minimax_h3_ultra_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_native_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_native_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
 }
 
 
@@ -125,6 +143,31 @@ def _synthetic_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
     )
 
 
+def _minimax_h3_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
+    profile_name = {
+        "minimax_h3_lowvram_i2v": "balanced-lowvram",
+        "minimax_h3_lowvram_t2v": "balanced-lowvram",
+        "minimax_h3_lowvram_15s_fl2va_i2v": "balanced-lowvram",
+        "minimax_h3_ultra_lowvram_i2v": "ultra-lowvram",
+        "minimax_h3_ultra_lowvram_t2v": "ultra-lowvram",
+        "minimax_h3_ultra_lowvram_15s_fl2va_i2v": "ultra-lowvram",
+        "minimax_h3_native_i2v": "native-quality",
+        "minimax_h3_native_t2v": "native-quality",
+    }.get(name)
+    if not profile_name:
+        return _synthetic_manifest(name, workflow_rel_path)
+    payload = profile_manifest(profile_name)
+    return WorkflowManifest(
+        name=name,
+        media_types=list(payload["media_types"]),
+        workflow_path=workflow_rel_path,
+        summary=str(payload["summary"]),
+        required_assets=[AssetRequirement.from_dict(item) for item in payload["required_assets"]],
+        recommended_defaults=dict(payload["recommended_defaults"]),
+        asset_extra_roots=[],
+    )
+
+
 class AssetRegistry:
     def __init__(self, project_root: Path, asset_root: Path | None = None) -> None:
         self.project_root = project_root
@@ -139,7 +182,7 @@ class AssetRegistry:
         for path in sorted(self._workflow_dir.glob("*.json")):
             stem = path.stem
             rel = _relative_to_project(self.project_root, path)
-            manifests[stem] = _synthetic_manifest(stem, rel)
+            manifests[stem] = _minimax_h3_manifest(stem, rel)
         return manifests
 
     def all_manifests(self) -> list[WorkflowManifest]:
@@ -323,7 +366,16 @@ class AssetRegistry:
             existing_path = next((path for path in candidate_paths if path.exists()), None)
             target_path = existing_path or candidate_paths[0]
             exists = existing_path is not None
-            if exists:
+            size_mismatch = bool(
+                exists
+                and requirement.expected_size is not None
+                and existing_path is not None
+                and existing_path.stat().st_size != requirement.expected_size
+            )
+            if exists and size_mismatch:
+                status = "corrupt"
+                action = "redownload"
+            elif exists:
                 status = "ready"
                 action = "reuse"
             elif auto_download:
@@ -341,6 +393,8 @@ class AssetRegistry:
                     "status": status,
                     "action": action,
                     "source": requirement.source,
+                    "expected_size": requirement.expected_size,
+                    "sha256": requirement.sha256,
                 }
             )
         return statuses

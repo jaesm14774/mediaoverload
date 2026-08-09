@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import yaml
 
-from agentic.app.character_workflow import build_goal_payload_from_character_config
+from agentic.app.character_workflow import _resolve_publish_prompt, build_goal_payload_from_character_config
 
 
 class CharacterWorkflowRoutingTests(unittest.TestCase):
@@ -60,6 +60,32 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["routing_summary"]["primary_workflow"], "nova-anime-xl")
         self.assertEqual(payload["routing_summary"]["workflow_plan"]["video_workflow_name"], "wan2.2_gguf_i2v")
         self.assertEqual(payload["routing_summary"]["count_plan"]["review_selection_limit"], 5)
+
+    def test_publish_prompt_inherits_rendered_native_h3_story(self) -> None:
+        prompt, source = _resolve_publish_prompt(
+            {
+                "state": {
+                    "node_outputs": {
+                        "native-story-prompt": {
+                            "prompt": "Kirby reaches the blue orb, survives the energy surge, and restores balance."
+                        }
+                    }
+                }
+            },
+            fallback_prompt="Original news brief",
+        )
+
+        self.assertEqual(
+            prompt,
+            "Kirby reaches the blue orb, survives the energy surge, and restores balance.",
+        )
+        self.assertEqual(source, "native_h3_story")
+
+    def test_publish_prompt_falls_back_when_generation_has_no_native_story(self) -> None:
+        prompt, source = _resolve_publish_prompt({"state": {"node_outputs": {}}}, fallback_prompt="News brief")
+
+        self.assertEqual(prompt, "News brief")
+        self.assertEqual(source, "goal_prompt")
 
     def test_build_goal_payload_raises_on_invalid_routed_workflow(self) -> None:
         with patch(
@@ -173,11 +199,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         ):
             payload = build_goal_payload_from_character_config(self.repo_root, self.kirby_config)
 
-        self.assertIn("twitter", payload["constraints"]["platforms"])
+        self.assertNotIn("twitter", payload["constraints"]["platforms"])
         self.assertIn("instagram_graph", payload["constraints"]["platforms"])
         self.assertIn("youtube", payload["constraints"]["platforms"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "Kirby")
-        self.assertIn("twitter", payload["character_config_summary"]["enabled_platforms"])
+        self.assertNotIn("twitter", payload["character_config_summary"]["enabled_platforms"])
 
     def test_build_goal_payload_skips_disabled_and_unsupported_platforms(self) -> None:
         temp_dir = self.repo_root / ".tmp-tests" / "character-workflow"
@@ -284,14 +310,21 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             {"discord_review_bot_token": "token", "discord_review_channel_id": "123"},
             clear=False,
         ):
-            payload = build_goal_payload_from_character_config(
+            automatic_payload = build_goal_payload_from_character_config(
                 self.repo_root,
                 self.kirby_config,
                 prompt="Kirby short rainy alley clip",
             )
+            reviewed_payload = build_goal_payload_from_character_config(
+                self.repo_root,
+                self.kirby_config,
+                prompt="Kirby short rainy alley clip",
+                enable_review_loop=True,
+            )
 
-        self.assertEqual(payload["media_type"], "text2img2video")
-        self.assertTrue(payload["constraints"]["enable_stage_review"])
+        self.assertEqual(automatic_payload["media_type"], "text2img2video")
+        self.assertFalse(automatic_payload["constraints"]["enable_stage_review"])
+        self.assertTrue(reviewed_payload["constraints"]["enable_stage_review"])
 
 
 if __name__ == "__main__":

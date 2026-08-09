@@ -3,12 +3,39 @@ from __future__ import annotations
 import base64
 import os
 import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, ClassVar, Protocol
 
 import requests
 from dotenv import load_dotenv
+
+
+STATIC_MODEL_MODES = {"structured", "prompt_only", "reasoning_off"}
+DEFAULT_STATIC_MODEL_POOLS = {
+    "text": [
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    ],
+    "vision": [
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "nvidia/nemotron-nano-12b-v2-vl:free",
+    ],
+}
+DEFAULT_STATIC_MODEL_MODES = {
+    "nvidia/nemotron-3-ultra-550b-a55b:free": "structured",
+    "nvidia/nemotron-3-super-120b-a12b:free": "structured",
+    "google/gemma-4-26b-a4b-it:free": "structured",
+    "nvidia/nemotron-3-nano-30b-a3b:free": "reasoning_off",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "reasoning_off",
+    "nvidia/nemotron-nano-12b-v2-vl:free": "prompt_only",
+}
+_STATIC_MODEL_CONFIG_CACHE: dict[str, Any] | None = None
 
 
 def _load_project_env() -> None:
@@ -16,6 +43,59 @@ def _load_project_env() -> None:
     for env_path in (repo_root / "media_overload.env", repo_root / ".env"):
         if env_path.exists():
             load_dotenv(env_path, override=False)
+
+
+def _load_static_model_config() -> dict[str, Any]:
+    global _STATIC_MODEL_CONFIG_CACHE
+    if _STATIC_MODEL_CONFIG_CACHE is not None:
+        return _STATIC_MODEL_CONFIG_CACHE
+    repo_root = Path(__file__).resolve().parents[4]
+    configured_path = os.environ.get("AGENTIC_OPENROUTER_MODEL_CONFIG", "").strip()
+    config_path = Path(configured_path) if configured_path else repo_root / "configs" / "openrouter_models.yaml"
+    if not config_path.is_absolute():
+        config_path = repo_root / config_path
+    config: dict[str, Any] = {}
+    try:
+        import yaml
+
+        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            config = loaded
+    except Exception:
+        config = {}
+    _STATIC_MODEL_CONFIG_CACHE = config
+    return config
+
+
+def static_openrouter_models(modality: str) -> list[str]:
+    normalized = "vision" if modality.lower() in {"vision", "image", "multimodal"} else "text"
+    configured = _load_static_model_config().get(normalized)
+    models: list[str] = []
+    if isinstance(configured, list):
+        for item in configured:
+            raw_id = item.get("id") if isinstance(item, dict) else item
+            model_id = str(raw_id or "").strip()
+            if model_id and model_id not in models:
+                models.append(model_id)
+    return models or list(DEFAULT_STATIC_MODEL_POOLS[normalized])
+
+
+def static_openrouter_model_modes(modality: str | None = None) -> dict[str, str]:
+    modes = dict(DEFAULT_STATIC_MODEL_MODES)
+    config = _load_static_model_config()
+    modalities = (modality,) if modality in {"text", "vision"} else ("text", "vision")
+    for configured_modality in modalities:
+        entries = config.get(configured_modality)
+        if not isinstance(entries, list):
+            continue
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            model_id = str(item.get("id") or "").strip()
+            mode = str(item.get("mode") or "").strip().lower()
+            if model_id and mode in STATIC_MODEL_MODES:
+                modes[model_id] = mode
+    return modes
 
 
 @dataclass(slots=True)
@@ -105,18 +185,105 @@ class GeminiModel:
         return "\n".join(parts).strip()
 
 
+class OpenRouterModelCatalog:
+    """Optional diagnostic discovery; normal scheduler runs use the static YAML pool."""
+
+    ENDPOINT = "https://openrouter.ai/api/v1/models"
+    EXCLUDED_TERMS = (
+        "content-safety",
+        "safety",
+        "guard",
+        "safeguard",
+        "lyria",
+        "alpha",
+        "beta",
+        "preview",
+    )
+    _cache: ClassVar[dict[str, tuple[float, list[dict[str, Any]]]]] = {}
+
+    @classmethod
+    def candidates(
+        cls,
+        modality: str = "text",
+        *,
+        limit: int | None = None,
+        ttl_seconds: int | None = None,
+        force_refresh: bool = False,
+    ) -> list[str]:
+        normalized = "vision" if modality.lower() in {"vision", "image", "multimodal"} else "text"
+        ttl = max(0, int(ttl_seconds if ttl_seconds is not None else os.environ.get("AGENTIC_OPENROUTER_MODEL_CACHE_TTL_SECONDS", "21600")))
+        now = time.time()
+        cached = cls._cache.get(normalized)
+        if not force_refresh and cached and now - cached[0] < ttl:
+            entries = cached[1]
+        else:
+            entries = cls._fetch(normalized)
+            cls._cache[normalized] = (now, entries)
+        pool_size = int(limit or os.environ.get("AGENTIC_OPENROUTER_FREE_POOL_SIZE", "5"))
+        pool_size = max(1, pool_size)
+        selected = [str(item["id"]) for item in entries[:pool_size] if str(item.get("id") or "").strip()]
+        if os.environ.get("AGENTIC_OPENROUTER_RANDOMIZE_MODELS", "true").lower() in {"1", "true", "yes"}:
+            random.SystemRandom().shuffle(selected)
+        return selected
+
+    @classmethod
+    def _fetch(cls, modality: str) -> list[dict[str, Any]]:
+        try:
+            response = requests.get(
+                cls.ENDPOINT,
+                headers={"Accept": "application/json", "User-Agent": "MediaOverload/agentic"},
+                timeout=(5, 15),
+            )
+            response.raise_for_status()
+            body = response.json()
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            raise RuntimeError(f"OpenRouter model catalog unavailable: {exc}") from exc
+        raw_models = body.get("data", []) if isinstance(body, dict) else []
+        if not isinstance(raw_models, list):
+            raise RuntimeError("OpenRouter model catalog returned an invalid data list")
+        eligible = [model for model in raw_models if isinstance(model, dict) and cls._is_eligible(model, modality)]
+        eligible.sort(key=cls._score, reverse=True)
+        return eligible
+
+    @classmethod
+    def _is_eligible(cls, model: dict[str, Any], modality: str) -> bool:
+        model_id = str(model.get("id") or "").strip().lower()
+        label = " ".join(str(model.get(key) or "") for key in ("name", "description", "id")).lower()
+        if not model_id or model_id == "openrouter/free" or any(term in label for term in cls.EXCLUDED_TERMS):
+            return False
+        pricing = model.get("pricing") or {}
+        if not isinstance(pricing, dict):
+            return False
+        try:
+            if float(pricing.get("prompt", 1)) != 0.0 or float(pricing.get("completion", 1)) != 0.0:
+                return False
+        except (TypeError, ValueError):
+            return False
+        architecture = model.get("architecture") or {}
+        if not isinstance(architecture, dict):
+            architecture = {}
+        input_modalities = {str(item).lower() for item in architecture.get("input_modalities", []) if item}
+        output_modalities = {str(item).lower() for item in architecture.get("output_modalities", []) if item}
+        if output_modalities and "text" not in output_modalities:
+            return False
+        if modality == "vision" and input_modalities and not ({"image", "video"} & input_modalities):
+            return False
+        if modality == "text" and input_modalities and "text" not in input_modalities:
+            return False
+        return True
+
+    @staticmethod
+    def _score(model: dict[str, Any]) -> tuple[float, float, float]:
+        supported = {str(item).lower() for item in model.get("supported_parameters", []) if item}
+        context_length = float(model.get("context_length") or 0)
+        created = float(model.get("created") or 0)
+        structured_bonus = 1.0 if {"response_format", "structured_outputs"} & supported else 0.0
+        return (structured_bonus, min(context_length, 2_000_000) / 2_000_000, created)
+
+
 class OpenRouterModel:
-    FREE_TEXT_MODELS = [
-        "qwen/qwen3.6-plus:free",
-        "nvidia/nemotron-3-super-120b-a12b:free",
-        "z-ai/glm-4.5-air:free",
-        "minimax/minimax-m2.5:free",
-        "openrouter/free"
-    ]
-    FREE_VISION_MODELS = [
-        "qwen/qwen3.6-plus:free",
-        "openrouter/free"
-    ]
+    FREE_TEXT_MODELS = list(DEFAULT_STATIC_MODEL_POOLS["text"])
+    FREE_VISION_MODELS = list(DEFAULT_STATIC_MODEL_POOLS["vision"])
 
     def __init__(self, config: ModelConfig) -> None:
         _load_project_env()
@@ -141,11 +308,17 @@ class OpenRouterModel:
 
     @classmethod
     def get_random_free_text_model(cls) -> str:
-        return random.choice(cls.FREE_TEXT_MODELS)
+        try:
+            return random.choice(static_openrouter_models("text"))
+        except (RuntimeError, ValueError):
+            return random.choice(DEFAULT_STATIC_MODEL_POOLS["text"])
 
     @classmethod
     def get_random_free_vision_model(cls) -> str:
-        return random.choice(cls.FREE_VISION_MODELS)
+        try:
+            return random.choice(static_openrouter_models("vision"))
+        except (RuntimeError, ValueError):
+            return random.choice(DEFAULT_STATIC_MODEL_POOLS["vision"])
 
     def chat_completion_single_model(
         self,
@@ -279,12 +452,16 @@ class OpenRouterRotatingModel:
         candidate_models: list[str],
         *,
         max_models_per_call: int | None = None,
+        model_modes: dict[str, str] | None = None,
+        random_each_call: bool = True,
     ) -> None:
         if not candidate_models:
             raise ValueError("OpenRouterRotatingModel requires a non-empty candidate_models list.")
         limit = max_models_per_call if max_models_per_call and max_models_per_call > 0 else len(candidate_models)
         self._candidates = candidate_models[:limit]
         self._inner = OpenRouterModel(ModelConfig(model_name=self._candidates[0], temperature=config.temperature))
+        self._model_modes = dict(model_modes or {})
+        self._random_each_call = random_each_call
         self.last_success_model: str = ""
 
     def chat_completion(
@@ -294,20 +471,31 @@ class OpenRouterRotatingModel:
         **kwargs: object,
     ) -> str:
         last_error: Exception | None = None
-        for model_name in self._candidates:
+        candidates = list(self._candidates)
+        if self._random_each_call and len(candidates) > 1:
+            random.SystemRandom().shuffle(candidates)
+        for model_name in candidates:
+            model_kwargs = dict(kwargs)
+            mode = self._model_modes.get(model_name, "structured")
+            if mode == "prompt_only":
+                model_kwargs.pop("response_format", None)
+            elif mode == "reasoning_off":
+                model_kwargs["reasoning"] = {"enabled": False}
             try:
                 text = self._inner.chat_completion_single_model(
                     model_name,
                     messages,
                     images=images,
-                    **kwargs,
+                    max_retries=1,
+                    initial_retry_delay=0.5,
+                    **model_kwargs,
                 )
                 self.last_success_model = model_name
                 return text
             except ValueError as exc:
                 last_error = exc
                 continue
-        raise ValueError(f"OpenRouter: exhausted text model candidates. Last error: {last_error}")
+        raise ValueError(f"OpenRouter: exhausted configured model candidates. Last error: {last_error}")
 
 
 @dataclass(slots=True)

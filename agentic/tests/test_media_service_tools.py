@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
+
 from agentic.tools.comfy_backend import AgenticComfyCommunicator
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.media_services import MediaServiceTools
-from agentic.tools.social_native import InstagramGraphPlatform, MediaPost, YouTubePlatform
+from agentic.tools.social_native import FacebookPlatform, InstagramGraphPlatform, MediaPost, YouTubePlatform
 from agentic.tools.social_services import SocialServiceTools
 from agentic.tools.tts_adapter import TTSAdapter
 
@@ -39,6 +43,12 @@ class FFmpegAdapterTests(unittest.TestCase):
 
 
 class AgenticComfyCommunicatorTests(unittest.TestCase):
+    def test_default_timeout_is_configurable_for_lowvram_generation(self) -> None:
+        with patch.dict(os.environ, {"COMFYUI_TIMEOUT_SECONDS": "1800"}):
+            communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
+
+        self.assertEqual(communicator.timeout, 1800)
+
     def test_wait_for_completion_ignores_binary_preview_frames(self) -> None:
         communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188, timeout=1)
 
@@ -264,6 +274,47 @@ class SocialServiceToolsTests(unittest.TestCase):
         self.assertEqual(result["results"], {"instagram_graph": False})
         self.assertIn("instagram_graph", result["errors"])
 
+    def test_publish_social_writes_external_receipts_to_manifest(self) -> None:
+        tools = SocialServiceTools(Path(tempfile.mkdtemp()))
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                del post
+                platform_name = (platforms or ["facebook"])[0]
+                return {platform_name: True}
+
+            def get_publish_receipts(self) -> dict[str, dict[str, object]]:
+                return {
+                    "facebook": {
+                        "platform": "facebook",
+                        "external_id": "video-1",
+                        "status": "draft_ready",
+                        "verified": True,
+                        "visibility": "draft",
+                    }
+                }
+
+        manifest_dir = Path(tempfile.mkdtemp())
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+        result = tools.publish_social(
+            {
+                "media_paths": ["clip.mp4"],
+                "caption": "manifest test",
+                "platforms": ["facebook"],
+                "platform_configs": {"facebook": {"config_folder_path": "configs/fb"}},
+                "manifest_dir": str(manifest_dir),
+            }
+        )
+
+        manifest_path = Path(str(result["manifest_path"]))
+        self.assertTrue(manifest_path.exists())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["publish_receipts"]["facebook"]["external_id"], "video-1")
+        self.assertEqual(manifest["status"], "success")
+
 
 class InstagramGraphPlatformTests(unittest.TestCase):
     @patch.object(InstagramGraphPlatform, "authenticate")
@@ -403,6 +454,156 @@ class SocialServiceToolsYouTubeTests(unittest.TestCase):
         self.assertEqual(yt_post.additional_params.get("youtube_title"), "Title Override")  # type: ignore[union-attr]
         self.assertFalse(yt_post.additional_params.get("youtube_made_for_kids"))  # type: ignore[union-attr]
 
+    def test_safe_poc_overrides_platform_metadata_and_does_not_enable_x(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+        captured_posts: dict[str, object] = {}
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def process_media(self, media_paths: list[str], output_dir: str) -> list[str]:
+                return media_paths
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                platform_name = (platforms or ["youtube"])[0]
+                captured_posts[platform_name] = post
+                return {platform_name: True}
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+        result = tools.publish_social(
+            {
+                "media_paths": ["clip.mp4"],
+                "caption": "safe POC",
+                "platforms": ["youtube", "facebook", "instagram_graph"],
+                "platform_configs": {
+                    "youtube": {"config_folder_path": "configs/yt"},
+                    "facebook": {"config_folder_path": "configs/fb"},
+                    "instagram_graph": {"config_folder_path": "configs/ig"},
+                },
+                "publish_mode": "safe_poc",
+                "platform_bundle": {
+                    "youtube": {"additional_params": {"youtube_privacy_status": "public"}},
+                    "facebook": {"additional_params": {"facebook_video_state": "PUBLISHED"}},
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(captured_posts["youtube"].additional_params["youtube_privacy_status"], "private")  # type: ignore[union-attr]
+        self.assertEqual(captured_posts["facebook"].additional_params["facebook_video_state"], "DRAFT")  # type: ignore[union-attr]
+        self.assertTrue(captured_posts["facebook"].additional_params["facebook_use_reels"])  # type: ignore[union-attr]
+        self.assertEqual(captured_posts["instagram_graph"].additional_params["instagram_publish_mode"], "container_only")  # type: ignore[union-attr]
+
+
+class FacebookPlatformTests(unittest.TestCase):
+    @patch.object(FacebookPlatform, "authenticate")
+    @patch.object(FacebookPlatform, "load_config")
+    def test_reels_finishes_upload_without_waiting_for_ready(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = FacebookPlatform("configs/social_media/credentials/kirby")
+        platform.page_access_token = "token"
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            video_path = handle.name
+        self.addCleanup(lambda: Path(video_path).unlink(missing_ok=True))
+
+        platform.ffmpeg.probe_media = lambda _path: {"duration": 15.0, "width": 540, "height": 960}  # type: ignore[method-assign]
+
+        class FakeResponse:
+            def __init__(self, body: dict[str, object]) -> None:
+                self.body = body
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return self.body
+
+        responses = [
+            FakeResponse({"video_id": "video-1", "upload_url": "https://upload.test/video-1"}),
+            FakeResponse({"success": True}),
+            FakeResponse({"success": True}),
+        ]
+        status_response = FakeResponse(
+            {
+                "id": "video-1",
+                "status": {
+                    "video_status": "ready",
+                    "uploading_phase": {"status": "complete"},
+                    "processing_phase": {"status": "complete"},
+                    "publishing_phase": {"status": "not_started"},
+                },
+            }
+        )
+        with patch("agentic.tools.social_native.requests.post", side_effect=responses) as post_mock, patch(
+            "agentic.tools.social_native.requests.get", return_value=status_response
+        ) as get_mock:
+            result = platform._upload_reel(video_path, "caption", {"facebook_video_state": "DRAFT"})
+
+        self.assertTrue(result)
+        self.assertEqual(platform.last_publish_receipt["external_id"], "video-1")  # type: ignore[index]
+        self.assertTrue(platform.last_publish_receipt["verified"])  # type: ignore[index]
+        self.assertEqual(post_mock.call_count, 3)
+        finish_params = post_mock.call_args_list[2].kwargs["params"]
+        self.assertEqual(finish_params["upload_phase"], "finish")
+        self.assertEqual(finish_params["video_state"], "DRAFT")
+        get_mock.assert_called_once()
+
+    @patch.object(FacebookPlatform, "authenticate")
+    @patch.object(FacebookPlatform, "load_config")
+    def test_reels_reconciles_finish_http_error_when_external_draft_is_ready(
+        self,
+        load_config_mock,
+        authenticate_mock,
+    ) -> None:
+        del load_config_mock, authenticate_mock
+        platform = FacebookPlatform("configs/social_media/credentials/kirby")
+        platform.page_access_token = "token"
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            video_path = handle.name
+        self.addCleanup(lambda: Path(video_path).unlink(missing_ok=True))
+
+        platform.ffmpeg.probe_media = lambda _path: {"duration": 15.0, "width": 540, "height": 960}  # type: ignore[method-assign]
+
+        class FakeResponse:
+            def __init__(self, body: dict[str, object], status_code: int = 200, error: bool = False) -> None:
+                self.body = body
+                self.status_code = status_code
+                self.error = error
+
+            def raise_for_status(self) -> None:
+                if self.error:
+                    raise requests.HTTPError("finish transient error")
+
+            def json(self) -> dict[str, object]:
+                return self.body
+
+        responses = [
+            FakeResponse({"video_id": "video-2", "upload_url": "https://upload.test/video-2"}),
+            FakeResponse({"success": True}),
+            FakeResponse({"error": {"code": 1, "error_subcode": 99}}, status_code=500, error=True),
+        ]
+        status_response = FakeResponse(
+            {
+                "id": "video-2",
+                "status": {
+                    "video_status": "ready",
+                    "uploading_phase": {"status": "complete"},
+                    "processing_phase": {"status": "complete"},
+                    "publishing_phase": {"status": "complete", "publish_status": "draft"},
+                },
+            }
+        )
+        with patch("agentic.tools.social_native.requests.post", side_effect=responses), patch(
+            "agentic.tools.social_native.requests.get", return_value=status_response
+        ):
+            result = platform._upload_reel(video_path, "caption", {"facebook_video_state": "DRAFT"})
+
+        self.assertTrue(result)
+        self.assertEqual(platform.last_publish_receipt["external_id"], "video-2")  # type: ignore[index]
+        self.assertEqual(platform.last_publish_receipt["status"], "draft_ready")  # type: ignore[index]
+        self.assertTrue(platform.last_publish_receipt["details"]["reconciled_after_finish_error"])  # type: ignore[index]
+
 
 class YouTubePlatformTests(unittest.TestCase):
     @patch.object(YouTubePlatform, "authenticate")
@@ -428,6 +629,63 @@ class YouTubePlatformTests(unittest.TestCase):
         self.assertTrue(body["status"]["containsSyntheticMedia"])
         self.assertEqual(body["snippet"]["tags"], ["kirby", "mediaoverload"])
         self.assertFalse(notify_subscribers)
+
+    @patch.object(YouTubePlatform, "authenticate")
+    @patch.object(YouTubePlatform, "load_config")
+    def test_upload_post_requires_verified_video_id(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = YouTubePlatform("configs/social_media/credentials/kirby")
+        platform.default_privacy_status = "private"
+        platform.channel_id = "channel-1"
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            video_path = handle.name
+        self.addCleanup(lambda: Path(video_path).unlink(missing_ok=True))
+
+        class FakeRequest:
+            def next_chunk(self):
+                return None, {
+                    "id": "yt-video-1",
+                    "snippet": {"channelId": "channel-1"},
+                    "status": {"privacyStatus": "private"},
+                }
+
+        class FakeVideos:
+            def insert(self, **kwargs):
+                del kwargs
+                return FakeRequest()
+
+            def list(self, **kwargs):
+                del kwargs
+
+                class FakeExecute:
+                    @staticmethod
+                    def execute():
+                        return {
+                            "items": [
+                                {
+                                    "id": "yt-video-1",
+                                    "snippet": {"channelId": "channel-1"},
+                                    "status": {"uploadStatus": "processed", "privacyStatus": "private"},
+                                    "processingDetails": {"processingStatus": "succeeded"},
+                                }
+                            ]
+                        }
+
+                return FakeExecute()
+
+        class FakeService:
+            def videos(self):
+                return FakeVideos()
+
+        platform.service = FakeService()
+        platform._build_media_upload = lambda _path: object()  # type: ignore[method-assign]
+
+        result = platform.upload_post(MediaPost(media_paths=[video_path], caption="verify"))
+
+        self.assertTrue(result)
+        self.assertEqual(platform.last_publish_receipt["external_id"], "yt-video-1")  # type: ignore[index]
+        self.assertTrue(platform.last_publish_receipt["verified"])  # type: ignore[index]
 
 
 if __name__ == "__main__":

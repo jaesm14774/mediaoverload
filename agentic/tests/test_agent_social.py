@@ -131,7 +131,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 prompt="pick the best kirby frame",
                 media_type="text2img2video",
                 style="anime",
-                constraints={},
+                constraints={"enable_stage_review": True},
             ),
             workflow_name="text2img2video_v1",
             nodes=[],
@@ -197,6 +197,46 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["review_mode"], "discord")
         self.assertEqual(result.outputs["reviewer"], "tester#0001")
 
+    def test_review_select_is_automatic_without_explicit_review_flag(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="publish the selected Kirby clip",
+                media_type="publish_review",
+                style="anime",
+                constraints={},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="review-select",
+            skill_name="review.assets.select",
+            depends_on=["ingest-media"],
+            inputs={"limit": 1},
+        )
+        state = RunState(
+            goal={"prompt": "publish the selected Kirby clip"},
+            metadata={},
+            node_outputs={"ingest-media": {"media_paths": ["C:\\selected.mp4"]}},
+        )
+
+        with patch.object(
+            skills.prompt_engine,
+            "review_asset_candidates",
+            return_value={"selected_assets": ["C:\\selected.mp4"], "ranked_candidates": []},
+        ), patch.object(
+            skills.prompt_engine,
+            "prepare_publish_caption",
+            return_value={"caption": "A caption", "hashtags": "#kirby", "dispatch_ready": True},
+        ), patch.object(skills.discord_review, "review_candidates") as discord_review:
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["review_mode"], "automatic")
+        discord_review.assert_not_called()
+
     def test_review_select_falls_back_to_llm_shortlist_when_discord_has_no_decision(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
@@ -205,7 +245,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 prompt="pick the best kirby frame",
                 media_type="text2img2video",
                 style="anime",
-                constraints={},
+                constraints={"enable_stage_review": True},
             ),
             workflow_name="text2img2video_v1",
             nodes=[],
@@ -274,6 +314,148 @@ class AgentSocialSkillTests(unittest.TestCase):
             result.outputs["fallback_reason"],
             "discord review did not return a valid human decision",
         )
+
+    def test_first_frame_review_sends_all_six_candidates_and_never_auto_selects(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        candidate_paths = [f"C:\\frame_{index}.png" for index in range(1, 7)]
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby must stop the runaway lantern in the first second",
+                media_type="native_h3_story",
+                style="anime",
+                constraints={"require_human_review": True},
+            ),
+            workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="native-opening-review",
+            skill_name="review.assets.select",
+            depends_on=["native-opening-keyframe"],
+            inputs={
+                "limit": 1,
+                "review_all_candidates": True,
+                "review_scope": "first_frame",
+                "review_notes": "Choose one opening frame; reject all six if none is usable.",
+            },
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={"native-opening-keyframe": {"saved_files": candidate_paths}},
+        )
+        captured: dict[str, object] = {}
+
+        def fake_review(**kwargs):
+            captured.update(kwargs)
+            return type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "approved",
+                    "selected_paths": [candidate_paths[3]],
+                    "reviewer": "tester#0001",
+                    "session_id": "sess-six",
+                    "session_path": "C:\\session-six.json",
+                    "edited_text": "keep asset 4",
+                    "fallback_reason": "",
+                },
+            )()
+
+        with patch.object(skills.discord_review, "review_candidates", side_effect=fake_review):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["selected_assets"], [candidate_paths[3]])
+        self.assertEqual(captured["media_paths"], candidate_paths)
+        self.assertIn("Asset 6", captured["text"])
+
+    def test_required_first_frame_review_blocks_when_discord_is_unavailable(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby opening frame",
+                media_type="native_h3_story",
+                style="anime",
+                constraints={"require_human_review": True},
+            ),
+            workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="native-opening-review",
+            skill_name="review.assets.select",
+            depends_on=["native-opening-keyframe"],
+            inputs={"limit": 1, "review_all_candidates": True, "review_scope": "first_frame"},
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={"native-opening-keyframe": {"saved_files": ["C:\\frame_a.png", "C:\\frame_b.png"]}},
+        )
+        with patch.object(
+            skills.discord_review,
+            "review_candidates",
+            return_value=type(
+                "_Decision",
+                (),
+                {"review_mode": "auto", "status": "skipped", "fallback_reason": "not configured"},
+            )(),
+        ):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.outputs["selected_assets"], [])
+        self.assertIn("no candidate was selected automatically", result.outputs["selection_rationale"])
+
+    def test_first_frame_review_blocks_accepting_all_candidates(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        paths = [f"C:\\frame_{index}.png" for index in range(1, 7)]
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby opening frame",
+                media_type="native_h3_story",
+                style="anime",
+                constraints={"require_human_review": True},
+            ),
+            workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="native-opening-review",
+            skill_name="review.assets.select",
+            depends_on=["native-opening-keyframe"],
+            inputs={"limit": 1, "review_all_candidates": True, "review_scope": "first_frame"},
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={"native-opening-keyframe": {"saved_files": paths}},
+        )
+        with patch.object(
+            skills.discord_review,
+            "review_candidates",
+            return_value=type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "approved",
+                    "selected_paths": paths,
+                    "reviewer": "tester",
+                    "session_id": "sess-many",
+                    "session_path": "C:\\session-many.json",
+                },
+            )(),
+        ):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "blocked")
+        self.assertIn("exactly one", result.outputs["selection_rationale"])
 
     def test_build_review_text_stays_short_enough_for_discord(self) -> None:
         text = AgentSocialSkills._build_review_text(

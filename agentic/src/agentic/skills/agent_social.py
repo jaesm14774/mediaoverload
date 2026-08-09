@@ -175,19 +175,31 @@ class AgentSocialSkills:
                 "platforms": platforms,
                 "platform_configs": context.node.inputs.get("platform_configs", {}),
                 "additional_params": context.node.inputs.get("additional_params", {}),
+                "publish_mode": str(context.node.inputs.get("publish_mode") or context.plan.goal.constraints.get("publish_mode") or ""),
                 "dry_run": dry_run,
                 "platform_bundle": platform_bundle if isinstance(platform_bundle, dict) else {},
+                "manifest_dir": str(self.output_root),
             },
         )
         outputs = dict(result)
         outputs["platform_bundle"] = platform_bundle if isinstance(platform_bundle, dict) else {}
         outputs["dispatch_plan"] = dispatch_plan
         outputs["dispatch_ready"] = bool(caption_bundle.get("dispatch_ready", False)) and not blocked_platforms
-        return SkillResult(status="success", outputs=outputs, logs=["Dispatched a social publishing action."])
+        dispatch_status = str(outputs.get("status") or "").strip().lower()
+        skill_status = "success" if dispatch_status in {"success", "dry_run"} else "failed"
+        return SkillResult(status=skill_status, outputs=outputs, logs=["Dispatched a social publishing action."])
 
     def select_best_assets(self, context: SkillContext) -> SkillResult:
         media_paths = self._collect_media_from_dependencies(context)
         limit = int(context.node.inputs.get("limit", 10))
+        review_scope = str(
+            context.node.inputs.get("review_scope")
+            or context.plan.goal.constraints.get("review_scope")
+            or ""
+        ).strip().lower()
+        first_frame_review = review_scope == "first_frame"
+        review_all_candidates = bool(context.node.inputs.get("review_all_candidates", False))
+        require_human_review = bool(context.plan.goal.constraints.get("require_human_review", False))
         preferred_extensions = tuple(context.node.inputs.get("preferred_extensions", [".mp4", ".gif", ".png", ".jpg", ".jpeg", ".webp"]))
         ranked = sorted(
             media_paths,
@@ -201,40 +213,86 @@ class AgentSocialSkills:
             }
             for index, path in enumerate(ranked)
         ]
-        bundle = self.prompt_engine.review_asset_candidates(
-            context.plan.goal,
-            media_paths=ranked,
-            review_notes=str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
-            selection_limit=limit,
+        caption_review_notes = str(
+            context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")
         )
+        review_notes = caption_review_notes
+        if review_scope == "final_video" and not review_notes.strip():
+            review_notes = (
+                "最終影片人工審核：請確認首幀立即建立清楚衝突，中段有可見失敗或反轉，最後解決原始任務。 "
+                "若只是漂亮畫面拼接、角色停留觀看、故事主線不清楚，請按 Reject。"
+            )
+        if first_frame_review:
+            bundle = {
+                "selected_assets": ranked[:limit],
+                "ranked_candidates": heuristic_ranked,
+                "selection_rationale": "Six opening-frame candidates are waiting for mandatory human selection.",
+                "prompt_mode": "human_first_frame",
+            }
+        else:
+            bundle = self.prompt_engine.review_asset_candidates(
+                context.plan.goal,
+                media_paths=ranked,
+                review_notes=review_notes,
+                selection_limit=limit,
+            )
         selected = [path for path in bundle.get("selected_assets", []) if path in ranked][:limit]
         if not selected:
             selected = ranked[:limit]
         hashtags = context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or [])]
-        caption_bundle = self.prompt_engine.prepare_publish_caption(
-            context.plan.goal,
-            prefix="",
-            hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
-            platforms=platforms,
-            media_paths=selected or ranked[:limit],
-            review_notes=str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
-        )
+        if first_frame_review:
+            caption_bundle = {"caption": context.plan.goal.prompt, "hashtags": ""}
+        else:
+            caption_bundle = self.prompt_engine.prepare_publish_caption(
+                context.plan.goal,
+                prefix="",
+                hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
+                platforms=platforms,
+                media_paths=selected or ranked[:limit],
+                review_notes=caption_review_notes,
+            )
+        review_media_paths = ranked if review_all_candidates else (selected or ranked[:limit])
         review_text = self._build_review_text(
             prompt=context.plan.goal.prompt,
-            review_notes=str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
+            review_notes=review_notes,
             ranked_candidates=bundle.get("ranked_candidates", heuristic_ranked),
             selection_limit=limit,
             draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
             draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
             platforms=platforms,
+            candidate_paths=review_media_paths,
         )
-        decision = self.discord_review.review_candidates(
-            text=review_text,
-            media_paths=selected or ranked[:limit],
-            timeout_seconds=int(context.plan.goal.constraints.get("discord_review_timeout_seconds") or 3600),
+        human_review_enabled = bool(
+            context.plan.goal.constraints.get("enable_stage_review", False)
+            or context.plan.goal.constraints.get("enable_review_loop", False)
+            or require_human_review
         )
-        if decision.review_mode == "discord":
+        decision = None
+        if human_review_enabled:
+            decision = self.discord_review.review_candidates(
+                text=review_text,
+                media_paths=review_media_paths,
+                timeout_seconds=int(context.plan.goal.constraints.get("discord_review_timeout_seconds") or 3600),
+            )
+        if require_human_review and (decision is None or getattr(decision, "review_mode", "") != "discord"):
+            fallback_reason = str(getattr(decision, "fallback_reason", "Discord human review did not start."))
+            return SkillResult(
+                status="blocked",
+                outputs={
+                    "media_paths": [],
+                    "selected_assets": [],
+                    "selected_count": 0,
+                    "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
+                    "rejected_assets": ranked,
+                    "selection_rationale": "Required Discord human review was unavailable; no candidate was selected automatically.",
+                    "review_mode": str(getattr(decision, "review_mode", "none")),
+                    "review_scope": review_scope,
+                    "fallback_reason": fallback_reason,
+                },
+                logs=["Blocked workflow because required Discord human review was unavailable; automatic selection is disabled."],
+            )
+        if decision is not None and decision.review_mode == "discord":
             if decision.status == "rejected":
                 return SkillResult(
                     status="blocked",
@@ -274,8 +332,36 @@ class AgentSocialSkills:
                     },
                     logs=["Blocked workflow because Discord review did not complete successfully."],
                 )
-            if decision.selected_paths:
+            if first_frame_review:
+                decision_selected = [path for path in (decision.selected_paths or []) if path in ranked]
+                if len(decision_selected) != 1:
+                    return SkillResult(
+                        status="blocked",
+                        outputs={
+                            "media_paths": [],
+                            "selected_assets": [],
+                            "selected_count": 0,
+                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
+                            "rejected_assets": ranked,
+                            "selection_rationale": "First-frame review must select exactly one candidate; automatic first-item selection is disabled.",
+                            "review_mode": decision.review_mode,
+                            "review_scope": review_scope,
+                            "reviewer": decision.reviewer,
+                            "review_session_id": decision.session_id,
+                            "review_session_path": decision.session_path,
+                            "fallback_reason": "Select exactly one opening frame in Discord before pressing Accept.",
+                        },
+                        logs=["Blocked workflow because first-frame Discord review did not select exactly one candidate."],
+                    )
+                selected = decision_selected[:limit]
+            elif decision.selected_paths:
                 selected = [path for path in decision.selected_paths if path in ranked]
+        review_mode = str(getattr(decision, "review_mode", "automatic"))
+        reviewer = str(getattr(decision, "reviewer", ""))
+        review_session_id = str(getattr(decision, "session_id", ""))
+        review_session_path = str(getattr(decision, "session_path", ""))
+        edited_review_text = str(getattr(decision, "edited_text", ""))
+        fallback_reason = str(getattr(decision, "fallback_reason", ""))
         rejected = [path for path in ranked if path not in selected]
         return SkillResult(
             status="success",
@@ -294,12 +380,12 @@ class AgentSocialSkills:
                 "publish_ready": bool(bundle.get("publish_ready", bool(selected))),
                 "review_notes": str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
                 "prompt_mode": str(bundle.get("prompt_mode", "template")),
-                "review_mode": decision.review_mode,
-                "reviewer": decision.reviewer,
-                "review_session_id": decision.session_id,
-                "review_session_path": decision.session_path,
-                "edited_review_text": decision.edited_text,
-                "fallback_reason": getattr(decision, "fallback_reason", ""),
+                "review_mode": review_mode,
+                "reviewer": reviewer,
+                "review_session_id": review_session_id,
+                "review_session_path": review_session_path,
+                "edited_review_text": edited_review_text,
+                "fallback_reason": fallback_reason,
             },
             metrics={"selected_count": len(selected)},
             logs=["Selected a best-effort shortlist of candidate assets."],
@@ -315,12 +401,25 @@ class AgentSocialSkills:
         draft_caption: str,
         draft_hashtags: str,
         platforms: list[str],
+        candidate_paths: list[str] | None = None,
     ) -> str:
-        return AgentSocialSkills._format_review_post(
+        lines: list[str] = []
+        if review_notes.strip():
+            lines.append(review_notes.strip())
+        if candidate_paths:
+            lines.extend(["", "Candidates attached in this order:"])
+            lines.extend(
+                f"Asset {index}: {AgentSocialSkills._candidate_label(path)}"
+                for index, path in enumerate(candidate_paths, start=1)
+            )
+        review_body = AgentSocialSkills._format_review_post(
             caption=str(draft_caption or prompt),
             hashtags=str(draft_hashtags or ""),
             platforms=platforms,
         )
+        if review_body:
+            lines.extend(["", review_body])
+        return textwrap.shorten("\n".join(lines).strip(), width=1900, placeholder="...")
 
     @staticmethod
     def _candidate_label(media_path: str) -> str:

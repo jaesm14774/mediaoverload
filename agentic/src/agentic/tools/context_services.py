@@ -78,6 +78,16 @@ class NewsContextService:
     def __init__(self) -> None:
         _load_env_once()
 
+    @staticmethod
+    def is_usable_selection(title: str, keyword: str) -> bool:
+        title_text = str(title or "").strip()
+        keyword_text = str(keyword or "").strip()
+        if not title_text or not keyword_text:
+            return False
+        if title_text.casefold() in {"...", "…", "n/a", "na", "null", "unknown", "untitled"}:
+            return False
+        return any(character.isalnum() for character in title_text)
+
     def is_configured(self) -> bool:
         return all(
             os.getenv(key)
@@ -128,8 +138,13 @@ class NewsContextService:
         finally:
             connection.close()
 
+        rows = [
+            row
+            for row in rows
+            if self.is_usable_selection(row.get("title", ""), row.get("keyword", ""))
+        ]
         if not rows:
-            _logger().info("news.fetch.empty")
+            _logger().info("news.fetch.empty | reason=no_usable_news_rows")
             return None
         selected = random.choice(rows)
         _logger().info("news.fetch.title | %s", str(selected.get("title") or "").strip())

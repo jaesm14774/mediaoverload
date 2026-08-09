@@ -2,9 +2,11 @@ routing:
   enabled: true
   strategy_candidates:
     - text2img
-    # - text2video
+    - text2video
     - text2image2video
     - text2longvideo
+    - native_h3_story
+    - native_h3_t2v_story
     - text2image2image
     - sticker_pack
 
@@ -19,6 +21,7 @@ routing:
         - z_image_plus_nova_model
         - nova-anime-xl
       video_workflow_name:
+        - minimax_h3_lowvram_t2v
         - wan2.2_gguf_i2v
         - wan2.2_gguf_i2v_audio
     text2image2video:
@@ -26,6 +29,7 @@ routing:
         - z_image_plus_nova_model
         - anima_anime
       video_workflow_name:
+        - minimax_h3_lowvram_i2v
         - wan2.2_gguf_i2v
         - wan2.2_gguf_i2v_audio
       upscale_workflow_name:
@@ -35,11 +39,29 @@ routing:
         - z_image_plus_nova_model
         - nova-anime-xl
       video_workflow_name:
+        - minimax_h3_lowvram_i2v
         - wan2.2_gguf_i2v
         - wan2.2_gguf_i2v_audio
       transition_workflow_name:
         - image_to_image
         - z_image_i2i_anime
+    native_h3_story:
+      image_workflow_name:
+        - kirby_keyframe_anima
+        - anima_anime
+        - nova-anime-xl
+      video_workflow_name:
+        - minimax_h3_lowvram_15s_fl2va_i2v
+        - minimax_h3_ultra_lowvram_15s_fl2va_i2v
+        - minimax_h3_native_i2v
+      refine_workflow_name:
+        - kirby_continuity_img2img
+        - kirby_identity_img2img
+    native_h3_t2v_story:
+      video_workflow_name:
+        - minimax_h3_lowvram_t2v
+        - minimax_h3_ultra_lowvram_t2v
+        - minimax_h3_native_t2v
     text2image2image:
       image_workflow_name:
         - nova_model_plus_z_image_anime
@@ -53,6 +75,7 @@ routing:
         - nova-anime-xl
         - nova_model_plus_z_image_anime
       video_workflow_name:
+        - minimax_h3_lowvram_i2v
         - wan2.2_gguf_i2v
         - wan2.2_gguf_i2v_audio
 
@@ -133,6 +156,44 @@ routing:
       images_per_prompt:
         min: 1
         max: 1
+    native_h3_story:
+      image_count:
+        min: 1
+        max: 1
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_t2v_story:
+      image_count:
+        min: 1
+        max: 1
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
     text2image2image:
       image_count:
         min: 1
@@ -193,6 +254,18 @@ routing:
         - storyboard
         - sequence
         - plot beat
+      native_h3_story:
+        - native H3
+        - one continuous story clip
+        - causal short film
+        - fifteen second story
+        - single take animation
+      native_h3_t2v_story:
+        - native H3 text to video story
+        - direct text to video
+        - fifteen second animation
+        - no reference image
+        - animated short film
       text2image2video:
         - short clip
         - short video

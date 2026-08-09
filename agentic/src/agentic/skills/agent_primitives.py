@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from agentic.assets.kirby_input import assert_kirby_input
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.prompting import (
@@ -250,14 +251,27 @@ class AgentMediaSkills:
         return _asset_check_result(result, "Checked workflow assets for an agent step.")
 
     def refine_image(self, context: SkillContext) -> SkillResult:
+        workflow_name = str(context.plan.goal.constraints.get("identity_refine_workflow_name") or "")
+        prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
+        prompt = ""
+        if prompt_key:
+            for dependency in reversed(context.node.depends_on):
+                dependency_output = context.state[dependency]
+                resolved_prompt = dependency_output.get(prompt_key)
+                if isinstance(resolved_prompt, str) and resolved_prompt.strip():
+                    prompt = resolved_prompt.strip()
+                    break
+        payload = {
+            "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "img2img")),
+            "image_path": self._resolve_image_path(context),
+            "prompt": prompt or self._resolve_prompt(context),
+            "negative_prompt": self._resolve_negative_prompt(context),
+        }
+        if workflow_name:
+            payload["workflow_name"] = workflow_name
         result = self.tools.call(
             "comfy.workflow.image_to_image",
-            {
-                "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "img2img")),
-                "image_path": self._resolve_image_path(context),
-                "prompt": self._resolve_prompt(context),
-                "negative_prompt": self._resolve_negative_prompt(context),
-            },
+            payload,
         )
         return SkillResult(
             status="success",
@@ -276,9 +290,14 @@ class AgentMediaSkills:
                     prior_frame_path = candidate
                     break
         if isinstance(prior_frame_path, str) and prior_frame_path:
+            workflow_name = str(
+                context.plan.goal.constraints.get("identity_refine_workflow_name")
+                or "image_to_image"
+            )
             result = self.tools.call(
                 "comfy.workflow.image_to_image",
                 {
+                    "workflow_name": workflow_name,
                     "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
                     "image_path": prior_frame_path,
                     "prompt": self._resolve_prompt(context),
@@ -287,11 +306,20 @@ class AgentMediaSkills:
             )
             log = "Generated a continuity keyframe from a prior frame."
         else:
+            workflow_name = str(
+                context.plan.goal.constraints.get("keyframe_workflow_name")
+                or context.node.inputs["workflow_name"]
+            )
             result = self.tools.call(
                 "comfy.workflow.text_to_image",
                 {
-                    "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
-                    "workflow_name": context.node.inputs["workflow_name"],
+                    "run_dir": str(
+                        self._build_run_dir(
+                            context.plan.goal.prompt,
+                            str(context.node.inputs.get("suffix") or "segment_keyframe"),
+                        )
+                    ),
+                    "workflow_name": workflow_name,
                     "prompt": self._resolve_prompt(context),
                     "negative_prompt": self._resolve_negative_prompt(context),
                     "width": int(context.node.inputs.get("width", 1024)),
@@ -305,6 +333,79 @@ class AgentMediaSkills:
             outputs=result,
             metrics={"image_count": len(result.get("saved_files", []))},
             logs=[log],
+        )
+
+    def validate_character_frames(self, context: SkillContext) -> SkillResult:
+        opening_node = str(context.node.inputs.get("opening_node") or context.node.depends_on[0])
+        ending_node = str(
+            context.node.inputs.get("ending_node")
+            or (context.node.depends_on[1] if len(context.node.depends_on) > 1 else context.node.depends_on[0])
+        )
+        character = str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or "").strip().lower()
+        story = context.state.node_outputs.get("native-story-prompt", {})
+        frame_specs = (
+            ("opening", opening_node, str(context.node.inputs.get("opening_prompt_key") or "opening_keyframe_prompt")),
+            ("ending", ending_node, str(context.node.inputs.get("ending_prompt_key") or "ending_keyframe_prompt")),
+        )
+        reports: list[dict[str, object]] = []
+        regenerated_count = 0
+        final_paths: dict[str, str] = {}
+        preserve_opening_frame = bool(context.node.inputs.get("preserve_opening_frame", False))
+        for label, node_id, prompt_key in frame_specs:
+            frame_path = self._first_output_path(context.state.node_outputs.get(node_id, {}))
+            last_error = ""
+            for attempt in range(max(0, int(context.node.inputs.get("max_regenerations", 0))) + 1):
+                try:
+                    if not frame_path:
+                        raise ValueError("keyframe output is missing")
+                    if label == "opening" and preserve_opening_frame:
+                        if not Path(frame_path).is_file():
+                            raise ValueError("human-selected opening frame file is missing")
+                        report = {
+                            "path": frame_path,
+                            "passed": True,
+                            "validation": "human_selected_immutable",
+                        }
+                    elif character == "kirby":
+                        report = assert_kirby_input(frame_path, allow_external=False).to_dict()
+                    else:
+                        report = {"path": frame_path, "passed": Path(frame_path).is_file()}
+                        if not report["passed"]:
+                            raise ValueError("keyframe output file is missing")
+                    reports.append(report)
+                    final_paths[label] = frame_path
+                    break
+                except (OSError, ValueError) as exc:
+                    last_error = str(exc)
+                    if attempt >= int(context.node.inputs.get("max_regenerations", 0)):
+                        raise ValueError(f"{label} character continuity gate failed after {attempt} regenerations: {last_error}") from exc
+                    prompt = str(story.get(prompt_key) or context.plan.goal.prompt)
+                    result = self.tools.call(
+                        "comfy.workflow.text_to_image",
+                        {
+                            "workflow_name": str(context.node.inputs.get("workflow_name") or context.plan.goal.constraints.get("native_h3_keyframe_workflow_name") or context.plan.goal.constraints.get("keyframe_workflow_name") or ""),
+                            "run_dir": str(self._build_run_dir(context.plan.goal.prompt, f"identity_{label}_retry_{attempt + 1}")),
+                            "prompt": prompt,
+                            "negative_prompt": str(story.get("negative_prompt") or ""),
+                            "width": int(context.node.inputs.get("width") or 608),
+                            "height": int(context.node.inputs.get("height") or 352),
+                            "image_count": 1,
+                        },
+                    )
+                    frame_path = self._first_output_path(result)
+                    regenerated_count += 1
+        return SkillResult(
+            status="success",
+            outputs={
+                "first_frame_path": final_paths["opening"],
+                "last_frame_path": final_paths["ending"],
+                "character": character,
+                "identity_reports": reports,
+                "identity_gate": "passed",
+                "regenerated_count": regenerated_count,
+            },
+            metrics={"validated_frame_count": 2, "regenerated_count": regenerated_count},
+            logs=[f"Validated opening and ending continuity frames for {character or 'the configured character'}."]
         )
 
     def upscale_image(self, context: SkillContext) -> SkillResult:
@@ -638,6 +739,13 @@ class AgentMediaSkills:
         return self.output_root / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}_{suffix}"
 
     def _resolve_prompt(self, context: SkillContext) -> str:
+        prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
+        if prompt_key:
+            for dependency in reversed(context.node.depends_on):
+                dependency_output = context.state[dependency]
+                resolved = dependency_output.get(prompt_key)
+                if isinstance(resolved, str) and resolved:
+                    return resolved
         prompt = context.node.inputs.get("prompt")
         if isinstance(prompt, str) and prompt:
             return prompt
@@ -647,6 +755,16 @@ class AgentMediaSkills:
             if isinstance(resolved, str) and resolved:
                 return resolved
         return context.plan.goal.prompt
+
+    @staticmethod
+    def _first_output_path(outputs: dict[str, object]) -> str | None:
+        for key in ("image_path", "frame_path", "selected_assets", "saved_files", "media_paths"):
+            value = outputs.get(key)
+            if isinstance(value, list) and value:
+                return str(value[0])
+            if isinstance(value, str) and value:
+                return value
+        return None
 
     def _resolve_negative_prompt(self, context: SkillContext) -> str:
         negative_prompt = context.node.inputs.get("negative_prompt")
@@ -762,6 +880,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.ensure_workflow", media.ensure_workflow, "Check workflow assets for any agent step")
     skill_registry.register("media.image.refine", media.refine_image, "Refine an image as an agent media primitive")
     skill_registry.register("media.image.generate_keyframe", media.generate_keyframe, "Generate a keyframe from text or a prior frame")
+    skill_registry.register("media.image.validate_character", media.validate_character_frames, "Validate configured character continuity keyframes")
     skill_registry.register("media.image.upscale", media.upscale_image, "Upscale an image as an agent media primitive")
     skill_registry.register("media.image.animate", media.animate_image, "Animate an image as an agent media primitive")
     skill_registry.register("media.image.render_batch", media.render_image_batch, "Render a batch of images as an agent media primitive")
