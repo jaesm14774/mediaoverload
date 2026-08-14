@@ -1,39 +1,25 @@
 from __future__ import annotations
 
 import json
-import re
-from datetime import datetime
 from pathlib import Path
 
-from agentic.assets.kirby_input import assert_kirby_input
+from agentic.assets.kirby_input import assert_kirby_input, inspect_kirby_input
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.prompting import (
     build_segment_prompt,
 )
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
-
-
-def _asset_check_result(result: dict[str, object], success_log: str) -> SkillResult:
-    asset_status = result.get("asset_status", [])
-    if not isinstance(asset_status, list):
-        return SkillResult(status="success", outputs=result, logs=[success_log])
-
-    missing_assets = [
-        str(item.get("asset", "")).strip()
-        for item in asset_status
-        if isinstance(item, dict) and str(item.get("status", "")).lower() != "ready"
-    ]
-    if not missing_assets:
-        return SkillResult(status="success", outputs=result, logs=[success_log])
-
-    workflow_name = str(result.get("workflow_name", "")).strip()
-    details = ", ".join(asset for asset in missing_assets if asset) or "unknown assets"
-    return SkillResult(
-        status="failed",
-        outputs=result,
-        logs=[f"Workflow assets missing for '{workflow_name}': {details}"],
-    )
+from agentic.skills.shared import (
+    asset_check_result,
+    build_run_dir,
+    collect_output_values,
+    resolve_dependency_negative_prompt,
+    resolve_dependency_prompt,
+    resolve_dependency_value,
+    safe_path_component,
+    slug_path_component,
+)
 
 
 class AgentPlanningSkills:
@@ -96,7 +82,12 @@ class AgentPlanningSkills:
         segment = context.state["script-plan"]["segments"][segment_index]
         prior_frame = self._resolve_first_value(context, ("frame_path", "saved_files"))
         previous_segment = context.state["script-plan"]["segments"][segment_index - 1] if segment_index > 0 else None
-        review_direction = self._resolve_first_value(context, ("revised_prompt", "prompt"))
+        # Only a review node may inject a revision direction.  The ordinary
+        # idea-brief dependency also exposes ``prompt``; treating that as a
+        # review direction duplicated the entire expanded long-video brief in
+        # every keyframe prompt and caused image models to render contact
+        # sheets/storyboards instead of a single frame.
+        review_direction = self._resolve_first_value(context, ("revised_prompt",))
         outputs = self.prompt_engine.prepare_segment(
             context.plan.goal,
             segment,
@@ -210,28 +201,11 @@ class AgentPlanningSkills:
 
     @staticmethod
     def _resolve_first_value(context: SkillContext, candidate_keys: tuple[str, ...]) -> str | None:
-        for dependency in reversed(context.node.depends_on):
-            dependency_output = context.state[dependency]
-            for key in candidate_keys:
-                value = dependency_output.get(key)
-                if isinstance(value, list) and value:
-                    return str(value[0])
-                if isinstance(value, str) and value:
-                    return value
-        return None
+        return resolve_dependency_value(context, candidate_keys)
 
     @staticmethod
     def _resolve_many_values(context: SkillContext, candidate_keys: tuple[str, ...]) -> list[str]:
-        resolved: list[str] = []
-        for dependency in context.node.depends_on:
-            dependency_output = context.state[dependency]
-            for key in candidate_keys:
-                value = dependency_output.get(key)
-                if isinstance(value, list):
-                    resolved.extend(str(item) for item in value if item)
-                elif isinstance(value, str) and value:
-                    resolved.append(value)
-        return list(dict.fromkeys(resolved))
+        return list(dict.fromkeys(collect_output_values(context, candidate_keys)))
 
 
 class AgentMediaSkills:
@@ -248,7 +222,7 @@ class AgentMediaSkills:
                 "auto_download": context.node.inputs.get("auto_download", False),
             },
         )
-        return _asset_check_result(result, "Checked workflow assets for an agent step.")
+        return asset_check_result(result, "Checked workflow assets for an agent step.")
 
     def refine_image(self, context: SkillContext) -> SkillResult:
         workflow_name = str(context.plan.goal.constraints.get("identity_refine_workflow_name") or "")
@@ -310,23 +284,78 @@ class AgentMediaSkills:
                 context.plan.goal.constraints.get("keyframe_workflow_name")
                 or context.node.inputs["workflow_name"]
             )
-            result = self.tools.call(
-                "comfy.workflow.text_to_image",
-                {
-                    "run_dir": str(
-                        self._build_run_dir(
-                            context.plan.goal.prompt,
-                            str(context.node.inputs.get("suffix") or "segment_keyframe"),
-                        )
-                    ),
-                    "workflow_name": workflow_name,
-                    "prompt": self._resolve_prompt(context),
-                    "negative_prompt": self._resolve_negative_prompt(context),
-                    "width": int(context.node.inputs.get("width", 1024)),
-                    "height": int(context.node.inputs.get("height", 1024)),
-                    "image_count": int(context.node.inputs.get("image_count", 1)),
-                },
-            )
+            character = str(context.plan.goal.constraints.get("character") or "").strip().lower()
+            prompt = self._resolve_prompt(context)
+            negative_prompt = self._resolve_negative_prompt(context)
+            if character == "kirby":
+                prompt = (
+                    f"{prompt}, single continuous animation frame, one composition, Kirby large and clearly visible "
+                    "in the foreground or midground, full readable round pink body and bright red feet, "
+                    "no storyboard, no sequence, no contact sheet, no split composition"
+                )
+                negative_prompt = (
+                    f"{negative_prompt}, storyboard, contact sheet, comic panels, multi-panel, split screen, collage, "
+                    "tiny distant subject, cropped character, white or unrecognizable character"
+                )
+            attempts = 1 if character != "kirby" else max(1, int(context.node.inputs.get("max_regenerations", 2)) + 1)
+            result: dict[str, object] = {}
+            rejected_reasons: list[str] = []
+            final_reports: list[tuple[str, object | None]] = []
+            for attempt in range(attempts):
+                result = self.tools.call(
+                    "comfy.workflow.text_to_image",
+                    {
+                        "run_dir": str(
+                            self._build_run_dir(
+                                context.plan.goal.prompt,
+                                str(context.node.inputs.get("suffix") or "segment_keyframe"),
+                            )
+                        ),
+                        "workflow_name": workflow_name,
+                        "prompt": prompt,
+                        "negative_prompt": negative_prompt,
+                        "width": int(context.node.inputs.get("width", 1024)),
+                        "height": int(context.node.inputs.get("height", 1024)),
+                        "image_count": int(context.node.inputs.get("image_count", 1)),
+                    },
+                )
+                if character != "kirby":
+                    break
+                candidate_paths = self._output_paths(result)
+                reports = [
+                    (path, inspect_kirby_input(path))
+                    for path in candidate_paths
+                ]
+                final_reports = reports
+                failed_reports = [
+                    (path, report)
+                    for path, report in reports
+                    if not report or not report.passed
+                ]
+                if candidate_paths and not failed_reports:
+                    break
+                if failed_reports:
+                    rejected_reasons.extend(
+                        f"{path}: {('; '.join(report.reasons) if report else 'keyframe output is missing')}"
+                        for path, report in failed_reports
+                    )
+                else:
+                    rejected_reasons.append("keyframe output is missing")
+            if character == "kirby":
+                candidate_paths = self._output_paths(result)
+                if not final_reports and candidate_paths:
+                    final_reports = [
+                        (path, inspect_kirby_input(path))
+                        for path in candidate_paths
+                    ]
+                failed_reports = [
+                    (path, report)
+                    for path, report in final_reports
+                    if not report or not report.passed
+                ]
+                if not candidate_paths or failed_reports:
+                    details = " | ".join(rejected_reasons) or "unknown Kirby keyframe validation failure"
+                    raise ValueError(f"Kirby keyframe generation failed after {attempts} attempts: {details}")
             log = "Generated an opening keyframe from text."
         return SkillResult(
             status="success",
@@ -337,20 +366,27 @@ class AgentMediaSkills:
 
     def validate_character_frames(self, context: SkillContext) -> SkillResult:
         opening_node = str(context.node.inputs.get("opening_node") or context.node.depends_on[0])
+        use_last_frame = bool(context.node.inputs.get("use_last_frame", False))
         ending_node = str(
             context.node.inputs.get("ending_node")
-            or (context.node.depends_on[1] if len(context.node.depends_on) > 1 else context.node.depends_on[0])
+            or (context.node.depends_on[1] if len(context.node.depends_on) > 1 else "")
         )
         character = str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or "").strip().lower()
         story = context.state.node_outputs.get("native-story-prompt", {})
-        frame_specs = (
+        frame_specs = [
             ("opening", opening_node, str(context.node.inputs.get("opening_prompt_key") or "opening_keyframe_prompt")),
-            ("ending", ending_node, str(context.node.inputs.get("ending_prompt_key") or "ending_keyframe_prompt")),
-        )
+        ]
+        if use_last_frame:
+            if not ending_node:
+                raise ValueError("Native H3 use_last_frame=true requires an ending_node")
+            frame_specs.append(
+                ("ending", ending_node, str(context.node.inputs.get("ending_prompt_key") or "ending_keyframe_prompt"))
+            )
         reports: list[dict[str, object]] = []
         regenerated_count = 0
         final_paths: dict[str, str] = {}
         preserve_opening_frame = bool(context.node.inputs.get("preserve_opening_frame", False))
+        preserve_ending_frame = bool(context.node.inputs.get("preserve_ending_frame", False))
         for label, node_id, prompt_key in frame_specs:
             frame_path = self._first_output_path(context.state.node_outputs.get(node_id, {}))
             last_error = ""
@@ -358,9 +394,10 @@ class AgentMediaSkills:
                 try:
                     if not frame_path:
                         raise ValueError("keyframe output is missing")
-                    if label == "opening" and preserve_opening_frame:
+                    preserve_frame = preserve_opening_frame if label == "opening" else preserve_ending_frame
+                    if preserve_frame:
                         if not Path(frame_path).is_file():
-                            raise ValueError("human-selected opening frame file is missing")
+                            raise ValueError(f"human-selected {label} frame file is missing")
                         report = {
                             "path": frame_path,
                             "passed": True,
@@ -394,18 +431,62 @@ class AgentMediaSkills:
                     )
                     frame_path = self._first_output_path(result)
                     regenerated_count += 1
+        outputs: dict[str, object] = {
+            "first_frame_path": final_paths["opening"],
+            "character": character,
+            "identity_reports": reports,
+            "identity_gate": "passed",
+            "use_last_frame": use_last_frame,
+            "regenerated_count": regenerated_count,
+        }
+        if use_last_frame:
+            outputs["last_frame_path"] = final_paths["ending"]
+        return SkillResult(
+            status="success",
+            outputs=outputs,
+            metrics={"validated_frame_count": len(frame_specs), "regenerated_count": regenerated_count},
+            logs=[
+                f"Validated {'opening and ending' if use_last_frame else 'opening'} continuity frame(s) for {character or 'the configured character'}."
+            ]
+        )
+
+    def validate_last_frame(self, context: SkillContext) -> SkillResult:
+        frame_node = str(context.node.inputs.get("frame_node") or context.node.depends_on[0])
+        frame_path = self._first_output_path(context.state.node_outputs.get(frame_node, {}))
+        if not frame_path:
+            raise ValueError("Native H3 L2VA continuity gate requires a last-frame output")
+        if not Path(frame_path).is_file():
+            raise ValueError(f"Native H3 L2VA last-frame file is missing: {frame_path}")
+
+        character = str(
+            context.node.inputs.get("character")
+            or context.plan.goal.constraints.get("character")
+            or ""
+        ).strip().lower()
+        preserve = bool(context.node.inputs.get("preserve_last_frame", True))
+        if preserve:
+            report = {
+                "path": frame_path,
+                "passed": True,
+                "validation": "human_selected_immutable",
+            }
+        elif character == "kirby":
+            report = assert_kirby_input(frame_path, allow_external=False).to_dict()
+        else:
+            report = {"path": frame_path, "passed": True, "validation": "file_exists"}
         return SkillResult(
             status="success",
             outputs={
-                "first_frame_path": final_paths["opening"],
-                "last_frame_path": final_paths["ending"],
+                "first_frame_path": "",
+                "last_frame_path": frame_path,
                 "character": character,
-                "identity_reports": reports,
+                "identity_reports": [report],
                 "identity_gate": "passed",
-                "regenerated_count": regenerated_count,
+                "preserve_last_frame": preserve,
+                "regenerated_count": 0,
             },
-            metrics={"validated_frame_count": 2, "regenerated_count": regenerated_count},
-            logs=[f"Validated opening and ending continuity frames for {character or 'the configured character'}."]
+            metrics={"validated_frame_count": 1, "regenerated_count": 0},
+            logs=["Validated and preserved the selected last frame for native H3 L2VA."],
         )
 
     def upscale_image(self, context: SkillContext) -> SkillResult:
@@ -419,15 +500,36 @@ class AgentMediaSkills:
         return SkillResult(status="success", outputs=result, logs=["Upscaled an image with an agent media primitive."])
 
     def animate_image(self, context: SkillContext) -> SkillResult:
+        workflow_name = str(context.node.inputs.get("workflow_name", ""))
+        payload: dict[str, object] = {
+            "workflow_name": workflow_name,
+            "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
+            "image_path": self._resolve_image_path(context),
+            "prompt": self._resolve_prompt(context),
+            "model_profile": str(
+                context.node.inputs.get("model_profile")
+                or context.plan.goal.constraints.get("native_h3_model_profile")
+                or "q4"
+            ),
+            "video_count": int(context.node.inputs.get("video_count") or context.plan.goal.constraints.get("video_count") or 1),
+        }
+        if context.plan.goal.media_type == "long_video" and workflow_name.startswith("minimax_h3_"):
+            constraints = context.plan.goal.constraints
+            payload.update(
+                {
+                    # Long-video runs queue multiple H3 jobs. Keep each draft
+                    # below the standalone 5-second profile so an 8GB GPU can
+                    # complete the segment and reload the next one.
+                    "width": int(constraints.get("longvideo_h3_width", 512)),
+                    "height": int(constraints.get("longvideo_h3_height", 288)),
+                    "length": int(constraints.get("longvideo_h3_length", 81)),
+                    "steps": int(constraints.get("longvideo_h3_steps", 16)),
+                    "model_profile": str(constraints.get("longvideo_h3_model_profile", "q2")),
+                }
+            )
         result = self.tools.call(
             "comfy.workflow.image_to_video",
-            {
-                "workflow_name": str(context.node.inputs.get("workflow_name", "")),
-                "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
-                "image_path": self._resolve_image_path(context),
-                "prompt": self._resolve_prompt(context),
-                "video_count": int(context.node.inputs.get("video_count") or context.plan.goal.constraints.get("video_count") or 1),
-            },
+            payload,
         )
         return SkillResult(
             status="success",
@@ -451,7 +553,10 @@ class AgentMediaSkills:
         saved_files: list[str] = []
         item_runs: list[dict[str, str]] = []
         for index, prompt_set in enumerate(prompt_sets, start=1):
-            label = str(prompt_set.get("label", f"item_{index:02d}"))
+            label = slug_path_component(
+                prompt_set.get("label", f"item_{index:02d}"),
+                default=f"item-{index:02d}",
+            )
             item_dir = run_dir / label
             result = self.tools.call(
                 "comfy.workflow.text_to_image",
@@ -734,27 +839,15 @@ class AgentMediaSkills:
         )
 
     def _build_run_dir(self, prompt: str, suffix: str) -> Path:
-        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")
-        slug = slug[:32] or "agent"
-        return self.output_root / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}_{suffix}"
+        return build_run_dir(self.output_root, prompt, suffix, default_slug="agent")
 
     def _resolve_prompt(self, context: SkillContext) -> str:
         prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
         if prompt_key:
-            for dependency in reversed(context.node.depends_on):
-                dependency_output = context.state[dependency]
-                resolved = dependency_output.get(prompt_key)
-                if isinstance(resolved, str) and resolved:
-                    return resolved
-        prompt = context.node.inputs.get("prompt")
-        if isinstance(prompt, str) and prompt:
-            return prompt
-        for dependency in reversed(context.node.depends_on):
-            dependency_output = context.state[dependency]
-            resolved = dependency_output.get("prompt")
-            if isinstance(resolved, str) and resolved:
+            resolved = resolve_dependency_value(context, (prompt_key,))
+            if resolved is not None:
                 return resolved
-        return context.plan.goal.prompt
+        return resolve_dependency_prompt(context)
 
     @staticmethod
     def _first_output_path(outputs: dict[str, object]) -> str | None:
@@ -766,16 +859,18 @@ class AgentMediaSkills:
                 return value
         return None
 
+    @staticmethod
+    def _output_paths(outputs: dict[str, object]) -> list[str]:
+        """Return every image output so batch candidates are validated individually."""
+        for key in ("saved_files", "selected_assets", "media_paths"):
+            value = outputs.get(key)
+            if isinstance(value, list):
+                return list(dict.fromkeys(str(item) for item in value if str(item)))
+        first = AgentMediaSkills._first_output_path(outputs)
+        return [first] if first else []
+
     def _resolve_negative_prompt(self, context: SkillContext) -> str:
-        negative_prompt = context.node.inputs.get("negative_prompt")
-        if isinstance(negative_prompt, str):
-            return negative_prompt
-        for dependency in reversed(context.node.depends_on):
-            dependency_output = context.state[dependency]
-            resolved = dependency_output.get("negative_prompt")
-            if isinstance(resolved, str):
-                return resolved
-        return ""
+        return resolve_dependency_negative_prompt(context)
 
     def _resolve_image_path(self, context: SkillContext) -> str:
         image_path = context.node.inputs.get("image_path") or context.node.inputs.get("input_image_path")
@@ -801,29 +896,11 @@ class AgentMediaSkills:
 
     @staticmethod
     def _resolve_first(context: SkillContext, candidate_keys: tuple[str, ...]) -> str | None:
-        for dependency in reversed(context.node.depends_on):
-            dependency_output = context.state[dependency]
-            for key in candidate_keys:
-                value = dependency_output.get(key)
-                if isinstance(value, list) and value:
-                    return str(value[0])
-                if isinstance(value, str) and value:
-                    return value
-        return None
+        return resolve_dependency_value(context, candidate_keys)
 
     @staticmethod
     def _resolve_many(context: SkillContext, candidate_keys: tuple[str, ...]) -> list[str]:
-        values: list[str] = []
-        for dependency in context.node.depends_on:
-            dependency_output = context.state[dependency]
-            for key in candidate_keys:
-                value = dependency_output.get(key)
-                if isinstance(value, list):
-                    values.extend(str(item) for item in value)
-                    break
-                if isinstance(value, str) and value:
-                    values.append(value)
-                    break
+        values = collect_output_values(context, candidate_keys, first_key_only=True)
         if not values:
             raise RuntimeError(f"No dependency outputs found for node '{context.node.node_id}'")
         return values
@@ -881,6 +958,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.image.refine", media.refine_image, "Refine an image as an agent media primitive")
     skill_registry.register("media.image.generate_keyframe", media.generate_keyframe, "Generate a keyframe from text or a prior frame")
     skill_registry.register("media.image.validate_character", media.validate_character_frames, "Validate configured character continuity keyframes")
+    skill_registry.register("media.image.validate_last_frame", media.validate_last_frame, "Validate and preserve a native H3 L2VA last frame")
     skill_registry.register("media.image.upscale", media.upscale_image, "Upscale an image as an agent media primitive")
     skill_registry.register("media.image.animate", media.animate_image, "Animate an image as an agent media primitive")
     skill_registry.register("media.image.render_batch", media.render_image_batch, "Render a batch of images as an agent media primitive")

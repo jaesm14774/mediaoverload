@@ -34,7 +34,7 @@ if ($existing) {
 }
 
 $process = Start-Process -FilePath $python -ArgumentList $arguments -WorkingDirectory $ComfyRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-$mode = if ($DynamicMode) { 'dynamic-VRAM + pinned-memory + async-offload' } else { 'legacy low-VRAM' }
+$mode = if ($DynamicMode) { 'dynamic-VRAM + pinned-memory + async-offload' } else { 'conservative low-VRAM' }
 Write-Output "Started ComfyUI H3 $mode profile with PID $($process.Id)."
 Write-Output "Logs: $stdout and $stderr"
 

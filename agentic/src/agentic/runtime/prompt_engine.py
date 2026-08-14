@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
@@ -149,6 +150,7 @@ class PromptEngine:
         platforms: list[str],
         media_paths: list[str] | None = None,
         review_notes: str = "",
+        visual_paths: list[str] | None = None,
     ) -> dict[str, Any]:
         bundle = self.llm_engine.prepare_publish_caption(
             goal,
@@ -157,6 +159,7 @@ class PromptEngine:
             platforms=platforms,
             media_paths=media_paths,
             review_notes=review_notes,
+            visual_paths=visual_paths,
         )
         normalized_hashtags = str(bundle.get("hashtags", "") or "").strip()
         platform_captions = bundle.get("platform_captions", {})
@@ -191,6 +194,27 @@ class PromptEngine:
         bundle["caption_strategy"] = "platform_adapted" if platform_bundle else "generic"
         bundle["dispatch_ready"] = bool(media_paths) and bool(bundle.get("caption"))
         return bundle
+
+    def evaluate_video_contact_sheet(
+        self,
+        *,
+        contact_sheet_path: str,
+        character: str,
+        story_spine: dict[str, Any],
+        native_shots: list[dict[str, Any]],
+        news_context: dict[str, Any],
+        rendered_prompt: str,
+        news_anchor_terms: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self.llm_engine.evaluate_video_contact_sheet(
+            contact_sheet_path=contact_sheet_path,
+            character=character,
+            story_spine=story_spine,
+            native_shots=native_shots,
+            news_context=news_context,
+            rendered_prompt=rendered_prompt,
+            news_anchor_terms=news_anchor_terms,
+        )
 
     def review_asset_candidates(
         self,

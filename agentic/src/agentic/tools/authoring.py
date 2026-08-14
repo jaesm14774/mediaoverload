@@ -23,11 +23,18 @@ class AgentAuthoringTools:
     def acquire_missing_assets(self, payload: dict[str, object]) -> dict[str, object]:
         workflow_name = str(payload["workflow_name"])
         if bool(payload.get("execute_download", False)) and workflow_name.startswith("minimax_h3_"):
-            profile_name = {
+            requested_profile = str(payload.get("model_profile") or "").strip().lower().replace("_", "-")
+            if requested_profile in {"q4", "q4-k-m", "balanced-lowvram", "ref2va-lowvram"}:
+                profile_name = "ref2va-lowvram" if "ref2va" in workflow_name else "balanced-lowvram"
+            elif requested_profile in {"q2", "ultra-lowvram"}:
+                profile_name = "ref2va-ultra-lowvram" if "ref2va" in workflow_name else "ultra-lowvram"
+            elif requested_profile in {"native", "native-quality", "official", "ref2va-native"}:
+                profile_name = "ref2va-native" if "ref2va" in workflow_name else "native-quality"
+            else:
+                profile_name = None
+            profile_name = profile_name or {
                 "minimax_h3_lowvram_i2v": "balanced-lowvram",
                 "minimax_h3_lowvram_t2v": "balanced-lowvram",
-                "minimax_h3_ultra_lowvram_i2v": "ultra-lowvram",
-                "minimax_h3_ultra_lowvram_t2v": "ultra-lowvram",
                 "minimax_h3_native_i2v": "native-quality",
                 "minimax_h3_native_t2v": "native-quality",
             }.get(workflow_name, "balanced-lowvram")

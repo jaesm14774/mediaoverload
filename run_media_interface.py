@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def main() -> None:
     parser.add_argument("--character", type=str, help="Character name")
     parser.add_argument("--prompt", type=str, default="", help="Prompt text")
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature parameter")
-    parser.add_argument("--generation-type", type=str, help="Override legacy generation type, for example text2longvideo")
+    parser.add_argument("--generation-type", type=str, help="Override generation type, for example text2longvideo")
     parser.add_argument("--dry-run-publish", action="store_true", help="Run publish stage in dry-run mode")
     parser.add_argument(
         "--publish-mode",
@@ -45,12 +46,19 @@ def main() -> None:
         help="Restrict publishing to a platform; repeat for multiple platforms",
     )
     parser.add_argument("--no-publish", action="store_true", help="Skip publish stage after generation")
+    parser.add_argument("--no-review", action="store_true", help="Disable human review for this run; auto Ref2VA keeps generated references without a Discord selection gate")
+    parser.add_argument("--news-driven", action="store_true", help="Require a fresh unseen news item for this run")
     parser.add_argument("--enable-review-loop", action="store_true", help="Enable retry/review branches where supported")
     parser.add_argument("--review-notes", type=str, default="", help="Review notes for planner retry branches")
     parser.add_argument("--output-dir", type=str, help="Override output directory")
     parser.add_argument("--comfy-host", type=str, help="Override ComfyUI host")
     parser.add_argument("--comfy-port", type=int, help="Override ComfyUI port")
-    parser.add_argument("--comfy-root", type=str, help="Override ComfyUI root for asset checks")
+    parser.add_argument(
+        "--comfy-root",
+        type=str,
+        default=os.environ.get("COMFYUI_ROOT", r"D:\ComfyUI_windows_portable"),
+        help="ComfyUI root for asset checks (default: COMFYUI_ROOT or D:\\ComfyUI_windows_portable)",
+    )
     parser.add_argument("--auto-download-assets", action="store_true", help="Allow automatic workflow asset preparation")
     args = parser.parse_args()
 
@@ -65,6 +73,8 @@ def main() -> None:
         publish_mode=args.publish_mode,
         publish_platforms=args.publish_platforms,
         publish_after_generate=not args.no_publish,
+        no_review=args.no_review,
+        news_driven=args.news_driven,
         output_dir=args.output_dir,
         enable_review_loop=args.enable_review_loop,
         review_notes=args.review_notes,

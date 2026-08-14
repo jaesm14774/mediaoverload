@@ -1,7 +1,6 @@
 social_media:
-  default_hashtags:
-    - mediaoverload
-    - kirby
+  # Leave empty: the caption model must select tags grounded in the post and media.
+  default_hashtags: []
 
   platforms:
     instagram_graph:

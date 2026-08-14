@@ -1,6 +1,6 @@
 # Agentic Runtime
 
-`agentic/` is the clean-slate media runtime that will eventually supersede the legacy MediaOverload orchestration stack. It centers every run around explicit planners, execution graphs, skills, tools, memories, and an asset registry so AI agents can iteratively design and refine workflows without being boxed in by the historical service hierarchy.
+`agentic/` is the media runtime for explicit planners, execution graphs, skills, tools, memories, and an asset registry. It gives AI agents a composable surface for designing and refining workflows without coupling generation logic to a service hierarchy.
 
 ## Design Principles
 - Goal driven: each run starts from an abstract goal plus constraints, not a hard-coded generation strategy.
@@ -14,9 +14,10 @@
 - `src/agentic/runtime/`: planners, execution graph contracts, runner, registries.
 - `src/agentic/skills/`: skill implementations, including agent-facing planning/media primitives and workflow-specific chains.
 - `src/agentic/tools/`: built-in tools that wrap ComfyUI, audio, media, and evaluation utilities.
-- `src/agentic/assets/`: workflow manifest loader and future asset registry helpers.
+- `src/agentic/assets/`: workflow manifest and asset registry helpers.
 - `src/agentic/memory/`: run memory buffers and portfolio/experience storage.
-- `configs/workflow_manifests/`: machine-readable workflow templates.
+- repo-level `configs/workflow/`: machine-readable ComfyUI workflow templates.
+- repo-level `configs/storyboards/`: reusable storyboard contracts and presets.
 - `examples/`: runnable goal definitions for smoke tests.
 
 ## Quickstart
@@ -29,7 +30,7 @@ agentic --goal "kirby explores a surreal city" \
         --execute
 ```
 
-The CLI prints the generated plan first, then executes it through the registered skill/tool graph. Some paths already use real ComfyUI/FFmpeg/TTS adapters; remaining placeholder paths are being migrated incrementally.
+The CLI prints the generated plan first, then executes it through the registered skill/tool graph. Production paths use the configured ComfyUI/FFmpeg/TTS adapters, while local adapters support smoke tests and offline development.
 
 For a real local output demo that does not depend on ComfyUI, run:
 
@@ -55,7 +56,7 @@ agentic --goal "kirby in a neon ramen alley" \
 
 This uses the existing `z_image.json` graph in the repo and writes actual ComfyUI outputs into `agentic/output/`. ComfyUI must already be running and reachable.
 
-For the first migrated legacy chain (`text2img2video`):
+For the `text2img2video` chain:
 
 ```bash
 agentic --goal "kirby jogging through a rainy neon ramen alley at night" \
@@ -66,9 +67,9 @@ agentic --goal "kirby jogging through a rainy neon ramen alley at night" \
         --comfy-port 8188
 ```
 
-That chain uses the new runtime to compose `text2img -> upscale -> image-to-video -> gif preview`.
+That chain composes `text2img -> upscale -> image-to-video -> gif preview` through the shared runtime.
 
-For the first real migrated `long_video` chain:
+For the real `long_video` chain:
 
 ```bash
 agentic --goal "kirby explores a surreal city at night" \
@@ -78,12 +79,12 @@ agentic --goal "kirby explores a surreal city at night" \
         --execute \
         --comfy-host 127.0.0.1 \
         --comfy-port 8188 \
-        --comfy-root C:\Users\jaesm14774\Desktop\ComfyUI
+        --comfy-root D:\ComfyUI_windows_portable
 ```
 
 This chain now uses the new runtime to compose `segment prompt -> first keyframe -> tail-frame guided img2img -> i2v -> concat -> gif preview`. Add `--use-tts` if you also want per-segment narration generation and final mux.
 
-Additional migrated primitives are now available:
+Additional runtime primitives are available:
 
 ```bash
 agentic --goal "refine this portrait" \
@@ -114,7 +115,9 @@ agentic --goal "refine character art from scratch" \
         --comfy-port 8188
 ```
 
-The migration map for legacy capabilities lives in `configs/migrations/legacy_capability_map.yaml`.
+Routing and workflow selection live in the repo-level `configs/routing.yaml` and
+the workflow manifests under `configs/workflow/`; there is no separate routing
+map required by the runtime entry point.
 
 ## Agentic Skill Surface
 
@@ -124,11 +127,11 @@ The runtime is no longer limited to workflow-specific wrappers. It now exposes a
 - Media skills: `media.ensure_workflow`, `media.image.refine`, `media.image.upscale`, `media.image.animate`
 - Audio/video packaging skills: `media.audio.narrate`, `media.audio.concat`, `media.video.concat`, `media.video.merge_audio`, `media.video.gif_preview`, `media.video.extract_last_frame`
 
-Those skills are intended to become the default building blocks for migrated capabilities instead of hard-coded legacy strategy flow.
+Those skills are the default building blocks for composed capabilities instead of hard-coded strategy flow.
 
 ## Validation Snapshot
 
-As of 2026-04-04, the following paths have been independently executed through the `agentic` CLI with real local adapters:
+The following paths are covered by the checked-in runtime tests and local-adapter validation:
 
 - `image`
 - `image_refine`
@@ -141,4 +144,7 @@ As of 2026-04-04, the following paths have been independently executed through t
 The current development order should keep validating small primitives first, then reuse them inside more complex chains such as `long_video`.
 
 ## Roadmap Snapshot
-Milestone 1 focuses on long-video generation: planner + execution graph + ComfyUI asset tooling + long-video skills + a basic feedback loop. Later milestones will layer richer creativity loops, multi-agent collaboration, and downstream publishing hooks once the new runtime proves its flexibility.
+The current runtime already covers planner + execution graph + shared ComfyUI
+asset tooling + long-video/storyboard skills + prompt/review state + social
+publishing tools. Further work should extend those shared contracts and skill
+registrations rather than create another workflow-specific orchestration path.

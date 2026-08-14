@@ -11,8 +11,15 @@ from typing import Any
 
 from agentic.assets.registry import AssetRegistry
 from agentic.assets.kirby_input import assert_kirby_input
+from agentic.assets.minimax_h3 import minimax_h3_model_overrides
+from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
 from agentic.runtime.registry import ToolRegistry
+from agentic.runtime.h3_modes import validate_h3_payload
 from agentic.tools.comfy_adapter import ComfyAdapter
+
+
+MAX_REFERENCE_IMAGE_SLOTS = 9
+MAX_REFERENCE_VIDEO_SLOTS = 3
 
 
 @dataclass(slots=True)
@@ -40,6 +47,12 @@ class ComfyWorkflowSpec:
     steps_binding: NodeBinding | None = None
     image_binding: NodeBinding | None = None
     last_image_binding: NodeBinding | None = None
+    first_frame_binding: NodeBinding | None = None
+    last_frame_binding: NodeBinding | None = None
+    reference_image_bindings: tuple[NodeBinding, ...] = ()
+    reference_video_bindings: tuple[NodeBinding, ...] = ()
+    reference_conditioning_node_type: str | None = None
+    reference_image_size_binding: NodeBinding | None = None
     seed_enabled: bool = True
     default_payload: dict[str, Any] = field(default_factory=dict)
 
@@ -48,7 +61,7 @@ class ComfyWorkflowToolset:
     DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
     DEFAULT_REFINE_WORKFLOWS = ("kirby_identity_img2img", "z_image_i2i_anime", "image_to_image")
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
-    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "wan2.2_gguf_i2v", "wan2.2_gguf_i2v_audio")
+    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "minimax_h3_native_i2v")
 
     def __init__(self, asset_registry: AssetRegistry, output_root: Path, comfy_host: str | None = None, comfy_port: int | None = None) -> None:
         self.asset_registry = asset_registry
@@ -80,6 +93,12 @@ class ComfyWorkflowToolset:
         tool_registry.register("comfy.render_image_to_image", self._build_handler("comfy.workflow.image_to_image"), "Render a real image-to-image workflow through ComfyUI")
         tool_registry.register("comfy.upscale_image", self._build_handler("comfy.workflow.image_upscale"), "Upscale an image through ComfyUI")
         tool_registry.register("comfy.render_image_to_video", self._build_handler("comfy.workflow.image_to_video"), "Render a real image-to-video workflow through ComfyUI")
+        if "comfy.workflow.reference_to_video" in self.specs:
+            tool_registry.register(
+                "comfy.render_reference_to_video",
+                self._build_handler("comfy.workflow.reference_to_video"),
+                "Render a MiniMax H3 reference-image/video-to-video workflow through ComfyUI",
+            )
         if "comfy.workflow.text_to_video" in self.specs:
             tool_registry.register("comfy.render_text_to_video", self._build_handler("comfy.workflow.text_to_video"), "Render a native H3 text-to-video workflow through ComfyUI")
 
@@ -93,6 +112,9 @@ class ComfyWorkflowToolset:
         spec = self.specs[spec_name]
         merged_payload: dict[str, Any] = {**spec.default_payload, **payload}
         requested_workflow_name = str(merged_payload.get("workflow_name") or spec.workflow_name)
+        h3_mode = merged_payload.get("h3_mode") or merged_payload.get("generation_type")
+        if h3_mode and requested_workflow_name.startswith("minimax_h3_"):
+            validate_h3_payload(str(h3_mode), merged_payload)
         manifest = self.asset_registry.get_manifest(requested_workflow_name)
         workflow_path = self.asset_registry.materialize_workflow(manifest)
         workflow = self.adapter.load_workflow(workflow_path)
@@ -105,6 +127,23 @@ class ComfyWorkflowToolset:
             generator = self.adapter.build_generator(host=self.comfy_host, port=self.comfy_port)
         except Exception as exc:
             raise RuntimeError(self._connection_error_message()) from exc
+        reference_info: dict[str, Any] | None = None
+        runtime_workflow = workflow
+        model_overrides = self._resolve_model_overrides(spec, merged_payload)
+        if model_overrides:
+            runtime_workflow = self._apply_model_overrides(runtime_workflow, model_overrides)
+            merged_payload["model_overrides"] = model_overrides
+        if spec.reference_conditioning_node_type:
+            reference_info = self._prepare_reference_payload(merged_payload)
+            merged_payload["reference_manifest"] = reference_info["manifest"]
+            merged_payload["reference_lineage"] = reference_info["lineage"]
+            merged_payload["reference_mode"] = self._reference_mode(reference_info["manifest"])
+            self._check_required_nodes(generator, spec, reference_info["manifest"])
+            runtime_workflow = self._build_runtime_reference_workflow(
+                runtime_workflow,
+                reference_info["manifest"],
+                merged_payload,
+            )
         output_dir = run_dir / spec.output_folder
         output_dir.mkdir(parents=True, exist_ok=True)
         render_count = max(1, int(merged_payload.get(spec.count_payload_key, 1)))
@@ -114,16 +153,23 @@ class ComfyWorkflowToolset:
                 iteration_payload = dict(merged_payload)
                 if spec.seed_enabled and "seed" not in iteration_payload:
                     iteration_payload["seed"] = random.randint(1, 999999999)
-                updates = self._build_updates(spec, workflow_path, iteration_payload, generator)
-                run_suffix = spec.file_prefix if render_count == 1 else f"{spec.file_prefix}_{run_index + 1:02d}"
-                saved_files.extend(
-                    generator.generate(
-                        workflow_path=str(workflow_path),
-                        updates=updates,
-                        output_dir=str(output_dir),
-                        file_prefix=run_suffix,
-                    )
+                updates = self._build_updates(
+                    spec,
+                    workflow_path,
+                    iteration_payload,
+                    generator,
+                    workflow=runtime_workflow if (reference_info or model_overrides) else None,
                 )
+                run_suffix = spec.file_prefix if render_count == 1 else f"{spec.file_prefix}_{run_index + 1:02d}"
+                generate_kwargs = {
+                    "workflow_path": str(workflow_path),
+                    "updates": updates,
+                    "output_dir": str(output_dir),
+                    "file_prefix": run_suffix,
+                }
+                if reference_info or model_overrides:
+                    generate_kwargs["workflow"] = runtime_workflow
+                saved_files.extend(generator.generate(**generate_kwargs))
         except Exception as exc:
             raise RuntimeError(f"ComfyUI generation failed for {spec_name}: {exc}") from exc
 
@@ -145,6 +191,7 @@ class ComfyWorkflowToolset:
             "saved_files": saved_files,
             "summary_path": str(summary_path),
             "workflow_name": manifest.name,
+            "h3_mode": str(h3_mode or ""),
         }
         if not saved_files:
             fallback = merged_payload.get("image_path") or merged_payload.get("input_image_path")
@@ -158,6 +205,8 @@ class ComfyWorkflowToolset:
         workflow_path: Path,
         payload: dict[str, Any],
         generator: Any,
+        *,
+        workflow: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         updates: list[dict[str, Any]] = []
 
@@ -174,14 +223,19 @@ class ComfyWorkflowToolset:
         if spec.steps_binding and payload.get("steps") is not None:
             updates.append(self._binding_update(spec.steps_binding, int(payload["steps"]), str(workflow_path)))
 
+        if spec.reference_conditioning_node_type:
+            updates.extend(self._build_reference_updates(spec, payload, workflow_path, generator))
+
         image_path = payload.get("image_path") or payload.get("input_image_path")
         requested_workflow = str(payload.get("workflow_name") or spec.workflow_name)
         if image_path and spec.name == "comfy.workflow.image_to_video" and requested_workflow.startswith("minimax_h3_"):
             prompt_text = str(payload.get("prompt") or "").lower()
             if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
+                h3_mode = str(payload.get("h3_mode") or "").strip().lower().replace("-", "_")
                 assert_kirby_input(
                     image_path,
                     allow_external=bool(payload.get("allow_external_reference", False)),
+                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
                 )
         if spec.image_binding and image_path:
             image_filename = generator.upload_image(str(image_path))
@@ -191,24 +245,257 @@ class ComfyWorkflowToolset:
         if last_image_path and spec.last_image_binding and requested_workflow.startswith("minimax_h3_"):
             prompt_text = str(payload.get("prompt") or "").lower()
             if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
+                h3_mode = str(payload.get("h3_mode") or "").strip().lower().replace("-", "_")
                 assert_kirby_input(
                     last_image_path,
                     allow_external=bool(payload.get("allow_external_reference", False)),
+                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
                 )
             last_image_filename = generator.upload_image(str(last_image_path))
             updates.append(self._binding_update(spec.last_image_binding, last_image_filename, str(workflow_path)))
+        elif payload.get("use_last_frame") is False and spec.last_frame_binding and requested_workflow.startswith("minimax_h3_"):
+            # The 15s manifest contains a last_frame connection by design. Override
+            # it with None for first-frame-only runs so ComfyUI cannot reuse the
+            # template's placeholder LoadImage node.
+            updates.append(self._binding_update(spec.last_frame_binding, None, str(workflow_path)))
+
+        if payload.get("use_first_frame") is False and spec.first_frame_binding and requested_workflow.startswith("minimax_h3_"):
+            updates.append(self._binding_update(spec.first_frame_binding, None, str(workflow_path)))
 
         seed = payload.get("seed")
         if seed is None and spec.seed_enabled:
             seed = random.randint(1, 999999999)
 
         return self.adapter.generate_updates(
-            workflow=self.adapter.load_workflow(workflow_path),
+            workflow=workflow or self.adapter.load_workflow(workflow_path),
             updates_config=updates,
             description=None,
             seed=seed if spec.seed_enabled else None,
             workflow_path=str(workflow_path),
         )
+
+    @staticmethod
+    def _reference_mode(references: list[dict[str, Any]]) -> str:
+        image_count = sum(str(reference.get("type")) == "image" for reference in references)
+        video_count = sum(str(reference.get("type")) == "video" for reference in references)
+        parts: list[str] = []
+        if image_count:
+            parts.append(f"{image_count} image")
+        if video_count:
+            parts.append(f"{video_count} video")
+        return " + ".join(parts)
+
+    @staticmethod
+    def _resolve_model_overrides(spec: ComfyWorkflowSpec, payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        raw_overrides = payload.get("model_overrides")
+        overrides: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_overrides, dict):
+            overrides.update(
+                {
+                    str(node_id): dict(value)
+                    for node_id, value in raw_overrides.items()
+                    if isinstance(value, dict)
+                }
+            )
+        profile = payload.get("model_profile")
+        workflow_name = str(payload.get("workflow_name") or spec.workflow_name)
+        if profile and workflow_name.startswith("minimax_h3_"):
+            profile_overrides = minimax_h3_model_overrides(
+                str(profile),
+                reference_to_video=bool(spec.reference_conditioning_node_type),
+            )
+            for node_id, value in profile_overrides.items():
+                merged = dict(overrides.get(node_id, {}))
+                merged_inputs = dict(merged.get("inputs") or {})
+                merged_inputs.update(dict(value.get("inputs") or {}))
+                merged.update(value)
+                if merged_inputs:
+                    merged["inputs"] = merged_inputs
+                overrides[node_id] = merged
+        return overrides
+
+    @staticmethod
+    def _apply_model_overrides(
+        workflow: dict[str, Any],
+        overrides: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Apply model loader class/input overrides to a runtime-only graph."""
+
+        runtime = json.loads(json.dumps(workflow))
+        for node_id, override in overrides.items():
+            node = runtime.get(str(node_id))
+            if not isinstance(node, dict):
+                raise ValueError(f"Model override references unknown workflow node {node_id!r}")
+            if override.get("class_type"):
+                node["class_type"] = str(override["class_type"])
+            inputs = override.get("inputs")
+            if inputs is not None and not isinstance(inputs, dict):
+                raise ValueError(f"Model override inputs for node {node_id!r} must be an object")
+            if isinstance(inputs, dict):
+                if bool(override.get("replace_inputs")):
+                    node["inputs"] = dict(inputs)
+                else:
+                    node.setdefault("inputs", {}).update(inputs)
+        return runtime
+
+    @staticmethod
+    def _build_runtime_reference_workflow(
+        workflow: dict[str, Any],
+        references: list[dict[str, Any]],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build only the reference loaders that this render actually uses.
+
+        The checked-in workflow is intentionally a zero-reference base graph.
+        ComfyUI's H3 node exposes optional auto-grow inputs, so materialising
+        unused image/video loaders is unnecessary work and makes the graph
+        falsely imply that both reference types are required.
+        """
+
+        runtime = json.loads(json.dumps(workflow))
+        conditioning_nodes: list[dict[str, Any]] = []
+        stale_reference_nodes: set[str] = set()
+        reference_prefixes = ("ref_images.", "ref_videos.", "ref_audios.", "ref_video_audios.")
+
+        for node_id, node in list(runtime.items()):
+            if not isinstance(node, dict):
+                continue
+            class_type = str(node.get("class_type") or "")
+            title = str(node.get("_meta", {}).get("title") or "").lower()
+            if class_type == "MiniMaxH3ReferenceToVideo":
+                conditioning_nodes.append(node)
+                inputs = node.setdefault("inputs", {})
+                for input_name in list(inputs):
+                    if input_name.startswith(reference_prefixes):
+                        source = inputs.pop(input_name)
+                        if isinstance(source, list) and source:
+                            stale_reference_nodes.add(str(source[0]))
+            if class_type in {"LoadImage", "VHS_LoadVideoPath"} and "h3 reference " in title:
+                stale_reference_nodes.add(str(node_id))
+
+        for node_id in stale_reference_nodes:
+            runtime.pop(node_id, None)
+
+        next_node_id = max((int(node_id) for node_id in runtime if str(node_id).isdigit()), default=0) + 1
+
+        def allocate_node() -> str:
+            nonlocal next_node_id
+            while str(next_node_id) in runtime:
+                next_node_id += 1
+            node_id = str(next_node_id)
+            next_node_id += 1
+            return node_id
+
+        image_index = 0
+        video_index = 0
+        image_size = int(payload.get("width") or 608), int(payload.get("height") or 352)
+        for reference in references:
+            ref_type = str(reference["type"])
+            if ref_type == "image":
+                image_index += 1
+                node_id = allocate_node()
+                runtime[node_id] = {
+                    "inputs": {"image": "__runtime_reference_image__"},
+                    "class_type": "LoadImage",
+                    "_meta": {"title": f"H3 reference image {image_index}"},
+                }
+                input_name = f"ref_images.ref_image_{image_index - 1}"
+            else:
+                video_index += 1
+                node_id = allocate_node()
+                runtime[node_id] = {
+                    "inputs": {
+                        "video": str(reference["path"]),
+                        "force_rate": 24.0,
+                        "custom_width": image_size[0],
+                        "custom_height": image_size[1],
+                        "frame_load_cap": int(payload.get("reference_frame_cap") or 0),
+                        "skip_first_frames": 0,
+                        "select_every_nth": 1,
+                    },
+                    "class_type": "VHS_LoadVideoPath",
+                    "_meta": {"title": f"H3 reference video {video_index}"},
+                }
+                input_name = f"ref_videos.ref_video_{video_index - 1}"
+
+            for conditioning_node in conditioning_nodes:
+                conditioning_node.setdefault("inputs", {})[input_name] = [node_id, 0]
+
+        return runtime
+
+    def _prepare_reference_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        references = normalize_reference_manifest(
+            payload.get("reference_manifest"),
+            image_paths=payload.get("reference_image_paths"),
+            video_paths=payload.get("reference_video_paths"),
+            require_files=True,
+            max_images=MAX_REFERENCE_IMAGE_SLOTS,
+            max_videos=MAX_REFERENCE_VIDEO_SLOTS,
+        )
+        return {"manifest": references, "lineage": build_reference_lineage(references)}
+
+    def _build_reference_updates(
+        self,
+        spec: ComfyWorkflowSpec,
+        payload: dict[str, Any],
+        workflow_path: Path,
+        generator: Any,
+    ) -> list[dict[str, Any]]:
+        references = normalize_reference_manifest(
+            payload.get("reference_manifest"),
+            require_files=True,
+            max_images=len(spec.reference_image_bindings),
+            max_videos=len(spec.reference_video_bindings),
+        )
+        updates: list[dict[str, Any]] = []
+        image_index = 0
+        video_index = 0
+        for reference in references:
+            ref_type = str(reference["type"])
+            if ref_type == "image":
+                binding = spec.reference_image_bindings[image_index]
+                uploaded_name = generator.upload_image(str(reference["path"]))
+                updates.append(self._binding_update(binding, uploaded_name, str(workflow_path)))
+                image_index += 1
+            elif ref_type == "video":
+                binding = spec.reference_video_bindings[video_index]
+                # VHS_LoadVideoPath reads from the same filesystem as ComfyUI;
+                # uploading a video through the image endpoint would corrupt the
+                # input contract and silently lose frame-rate metadata.
+                updates.append(self._binding_update(binding, str(reference["path"]), str(workflow_path)))
+                video_index += 1
+            else:  # normalize_reference_manifest already rejects this; keep the guard explicit.
+                raise ValueError(f"Unsupported H3 reference type: {ref_type}")
+
+        if spec.reference_image_size_binding and payload.get("ref_image_size") is not None:
+            updates.append(
+                self._binding_update(
+                    spec.reference_image_size_binding,
+                    str(payload["ref_image_size"]),
+                    str(workflow_path),
+                )
+            )
+        return updates
+
+    @staticmethod
+    def _check_required_nodes(generator: Any, spec: ComfyWorkflowSpec, references: list[dict[str, Any]]) -> None:
+        required = {str(spec.reference_conditioning_node_type)}
+        if any(str(reference.get("type")) == "video" for reference in references):
+            required.add("VHS_LoadVideoPath")
+        missing: list[str] = []
+        for node_type in sorted(required):
+            try:
+                info = generator.get_object_info(node_type)
+            except Exception:
+                info = {}
+            if not isinstance(info, dict) or not info.get(node_type):
+                missing.append(node_type)
+        if missing:
+            raise RuntimeError(
+                "ComfyUI is missing required Ref2VA node(s): "
+                + ", ".join(missing)
+                + ". Update ComfyUI and install ComfyUI-VideoHelperSuite before running this mode."
+            )
 
     def _binding_update(self, binding: NodeBinding, value: Any, workflow_path: str) -> dict[str, Any]:
         if binding.alias:
@@ -233,6 +520,14 @@ class ComfyWorkflowToolset:
         refine_workflow = self._preferred_workflow_name(*self.DEFAULT_REFINE_WORKFLOWS)
         upscale_workflow = self._preferred_workflow_name(*self.DEFAULT_UPSCALE_WORKFLOWS)
         i2v_workflow = self._preferred_workflow_name(*self.DEFAULT_I2V_WORKFLOWS)
+        reference_image_bindings = tuple(
+            NodeBinding(kind="reference_image", node_type="LoadImage", title=f"H3 reference image {index}", input_key="image")
+            for index in range(1, 10)
+        )
+        reference_video_bindings = tuple(
+            NodeBinding(kind="reference_video", node_type="VHS_LoadVideoPath", title=f"H3 reference video {index}", input_key="video")
+            for index in range(1, 4)
+        )
         return {
             "comfy.workflow.text_to_image": ComfyWorkflowSpec(
                 name="comfy.workflow.text_to_image",
@@ -281,6 +576,8 @@ class ComfyWorkflowToolset:
                 steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps") if i2v_workflow.startswith("minimax_h3_") else None,
                 image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
                 last_image_binding=NodeBinding(kind="last_image", node_type="LoadImage", title="native 15s last frame", input_key="image") if i2v_workflow.startswith("minimax_h3_") else None,
+                first_frame_binding=NodeBinding(kind="first_frame", node_type="MiniMaxH3ImageToVideo", input_key="first_frame") if i2v_workflow.startswith("minimax_h3_") else None,
+                last_frame_binding=NodeBinding(kind="last_frame", node_type="MiniMaxH3ImageToVideo", input_key="last_frame") if i2v_workflow.startswith("minimax_h3_") else None,
             ),
             "comfy.workflow.text_to_video": ComfyWorkflowSpec(
                 name="comfy.workflow.text_to_video",
@@ -293,6 +590,26 @@ class ComfyWorkflowToolset:
                 height_binding=NodeBinding(kind="height", node_type="MiniMaxH3ImageToVideo", input_key="height"),
                 length_binding=NodeBinding(kind="length", node_type="MiniMaxH3ImageToVideo", input_key="length"),
                 steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps"),
+            ),
+            "comfy.workflow.reference_to_video": ComfyWorkflowSpec(
+                name="comfy.workflow.reference_to_video",
+                workflow_name="minimax_h3_ref2va",
+                output_folder="videos",
+                file_prefix="agentic_h3_ref2va",
+                count_payload_key="video_count",
+                prompt_binding=NodeBinding(kind="prompt", node_type="MiniMaxH3ReferenceToVideo", input_key="prompt"),
+                width_binding=NodeBinding(kind="width", node_type="MiniMaxH3ReferenceToVideo", input_key="width"),
+                height_binding=NodeBinding(kind="height", node_type="MiniMaxH3ReferenceToVideo", input_key="height"),
+                length_binding=NodeBinding(kind="length", node_type="MiniMaxH3ReferenceToVideo", input_key="length"),
+                steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps"),
+                reference_image_bindings=reference_image_bindings,
+                reference_video_bindings=reference_video_bindings,
+                reference_conditioning_node_type="MiniMaxH3ReferenceToVideo",
+                reference_image_size_binding=NodeBinding(
+                    kind="reference_image_size",
+                    node_type="MiniMaxH3ReferenceToVideo",
+                    input_key="ref_image_size",
+                ),
             ),
         }
 

@@ -1,34 +1,11 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime
 from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.minimax_prompting import structured_visual_prompt
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
-
-
-def _asset_check_result(result: dict[str, object], success_log: str) -> SkillResult:
-    asset_status = result.get("asset_status", [])
-    if not isinstance(asset_status, list):
-        return SkillResult(status="success", outputs=result, logs=[success_log])
-
-    missing_assets = [
-        str(item.get("asset", "")).strip()
-        for item in asset_status
-        if isinstance(item, dict) and str(item.get("status", "")).lower() != "ready"
-    ]
-    if not missing_assets:
-        return SkillResult(status="success", outputs=result, logs=[success_log])
-
-    workflow_name = str(result.get("workflow_name", "")).strip()
-    details = ", ".join(asset for asset in missing_assets if asset) or "unknown assets"
-    return SkillResult(
-        status="failed",
-        outputs=result,
-        logs=[f"Workflow assets missing for '{workflow_name}': {details}"],
-    )
+from agentic.skills.shared import asset_check_result, build_run_dir
 
 
 class ComfyImageSkills:
@@ -67,7 +44,7 @@ class ComfyImageSkills:
                 "auto_download": context.node.inputs.get("auto_download", False),
             },
         )
-        return _asset_check_result(result, "Checked ComfyUI workflow.")
+        return asset_check_result(result, "Checked ComfyUI workflow.")
 
     def render_image(self, context: SkillContext) -> SkillResult:
         prompt_bundle = self._resolve_prompt_bundle(context)
@@ -104,9 +81,7 @@ class ComfyImageSkills:
         return {"prompt": context.plan.goal.prompt, "negative_prompt": ""}
 
     def _build_run_dir(self, prompt: str) -> Path:
-        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")
-        slug = slug[:40] or "comfy-image"
-        return self.output_root / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}"
+        return build_run_dir(self.output_root, prompt, default_slug="comfy-image", max_slug_length=40)
 
 
 def register_comfy_image_skills(skill_registry: SkillRegistry, tool_registry: ToolRegistry, output_root: Path) -> None:

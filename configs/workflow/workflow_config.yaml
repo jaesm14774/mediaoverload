@@ -21,10 +21,3 @@ workflows:
   "Tile Upscaler SDXL.json":
     node_aliases:
       load_image: "225"
-
-  # wan2.2 I2V + Audio workflow
-  "wan2.2_gguf_i2v_audio.json":
-    node_aliases:
-      positive_prompt: "70"
-      audio_prompt: "94"
-

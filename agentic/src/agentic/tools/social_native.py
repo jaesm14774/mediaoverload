@@ -160,6 +160,35 @@ class BaseConfigPlatform:
     def _config_path(self) -> Path:
         return Path(self.config_folder_path) / self.prefix if self.prefix else Path(self.config_folder_path)
 
+    def _prepare_reel_canvas(self, video_path: str) -> str:
+        """Normalize non-Reels video into one API-safe 9:16 canvas.
+
+        H3 stays at its low-VRAM native size during inference. The platform
+        adapter owns delivery formatting so Instagram and Facebook do not
+        grow separate, contradictory padding rules.
+        """
+        probe = self.ffmpeg.probe_media(video_path)
+        width = int(probe.get("width") or 0)
+        height = int(probe.get("height") or 0)
+        if width <= 0 or height <= 0:
+            raise ValueError(f"Reels video has no readable dimensions: {Path(video_path).name}")
+        aspect = width / height
+        if (9 / 16) <= aspect <= 1.91:
+            return video_path
+        vertical_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        vertical_path = vertical_file.name
+        vertical_file.close()
+        self.ffmpeg.pad_video_to_aspect(
+            video_path,
+            vertical_path,
+            target_width=720,
+            target_height=1280,
+        )
+        temp_files = getattr(self, "temp_files", None)
+        if isinstance(temp_files, list):
+            temp_files.append(vertical_path)
+        return vertical_path
+
 
 class TwitterPlatform(BaseConfigPlatform):
     def __init__(self, config_folder_path: str, prefix: str = "") -> None:
@@ -288,9 +317,15 @@ class FacebookPlatform(BaseConfigPlatform):
         if not valid_paths:
             return False
         additional = dict(post.additional_params or {})
+        video_extensions = {".mp4", ".avi", ".mov", ".webm", ".mkv", ".m4v", ".gif"}
+        has_video = any(Path(path).suffix.lower() in video_extensions for path in valid_paths)
         use_reels = _coerce_bool(
             additional.get("facebook_use_reels"),
-            default=_coerce_bool(os.getenv("FB_USE_REELS"), default=False),
+            # A short generated video is a Reel by default. The previous
+            # default routed it to the legacy Page video endpoint, which
+            # returned True without a receipt and was therefore correctly
+            # rejected by the verified-publication gate.
+            default=_coerce_bool(os.getenv("FB_USE_REELS"), default=has_video),
         )
         if use_reels:
             video_path = next(
@@ -319,17 +354,7 @@ class FacebookPlatform(BaseConfigPlatform):
         duration = float(probe.get("duration") or 0.0)
         if duration < 4 or duration > 60:
             raise ValueError(f"Facebook Reels video duration must be 4-60 seconds, got {duration:.3f}")
-        width = int(probe.get("width") or 0)
-        height = int(probe.get("height") or 0)
-        if width <= 0 or height <= 0:
-            raise ValueError(f"Facebook Reels video has no readable dimensions: {Path(upload_path).name}")
-        if abs((width / height) - (9 / 16)) > 0.02:
-            vertical_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-            vertical_path = vertical_file.name
-            vertical_file.close()
-            self.ffmpeg.pad_video_to_aspect(upload_path, vertical_path, target_width=540, target_height=960)
-            self.temp_files.append(vertical_path)
-            upload_path = vertical_path
+        upload_path = self._prepare_reel_canvas(upload_path)
 
         video_state = str(additional.get("facebook_video_state") or "PUBLISHED").strip().upper()
         if video_state not in {"DRAFT", "SCHEDULED", "PUBLISHED"}:
@@ -521,7 +546,17 @@ class FacebookPlatform(BaseConfigPlatform):
             data = {text_key: caption, "access_token": self.page_access_token}
             response = requests.post(url, files=files, data=data, timeout=300)
             response.raise_for_status()
-        return True
+        body = response.json() if getattr(response, "content", b"") else {}
+        external_id = str(body.get("id") or body.get("video_id") or "") if isinstance(body, dict) else ""
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=external_id,
+            status="published" if external_id else "uploaded_unverified",
+            verified=bool(external_id),
+            visibility="published" if external_id else "unknown",
+            details={"endpoint": endpoint, "response": body},
+        )
+        return bool(external_id)
 
     def _upload_multiple(self, media_paths: list[str], caption: str) -> bool:
         image_paths: list[str] = []
@@ -577,7 +612,17 @@ class FacebookPlatform(BaseConfigPlatform):
             data[f"attached_media[{index}]"] = json.dumps({"media_fbid": media_fbid})
         response = requests.post(feed_url, data=data, timeout=60)
         response.raise_for_status()
-        return True
+        body = response.json() if getattr(response, "content", b"") else {}
+        external_id = str(body.get("id") or "") if isinstance(body, dict) else ""
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=external_id,
+            status="published" if external_id else "uploaded_unverified",
+            verified=bool(external_id),
+            visibility="published" if external_id else "unknown",
+            details={"endpoint": "feed", "response": body, "media_count": len(media_fbids)},
+        )
+        return bool(external_id)
 
     def _post_videos_album(self, video_paths: list[str], caption: str) -> bool:
         media_fbids: list[str] = []
@@ -600,7 +645,17 @@ class FacebookPlatform(BaseConfigPlatform):
             data[f"attached_media[{index}]"] = json.dumps({"media_fbid": media_fbid})
         response = requests.post(feed_url, data=data, timeout=60)
         response.raise_for_status()
-        return True
+        body = response.json() if getattr(response, "content", b"") else {}
+        external_id = str(body.get("id") or "") if isinstance(body, dict) else ""
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=external_id,
+            status="published" if external_id else "uploaded_unverified",
+            verified=bool(external_id),
+            visibility="published" if external_id else "unknown",
+            details={"endpoint": "feed", "response": body, "media_count": len(media_fbids)},
+        )
+        return bool(external_id)
 
     def _gif_to_mp4(self, gif_path: str) -> str:
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
@@ -724,6 +779,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         return True
 
     def _publish_video_url(self, video_path: str, caption: str, *, publish: bool = True) -> bool:
+        video_path = self._prepare_reel_canvas(video_path)
         media_url = self._require_media_url(video_path)
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.ig_user_id}/media"
         response = requests.post(

@@ -8,9 +8,12 @@ agentic runtime.
 ## Current short-video contract
 
 The production Kirby native-H3 recipes use a single 15-second clip with five
-causal beats: hook, promise, escalation, reversal, and payoff. The story is
-generated from the current news item; the repository preset supplies only the
-character/style/continuity contract. Beat boundaries may move slightly, but
+causal beats: hook, promise, escalation, reversal, and payoff. The story
+combines the user creative brief with the current news item; the repository
+preset supplies only the character/style/continuity contract. The LLM must
+return a `news_trace` that maps source concepts to concrete visual anchors, and
+the validator rejects a generic story when those anchors do not reach the hook
+and later causal beats. Beat boundaries may move slightly, but
 they must remain contiguous from 0 to 15 seconds and the final beat must solve
 the original objective.
 
@@ -45,15 +48,16 @@ storyboard prompt
    -> opening keyframe  ─┐
    -> ending keyframe   ─┼-> character identity gate
                         └-> MiniMax H3 first-frame + last-frame I2V
-                              -> ffprobe duration/stream QA
+                              -> shared technical QA + sampled-frame semantic QA
                               -> contact sheet + GIF + packaged video
 ```
 
-The prompt is assembled by `longvideo.prepare_native_h3_story` from the
-configured storyboard and the current run's creative brief. The LLM is only
-used by the existing route/prompt layer when enabled; the story preset, state
-changes, first/last frame contracts, and QA rules remain reproducible and
-visible in the plan manifest.
+`longvideo.prepare_native_h3_story` delegates news selection and LLM story
+generation to `agentic/src/agentic/runtime/story_service.py`, then formats the
+resolved storyboard into the render prompt. The storyboard rules, `news_trace`,
+state changes, first/last frame contracts, and QA rules remain reproducible and
+visible in the plan manifest. The publish stage receives a compact story/news
+context rather than the full production prompt.
 
 ## Kirby configuration
 
@@ -126,10 +130,23 @@ Each run stores the generated video plus:
 - `native_h3` plan and prompt lineage in the normal agentic run result;
 - GIF preview and first/last continuity frame paths.
 
-The native H3 technical QA node is currently an explicit no-op: it returns
-`passed: true` after confirming that the render produced a video path. It does
-not run ffprobe, duration/audio heuristics, or contact-sheet generation. The
-final Discord human review is the authoritative visual/story decision.
+The canonical debug record is `agentic/logs/runs/<run_id>/`. It contains
+`lifecycle.log`, `events.jsonl`, `llm/*.json` with every request/response and
+repair attempt, `nodes/*.json` with node outputs, workflow result JSON, and
+`run_manifest.json`. `agentic/logs/agentic_portfolio.jsonl` remains a compact
+cross-run memory and is not the source of truth for prompt debugging.
+
+The native H3 QA node delegates technical checks to the shared
+`media.video_qa` tool. It records file/stream/dimension/duration checks, audio
+warnings, and a duration-aware contact sheet in the run directory. When the
+recipe enables `semantic_qa_required`, the shared Prompt Engine sends that
+contact sheet to the configured vision model and records the full request and
+response under `agentic/logs/runs/<run_id>/llm/`. The semantic judge checks
+protagonist identity, visible action, the news-derived visual anchor,
+progression, and unwanted extra characters; it must not infer evidence from
+the title or prompt. In `--no-review` mode an unavailable or failing semantic
+judge blocks publication. With Discord human review enabled, semantic failure
+is advisory and the human decision remains authoritative.
 
 ## Automated social publishing
 
@@ -177,9 +194,23 @@ reject are blocking outcomes. The runtime never silently selects candidate 1.
 
 After approval, the selected image is immutable: it is passed directly to the
 MiniMax H3 I2V workflow without identity img2img refinement or automatic
-opening-frame regeneration. The ending keyframe is generated separately, and
-the final publish/review plan requires a Discord decision before safe POC
-publishing.
+opening-frame regeneration. The ending keyframe is generated only when
+`use_last_frame: true`; otherwise the Comfy last-frame input is explicitly
+cleared. The final publish/review plan requires a Discord decision before safe
+POC publishing.
+
+`--no-review` is an explicit bypass: it does not send an interactive Discord
+review message and selects the configured single opening candidate
+automatically. This mode still runs deterministic media QA. When publishing is
+attempted, the runtime sends a separate concise Discord run-status notification
+and records the notification receipt; interactive review delivery records the
+channel, message, attachment count, and decision session separately.
+
+Publication state is based on verified platform receipts rather than HTTP
+success alone. A run can therefore be `partially_published` or `staged` when
+one platform is public but another is private, draft, or failed. The checked-in
+YouTube credentials currently request `private`, so a live run is not treated
+as publicly complete until the YouTube receipt reports public visibility.
 
 The formal command remains the repository entry point:
 

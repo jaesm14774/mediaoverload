@@ -23,7 +23,7 @@
     "inputs": {
       "clip": ["2", 0],
       "vae": ["3", 0],
-      "prompt": "One continuous 15-second 2D anime short, not a montage. Kirby is the only character; preserve one golden star seed, one dark sky rift on screen right, a fixed left-to-right meadow geography, and consistent prop scale. SHOT 1 (0-4s) HOOK: the seed crashes into a crater, the meadow visibly dims, and Kirby grabs it while looking at the rift. SHOT 2 (4-10s) ESCALATION: Kirby runs continuously left to right carrying the seed, a golden path forms, the rift opens into a transparent gold-and-cyan light gate, and the gate begins closing. SHOT 3 (10-15s) PAYOFF: Kirby crosses the shrinking gate, releases the fading seed upward into the rift, the rift becomes one steady star, and a warm wave restores the meadow. Use smooth connected motion and readable cause-and-effect; no hard cuts, teleporting, frozen poses, duplicate characters, humans, text, watermark, solid architecture, or repeated holding shots. Audio: impact chime, fading ambience, urgent pulse and footsteps, gate swell, release chime, warm restoration wave, calm fireflies. Ending frame is locked by the supplied last-frame reference.",
+      "prompt": "MediaOverload runtime prompt placeholder; the Python runner injects the generated native H3 story before execution.",
       "width": 608,
       "height": 352,
       "length": 362,

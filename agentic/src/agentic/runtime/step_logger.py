@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 
+from agentic.runtime.observability import RunRecorder
 
-def create_run_logger(log_root: Path, run_id: str) -> tuple[logging.Logger, Path]:
-    log_root.mkdir(parents=True, exist_ok=True)
-    log_path = log_root / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{run_id}.log"
+
+def create_run_logger(
+    log_root: Path,
+    run_id: str,
+    *,
+    recorder: RunRecorder | None = None,
+) -> tuple[logging.Logger, Path]:
+    recorder = recorder or RunRecorder(log_root, run_id)
+    log_path = recorder.run_dir / "lifecycle.log"
     logger_name = f"mediaoverload.agentic.{run_id}"
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
@@ -22,4 +28,5 @@ def create_run_logger(log_root: Path, run_id: str) -> tuple[logging.Logger, Path
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+    setattr(logger, "run_recorder", recorder)
     return logger, log_path

@@ -42,17 +42,107 @@ class MediaServiceTools:
     def video_qa(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._ffmpeg_service()
         video_path = str(payload["video_path"])
-        probe = service.probe_media(video_path)
+        file_exists = Path(video_path).is_file()
+        probe = service.probe_media(video_path) if file_exists else {
+            "path": video_path,
+            "duration": 0.0,
+            "has_video": False,
+            "has_audio": False,
+            "width": 0,
+            "height": 0,
+        }
         errors: list[str] = []
         warnings: list[str] = []
+        if not file_exists:
+            errors.append("video file does not exist")
         target_duration = payload.get("target_duration")
         tolerance = float(payload.get("duration_tolerance", 0.5))
         duration = float(probe.get("duration") or 0.0)
+        checks = {
+            "file_exists": file_exists,
+            "has_video": bool(probe.get("has_video")),
+            "dimensions": int(probe.get("width") or 0) > 0 and int(probe.get("height") or 0) > 0,
+            "duration": target_duration in {None, ""} or abs(duration - float(target_duration)) <= tolerance,
+        }
+        expected_width = payload.get("expected_width")
+        expected_height = payload.get("expected_height")
+        if expected_width not in {None, ""} or expected_height not in {None, ""}:
+            checks["expected_dimensions"] = (
+                expected_width in {None, ""} or int(probe.get("width") or 0) == int(expected_width)
+            ) and (
+                expected_height in {None, ""} or int(probe.get("height") or 0) == int(expected_height)
+            )
+            if not checks["expected_dimensions"]:
+                errors.append(
+                    f"dimensions {int(probe.get('width') or 0)}x{int(probe.get('height') or 0)} do not match "
+                    f"expected {expected_width}x{expected_height}"
+                )
+        expected_fps = payload.get("expected_fps")
+        if expected_fps not in {None, ""}:
+            observed_fps = float(probe.get("frame_rate") or 0.0)
+            checks["expected_fps"] = abs(observed_fps - float(expected_fps)) <= float(payload.get("fps_tolerance", 0.15))
+            if not checks["expected_fps"]:
+                errors.append(f"frame rate {observed_fps:.3f} does not match expected {float(expected_fps):.3f}")
         if not bool(probe.get("has_video")):
             errors.append("no video stream")
+        if not checks["dimensions"]:
+            errors.append("video dimensions are missing")
         if target_duration not in {None, ""} and abs(duration - float(target_duration)) > tolerance:
             errors.append(f"duration {duration:.3f}s is outside target {float(target_duration):.3f}s ± {tolerance:.3f}s")
-        if bool(payload.get("warn_if_no_audio", False)) and not bool(probe.get("has_audio")):
+        require_audio = bool(payload.get("require_audio", False))
+        require_stereo = bool(payload.get("require_stereo_audio", False))
+        has_audio = bool(probe.get("has_audio"))
+        audio_checks = {
+            "audio_present": has_audio if require_audio else True,
+            "stereo": (
+                int(probe.get("channels") or 0) >= 2
+                and str(probe.get("channel_layout") or "").lower() in {"stereo", "2.0", "2c", ""
+                }
+                if require_stereo and has_audio
+                else True
+            ),
+            "loudness": True,
+            "silence": True,
+            "duration_alignment": True,
+        }
+        audio_analysis: dict[str, object] = {}
+        should_analyze_audio = bool(payload.get("analyze_audio", require_audio)) and has_audio
+        if should_analyze_audio:
+            try:
+                audio_analysis = service.analyze_audio(
+                    video_path,
+                    silence_threshold_db=float(payload.get("silence_threshold_db", -50.0)),
+                    silence_min_seconds=float(payload.get("silence_min_seconds", 0.4)),
+                )
+                mean_volume = audio_analysis.get("mean_volume_db")
+                max_volume = audio_analysis.get("max_volume_db")
+                silence_ratio = float(audio_analysis.get("silence_ratio") or 0.0)
+                audio_checks["loudness"] = mean_volume is not None and float(mean_volume) >= float(payload.get("min_mean_volume_db", -45.0))
+                audio_checks["silence"] = silence_ratio <= float(payload.get("max_silence_ratio", 0.98))
+                if max_volume is not None and float(max_volume) >= float(payload.get("max_peak_db", -0.1)):
+                    errors.append(f"audio peak {float(max_volume):.2f} dBFS is at or above clipping threshold")
+                    audio_checks["loudness"] = False
+                if not audio_checks["loudness"]:
+                    errors.append("audio mean level is too quiet or could not be measured")
+                if not audio_checks["silence"]:
+                    errors.append("audio is silent for too much of the rendered duration")
+            except (OSError, RuntimeError, ValueError) as exc:
+                audio_checks["loudness"] = False
+                audio_checks["silence"] = False
+                errors.append(f"audio analysis failed: {exc}")
+        elif require_audio and not has_audio:
+            errors.append("audio stream is required but missing")
+        if require_stereo and has_audio and not audio_checks["stereo"]:
+            errors.append("stereo audio is required but the output is not stereo")
+        video_duration = float(probe.get("video_duration") or duration)
+        audio_duration = float(probe.get("audio_duration") or 0.0)
+        if require_audio and audio_duration > 0 and video_duration > 0:
+            drift = abs(audio_duration - video_duration)
+            audio_checks["duration_alignment"] = drift <= float(payload.get("audio_duration_tolerance", 0.5))
+            if not audio_checks["duration_alignment"]:
+                errors.append(f"audio/video duration drift is {drift:.3f}s")
+        checks.update(audio_checks)
+        if bool(payload.get("warn_if_no_audio", False)) and not has_audio:
             warnings.append("no audio stream detected")
         contact_sheet_path = str(payload.get("contact_sheet_path") or "")
         if contact_sheet_path and bool(probe.get("has_video")):
@@ -62,11 +152,15 @@ class MediaServiceTools:
                 frame_count=int(payload.get("frame_count", 6)),
                 columns=int(payload.get("columns", 3)),
                 scale_width=int(payload.get("scale_width", 320)),
+                duration_seconds=duration,
             )
         return {
-            "passed": not errors,
+            "passed": all(checks.values()),
             "video_path": video_path,
+            "file_exists": file_exists,
             "probe": probe,
+            "audio_analysis": audio_analysis,
+            "checks": checks,
             "duration": duration,
             "target_duration": float(target_duration) if target_duration not in {None, ""} else None,
             "errors": errors,

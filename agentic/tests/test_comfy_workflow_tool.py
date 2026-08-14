@@ -92,6 +92,92 @@ class _FakeAssetRegistry:
 
 
 class ComfyWorkflowToolsetTests(unittest.TestCase):
+    def test_ref2va_model_profile_overrides_loader_nodes_without_mutating_template(self) -> None:
+        workflow = {
+            "1": {
+                "class_type": "UnetLoaderGGUF",
+                "inputs": {"unet_name": "q4.gguf"},
+            },
+            "2": {
+                "class_type": "CLIPLoaderGGUF",
+                "inputs": {"clip_name": "q4.gguf", "type": "minimax"},
+            },
+        }
+        overrides = ComfyWorkflowToolset._resolve_model_overrides(
+            ComfyWorkflowSpec(
+                name="comfy.workflow.reference_to_video",
+                workflow_name="minimax_h3_ref2va",
+                output_folder="videos",
+                file_prefix="ref2va",
+                reference_conditioning_node_type="MiniMaxH3ReferenceToVideo",
+            ),
+            {"model_profile": "native"},
+        )
+
+        runtime = ComfyWorkflowToolset._apply_model_overrides(workflow, overrides)
+
+        self.assertEqual(workflow["1"]["class_type"], "UnetLoaderGGUF")
+        self.assertEqual(runtime["1"]["class_type"], "UNETLoader")
+        self.assertEqual(runtime["1"]["inputs"]["unet_name"], "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
+        self.assertEqual(runtime["2"]["class_type"], "CLIPLoader")
+        self.assertEqual(runtime["2"]["inputs"]["clip_name"], "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+
+    def test_ref2va_runtime_reference_graph_keeps_model_profile_overrides(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        workflow = json.loads((repo_root / "configs" / "workflow" / "minimax_h3_ref2va.json").read_text(encoding="utf-8"))
+        spec = ComfyWorkflowSpec(
+            name="comfy.workflow.reference_to_video",
+            workflow_name="minimax_h3_ref2va",
+            output_folder="videos",
+            file_prefix="ref2va",
+            reference_conditioning_node_type="MiniMaxH3ReferenceToVideo",
+        )
+        runtime = ComfyWorkflowToolset._apply_model_overrides(
+            workflow,
+            ComfyWorkflowToolset._resolve_model_overrides(spec, {"model_profile": "native"}),
+        )
+        runtime = ComfyWorkflowToolset._build_runtime_reference_workflow(
+            runtime,
+            [{"type": "image", "path": r"C:\reference.png"}],
+            {"width": 608, "height": 352},
+        )
+        self.assertEqual(runtime["1"]["class_type"], "UNETLoader")
+        self.assertEqual(runtime["2"]["class_type"], "CLIPLoader")
+        self.assertEqual(runtime["5"]["inputs"]["ref_images.ref_image_0"], ["36", 0])
+
+    def test_first_only_native_h3_clears_template_last_frame_connection(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            asset_registry = _FakeAssetRegistry(temp_root)
+            with patch.object(ComfyWorkflowToolset, "_build_specs", return_value={}):
+                toolset = ComfyWorkflowToolset(asset_registry=asset_registry, output_root=temp_root)
+            toolset.adapter = _FakeAdapter()
+            workflow_path = temp_root / "workflow.json"
+            workflow_path.write_text("{}", encoding="utf-8")
+            spec = ComfyWorkflowSpec(
+                name="comfy.workflow.image_to_video",
+                workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+                output_folder="videos",
+                file_prefix="agentic_i2v",
+                prompt_binding=NodeBinding(kind="prompt", node_type="MiniMaxH3ImageToVideo", input_key="prompt"),
+                image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
+                last_frame_binding=NodeBinding(kind="last_frame", node_type="MiniMaxH3ImageToVideo", input_key="last_frame"),
+            )
+
+            updates = toolset._build_updates(
+                spec,
+                workflow_path,
+                {
+                    "prompt": "The hero protects the seed",
+                    "image_path": r"C:\opening.png",
+                    "use_last_frame": False,
+                },
+                toolset.adapter.generator,
+            )
+
+        self.assertEqual(updates[-1], {"node_type": "MiniMaxH3ImageToVideo", "node_index": 0, "inputs": {"last_frame": None}})
+        self.assertEqual(toolset.adapter.generator.upload_calls, [r"C:\opening.png"])
+
     def test_build_updates_uses_alias_binding_and_uploaded_image(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -103,7 +189,7 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
             workflow_path.write_text("{}", encoding="utf-8")
             spec = ComfyWorkflowSpec(
                 name="comfy.workflow.image_to_video",
-                workflow_name="wan2.2_gguf_i2v",
+                workflow_name="image_to_video_test",
                 output_folder="videos",
                 file_prefix="agentic_i2v",
                 count_payload_key="video_count",
@@ -164,6 +250,63 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
             self.assertEqual(summary["payload"]["run_dir"], str(temp_root / "run-1"))
             self.assertEqual(toolset.adapter.generator.generate_calls[0]["file_prefix"], "agentic_image")
             self.assertTrue(Path(result["saved_files"][0]).exists())
+
+    def test_ref2va_binds_image_upload_and_local_video_path_without_audio(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            image = temp_root / "identity.png"
+            video = temp_root / "motion.mp4"
+            image.write_bytes(b"image")
+            video.write_bytes(b"video")
+            asset_registry = _FakeAssetRegistry(temp_root)
+            with patch.object(ComfyWorkflowToolset, "_build_specs", return_value={}):
+                toolset = ComfyWorkflowToolset(asset_registry=asset_registry, output_root=temp_root)
+            toolset.adapter = _FakeAdapter()
+            workflow_path = temp_root / "workflow.json"
+            workflow_path.write_text("{}", encoding="utf-8")
+            spec = ComfyWorkflowSpec(
+                name="comfy.workflow.reference_to_video",
+                workflow_name="minimax_h3_ref2va",
+                output_folder="videos",
+                file_prefix="ref2va",
+                prompt_binding=NodeBinding(kind="prompt", node_type="MiniMaxH3ReferenceToVideo", input_key="prompt"),
+                reference_image_bindings=(
+                    NodeBinding(kind="reference_image", node_type="LoadImage", title="H3 reference image 1", input_key="image"),
+                    NodeBinding(kind="reference_image", node_type="LoadImage", title="H3 reference image 2", input_key="image"),
+                ),
+                reference_video_bindings=(
+                    NodeBinding(kind="reference_video", node_type="VHS_LoadVideoPath", title="H3 reference video 1", input_key="video"),
+                    NodeBinding(kind="reference_video", node_type="VHS_LoadVideoPath", title="H3 reference video 2", input_key="video"),
+                ),
+                reference_conditioning_node_type="MiniMaxH3ReferenceToVideo",
+            )
+            updates = toolset._build_updates(
+                spec,
+                workflow_path,
+                {
+                    "prompt": "Ref2VA scene",
+                    "reference_manifest": [
+                        {"path": str(image), "type": "image", "role": "identity"},
+                        {"path": str(video), "type": "video", "role": "motion"},
+                    ],
+                },
+                toolset.adapter.generator,
+            )
+
+        self.assertEqual(toolset.adapter.generator.upload_calls, [str(image)])
+        self.assertIn(
+            {"node_type": "LoadImage", "node_index": 0, "inputs": {"image": "uploaded_input.png"}, "filter": {"title": "H3 reference image 1"}},
+            updates,
+        )
+        self.assertIn(
+            {"node_type": "VHS_LoadVideoPath", "node_index": 0, "inputs": {"video": str(video)}, "filter": {"title": "H3 reference video 1"}},
+            updates,
+        )
+        self.assertFalse(any(None in update.get("inputs", {}).values() for update in updates))
+        self.assertEqual(
+            [update["inputs"] for update in updates if update.get("node_type") == "MiniMaxH3ReferenceToVideo"],
+            [{"prompt": "Ref2VA scene"}],
+        )
 
 
 class AgenticNodeManagerCustomUpdatesTests(unittest.TestCase):

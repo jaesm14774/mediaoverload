@@ -7,7 +7,7 @@
 | Profile | 用途 | 下載量 | 工作流 |
 | --- | --- | ---: | --- |
 | `balanced-lowvram` | 預設；Q4 diffusion + Q4_K_M text encoder | 約 29.59 GiB | `minimax_h3_lowvram_i2v` |
-| `ultra-lowvram` | balanced 初始化或反覆 OOM 時；只把 text encoder 降到 Q2_K | 約 23.92 GiB | `minimax_h3_ultra_lowvram_i2v` |
+| `ultra-lowvram` | balanced 初始化或反覆 OOM 時；只把 text encoder 降到 Q2_K | 約 23.92 GiB | `minimax_h3_lowvram_i2v` + `model_profile: q2` |
 | `native-quality` | 官方 INT8 ConvRot + NVFP4 對照組 | 約 39.55 GiB | `minimax_h3_native_i2v` |
 
 所有 profile 都固定從 608×352、124 frames（24 fps，約 5 秒）開始。這個尺寸是低配 draft 的起點；先完成構圖、角色辨識與動作，再提高解析度或關閉 Spectrum 做 final。
@@ -82,8 +82,6 @@ I2V 由 Kirby keyframe 鎖定角色外觀；T2V 可由 `comfy.render_text_to_vid
 
 `configs/workflow/*.json` 原本是 Agentic 呼叫 ComfyUI `/prompt` 的 API graph，不是 ComfyUI 畫布檔，所以不能用它確認節點位置與 widgets。這次新增的原生畫布檔案是：
 
-- `configs/workflow/comfyui/MediaOverload_Kirby_H3_Keyframe_to_I2V.json`
-- `configs/workflow/comfyui/MediaOverload_Kirby_H3_Continuation_Img2Img_to_I2V.json`
 
 兩份也已同步安裝到：
 
@@ -95,7 +93,6 @@ D:\ComfyUI_windows_portable\ComfyUI\user\default\workflows\
 
 1. 啟動 `D:\ComfyUI_windows_portable\run_nvidia_gpu.bat` 或 repo 的 H3 launcher。
 2. 開啟 `http://127.0.0.1:8188/`。
-3. 點上方 `工作流（w）`，在清單選 `MediaOverload_Kirby_H3_Keyframe_to_I2V`。
 4. 先按畫布的 `適應視圖 (.)`，即可看到完整節點、連線與所有參數。
 
 第一張是 repo 的 `anima_anime` / Kirby keyframe 生成接 H3 I2V；第二張是 repo 的 img2img identity continuity 接 H3 I2V，對應 long-video 每段使用上一段尾幀延續角色。若要換首幀，修改畫布中的 Anima prompt 或 `Load Image`；H3 低配主參數集中在 `608×352`、`124 frames`、`20 steps`、`Spectrum history_storage=system_ram`、`24 fps`。

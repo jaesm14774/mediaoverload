@@ -9,6 +9,7 @@ from agentic.memory.run import MemoryEvent
 from agentic.memory.portfolio import PortfolioRecord
 from agentic.runtime.contracts import ExecutionPlan, RunRecord, RunState, SkillContext, SkillResult, WorkflowRunResult
 from agentic.runtime.creativity import FeedbackRanker, RetryPolicy
+from agentic.runtime.observability import RunRecorder
 from agentic.runtime.registry import SkillRegistry
 
 
@@ -21,6 +22,7 @@ class WorkflowRunner:
         retry_policy: RetryPolicy | None = None,
         feedback_ranker: FeedbackRanker | None = None,
         logger: logging.Logger | None = None,
+        recorder: RunRecorder | None = None,
     ) -> None:
         self.skill_registry = skill_registry
         self.run_memory = run_memory
@@ -28,6 +30,7 @@ class WorkflowRunner:
         self.retry_policy = retry_policy or RetryPolicy()
         self.feedback_ranker = feedback_ranker
         self.logger = logger
+        self.recorder = recorder or getattr(logger, "run_recorder", None)
 
     def run(self, plan: ExecutionPlan) -> WorkflowRunResult:
         graph = plan.as_graph()
@@ -52,6 +55,14 @@ class WorkflowRunner:
             while True:
                 attempts += 1
                 self._log(f"node.start | id={node.node_id} | skill={node.skill_name} | attempt={attempts} | stage={node.stage or 'runtime'}")
+                if self.recorder:
+                    self.recorder.record_event(
+                        "node.started",
+                        node_id=node.node_id,
+                        skill_name=node.skill_name,
+                        attempt=attempts,
+                        stage=node.stage or "runtime",
+                    )
                 try:
                     result = skill.handler(context)
                 except Exception as exc:
@@ -75,6 +86,16 @@ class WorkflowRunner:
                         logs=result.logs,
                     )
                 )
+                if self.recorder:
+                    self.recorder.record_node(
+                        node_id=node.node_id,
+                        skill_name=node.skill_name,
+                        status=result.status,
+                        attempt=attempts,
+                        outputs=result.outputs,
+                        metrics=result.metrics,
+                        logs=result.logs,
+                    )
                 if self.run_memory:
                     self.run_memory.record(
                         MemoryEvent(
@@ -102,6 +123,7 @@ class WorkflowRunner:
                         state=state,
                     )
                     self._record_portfolio(plan, run_result)
+                    self._record_workflow_result(run_result)
                     return run_result
 
         run_result = WorkflowRunResult(
@@ -111,6 +133,7 @@ class WorkflowRunner:
             state=state,
         )
         self._record_portfolio(plan, run_result)
+        self._record_workflow_result(run_result)
         return run_result
 
     def _log(self, message: str) -> None:
@@ -134,6 +157,10 @@ class WorkflowRunner:
             notes=flat_notes,
         )
         self.portfolio_memory.append(record)
+
+    def _record_workflow_result(self, result: WorkflowRunResult) -> None:
+        if self.recorder:
+            self.recorder.record_workflow_result(result.workflow_name, result.to_dict())
 
     @staticmethod
     def _goal_signature(plan: ExecutionPlan) -> str:

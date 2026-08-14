@@ -1,5 +1,11 @@
 # MediaOverload
 
+## CI 與本機 E2E 的分工
+
+CI（Continuous Integration，持續整合）是每次 push 或 pull request 自動執行的基本品質防線。此專案的 CI 只驗證可重現的程式碼：安裝 `agentic`、編譯 Python source，並執行 `agentic/tests`；它不會啟動本機 ComfyUI、使用 GPU，也不會呼叫 Discord、Instagram、Facebook 或 YouTube 真實帳號。
+
+需要本機 GPU、ComfyUI 或真實平台帳號的流程，仍由 Windows 上的 `python run_media_interface.py` 做 E2E smoke test。這樣 CI 失敗代表程式碼或單元測試有問題；本機 E2E 失敗則代表模型、GPU、workflow、憑證或外部平台狀態有問題，兩者不能混為一談。
+
 以 **Agentic 媒體執行階層**（`agentic/`）為核心的專案：依「目標＋約束」組出計畫，透過技能／工具鏈呼叫 ComfyUI、媒體處理與發佈。角色向的一鍵流程由 **`run_media_interface.py`** 讀取角色 YAML，並依 **`configs/routing.yaml`** 做 **生成策略（generation strategy）** 路由。
 
 ---
@@ -50,6 +56,11 @@ pip install -e .
 | `text2video` | `text2video` | 短影片／單鏡頭動態（預設路由檔中可註解關閉） |
 | `text2image2video` | `text2img2video` | 先圖後短片（可含 upscale 階） |
 | `text2longvideo` | `long_video` | 多段故事／分鏡／轉場 |
+| `native_h3_story` | `native_h3_story` | Native H3 I2VA：單一 approved opening image 進連續故事 |
+| `native_h3_t2v_story` | `native_h3_t2v_story` | Native H3 T2VA：純文字直接生影片 |
+| `native_h3_fl2va_story` | `native_h3_fl2va_story` | Native H3 FL2VA：opening + landing 兩端 conditioning |
+| `native_h3_l2va_story` | `native_h3_l2va_story` | Native H3 L2VA：只使用 landing frame conditioning |
+| `native_h3_ref2va` | `native_h3_ref2va` | Native H3 Ref2VA：reference image/video manifest |
 | `text2image2image` | `text2img2img` | 先圖後 img2img refine |
 | `sticker_pack` | `sticker_pack` | 多表情貼圖批次 |
 | `image2image` | `image` | 單純 img2img 路線（路由需納入候選時才會被選到） |
@@ -133,7 +144,7 @@ additional_params:
 
 ### 2. `text2video` — 短影片／單鏡頭
 
-**會用到的鍵**：`image_workflow_name`、`video_workflow_name`（首幀＋ I2V）。
+**會用到的鍵**：`video_workflow_name` 為必要的 T2V stage；`image_workflow_name` 若被選出，只是 ideation／cover review artifact，不會接成影片的首幀 conditioning。若要真正的首幀 I2V，請用 `text2image2video`。
 
 預設 `configs/routing.yaml` 中 `text2video` 可能在 `strategy_candidates` 被註解；若要啟用，請取消註解並確認 workflow 候選存在。
 
@@ -168,7 +179,7 @@ print(result["status"], result.get("routing_summary", {}))
 generation:
   workflows:
     text2img: z_image_plus_nova_model
-    text2video: wan2.2_gguf_i2v
+    text2video: minimax_h3_lowvram_t2v
 ```
 
 ---
@@ -209,8 +220,8 @@ additional_params:
         t2i_workflow_path: configs/workflow/z_image_plus_nova_model.json
         upscale_workflow_name: Tile Upscaler SDXL
       video:
-        workflow_name: wan2.2_gguf_i2v
-        i2v_workflow_path: configs/workflow/wan2.2_gguf_i2v.json
+        workflow_name: minimax_h3_lowvram_i2v
+        i2v_workflow_path: configs/workflow/minimax_h3_lowvram_i2v.json
 ```
 
 ---
@@ -251,7 +262,7 @@ additional_params:
       first_stage:
         workflow_name: z_image_plus_nova_model
       video_generation:
-        workflow_name: wan2.2_gguf_i2v
+        workflow_name: minimax_h3_lowvram_i2v
       frame_transition:
         workflow_name: image_to_image
       longvideo_config:
@@ -306,8 +317,8 @@ additional_params:
       static_config:
         workflow_name: anima_anime
       animated_config:
-        workflow_name: wan2.2_gguf_i2v
-        i2v_workflow_path: configs/workflow/wan2.2_gguf_i2v.json
+        workflow_name: minimax_h3_lowvram_i2v
+        i2v_workflow_path: configs/workflow/minimax_h3_lowvram_i2v.json
 ```
 
 ---
@@ -340,6 +351,116 @@ additional_params:
       workflow_name: z_image_i2i_anime
       workflow_path: configs/workflow/z_image_i2i_anime.json
 ```
+
+---
+
+## 完整 CLI 執行清單（含 Discord review / publish gate）
+
+以下是目前 repo 可由 `run_media_interface.py` 呼叫的完整策略清單。每一列都會走同一條角色流程：載入 YAML → 路由 → 建立 workflow plan → 執行 ComfyUI → 進入 publish/review stage。`--dry-run-publish` 會保留 publish stage 與 Discord 審核，但不把結果送到社群平台；因此適合逐條 E2E 驗證。不要把 `--no-publish` 加到這組測試，否則不會驗證 Discord publish gate。
+
+PowerShell 先設定共用參數：
+
+```powershell
+$e2e = @(
+  '--character', 'kirby',
+  '--comfy-host', '127.0.0.1',
+  '--comfy-port', '8188',
+  '--comfy-root', 'D:\ComfyUI_windows_portable',
+  '--publish-platform', 'facebook',
+  '--dry-run-publish',
+  '--enable-review-loop'
+)
+```
+
+逐一呼叫各策略（每個命令都要在 Discord 完成審核；若成果不合格，請在 Discord 選 reject/block）：
+
+```powershell
+# 1. 靜態圖：anima_anime
+python run_media_interface.py @e2e --prompt '高完成度角色主視覺，霓虹夜市，清楚輪廓' --generation-type text2img
+
+# 2. 短影片／單鏡頭：z_image_plus_nova_model -> minimax_h3_lowvram_t2v
+python run_media_interface.py @e2e --prompt '單鏡頭短動畫，角色在雨中奔跑，鏡頭跟拍' --generation-type text2video
+
+# 3. 先圖後短片：z_image_plus_nova_model -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
+python run_media_interface.py @e2e --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
+
+# 4. 長片／多段故事：z_image_plus_nova_model -> minimax_h3_lowvram_i2v -> image_to_image
+python run_media_interface.py @e2e --prompt '三段式故事：相遇、追逐、收尾；每段要有狀態轉移' --generation-type text2longvideo
+
+# 5. Native H3 I2VA：generated opening image -> minimax_h3_lowvram_15s_fl2va_i2v
+python run_media_interface.py @e2e --prompt 'Native H3 單一連續故事，開場動作要立即發生' --generation-type native_h3_story
+
+# 6. Native H3 T2VA：prompt only -> minimax_h3_lowvram_t2v
+python run_media_interface.py @e2e --prompt 'Native H3 純文字生影片，角色從第一幀就開始行動' --generation-type native_h3_t2v_story
+
+# 7. Native H3 FL2VA：generated opening + generated landing -> minimax_h3_lowvram_15s_fl2va_i2v
+python run_media_interface.py @e2e --prompt 'Native H3 首尾幀故事，起點與結局都要由人工審核' --generation-type native_h3_fl2va_story
+
+# 8. Native H3 L2VA：generated landing only -> minimax_h3_lowvram_15s_fl2va_i2v
+python run_media_interface.py @e2e --prompt 'Native H3 以最後一幀作為故事落點，前段保持因果動作' --generation-type native_h3_l2va_story
+
+# 9. Native H3 Ref2VA：reference manifest -> minimax_h3_ref2va
+python run_media_interface.py @e2e --prompt 'Native H3 參考圖與參考影片共同控制身份和運鏡' --generation-type native_h3_ref2va
+
+# 10. 先圖後 img2img refine：nova_model_plus_z_image_anime -> image_to_image
+python run_media_interface.py @e2e --prompt '保留構圖與角色身份，只修正光影和細節' --generation-type text2image2image
+
+# 11. 貼圖包：anima_anime -> minimax_h3_lowvram_i2v（動態貼圖階段）
+python run_media_interface.py @e2e --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
+```
+
+### 自動路由與加權隨機
+
+這兩種模式要分開理解：不帶 `--generation-type` 是交給 LLM 依 prompt 選策略；加權隨機則讀取角色 YAML 的 `generation.generation_type_weights`，先抽出一個策略，再把抽中的策略明確傳給 CLI。Kirby 目前的權重是 `text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 3`、`native_h3_fl2va_story: 2`。
+
+```powershell
+# LLM 自動路由（不指定 --generation-type）
+python run_media_interface.py @e2e --prompt '幫我做一個有明確衝突與結局的 Kirby 媒體作品'
+
+# 加權隨機：每次重新抽樣；抽樣後仍會完整走同一個 E2E + Discord gate
+$randomType = python -c "import random,sys; from pathlib import Path; sys.path.insert(0,'agentic/src'); from agentic.app.character_workflow import choose_media_type,load_character_config; print(choose_media_type(load_character_config(Path('configs/characters/kirby.yaml')), rng=random.Random())[0])"
+Write-Host "weighted random generation_type=$randomType"
+# news-driven 會抓取一則尚未使用的新聞；不要用舊 prompt 或舊 media path 代替
+python run_media_interface.py @e2e --generation-type $randomType --news-driven
+```
+
+`image2image` 目前不是 `configs/routing.yaml` 的預設候選，只有在角色 YAML 的 `additional_params.strategies.image2image` 提供 workflow override 後才適合執行；不要把它和可直接 E2E 的 `text2image2image` 混用。它的 CLI 形式如下：
+
+```powershell
+python run_media_interface.py @e2e --prompt '在既有構圖上重做光影' --generation-type image2image
+```
+
+### MiniMax H3 五種 canonical mode 的獨立 ComfyUI E2E
+
+這支 runner 直接測試 H3 模式與 strict technical QA，不取代上面的角色流程或 Discord review。可一次跑全部，也可以明確一條一條跑：
+
+```powershell
+# 全部五種：t2va / i2va / fl2va / l2va / ref2va
+python scripts/run_h3_modes_e2e.py `
+  --comfy-root 'D:\ComfyUI_windows_portable' `
+  --output-root 'D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e'
+
+# 逐條重跑指定 mode（可重複 --mode）
+python scripts/run_h3_modes_e2e.py --mode t2va
+python scripts/run_h3_modes_e2e.py --mode i2va
+python scripts/run_h3_modes_e2e.py --mode fl2va
+python scripts/run_h3_modes_e2e.py --mode l2va
+python scripts/run_h3_modes_e2e.py --mode ref2va
+
+# 只對已產生的影片重跑 strict QA
+python scripts/verify_h3_e2e_outputs.py `
+  --output-root 'D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e'
+```
+
+H3 runner 的 canonical workflow 對應：`t2va → minimax_h3_lowvram_t2v`、`i2va → minimax_h3_lowvram_i2v`、`fl2va/l2va → minimax_h3_lowvram_15s_fl2va_i2v`、`ref2va → minimax_h3_ref2va`。完整 conditioning、解析度、音訊與 QA contract 請見 [`docs/minimax_h3_p2_e2e.md`](docs/minimax_h3_p2_e2e.md)。
+
+### 測試順序與 publish 邊界
+
+建議順序是先跑 `text2img` 確認基礎 ComfyUI 與 Discord，再跑四種 native H3，接著跑一般影片／長片／貼圖，最後跑 Ref2VA 與隨機。每條命令都應保留 `run_id`、`log_path`、`review_session_path`、輸出媒體與 `publish_review_summary.json`。
+
+本機測試不會自動公開發佈：`--dry-run-publish` 只驗證 publish/review graph；即使 Discord 通過，也不會送出社群平台。若要做不公開的平台 adapter smoke test，使用 `--publish-mode safe_poc`（YouTube private、Facebook draft、Instagram container-only）；不要在未經人工確認前使用 `--publish-mode live`。
+
+`--news-driven` 會把 `title + keyword` 寫入 `agentic/state/news_selection/<character>.json`，下一次隨機執行會排除已用新聞；沒有可用的新新聞時會直接 fail，不會用 generic prompt 或過去媒體充數。OpenRouter publish caption 預設會輪替已驗證 vision pool、每個模型最多 retry 2 次；可用 `AGENTIC_PUBLISH_CAPTION_MAX_RETRIES`、`AGENTIC_PUBLISH_CAPTION_MAX_MODELS_PER_CALL`（`0`/未設定代表整個 pool）、`AGENTIC_PUBLISH_CAPTION_TIMEOUT_SECONDS` 調整。所有 prompt/story LLM request 也可用 `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` 設定單次 request timeout（預設 30 秒）。
 
 ---
 

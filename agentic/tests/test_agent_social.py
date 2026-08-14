@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import unittest
+import tempfile
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -197,7 +200,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["review_mode"], "discord")
         self.assertEqual(result.outputs["reviewer"], "tester#0001")
 
-    def test_review_select_is_automatic_without_explicit_review_flag(self) -> None:
+    def test_publish_review_requires_discord_approval_even_without_explicit_flag(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
         plan = ExecutionPlan(
@@ -224,18 +227,27 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         with patch.object(
             skills.prompt_engine,
-            "review_asset_candidates",
-            return_value={"selected_assets": ["C:\\selected.mp4"], "ranked_candidates": []},
-        ), patch.object(
-            skills.prompt_engine,
             "prepare_publish_caption",
             return_value={"caption": "A caption", "hashtags": "#kirby", "dispatch_ready": True},
-        ), patch.object(skills.discord_review, "review_candidates") as discord_review:
+        ), patch.object(
+            skills.discord_review,
+            "review_candidates",
+            return_value=type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "auto",
+                    "status": "skipped",
+                    "selected_paths": [],
+                    "fallback_reason": "Discord is not configured",
+                },
+            )(),
+        ) as discord_review:
             result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
 
-        self.assertEqual(result.status, "success")
-        self.assertEqual(result.outputs["review_mode"], "automatic")
-        discord_review.assert_not_called()
+        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.outputs["review_mode"], "auto")
+        discord_review.assert_called_once()
 
     def test_review_select_falls_back_to_llm_shortlist_when_discord_has_no_decision(self) -> None:
         tool_registry = ToolRegistry()
@@ -324,7 +336,11 @@ class AgentSocialSkillTests(unittest.TestCase):
                 prompt="Kirby must stop the runaway lantern in the first second",
                 media_type="native_h3_story",
                 style="anime",
-                constraints={"require_human_review": True},
+                constraints={
+                    "require_human_review": True,
+                    "source_generation_type": "native_h3_story",
+                    "workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
+                },
             ),
             workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
             nodes=[],
@@ -343,7 +359,18 @@ class AgentSocialSkillTests(unittest.TestCase):
         state = RunState(
             goal={"prompt": plan.goal.prompt},
             metadata={},
-            node_outputs={"native-opening-keyframe": {"saved_files": candidate_paths}},
+            node_outputs={
+                "native-story-prompt": {
+                    "generated_storyboard": {
+                        "name": "Kirby and the Seed",
+                        "story_spine": {
+                            "premise": "Kirby protects one glowing seed as a sudden storm reshapes the meadow.",
+                            "objective": "Kirby must keep the seed safe.",
+                        },
+                    }
+                },
+                "native-opening-keyframe": {"saved_files": candidate_paths},
+            },
         )
         captured: dict[str, object] = {}
 
@@ -370,7 +397,232 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.outputs["selected_assets"], [candidate_paths[3]])
         self.assertEqual(captured["media_paths"], candidate_paths)
-        self.assertIn("Asset 6", captured["text"])
+        self.assertIn("故事：Kirby and the Seed: Kirby protects one glowing seed", captured["text"])
+        self.assertIn("請選擇最適合的開場首幀：Asset 1-6", captured["text"])
+        self.assertIn("六張都不合格請按 Reject。", captured["text"])
+        self.assertNotIn("Strategy:", captured["text"])
+        self.assertNotIn("Workflow:", captured["text"])
+        self.assertNotIn("Stage:", captured["text"])
+        self.assertNotIn("Prompt:", captured["text"])
+        self.assertNotIn("Candidates attached", captured["text"])
+        self.assertFalse(captured["allow_text_edit"])
+        self.assertEqual(captured["selection_mode"], "single")
+        self.assertTrue(captured["selection_required"])
+        self.assertEqual(captured["selection_limit"], 1)
+        return
+        self.assertIn("故事：Kirby and the Seed: Kirby protects one glowing seed", captured["text"])
+        self.assertIn("請選擇最適合的開場首幀：Asset 1-6", captured["text"])
+        self.assertIn("六張都不合格請按 Reject。", captured["text"])
+        self.assertNotIn("Candidates attached", captured["text"])
+        self.assertNotIn("Choose one opening frame", captured["text"])
+
+    def test_final_video_review_filters_frames_and_disables_asset_picker(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        video_path = r"C:\final\Kirby_H3.mp4"
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Publish the rendered Kirby video",
+                media_type="native_h3_story",
+                style="anime",
+                constraints={"enable_stage_review": True, "review_notes": None},
+            ),
+            workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="review-select",
+            skill_name="review.assets.select",
+            depends_on=["native-h3-package"],
+            inputs={"limit": 1, "review_scope": "final_video"},
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={
+                "native-h3-package": {
+                    "saved_files": [
+                        r"C:\frames\opening.png",
+                        r"C:\frames\ending.png",
+                        video_path,
+                        r"C:\preview\preview.gif",
+                    ]
+                }
+            },
+        )
+        captured: dict[str, object] = {}
+
+        def fake_review(**kwargs):
+            captured.update(kwargs)
+            return type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "approved",
+                    "selected_paths": [video_path],
+                    "reviewer": "tester#0001",
+                    "session_id": "sess-video",
+                    "session_path": r"C:\session-video.json",
+                    "edited_text": "",
+                    "fallback_reason": "",
+                },
+            )()
+
+        with patch.object(
+            skills.prompt_engine,
+            "review_asset_candidates",
+            side_effect=AssertionError("final video review must not invoke asset shortlist LLM"),
+        ), patch.object(
+            skills.prompt_engine,
+            "prepare_publish_caption",
+            return_value={"caption": "Final caption", "hashtags": "#kirby", "dispatch_ready": True},
+        ), patch.object(skills.discord_review, "review_candidates", side_effect=fake_review):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["selected_assets"], [video_path])
+        self.assertEqual(captured["media_paths"], [video_path])
+        self.assertFalse(captured["allow_asset_selection"])
+        self.assertTrue(captured["allow_text_edit"])
+        self.assertEqual(captured["text"], "Final caption\n\n#kirby")
+        self.assertNotIn("Caption:", captured["text"])
+        self.assertNotIn("Hashtags:", captured["text"])
+        self.assertNotIn("Strategy:", captured["text"])
+        self.assertNotIn("Workflow:", captured["text"])
+        self.assertNotIn("Stage:", captured["text"])
+        self.assertNotIn("None", captured["text"])
+        self.assertNotIn("Candidates attached", captured["text"])
+
+    def test_final_media_review_sends_images_to_discord_and_keeps_selection(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        image_paths = [r"C:\final\Kirby_1.png", r"C:\final\Kirby_2.png"]
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Publish Kirby images",
+                media_type="image",
+                style="anime",
+                constraints={"require_human_review": True, "platforms": ["instagram_graph", "facebook"]},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="review-select",
+            skill_name="review.assets.select",
+            depends_on=["ingest-media"],
+            inputs={"limit": 1, "review_scope": "final_media", "review_all_candidates": True},
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={"ingest-media": {"media_paths": image_paths}},
+        )
+        captured: dict[str, object] = {}
+
+        def fake_review(**kwargs):
+            captured.update(kwargs)
+            return type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "approved",
+                    "selected_paths": [image_paths[1]],
+                    "reviewer": "tester#0001",
+                    "session_id": "sess-images",
+                    "session_path": r"C:\session-images.json",
+                    "edited_text": "publish image 2",
+                    "fallback_reason": "",
+                    "delivery": {},
+                },
+            )()
+
+        with patch.object(
+            skills.prompt_engine,
+            "prepare_publish_caption",
+            return_value={"caption": "Kirby image", "hashtags": "#kirby", "dispatch_ready": True},
+        ) as prepare_caption, patch.object(skills.discord_review, "review_candidates", side_effect=fake_review):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["selected_assets"], [image_paths[1]])
+        self.assertEqual(captured["media_paths"], image_paths)
+        self.assertTrue(captured["allow_asset_selection"])
+        self.assertTrue(captured["allow_text_edit"])
+        self.assertEqual(captured["text"], "Kirby image\n\n#kirby")
+        self.assertNotIn("Caption:", captured["text"])
+        self.assertNotIn("Hashtags:", captured["text"])
+        self.assertEqual(prepare_caption.call_args.kwargs["media_paths"], image_paths)
+        self.assertNotIn("Candidates attached", captured["text"])
+
+    def test_last_frame_review_requires_explicit_approval_without_asset_picker(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        ending_path = r"C:\ending\Kirby_H3_ending.png"
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Approve the ending frame for the rendered Kirby story",
+                media_type="native_h3_story",
+                style="anime",
+                constraints={"require_human_review": True},
+            ),
+            workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="native-ending-review",
+            skill_name="review.assets.select",
+            depends_on=["native-ending-keyframe"],
+            inputs={
+                "limit": 1,
+                "review_all_candidates": True,
+                "review_scope": "last_frame",
+                "review_notes": "Reject if the ending cannot connect naturally from the selected opening frame.",
+            },
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={"native-ending-keyframe": {"saved_files": [ending_path]}},
+        )
+        captured: dict[str, object] = {}
+
+        def fake_review(**kwargs):
+            captured.update(kwargs)
+            return type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "approved",
+                    "selected_paths": [ending_path],
+                    "reviewer": "tester#0001",
+                    "session_id": "sess-ending",
+                    "session_path": r"C:\session-ending.json",
+                    "edited_text": "",
+                    "fallback_reason": "",
+                },
+            )()
+
+        with patch.object(skills.discord_review, "review_candidates", side_effect=fake_review):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["selected_assets"], [ending_path])
+        self.assertEqual(captured["media_paths"], [ending_path])
+        self.assertFalse(captured["allow_asset_selection"])
+        self.assertEqual(captured["review_scope"], "last_frame")
+        self.assertIn("故事：", captured["text"])
+        self.assertIn("請確認結尾畫面是否符合故事。符合請按 Accept，不符合請按 Reject。", captured["text"])
+        self.assertNotIn("Strategy:", captured["text"])
+        self.assertNotIn("Workflow:", captured["text"])
+        self.assertNotIn("Stage:", captured["text"])
+        self.assertNotIn("Prompt:", captured["text"])
+        return
+        self.assertIn("故事：Approve the ending frame", captured["text"])
+        self.assertNotIn("Reject if the ending cannot connect naturally", captured["text"])
 
     def test_required_first_frame_review_blocks_when_discord_is_unavailable(self) -> None:
         tool_registry = ToolRegistry()
@@ -459,6 +711,8 @@ class AgentSocialSkillTests(unittest.TestCase):
 
     def test_build_review_text_stays_short_enough_for_discord(self) -> None:
         text = AgentSocialSkills._build_review_text(
+            strategy="text2image2video",
+            workflow="z_image_plus_nova_model",
             prompt="Kirby " + ("very detailed " * 80),
             review_notes="Prefer the best composition " * 40,
             ranked_candidates=[
@@ -479,6 +733,21 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertNotIn("Accept to publish with these assets", text)
         self.assertFalse(text.startswith("Draft post:"))
         self.assertNotIn("Platforms:", text)
+
+    def test_final_review_text_preserves_article_paragraphs_without_internal_labels(self) -> None:
+        text = AgentSocialSkills._build_final_publish_review_text(
+            draft_caption="The purple orb flickers above the grass.\n\n1️⃣ Kirby faces the energy.\n2️⃣ The star shard changes the outcome.\n\nWhich moment stayed with you?",
+            draft_hashtags="#kirby #mediaoverload",
+            platforms=["facebook"],
+        )
+
+        self.assertIn("The purple orb flickers above the grass.", text)
+        self.assertIn("\n\n1️⃣ Kirby faces the energy.", text)
+        self.assertIn("Which moment stayed with you?", text)
+        self.assertTrue(text.endswith("#kirby #mediaoverload"))
+        self.assertNotIn("Caption:", text)
+        self.assertNotIn("Hashtags:", text)
+        self.assertNotIn("Strategy:", text)
 
     def test_prepare_caption_uses_edited_review_text_as_final_caption(self) -> None:
         tool_registry = ToolRegistry()
@@ -534,11 +803,85 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["hashtags"], "#edited #tags")
         self.assertEqual(result.outputs["platform_bundle"]["instagram"]["caption"], "Edited caption body")
 
+    def test_prepare_caption_uses_contact_sheet_for_video_visual_evidence(self) -> None:
+        tool_registry = ToolRegistry()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "clip.mp4"
+            contact_sheet = root / "output" / "clip_contact_sheet.jpg"
+            video_path.write_bytes(b"video")
+            contact_sheet.parent.mkdir(parents=True, exist_ok=True)
+            contact_sheet.write_bytes(b"image")
+            skills = AgentSocialSkills(tool_registry, root / "output")
+            plan = ExecutionPlan(
+                goal=GoalRequest(
+                    prompt="publish Kirby clip",
+                    media_type="publish_review",
+                    style="social promo",
+                    constraints={
+                        "platforms": ["instagram"],
+                        "hashtags": ["kirby"],
+                        "visual_grounding": {"contact_sheet_path": str(contact_sheet)},
+                    },
+                ),
+                workflow_name="publish_review_v1",
+                nodes=[],
+            )
+            node = ExecutionNode(
+                node_id="prepare-caption",
+                skill_name="publish.caption.prepare",
+                depends_on=["review-select", "process-media"],
+                inputs={"platforms": ["instagram"]},
+            )
+            state = RunState(
+                goal={"prompt": "publish Kirby clip"},
+                metadata={},
+                node_outputs={
+                    "review-select": {},
+                    "process-media": {"media_paths": [str(video_path)]},
+                },
+            )
+            with patch.object(
+                skills.prompt_engine,
+                "prepare_publish_caption",
+                return_value={
+                    "caption": "Kirby dodges metal spheres.",
+                    "hashtags": "#kirby",
+                    "platform_captions": {"instagram": "Kirby dodges metal spheres."},
+                    "platform_bundle": {},
+                    "dispatch_ready": True,
+                    "prompt_mode": "llm",
+                },
+            ) as prepare_caption:
+                skills.prepare_caption(SkillContext(plan=plan, node=node, state=state))
+
+            self.assertEqual(
+                prepare_caption.call_args.kwargs["visual_paths"],
+                [str(contact_sheet)],
+            )
+
 
 class DiscordHumanReviewServiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.project_root = Path(__file__).resolve().parents[1]
+
+    def test_review_candidates_filters_paths_to_media_under_output_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inside = root / "inside.png"
+            outside = root.parent / f"outside_{uuid.uuid4().hex}.txt"
+            inside.write_bytes(b"image")
+            outside.write_text("do not upload", encoding="utf-8")
+            self.addCleanup(outside.unlink)
+            service = DiscordHumanReviewService(root)
+
+            self.assertEqual(service._filter_media_paths([str(inside), str(outside)]), [str(inside.resolve())])
+
+    def test_review_candidates_fails_closed_without_reviewer_allowlist(self) -> None:
+        service = DiscordHumanReviewService(self.project_root / ".tmp-tests")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(service.is_configured() and bool(os.getenv("discord_review_allowed_users")))
 
     def test_review_candidates_treats_missing_discord_decision_as_skipped(self) -> None:
         service = DiscordHumanReviewService(self.project_root / ".tmp-tests")
@@ -547,7 +890,7 @@ class DiscordHumanReviewServiceTests(unittest.TestCase):
         temp_file.write_bytes(b"fake")
         self.addCleanup(temp_file.unlink)
 
-        with patch.object(service, "is_configured", return_value=True), patch(
+        with patch.dict("os.environ", {"discord_review_channel_id": "123"}), patch.object(service, "is_configured", return_value=True), patch(
             "agentic.tools.context_services._run_discord_file_feedback_process",
             return_value=("timeout", None, "review text", None),
         ):
@@ -565,7 +908,7 @@ class DiscordHumanReviewServiceTests(unittest.TestCase):
         temp_file.write_bytes(b"fake")
         self.addCleanup(temp_file.unlink)
 
-        with patch.object(service, "is_configured", return_value=True), patch(
+        with patch.dict("os.environ", {"discord_review_channel_id": "123"}), patch.object(service, "is_configured", return_value=True), patch(
             "agentic.tools.context_services._run_discord_file_feedback_process",
             side_effect=RuntimeError("login failed"),
         ):

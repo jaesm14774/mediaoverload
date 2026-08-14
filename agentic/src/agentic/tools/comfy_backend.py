@@ -5,7 +5,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib import parse, request
+from urllib import error, parse, request
 
 import websocket
 import yaml
@@ -23,8 +23,13 @@ class AgenticComfyCommunicator:
 
     def connect_websocket(self) -> None:
         self.ws = websocket.WebSocket()
+        try:
+            connect_timeout = max(0.1, float(os.environ.get("COMFYUI_CONNECT_TIMEOUT_SECONDS", "30")))
+        except ValueError:
+            connect_timeout = 30.0
         self.ws.connect(
             f"ws://{self.server_address}/ws?clientId={self.client_id}",
+            timeout=connect_timeout,
             ping_interval=20,
             ping_timeout=10,
         )
@@ -32,7 +37,13 @@ class AgenticComfyCommunicator:
     def queue_prompt(self, prompt: dict[str, Any]) -> dict[str, Any]:
         payload = json.dumps({"prompt": prompt, "client_id": self.client_id}).encode("utf-8")
         req = request.Request(f"http://{self.server_address}/prompt", data=payload)
-        return json.loads(request.urlopen(req, timeout=30).read())
+        try:
+            with request.urlopen(req, timeout=30) as response:
+                return json.loads(response.read())
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace").strip()
+            detail = body[:4000] if body else "no response body"
+            raise RuntimeError(f"ComfyUI /prompt HTTP {exc.code}: {detail}") from exc
 
     def upload_image(self, image_path: str, subfolder: str = "", overwrite: bool = False) -> str:
         import mimetypes
@@ -84,6 +95,31 @@ class AgenticComfyCommunicator:
             url += f"/{parse.quote(node_type, safe='')}"
         with request.urlopen(url, timeout=30) as response:
             return json.loads(response.read())
+
+    def free_memory(self) -> None:
+        """Ask ComfyUI to unload cached models between sequential jobs.
+
+        A long-video run queues several H3 generations in one process. On an
+        8GB GPU, the previous H3 graph can remain cached after its output is
+        saved, leaving too little VRAM for the next segment. ComfyUI exposes
+        ``/free`` for this exact lifecycle boundary. Failure to free is
+        intentionally non-fatal because older ComfyUI builds may not expose
+        the endpoint.
+        """
+        if os.environ.get("COMFYUI_FREE_MEMORY_AFTER_GENERATION", "true").strip().lower() in {"0", "false", "no", "off"}:
+            return
+        payload = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
+        req = request.Request(
+            f"http://{self.server_address}/free",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=30) as response:
+                response.read()
+        except Exception:
+            return
 
     def list_available_models(self) -> dict[str, list[str]]:
         """Query ComfyUI for installed models/LoRAs by inspecting loader node options."""
@@ -217,9 +253,16 @@ class AgenticComfyCommunicator:
                         str(matching_nodes[node_index]["id"]),
                         dict(update.get("inputs", {})),
                     )
+            # Image and H3 video jobs use different large model graphs. Clear
+            # ComfyUI's cached models before each queue boundary so a prior
+            # keyframe cannot consume the VRAM required by the next video
+            # segment on an 8GB GPU.
+            self.free_memory()
             prompt_id = str(self.queue_prompt(workflow_copy)["prompt_id"])
             self.wait_for_completion(prompt_id)
-            return self.save_results(prompt_id, output_path, file_name)
+            result = self.save_results(prompt_id, output_path, file_name)
+            self.free_memory()
+            return result
         except Exception as exc:
             return False, [str(exc)]
         finally:
@@ -230,23 +273,54 @@ class AgenticComfyCommunicator:
         try:
             history = self.get_history(prompt_id)[prompt_id]
             saved_files: list[str] = []
+            preview_media: list[tuple[dict[str, Any], str]] = []
             for node_output in history.get("outputs", {}).values():
                 if not isinstance(node_output, dict):
                     continue
                 for key, default_extension in (("images", ".png"), ("gifs", ""), ("videos", "")):
                     for media in node_output.get(key, []):
-                        if media.get("type") == "temp":
+                        if not isinstance(media, dict) or not media.get("filename"):
                             continue
-                        media_bytes = self.get_media_file(media["filename"], media["subfolder"], media["type"])
+                        if media.get("type") == "temp":
+                            # Some ComfyUI graphs expose only a PreviewImage while
+                            # their SaveImage node is cached or omitted from the
+                            # history response. Keep it as a last-resort input so
+                            # downstream image/refine nodes do not lose a real
+                            # generated frame.
+                            preview_media.append((media, default_extension))
+                            continue
+                        media_bytes = self.get_media_file(
+                            str(media["filename"]),
+                            str(media.get("subfolder", "")),
+                            str(media.get("type", "output")),
+                        )
                         extension = Path(media["filename"]).suffix or default_extension
                         base = Path(media["filename"]).stem
                         final_name = media["filename"] if not file_name else f"{base}_{file_name}{extension}"
                         save_path = str(Path(output_path) / final_name)
                         Path(save_path).write_bytes(media_bytes)
                         saved_files.append(save_path)
+            if not saved_files and preview_media:
+                # A preview is still a valid rendered image. Copy it into the
+                # run-owned output directory so later nodes receive a stable
+                # local path instead of an empty saved_files list.
+                for media, default_extension in preview_media:
+                    media_bytes = self.get_media_file(
+                        str(media["filename"]),
+                        str(media.get("subfolder", "")),
+                        str(media.get("type", "temp")),
+                    )
+                    extension = Path(str(media["filename"])).suffix or default_extension
+                    base = Path(str(media["filename"])).stem
+                    final_name = str(media["filename"]) if not file_name else f"{base}_{file_name}{extension}"
+                    save_path = str(Path(output_path) / final_name)
+                    Path(save_path).write_bytes(media_bytes)
+                    saved_files.append(save_path)
+            if not saved_files:
+                raise RuntimeError(f"ComfyUI completed prompt {prompt_id} but returned no media files")
             return True, saved_files
-        except Exception:
-            return False, []
+        except Exception as exc:
+            return False, [str(exc)]
 
 
 class AgenticMediaGenerator:
@@ -254,8 +328,15 @@ class AgenticMediaGenerator:
         self.communicator = AgenticComfyCommunicator(host, port)
         self.communicator.connect_websocket()
 
-    def generate(self, workflow_path: str, updates: list[dict[str, Any]], output_dir: str, file_prefix: str = "media") -> list[str]:
-        workflow = json.loads(Path(workflow_path).read_text(encoding="utf-8"))
+    def generate(
+        self,
+        workflow_path: str,
+        updates: list[dict[str, Any]],
+        output_dir: str,
+        file_prefix: str = "media",
+        workflow: dict[str, Any] | None = None,
+    ) -> list[str]:
+        workflow = workflow or json.loads(Path(workflow_path).read_text(encoding="utf-8"))
         success, saved_files = self.communicator.process_workflow(
             workflow=workflow,
             updates=updates,
@@ -270,6 +351,10 @@ class AgenticMediaGenerator:
 
     def upload_image(self, image_path: str) -> str:
         return self.communicator.upload_image(image_path)
+
+    def get_object_info(self, node_type: str | None = None) -> dict[str, Any]:
+        """Expose ComfyUI node metadata for workflow preflight checks."""
+        return self.communicator.get_object_info(node_type)
 
 
 class AgenticNodeManager:

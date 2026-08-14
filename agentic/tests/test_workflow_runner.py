@@ -154,12 +154,12 @@ class WorkflowRunnerTests(unittest.TestCase):
             @staticmethod
             def call(name: str, payload: dict[str, object]) -> dict[str, object]:
                 self.assertEqual(name, "asset.ensure_workflow_ready")
-                self.assertEqual(payload["workflow_name"], "wan2.2_gguf_i2v")
+                self.assertEqual(payload["workflow_name"], "minimax_h3_lowvram_i2v")
                 return {
-                    "workflow_name": "wan2.2_gguf_i2v",
+                    "workflow_name": "minimax_h3_lowvram_i2v",
                     "asset_status": [
-                        {"asset": "wan2.2_high_noise_model.safetensors", "status": "missing", "action": "manual_setup"},
-                        {"asset": "wan2.2_low_noise_model.safetensors", "status": "missing", "action": "manual_setup"},
+                        {"asset": "minimax_h3_fl2va_pruned_fp8_Q4_0.gguf", "status": "missing", "action": "manual_setup"},
+                        {"asset": "qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf", "status": "missing", "action": "manual_setup"},
                     ],
                 }
 
@@ -173,7 +173,7 @@ class WorkflowRunnerTests(unittest.TestCase):
             node=ExecutionNode(
                 node_id="video-asset-check",
                 skill_name="media.ensure_workflow",
-                inputs={"workflow_name": "wan2.2_gguf_i2v", "auto_download": False},
+                inputs={"workflow_name": "minimax_h3_lowvram_i2v", "auto_download": False},
             ),
             state={},
         )
@@ -181,8 +181,8 @@ class WorkflowRunnerTests(unittest.TestCase):
         result = skills.ensure_workflow(context)
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wan2.2_high_noise_model.safetensors", result.logs[0])
-        self.assertIn("wan2.2_low_noise_model.safetensors", result.logs[0])
+        self.assertIn("minimax_h3_fl2va_pruned_fp8_Q4_0.gguf", result.logs[0])
+        self.assertIn("qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf", result.logs[0])
 
 
 if __name__ == "__main__":

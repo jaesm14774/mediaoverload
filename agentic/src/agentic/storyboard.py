@@ -30,13 +30,14 @@ _NATIVE_STORY_STOPWORDS = {
 }
 
 _NATIVE_MOTION_PATTERN = re.compile(
-    r"\b(?:move|moves|moving|reach|reaches|rush|rushes|rushing|pull|pulls|pulled|tear|tears|torn|"
-    r"drag|drags|fall|falls|fell|slide|slides|slips|wrap|wraps|break|breaks|crack|cracks|"
-    r"burst|bursts|form|forms|whip|whips|blow|blows|scatter|scatters|roll|rolls|crash|crashes|"
-    r"splash|splashes|shatter|shatters|emerge|emerges|launch|launches|surge|surges|reverse|reverses|rise|rises|rising|fly|flies|dive|dives|"
-    r"leap|leaps|jump|jumps|turn|turns|shift|shifts|erupt|erupts|sweep|sweeps|swirl|swirls|"
-    r"drift|drifts|charge|charges|stumble|stumbles|grab|grabs|chase|chases|anchor|anchors|"
-    r"release|releases|collaps|tighten|tightens|snap|snaps|spin|spins|run|runs)\b|"
+    r"\b(?:move\w*|reach\w*|rush\w*|sprint\w*|pull\w*|tear\w*|drag\w*|fall\w*|"
+    r"slide\w*|slip\w*|wrap\w*|break\w*|crack\w*|burst\w*|form\w*|whip\w*|"
+    r"blow\w*|scatter\w*|roll\w*|crash\w*|splash\w*|shatter\w*|emerge\w*|"
+    r"launch\w*|surge\w*|reverse\w*|rise\w*|fly\w*|dive\w*|leap\w*|jump\w*|"
+    r"turn\w*|shift\w*|erupt\w*|sweep\w*|swirl\w*|drift\w*|charge\w*|"
+    r"stumble\w*|grab\w*|chase\w*|anchor\w*|release\w*|collaps\w*|tighten\w*|"
+    r"snap\w*|spin\w*|run\w*|swerve\w*|push\w*|pan\w*|tilt\w*|track\w*|"
+    r"follow\w*|accelerat\w*|slam\w*|jolt\w*|knock\w*|tumble\w*)\b|"
     r"(?:衝|奔|拉|撕|拖|落|滑|裂|爆|湧|逆|升|飛|潛|跳|轉|變|旋|漂|追|抓|錨|釋|崩|斷|跑)",
     flags=re.IGNORECASE,
 )
@@ -174,6 +175,272 @@ def evaluate_native_h3_story_quality(
     return {"passed": not errors, "score": score, "checks": checks, "errors": errors}
 
 
+def evaluate_native_h3_news_grounding(
+    story: dict[str, Any],
+    news_context: dict[str, Any] | None,
+    *,
+    creative_brief: str = "",
+) -> dict[str, Any]:
+    """Require an explicit, visible bridge between the news and the user brief.
+
+    The LLM is allowed to translate sensitive or abstract headlines into safe
+    visual action, but it cannot silently replace the headline with a generic
+    plot. The trace makes that translation inspectable and the checks ensure
+    its source concepts and visual anchors actually survive into the story.
+    """
+    source = news_context if isinstance(news_context, dict) else {}
+    source_text = " ".join(
+        str(source.get(key) or "").strip()
+        for key in ("title", "keyword", "category")
+    ).casefold()
+    trace = story.get("news_trace") if isinstance(story, dict) else None
+    checks: dict[str, bool] = {}
+    errors: list[str] = []
+    if not source_text.strip():
+        return {
+            "passed": False,
+            "score": 0,
+            "checks": {"news_context_present": False},
+            "errors": ["news context must contain title, keyword, or category"],
+        }
+    checks["news_context_present"] = True
+    if not isinstance(trace, dict):
+        return {
+            "passed": False,
+            "score": 0,
+            "checks": {**checks, "news_trace_present": False},
+            "errors": ["story must include a news_trace mapping"],
+        }
+    checks["news_trace_present"] = True
+
+    source_title = str(trace.get("source_title") or "").strip()
+    source_concepts = [
+        str(item).strip().casefold()
+        for item in trace.get("source_concepts", [])
+        if str(item).strip()
+    ]
+    visual_anchors = [
+        str(item).strip().casefold()
+        for item in trace.get("visual_anchors", [])
+        if str(item).strip()
+    ]
+    visual_translation = str(trace.get("visual_translation") or "").strip()
+    integration = str(trace.get("integration") or "").strip()
+    checks["source_title_locked"] = bool(source_title) and source_title.casefold() == str(source.get("title") or "").strip().casefold()
+    if not checks["source_title_locked"]:
+        errors.append("news_trace.source_title must exactly preserve the selected news title")
+    checks["source_concepts_are_source_derived"] = bool(source_concepts) and any(
+        concept in source_text for concept in source_concepts
+    )
+    if not checks["source_concepts_are_source_derived"]:
+        errors.append("news_trace.source_concepts must contain a concrete phrase from the title or keyword")
+    checks["visual_translation_present"] = bool(visual_translation)
+    if not checks["visual_translation_present"]:
+        errors.append("news_trace.visual_translation must explain the visible news-derived event")
+    checks["visual_anchors_present"] = bool(visual_anchors)
+    if not checks["visual_anchors_present"]:
+        errors.append("news_trace.visual_anchors must list concrete visible objects or actions")
+    bridge_text = f"{visual_translation} {integration}"
+    checks["source_anchor_mapping"] = bool(source_concepts) and bool(visual_anchors) and (
+        any(_news_anchor_matches_text(concept, bridge_text) for concept in source_concepts)
+        and any(_news_anchor_matches_text(anchor, bridge_text) for anchor in visual_anchors)
+    )
+    if not checks["source_anchor_mapping"]:
+        errors.append("news_trace.visual_translation or integration must connect a source concept to a visible anchor")
+    brief_terms = _native_story_terms(creative_brief)
+    brief_objective_terms = brief_terms - {"kirby"}
+    integration_terms = _native_story_terms(integration)
+    checks["integration_explains_both_inputs"] = bool(integration) and (
+        bool(visual_translation)
+        and checks["source_anchor_mapping"]
+        and any(_news_anchor_matches_text(anchor, integration) for anchor in visual_anchors)
+        and (not brief_objective_terms or bool(brief_objective_terms & integration_terms))
+    )
+    if not checks["integration_explains_both_inputs"]:
+        errors.append("news_trace.integration must explain how the news anchor and user brief share one causal story")
+
+    story_parts: list[str] = []
+    for key in ("name", "base_prompt", "opening_keyframe_prompt", "ending_keyframe_prompt", "native_audio"):
+        story_parts.append(str(story.get(key) or ""))
+    spine = story.get("story_spine")
+    if isinstance(spine, dict):
+        story_parts.extend(str(value) for value in spine.values())
+    shots = story.get("native_shots")
+    if isinstance(shots, list):
+        story_parts.extend(
+            str(value)
+            for shot in shots
+            if isinstance(shot, dict)
+            for value in shot.values()
+        )
+    story_text = " ".join(story_parts).casefold()
+    visible_anchor_matches = [
+        anchor for anchor in visual_anchors if _news_anchor_matches_text(anchor, story_text)
+    ]
+    checks["visual_anchor_reaches_story"] = bool(visible_anchor_matches)
+    if not checks["visual_anchor_reaches_story"]:
+        errors.append("at least one news_trace.visual_anchor must appear in the generated story fields")
+    matching_shots = 0
+    if isinstance(shots, list):
+        for shot in shots:
+            shot_text = " ".join(str(value) for value in shot.values()).casefold() if isinstance(shot, dict) else ""
+            if any(_news_anchor_matches_text(anchor, shot_text) for anchor in visual_anchors):
+                matching_shots += 1
+    checks["visual_anchor_has_causal_recurrence"] = matching_shots >= 2
+    if not checks["visual_anchor_has_causal_recurrence"]:
+        errors.append("the news-derived visual anchor must recur in at least two causal beats")
+
+    payoff_shot_text = " ".join(
+        str(value)
+        for value in (shots[-1].values() if isinstance(shots, list) and shots and isinstance(shots[-1], dict) else [])
+    ).casefold()
+    checks["visual_anchor_reaches_payoff"] = any(
+        _news_anchor_matches_text(anchor, payoff_shot_text) for anchor in visual_anchors
+    )
+    if not checks["visual_anchor_reaches_payoff"]:
+        errors.append("the news-derived visual anchor must remain visible in the payoff beat")
+
+    story_terms = _native_story_terms(story_text)
+    checks["user_brief_survives"] = not brief_terms or bool(brief_terms & story_terms)
+    if not checks["user_brief_survives"]:
+        errors.append("the generated story dropped all meaningful terms from the user creative brief")
+
+    total = len(checks)
+    score = round(sum(1 for passed in checks.values() if passed) / total * 100) if total else 0
+    return {"passed": not errors, "score": score, "checks": checks, "errors": errors}
+
+
+def repair_native_h3_news_trace_integration(
+    story: dict[str, Any],
+    news_context: dict[str, Any] | None,
+    *,
+    creative_brief: str = "",
+    character: str = "the protagonist",
+) -> dict[str, Any] | None:
+    """Repair a small news-grounding omission without changing the plot.
+
+    Some models use a valid synonym in ``news_trace.integration`` even though
+    the exact visual anchor is present in the opening, later beat, and payoff.
+    Keep the strict source/title checks intact, but deterministically carry an
+    already-declared visual anchor into the integration text and the missing
+    causal beats.  LLM repair is intentionally not required for this bounded
+    patch: a provider dropping one anchor from the payoff should not make an
+    otherwise usable native story fail before rendering.
+    """
+    if not isinstance(story, dict):
+        return None
+    quality = evaluate_native_h3_news_grounding(story, news_context, creative_brief=creative_brief)
+    checks = quality.get("checks") if isinstance(quality, dict) else None
+    if not isinstance(checks, dict):
+        return None
+    required_checks = (
+        "source_title_locked",
+        "source_concepts_are_source_derived",
+        "visual_translation_present",
+        "visual_anchors_present",
+        "user_brief_survives",
+    )
+    if not all(bool(checks.get(key)) for key in required_checks):
+        return None
+
+    trace = story.get("news_trace")
+    if not isinstance(trace, dict):
+        return None
+    source = news_context if isinstance(news_context, dict) else {}
+    source_concepts = [
+        str(item).strip()
+        for item in trace.get("source_concepts", [])
+        if str(item).strip()
+    ]
+    source_text = " ".join(
+        str(source.get(key) or "").strip()
+        for key in ("title", "keyword", "category")
+    ).casefold()
+    source_concept = next(
+        (concept for concept in source_concepts if concept.casefold() in source_text),
+        "",
+    )
+    if not source_concept:
+        return None
+    anchors = [str(item).strip() for item in trace.get("visual_anchors", []) if str(item).strip()]
+    if not anchors:
+        return None
+    repaired = deepcopy(story)
+    repaired_trace = dict(repaired.get("news_trace") or {})
+    integration = str(repaired_trace.get("integration") or "").strip().rstrip(".")
+    repaired_spine = repaired.get("story_spine") if isinstance(repaired.get("story_spine"), dict) else {}
+    objective = str(repaired_spine.get("objective") or "the protagonist's objective").strip().rstrip(".")
+    anchor = anchors[0]
+    if not _news_anchor_matches_text(anchor, str(repaired_trace.get("visual_translation") or "")):
+        repaired_trace["visual_translation"] = (
+            f"The source concept '{source_concept}' is translated into the visible anchor '{anchor}', "
+            "which drives the same on-screen conflict."
+        )
+    repaired_trace["integration"] = (
+        f"{integration}. The shared visual mission is anchored by the exact visible object or action "
+        f"'{anchor}', which {character} must resolve as part of the same causal story while pursuing "
+        f"'{objective}'. The source concept '{source_concept}' is safely represented by this visible anchor."
+    ).strip(". ") + "."
+    repaired["news_trace"] = repaired_trace
+
+    shots = repaired.get("native_shots")
+    if not isinstance(shots, list) or not shots:
+        return None
+    matching_indices: list[int] = []
+    for index, shot in enumerate(shots):
+        if isinstance(shot, dict):
+            shot_text = " ".join(str(value) for value in shot.values())
+            if _news_anchor_matches_text(anchor, shot_text):
+                matching_indices.append(index)
+
+    # Preserve the provider's action and timing.  Only add a compact visible
+    # anchor clause to the earliest missing beat(s) and the payoff beat.
+    target_indices = list(matching_indices[:2])
+    for index in (0, len(shots) - 1):
+        if index not in target_indices:
+            target_indices.append(index)
+    for index in target_indices:
+        shot = shots[index]
+        if not isinstance(shot, dict):
+            continue
+        if not _news_anchor_matches_text(anchor, " ".join(str(value) for value in shot.values())):
+            action = str(shot.get("action") or "").strip().rstrip(".")
+            shot["action"] = f"{action}. Keep the visible anchor '{anchor}' in the causal action.".strip(". ") + "."
+    repaired["native_shots"] = shots
+    return repaired
+
+
+def _news_anchor_matches_text(anchor: str, text: str) -> bool:
+    """Match a concrete anchor across small wording variations without accepting generic mood words."""
+    normalized_anchor = " ".join(str(anchor or "").casefold().split())
+    normalized_text = " ".join(str(text or "").casefold().split())
+    if not normalized_anchor or not normalized_text:
+        return False
+    if normalized_anchor in normalized_text:
+        return True
+
+    anchor_terms = [
+        term
+        for term in re.findall(r"[^\W_]+", normalized_anchor, flags=re.UNICODE)
+        if term not in _NATIVE_STORY_STOPWORDS
+    ]
+    text_terms = set(re.findall(r"[^\W_]+", normalized_text, flags=re.UNICODE))
+    if not anchor_terms:
+        return False
+    matched_terms = sum(term in text_terms for term in anchor_terms)
+    required_terms = max(1, math.ceil(len(anchor_terms) * 0.6))
+    if matched_terms >= required_terms:
+        return True
+
+    # A later beat often uses the concrete head noun after the opening beat
+    # establishes its full visual description ("featureless black monolith" ->
+    # "the monolith"). Keep recurrence strict enough to require a distinctive
+    # noun, but do not demand that every adjective survive verbatim into the
+    # payoff or the news-grounding trace.
+    head_term = anchor_terms[-1]
+    return len(anchor_terms) >= 2 and len(head_term) >= 4 and head_term in text_terms
+
+
 def native_surface_variation(creative_brief: str) -> str:
     """Keep autonomous variation bounded so it cannot replace the story spine.
 
@@ -241,39 +508,17 @@ def resolve_native_h3_story(
     news_context: dict[str, Any] | None = None,
     creative_brief: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Resolve one news-grounded native H3 story for every entry point.
+    """Compatibility entry point for callers using the pre-service API."""
+    from agentic.runtime.story_service import NativeH3StoryService
 
-    News selection, LLM generation, and storyboard validation live here so the
-    CLI and scheduler cannot silently drift into different story behavior.
-    Every failure propagates to the caller.
-    """
-    import os
-
-    from agentic.runtime.llm_engine import LLMPromptEngine
-    from agentic.tools.context_services import NewsContextService
-
-    resolved_news = dict(news_context or {})
-    if resolved_news.get("error"):
-        raise RuntimeError(f"Native H3 news context failed: {resolved_news['error']}")
-    if not NewsContextService.is_usable_selection(
-        str(resolved_news.get("title") or ""),
-        str(resolved_news.get("keyword") or ""),
-    ):
-        selected_news = NewsContextService().get_random_news()
-        if selected_news is None:
-            raise RuntimeError("Native H3 requires a selectable news item; no news context was available")
-        resolved_news = selected_news.to_dict()
-    payload = LLMPromptEngine(
-        mode=os.environ.get("AGENTIC_LLM_MODE", "llm")
-    ).generate_native_h3_storyboard(
+    return NativeH3StoryService().resolve(
+        base_storyboard,
         character=character,
         style=style,
         duration_seconds=duration_seconds,
-        base_storyboard=base_storyboard,
-        news_context=resolved_news,
+        news_context=news_context,
         creative_brief=creative_brief,
     )
-    return merge_native_h3_storyboard(base_storyboard, payload["story"]), payload
 
 
 def merge_native_h3_storyboard(
@@ -296,6 +541,7 @@ def merge_native_h3_storyboard(
         "opening_keyframe_prompt",
         "ending_keyframe_prompt",
         "negative_prompt",
+        "news_trace",
         "story_spine",
         "world",
         "native_audio",
@@ -306,11 +552,18 @@ def merge_native_h3_storyboard(
         raise StoryboardError("Generated native H3 story missing values: " + ", ".join(missing))
     spine = generated_story.get("story_spine")
     world = generated_story.get("world")
+    news_trace = generated_story.get("news_trace")
     shots = generated_story.get("native_shots")
     expected_times = native_h3_shot_times(base_storyboard)
-    if not isinstance(spine, dict) or not isinstance(world, dict) or not isinstance(shots, list) or len(shots) != len(expected_times):
+    if (
+        not isinstance(spine, dict)
+        or not isinstance(world, dict)
+        or not isinstance(news_trace, dict)
+        or not isinstance(shots, list)
+        or len(shots) != len(expected_times)
+    ):
         raise StoryboardError(
-            "Generated native H3 story must define story_spine, world, and exactly "
+            "Generated native H3 story must define story_spine, world, news_trace, and exactly "
             f"{len(expected_times)} native_shots"
         )
     required_spine = ("premise", "objective", "obstacle", "stakes", "climax", "resolution")
@@ -360,6 +613,7 @@ def merge_native_h3_storyboard(
             "opening_keyframe_prompt": str(generated_story["opening_keyframe_prompt"]).strip(),
             "ending_keyframe_prompt": str(generated_story["ending_keyframe_prompt"]).strip(),
             "negative_prompt": str(generated_story["negative_prompt"]).strip(),
+            "news_trace": deepcopy(news_trace),
             "story_spine": deepcopy(spine),
             "world": {
                 **base_world,
@@ -629,6 +883,19 @@ def format_native_h3_prompt(
         continuity_rules=continuity,
     )
     prompt += "\nAudience story contract: the first beat creates a concrete question, the middle worsens the obstacle or reverses the plan, and the final beat answers the original question with visible payoff evidence."
+    news_trace = storyboard.get("news_trace")
+    if isinstance(news_trace, dict):
+        visual_translation = str(news_trace.get("visual_translation") or "").strip()
+        visual_anchors = [
+            str(item).strip()
+            for item in news_trace.get("visual_anchors", [])
+            if str(item).strip()
+        ]
+        if visual_translation or visual_anchors:
+            prompt += (
+                "\nNews-grounded visual anchor: "
+                f"{visual_translation}. Keep these visible across the causal story: {', '.join(visual_anchors)}."
+            ).strip()
     prompt += f"\nEnding frame: show the concrete result of the climax: {str(spine.get('resolution') or '').strip()}."
     prompt += "\nDo not reset to an earlier pose, introduce a new quest, or replace the causal story with unrelated spectacle."
     return prompt.strip()

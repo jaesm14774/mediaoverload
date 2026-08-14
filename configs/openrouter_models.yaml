@@ -1,5 +1,5 @@
 version: 1
-snapshot_date: '2026-08-08'
+snapshot_date: '2026-08-12'
 discover_catalog_at_runtime: false
 randomize_each_request: true
 
@@ -24,13 +24,13 @@ vision:
     mode: structured
   - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     mode: reasoning_off
-  - id: nvidia/nemotron-nano-12b-v2-vl:free
-    mode: prompt_only
 
 # Explicit exclusions from the same snapshot:
 # - inclusionai/ling-3.0-tiny:free: repeated provider 429 during smoke tests.
 # - nvidia/nemotron-nano-9b-v2:free: empty content and no recoverable JSON answer.
 # - google/gemma-4-31b-it:free: repeated provider 429 in the current route.
+# - nvidia/nemotron-nano-12b-v2-vl:free: 0/2 caption runs; malformed response
+#   shape and a provider 502, so it is excluded from the production vision pool.
 # - openai/gpt-oss-20b:free: structured route returned non-JSON content; prompt-only
 #   and reasoning-off variants were also incompatible in follow-up tests.
 # - content-safety, Lyria/audio, openrouter/free: wrong product role or router semantics.

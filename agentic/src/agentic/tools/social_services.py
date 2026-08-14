@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agentic.runtime.registry import ToolRegistry
-from agentic.tools.publishing_adapter import MediaPost, PublishingAdapter
+from agentic.tools.publishing_adapter import MediaPost, PublishingAdapter, build_dispatch_plan
 
 
 class SocialServiceTools:
@@ -31,7 +31,7 @@ class SocialServiceTools:
         platform_configs = payload.get("platform_configs", {}) or {}
         dry_run = bool(payload.get("dry_run", False))
         publish_mode = str(payload.get("publish_mode") or "").strip().lower()
-        dispatch_plan = self._build_dispatch_plan(
+        dispatch_plan = build_dispatch_plan(
             media_paths=media_paths,
             caption=caption,
             hashtags=hashtags_str or "",
@@ -41,6 +41,8 @@ class SocialServiceTools:
         if dry_run:
             return {
                 "status": "dry_run",
+                "publication_state": "not_attempted",
+                "publicly_visible": False,
                 "media_paths": media_paths,
                 "caption": caption,
                 "hashtags": hashtags_str,
@@ -92,17 +94,29 @@ class SocialServiceTools:
                 receipt = receipts.get(platform) if isinstance(receipts, dict) else None
                 if isinstance(receipt, dict):
                     publish_receipts[platform] = dict(receipt)
-        manifest_path = self._write_publish_manifest(
-            payload=payload,
-            media_paths=media_paths,
-            platforms=platforms or list(results.keys()),
+        effective_platforms = platforms or list(results.keys())
+        publication_state, publicly_visible = self._publication_state(
             publish_mode=publish_mode,
+            platforms=effective_platforms,
             results=results,
             errors=errors,
             receipts=publish_receipts,
         )
+        manifest_path = self._write_publish_manifest(
+            payload=payload,
+            media_paths=media_paths,
+            platforms=effective_platforms,
+            publish_mode=publish_mode,
+            results=results,
+            errors=errors,
+            receipts=publish_receipts,
+            publication_state=publication_state,
+            publicly_visible=publicly_visible,
+        )
         return {
             "status": "success" if not errors else "partial_failure",
+            "publication_state": publication_state,
+            "publicly_visible": publicly_visible,
             "results": results,
             "errors": errors,
             "publish_receipts": publish_receipts,
@@ -110,7 +124,7 @@ class SocialServiceTools:
             "media_paths": media_paths,
             "caption": caption,
             "hashtags": hashtags_str,
-            "platforms": platforms or list(results.keys()),
+            "platforms": effective_platforms,
             "dispatch_plan": dispatch_plan,
             "publish_mode": publish_mode,
         }
@@ -125,6 +139,8 @@ class SocialServiceTools:
         results: dict[str, bool],
         errors: dict[str, str],
         receipts: dict[str, dict[str, object]],
+        publication_state: str,
+        publicly_visible: bool,
     ) -> str | None:
         manifest_dir = str(payload.get("manifest_dir") or "").strip()
         if not manifest_dir:
@@ -141,9 +157,71 @@ class SocialServiceTools:
             "errors": errors,
             "publish_receipts": receipts,
             "status": "success" if not errors else "partial_failure",
+            "publication_state": publication_state,
+            "publicly_visible": publicly_visible,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         return str(manifest_path)
+
+    @classmethod
+    def _publication_state(
+        cls,
+        *,
+        publish_mode: str,
+        platforms: list[str],
+        results: dict[str, bool],
+        errors: dict[str, str],
+        receipts: dict[str, dict[str, object]],
+    ) -> tuple[str, bool]:
+        """Separate transport success from actual public visibility.
+
+        A platform API can accept an upload while leaving it private, as a
+        draft, or as an unpublished Instagram container.  Those states must
+        never be reported as a public publication.
+        """
+        public_count = sum(
+            1 for platform in platforms if cls._receipt_is_public(receipts.get(platform))
+        )
+        if errors:
+            if public_count:
+                return "partially_published", False
+            return "failed", False
+        if not platforms or not all(results.get(platform, False) for platform in platforms):
+            return "failed", False
+        if publish_mode == "safe_poc":
+            return "staged", False
+        if len(receipts) < len(platforms):
+            return "unknown", False
+        if public_count == len(platforms):
+            return "published", True
+        if any(cls._receipt_is_non_public(receipts.get(platform)) for platform in platforms):
+            return "staged", False
+        return "uploaded_unverified", False
+
+    @staticmethod
+    def _receipt_is_public(receipt: dict[str, object] | None) -> bool:
+        if not isinstance(receipt, dict) or not bool(receipt.get("verified")):
+            return False
+        visibility = str(receipt.get("visibility") or "").strip().lower()
+        status = str(receipt.get("status") or "").strip().lower()
+        return visibility in {"public", "published"} and status not in {
+            "container_ready",
+            "draft_ready",
+            "uploaded_unverified",
+        }
+
+    @classmethod
+    def _receipt_is_non_public(cls, receipt: dict[str, object] | None) -> bool:
+        if not isinstance(receipt, dict):
+            return False
+        if cls._receipt_is_public(receipt):
+            return False
+        visibility = str(receipt.get("visibility") or "").strip().lower()
+        status = str(receipt.get("status") or "").strip().lower()
+        return visibility in {"private", "draft", "container_only", "container_ready"} or status in {
+            "draft_ready",
+            "container_ready",
+        }
 
     @staticmethod
     def _safe_poc_params(publish_mode: str) -> dict[str, object]:
@@ -169,41 +247,6 @@ class SocialServiceTools:
         if self._publishing is None:
             self._publishing = PublishingAdapter()
         return self._publishing
-
-    @staticmethod
-    def _build_dispatch_plan(
-        media_paths: list[str],
-        caption: str,
-        hashtags: str,
-        platforms: list[str],
-        platform_bundle: dict[str, object],
-    ) -> dict[str, dict[str, object]]:
-        effective_platforms = platforms or [str(platform) for platform in platform_bundle.keys()]
-        if not effective_platforms:
-            effective_platforms = ["generic"]
-        dispatch_plan: dict[str, dict[str, object]] = {}
-        for platform in effective_platforms:
-            bundle = platform_bundle.get(platform, {})
-            if not isinstance(bundle, dict):
-                bundle = {}
-            platform_caption = str(bundle.get("caption") or caption)
-            platform_hashtags = str(bundle.get("hashtags") or hashtags)
-            platform_media_paths = [str(path) for path in bundle.get("media_paths", media_paths)]
-            validation = bundle.get("validation", {})
-            if not isinstance(validation, dict):
-                validation = {}
-            dispatch_plan[platform] = {
-                "caption": platform_caption,
-                "hashtags": platform_hashtags,
-                "media_paths": platform_media_paths,
-                "validation": {
-                    "has_caption": bool(validation.get("has_caption", platform_caption)),
-                    "has_media": bool(validation.get("has_media", platform_media_paths)),
-                    "is_publish_ready": bool(validation.get("is_publish_ready", bool(platform_caption) and bool(platform_media_paths))),
-                },
-            }
-        return dispatch_plan
-
 
 def register_social_service_tools(tool_registry: ToolRegistry, output_root: Path) -> None:
     tools = SocialServiceTools(output_root=output_root)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import os
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
+from agentic.runtime.observability import RunRecorder
+from agentic.runtime.video_quality import normalize_video_semantic_qa
 
 
 class _FakeTextModel:
@@ -26,6 +30,13 @@ class _FakeManager:
 
 
 class LLMEngineTests(unittest.TestCase):
+    def test_run_recorder_sanitizes_run_id_before_creating_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = RunRecorder(Path(temp_dir), "../escape/run")
+
+            self.assertEqual(recorder.run_id, "escape_run")
+            self.assertEqual(recorder.run_dir.parent, Path(temp_dir))
+
     def test_expand_goal_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
@@ -82,7 +93,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2.2_gguf_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_lowvram_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
                 ]
             ),
         )
@@ -96,7 +107,7 @@ class LLMEngineTests(unittest.TestCase):
                 "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
                 "sticker_pack": {
                     "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
-                    "video_workflow_name": ["wan2.2_gguf_i2v"],
+                    "video_workflow_name": ["minimax_h3_lowvram_i2v"],
                 },
             },
             count_policies={
@@ -122,7 +133,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_route_generation_strategy_schema_locks_unavailable_sticker_stages(self) -> None:
         manager = _FakeManager(
             [
-                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2.2_gguf_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_lowvram_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
             ]
         )
         engine = LLMPromptEngine(mode="llm", manager=manager)
@@ -136,7 +147,7 @@ class LLMEngineTests(unittest.TestCase):
                 "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
                 "sticker_pack": {
                     "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
-                    "video_workflow_name": ["wan2.2_gguf_i2v"],
+                    "video_workflow_name": ["minimax_h3_lowvram_i2v"],
                 },
             },
             count_policies={
@@ -169,6 +180,69 @@ class LLMEngineTests(unittest.TestCase):
             sticker_branch["properties"]["workflow_plan"]["properties"]["upscale_workflow_name"],
             {"const": ""},
         )
+
+    def test_route_generation_strategy_defaults_an_omitted_policy_count(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"minimax_h3_lowvram_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
+                ]
+            ),
+        )
+
+        result = engine.route_generation_strategy(
+            prompt="Kirby makes a short animated clip",
+            character="Kirby",
+            style="anime",
+            generation_type_candidates=["text2image2video"],
+            workflow_stage_candidates={
+                "text2image2video": {
+                    "image_workflow_name": ["anima_anime"],
+                    "video_workflow_name": ["minimax_h3_lowvram_i2v"],
+                }
+            },
+            count_policies={
+                "text2image2video": {
+                    "image_count": {"min": 1, "max": 4},
+                    "video_count": {"min": 1, "max": 4},
+                }
+            },
+        )
+
+        self.assertEqual(result["count_plan"], {"image_count": 2, "video_count": 1})
+
+    def test_route_generation_strategy_ignores_legacy_irrelevant_counts(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"generation_type":"text2img","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":0,"segment_count":0,"review_selection_limit":1,"sticker_expression_count":0,"images_per_prompt":0},"reason":"Image-only request."}',
+                ]
+            ),
+        )
+
+        result = engine.route_generation_strategy(
+            prompt="Kirby portrait",
+            character="Kirby",
+            style="anime",
+            generation_type_candidates=["text2img"],
+            workflow_stage_candidates={
+                "text2img": {"image_workflow_name": ["nova-anime-xl"]}
+            },
+            count_policies={
+                "text2img": {
+                    "image_count": {"min": 1, "max": 4},
+                    "video_count": {"min": 1, "max": 1},
+                    "segment_count": {"min": 1, "max": 1},
+                    "review_selection_limit": {"min": 1, "max": 4},
+                    "sticker_expression_count": {"min": 1, "max": 1},
+                    "images_per_prompt": {"min": 1, "max": 1},
+                }
+            },
+        )
+
+        self.assertEqual(result["count_plan"], {"image_count": 1, "review_selection_limit": 1})
 
     def test_route_generation_strategy_raises_when_manager_unavailable(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)
@@ -342,7 +416,19 @@ class LLMEngineTests(unittest.TestCase):
                 ]
             ),
         )
-        goal = GoalRequest(prompt="publish kirby clip", media_type="publish_review", style="social promo")
+        goal = GoalRequest(
+            prompt="publish kirby clip",
+            media_type="publish_review",
+            style="social promo",
+            constraints={
+                "visual_grounding": {
+                    "status": "fail",
+                    "observed_story": "Kirby crosses a storm-lit meadow.",
+                    "caption_guidance": "Mention only Kirby and the meadow.",
+                    "issues": ["The news anchor is not visible."],
+                }
+            },
+        )
 
         result = engine.prepare_publish_caption(
             goal,
@@ -357,6 +443,201 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["hashtags"], "#one #two")
         self.assertEqual(result["platform_captions"]["instagram"], "ig caption")
         self.assertEqual(result["prompt_mode"], "llm")
+        self.assertIn("Mention only Kirby and the meadow.", engine._manager.text_model.calls[0]["messages"][1]["content"])
+        self.assertEqual(engine._manager.text_model.calls[0]["kwargs"]["max_retries"], 2)
+        self.assertIsNone(engine._manager.text_model.calls[0]["kwargs"].get("max_models_per_call"))
+        self.assertEqual(engine._manager.text_model.calls[0]["kwargs"]["request_timeout"], 60.0)
+
+    def test_prepare_publish_caption_removes_internal_labels_and_keeps_long_form_post(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"Caption: The purple orb flickers above the grass.\\n\\n1️⃣ Kirby faces the energy.\\n2️⃣ A golden shard changes the outcome.\\n\\nWhich moment stayed with you?\\n\\n#kirby #mediaoverload","hashtags":"#kirby #mediaoverload","platform_captions":{"facebook":"Caption: The purple orb flickers above the grass.\\n\\nWhich moment stayed with you?"}}',
+                ]
+            ),
+        )
+
+        result = engine.prepare_publish_caption(
+            GoalRequest(prompt="publish Kirby story", media_type="publish_review", style="social promo"),
+            prefix="",
+            hashtags=["kirby", "mediaoverload"],
+            platforms=["facebook"],
+            media_paths=["C:\\kirby.mp4"],
+        )
+
+        self.assertTrue(result["caption"].startswith("The purple orb flickers"))
+        self.assertIn("Kirby faces the energy.", result["caption"])
+        self.assertNotIn("Caption:", result["caption"])
+        self.assertNotIn("Hashtags:", result["caption"])
+        self.assertNotIn("Caption:", result["platform_captions"]["facebook"])
+
+    def test_publish_article_format_retries_a_short_draft(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"A short sentence.","hashtags":"#kirby #mediaoverload","platform_captions":{"facebook":"A short sentence."}}',
+                    '{"caption":"A strong hook opens the story.\\n\\nThe visible conflict gives the moment meaning.\\n\\n1. Kirby faces the orb.\\n2. The shard changes the outcome.\\n3. The crystal shows the payoff.\\n\\nWhich beat would you remember? Save this idea for later.","hashtags":"#kirby #mediaoverload","platform_captions":{"facebook":"A strong hook opens the story.\\n\\nThe visible conflict gives the moment meaning.\\n\\nWhich beat would you remember? Save this idea for later."}}',
+                ]
+            ),
+        )
+
+        result = engine.prepare_publish_caption(
+            GoalRequest(
+                prompt="publish Kirby story",
+                media_type="publish_review",
+                style="social promo",
+                constraints={"social_post_format": True},
+            ),
+            prefix="",
+            hashtags=["kirby", "mediaoverload"],
+            platforms=["facebook"],
+            media_paths=["C:\\kirby.mp4"],
+        )
+
+        self.assertIn("Which beat would you remember?", result["caption"])
+        self.assertIn("Which beat would you remember?", result["platform_captions"]["facebook"])
+        self.assertEqual(len(engine._manager.text_model.calls), 2)
+        self.assertNotIn("Caption:", result["caption"])
+        self.assertNotIn("Hashtags:", result["caption"])
+
+    def test_prepare_publish_caption_fails_when_caption_provider_fails(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(["not json"]),
+        )
+        goal = GoalRequest(
+            prompt="publish Kirby image",
+            media_type="publish_review",
+            style="anime",
+        )
+
+        with self.assertRaises(PromptGenerationError):
+            engine.prepare_publish_caption(
+                goal,
+                prefix="",
+                hashtags=["kirby"],
+                platforms=["instagram", "facebook"],
+                media_paths=["C:\\kirby.png"],
+            )
+
+    def test_prepare_publish_caption_rejects_placeholder_caption(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"None","hashtags":"#kirby #mediaoverload","platform_captions":{"facebook":"None"}}',
+                ]
+            ),
+        )
+
+        with self.assertRaises(PromptGenerationError):
+            engine.prepare_publish_caption(
+                GoalRequest(prompt="publish Kirby baseball clip", media_type="publish_review", style="anime"),
+                prefix="",
+                hashtags=["kirby", "mediaoverload"],
+                platforms=["facebook"],
+                media_paths=["C:\\kirby.mp4"],
+            )
+
+    def test_prepare_publish_caption_uses_attached_visual_evidence(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [],
+                vision_responses=[
+                    '{"caption":"Kirby stands beside a glowing blue crystal.","hashtags":"#kirby #mediaoverload","platform_captions":{"instagram_graph":"Kirby stands beside a glowing blue crystal."}}',
+                ],
+            ),
+        )
+        result = engine.prepare_publish_caption(
+            GoalRequest(prompt="The prompt claims a city battle.", media_type="publish_review", style="anime"),
+            prefix="",
+            hashtags=["kirby", "mediaoverload"],
+            platforms=["instagram_graph"],
+            media_paths=["D:\\kirby.png"],
+            visual_paths=["D:\\kirby.png"],
+        )
+
+        self.assertEqual(result["caption"], "Kirby stands beside a glowing blue crystal.")
+        self.assertEqual(engine._manager.vision_model.calls[0]["kwargs"]["images"], ["D:\\kirby.png"])
+        self.assertEqual(engine._manager.text_model.calls, [])
+
+    def test_prepare_publish_caption_closes_platform_contract_and_normalizes_tags(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"caption body","hashtags":"#one","platform_captions":{"instagram":"ig caption","youtube":"yt caption","youtube_title":"leaked metadata","youtube_tags":"leaked tags"},"youtube_title":"Kirby Clip","youtube_tags":"kirby, #anime, kirby"}',
+                ]
+            ),
+        )
+        goal = GoalRequest(prompt="publish kirby clip", media_type="publish_review", style="social promo")
+
+        result = engine.prepare_publish_caption(
+            goal,
+            prefix="",
+            hashtags=[],
+            platforms=["instagram", "youtube"],
+            media_paths=["C:\\clip.mp4"],
+            review_notes="",
+        )
+
+        self.assertEqual(set(result["platform_captions"]), {"instagram", "youtube"})
+        self.assertEqual(result["youtube_title"], "Kirby Clip")
+        self.assertEqual(result["youtube_tags"], ["kirby", "anime"])
+
+    def test_normalize_hashtags_blocks_internal_project_tag(self) -> None:
+        result = LLMPromptEngine._normalize_hashtag_text(
+            "#mediaoverload #RainyNeon #kirby",
+            required_hashtags=["mediaoverload", "kirby"],
+        )
+
+        self.assertEqual(result, "#kirby #RainyNeon")
+        self.assertNotIn("mediaoverload", result.casefold())
+
+    def test_prepare_publish_caption_reuses_main_article_when_platform_caption_is_missing(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"caption body","hashtags":"#kirby","platform_captions":{"instagram":"ig caption"}}',
+                ]
+            ),
+        )
+
+        result = engine.prepare_publish_caption(
+            GoalRequest(prompt="publish Kirby", media_type="publish_review", style="anime"),
+            prefix="",
+            hashtags=["kirby"],
+            platforms=["instagram", "facebook"],
+        )
+
+        self.assertEqual(result["platform_captions"]["instagram"], "ig caption")
+        self.assertEqual(result["platform_captions"]["facebook"], "caption body")
+
+    def test_caption_result_and_recorder_include_concrete_model_id(self) -> None:
+        manager = _FakeManager(
+            [
+                '{"caption":"short caption","hashtags":"#kirby","platform_captions":{"instagram_graph":"short caption"}}',
+            ]
+        )
+        manager.text_model.last_success_model = "test/caption-model"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = RunRecorder(Path(temp_dir), "model-id")
+            engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
+            result = engine.prepare_publish_caption(
+                GoalRequest(prompt="publish Kirby", media_type="publish_review", style="anime"),
+                prefix="",
+                hashtags=["kirby"],
+                platforms=["instagram_graph"],
+                media_paths=["D:\\kirby.png"],
+            )
+            record = json.loads(next((Path(temp_dir) / "model-id" / "llm").glob("*.json")).read_text(encoding="utf-8"))
+
+        self.assertEqual(result["llm_model"], "test/caption-model")
+        self.assertEqual(record["model_id"], "test/caption-model")
 
     def test_review_asset_candidates_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(
@@ -482,6 +763,65 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("JSON REPAIR MODE", fake_manager.text_model.calls[1]["messages"][0]["content"])
         self.assertNotIn("response_format", fake_manager.text_model.calls[1]["kwargs"])
 
+    def test_chat_json_uses_configurable_request_timeout(self) -> None:
+        fake_manager = _FakeManager(['{"ok":true}'])
+
+        with patch.dict(os.environ, {"AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS": "7.5"}):
+            result = LLMPromptEngine._chat_json(
+                fake_manager,
+                "You are a story planner.",
+                "Return the plan.",
+                "plan",
+                {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(fake_manager.text_model.calls[0]["kwargs"]["request_timeout"], 7.5)
+
+    def test_chat_json_records_each_request_and_response_for_debugging(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = RunRecorder(Path(temp_dir), "run-debug")
+            manager = _FakeManager(["not json", '{"ok":true}'])
+            engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
+            engine._require_manager()
+
+            result = LLMPromptEngine._chat_json(
+                manager,
+                "You are a story planner.",
+                "Return the plan.",
+                "plan",
+                {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            )
+
+            self.assertEqual(result, {"ok": True})
+            call_files = sorted((Path(temp_dir) / "run-debug" / "llm").glob("*.json"))
+            self.assertEqual(len(call_files), 2)
+            first = json.loads(call_files[0].read_text(encoding="utf-8"))
+            second = json.loads(call_files[1].read_text(encoding="utf-8"))
+            self.assertEqual(first["status"], "failed")
+            self.assertEqual(second["status"], "success")
+            self.assertIn("You are a story planner.", second["messages"][0]["content"])
+            self.assertEqual(second["parsed_payload"], {"ok": True})
+
+    def test_engine_chat_wrapper_records_calls_for_secondary_llm_flows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = RunRecorder(Path(temp_dir), "run-secondary")
+            manager = _FakeManager(['{"ok":true}'])
+            engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
+
+            result = engine._chat_json_with_recorder(
+                manager,
+                "You are a caption planner.",
+                "Return the plan.",
+                schema_name="publish_caption",
+                schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            )
+
+            self.assertEqual(result, {"ok": True})
+            call_files = sorted((Path(temp_dir) / "run-secondary" / "llm").glob("*.json"))
+            self.assertEqual(len(call_files), 1)
+            self.assertEqual(json.loads(call_files[0].read_text(encoding="utf-8"))["status"], "success")
+
     def test_chat_json_uses_array_contract_for_array_schema(self) -> None:
         fake_manager = _FakeManager(['[{"ok":true}]'])
 
@@ -580,6 +920,155 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertIs(manager, fake_manager)
         build_mock.assert_called_once()
+
+    def test_video_semantic_qa_uses_contact_sheet_and_normalizes_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contact_sheet = Path(temp_dir) / "contact_sheet.jpg"
+            contact_sheet.write_bytes(b"jpg")
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [],
+                    vision_responses=[
+                        json.dumps(
+                            {
+                                "status": "pass",
+                                "score": 92,
+                                "checks": {
+                                    "protagonist_clear": True,
+                                    "primary_action_visible": True,
+                                    "news_anchor_visible": True,
+                                    "progression_visible": True,
+                                    "unwanted_extra_characters": False,
+                                },
+                                "observed_story": "Kirby carries the glowing seed through the storm.",
+                                "issues": [],
+                                "caption_guidance": "Claim only Kirby, the seed, and the storm-lit meadow.",
+                            }
+                        )
+                    ],
+                ),
+            )
+
+            result = engine.evaluate_video_contact_sheet(
+                contact_sheet_path=str(contact_sheet),
+                character="Kirby",
+                story_spine={"hook": "seed falls", "payoff": "meadow restored"},
+                native_shots=[{"action": "Kirby carries the seed"}],
+                news_context={"title": "storm warning"},
+                rendered_prompt="one continuous Kirby story",
+            )
+
+            self.assertTrue(result["passed"])
+            self.assertEqual(result["status"], "pass")
+            vision_call = engine._manager.vision_model.calls[0]
+            self.assertEqual(vision_call["kwargs"]["images"], [str(contact_sheet)])
+
+    def test_video_semantic_qa_does_not_pass_without_vision_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contact_sheet = Path(temp_dir) / "contact_sheet.jpg"
+            contact_sheet.write_bytes(b"jpg")
+            result = LLMPromptEngine(mode="template").evaluate_video_contact_sheet(
+                contact_sheet_path=str(contact_sheet),
+                character="Kirby",
+                story_spine={},
+                native_shots=[],
+                news_context={},
+                rendered_prompt="story",
+            )
+
+            self.assertIsNone(result["passed"])
+            self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["reason"], "vision model unavailable")
+
+    def test_video_semantic_qa_flags_unwanted_characters_as_hard_failure(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 100,
+                "checks": {
+                    "protagonist_clear": True,
+                    "primary_action_visible": True,
+                    "news_anchor_visible": True,
+                    "progression_visible": True,
+                    "unwanted_extra_characters": True,
+                },
+                "issues": [],
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "fail")
+
+    def test_video_semantic_qa_maps_concrete_anchor_when_model_uses_legacy_news_anchor_false(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "fail",
+                "score": 98,
+                "checks": {
+                    "protagonist_clear": True,
+                    "primary_action_visible": True,
+                    "news_anchor_visible": False,
+                    "progression_visible": True,
+                    "unwanted_extra_characters": False,
+                },
+                "observed_story": "Kirby protects a glowing golden orb from shadowy tendrils and restores it.",
+                "issues": [],
+                "caption_guidance": "The orb is visible.",
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+            news_anchor_terms=["glowing golden orb", "shadowy tendrils attempting to steal the orb"],
+        )
+
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["checks"]["news_anchor_visible"])
+
+    def test_video_semantic_qa_blocks_multi_panel_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contact_sheet = Path(temp_dir) / "contact_sheet.jpg"
+            contact_sheet.write_bytes(b"jpg")
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [],
+                    vision_responses=[
+                        json.dumps(
+                            {
+                                "status": "fail",
+                                "score": 88,
+                                "checks": {
+                                    "protagonist_clear": True,
+                                    "primary_action_visible": True,
+                                    "news_anchor_visible": True,
+                                    "progression_visible": True,
+                                    "unwanted_extra_characters": False,
+                                },
+                                "observed_story": "Kirby advances through a baseball story in a stylized panel layout.",
+                                "issues": ["stylized logo and split-panel composition"],
+                                "caption_guidance": "Describe only the visible Kirby baseball action.",
+                            }
+                        )
+                    ],
+                ),
+            )
+
+            result = engine.evaluate_video_contact_sheet(
+                contact_sheet_path=str(contact_sheet),
+                character="Kirby",
+                story_spine={"objective": "reach the baseball field"},
+                native_shots=[{"action": "Kirby runs"}],
+                news_context={"title": "baseball reunion"},
+                rendered_prompt="one continuous Kirby baseball story",
+            )
+
+            self.assertEqual(result["status"], "fail")
+            self.assertFalse(result["passed"])
+            self.assertFalse(result["advisory_only"])
 
 
 if __name__ == "__main__":

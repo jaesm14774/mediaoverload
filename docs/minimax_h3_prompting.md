@@ -27,7 +27,8 @@ Native H3 uses the same order as one `integrated_multimodal_description` with `[
 
 - Shared composer: `agentic/src/agentic/minimax_prompting.py`
 - General prompt builders: `agentic/src/agentic/runtime/prompting.py`
-- Native H3 storyboard formatter: `agentic/src/agentic/storyboard.py`
+- Native H3 storyboard rules/formatter: `agentic/src/agentic/storyboard.py`
+- Native H3 news/LLM orchestration: `agentic/src/agentic/runtime/story_service.py`
 - LLM story/repair instructions: `agentic/src/agentic/runtime/llm_engine.py`
 - ComfyUI execution: `agentic/src/agentic/skills/longvideo.py`
 

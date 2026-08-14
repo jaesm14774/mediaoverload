@@ -105,7 +105,7 @@
   },
   "44": {
     "inputs": {
-      "unet_name": "anima\\anima-preview2.safetensors",
+      "unet_name": "anima\\anima-aesthetic-v1.1.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",

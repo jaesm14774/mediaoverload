@@ -12,11 +12,13 @@ from agentic.assets.registry import AssetRegistry
 from agentic.memory import PortfolioMemory, RunMemory
 from agentic.runtime.creativity import FeedbackRanker, IdeaDirector, RetryPolicy
 from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.observability import RunRecorder
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
 from agentic.runtime.step_logger import create_run_logger
+from agentic.runtime.story_service import NativeH3StoryService
 from agentic.skills.agent_primitives import register_agent_primitive_skills
 from agentic.skills.agent_social import register_agent_social_skills
 from agentic.skills.comfy_image import register_comfy_image_skills
@@ -26,9 +28,9 @@ from agentic.skills.storyboard import register_storyboard_skills
 from agentic.tools.comfy import register_builtin_tools
 from agentic.tools.authoring import register_authoring_tools
 from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
+from agentic.tools.context_services import NewsContextService
 from agentic.tools.local import register_local_tools
 from agentic.tools.media_services import register_media_service_tools
-from agentic.tools.model_resolver import register_model_resolver_tools
 from agentic.tools.social_services import register_social_service_tools
 
 
@@ -39,11 +41,15 @@ def build_runtime(
     comfy_port: int | None = None,
     comfy_root: Path | None = None,
     run_id: str | None = None,
+    logger=None,
+    recorder: RunRecorder | None = None,
 ) -> tuple[TaskPlanner, WorkflowRunner, RunMemory]:
-    asset_registry = AssetRegistry(
-        root,
-        asset_root=comfy_root or root.parent,
-    )
+    if recorder is None and logger is not None:
+        recorder = getattr(logger, "run_recorder", None)
+    if run_id and logger is None:
+        logger, _ = create_run_logger(root / "logs" / "runs", run_id, recorder=recorder)
+        recorder = getattr(logger, "run_recorder", recorder)
+    asset_registry = AssetRegistry(root, asset_root=_resolve_comfy_root(root, comfy_root))
     tool_registry = ToolRegistry()
     skill_registry = SkillRegistry()
     run_memory = RunMemory()
@@ -51,7 +57,11 @@ def build_runtime(
     portfolio_dir.mkdir(parents=True, exist_ok=True)
     portfolio_memory = PortfolioMemory(portfolio_dir / "agentic_portfolio.jsonl")
     resolved_output_root = output_root or root / "output"
-    llm_engine = LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
+    _allow_runtime_output_for_visual_evidence(resolved_output_root)
+    llm_engine = LLMPromptEngine(
+        mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
+        recorder=recorder,
+    )
     prompt_engine = PromptEngine(llm_engine=llm_engine)
 
     register_builtin_tools(tool_registry, asset_registry)
@@ -66,21 +76,25 @@ def build_runtime(
     )
     register_media_service_tools(tool_registry, resolved_output_root)
     register_social_service_tools(tool_registry, resolved_output_root)
-    register_model_resolver_tools(tool_registry, comfy_host=comfy_host, comfy_port=comfy_port)
     register_agent_primitive_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_agent_social_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_comfy_image_skills(skill_registry, tool_registry, resolved_output_root)
     register_comfy_workflow_skills(skill_registry, tool_registry, resolved_output_root)
-    register_longvideo_skills(skill_registry, tool_registry, resolved_output_root)
+    register_longvideo_skills(
+        skill_registry,
+        tool_registry,
+        resolved_output_root,
+        prompt_engine=prompt_engine,
+        story_service=NativeH3StoryService(
+            llm_engine=llm_engine,
+            news_service=NewsContextService(),
+        ),
+    )
     register_storyboard_skills(skill_registry, tool_registry)
 
     idea_director = IdeaDirector()
     retry_policy = RetryPolicy(max_attempts=3)
     feedback_ranker = FeedbackRanker()
-    logger = None
-    if run_id:
-        logger, _ = create_run_logger(root / "logs" / "runs", run_id)
-
     planner = TaskPlanner(asset_registry=asset_registry, idea_director=idea_director)
     runner = WorkflowRunner(
         skill_registry=skill_registry,
@@ -89,9 +103,42 @@ def build_runtime(
         retry_policy=retry_policy,
         feedback_ranker=feedback_ranker,
         logger=logger,
+        recorder=recorder,
     )
     runner.tool_registry = tool_registry
     return planner, runner, run_memory
+
+
+def _allow_runtime_output_for_visual_evidence(output_root: Path) -> None:
+    """Allow the app's own generated media root to reach vision fallbacks.
+
+    Vision providers intentionally reject arbitrary filesystem paths. The
+    runtime output directory is an explicit app-owned root, so registering it
+    here keeps caption/review fallback functional even when ``--output-dir``
+    points outside the repository (for example, a dedicated D: drive).
+    """
+
+    resolved = output_root.expanduser().resolve()
+    configured = [
+        Path(raw.strip()).expanduser().resolve()
+        for raw in os.environ.get("AGENTIC_ALLOWED_IMAGE_ROOTS", "").split(",")
+        if raw.strip()
+    ]
+    if not any(resolved == root or root in resolved.parents for root in configured):
+        configured.append(resolved)
+        os.environ["AGENTIC_ALLOWED_IMAGE_ROOTS"] = ",".join(str(root) for root in configured)
+
+
+def _resolve_comfy_root(root: Path, explicit_root: Path | None) -> Path:
+    if explicit_root:
+        return explicit_root.expanduser().resolve()
+    configured_root = os.environ.get("COMFYUI_ROOT", "").strip()
+    if configured_root:
+        return Path(configured_root).expanduser().resolve()
+    portable_root = Path(r"D:\ComfyUI_windows_portable")
+    if portable_root.is_dir():
+        return portable_root.resolve()
+    return root.parent.resolve()
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,7 +152,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", help="Optional output directory for artifact-producing workflows")
     parser.add_argument("--comfy-host", help="Override ComfyUI host")
     parser.add_argument("--comfy-port", type=int, help="Override ComfyUI port")
-    parser.add_argument("--comfy-root", help="Override ComfyUI root for asset checks")
+    parser.add_argument(
+        "--comfy-root",
+        default=os.environ.get("COMFYUI_ROOT", r"D:\ComfyUI_windows_portable"),
+        help="ComfyUI root for asset checks (default: COMFYUI_ROOT or D:\\ComfyUI_windows_portable)",
+    )
     parser.add_argument("--input-image", help="Input image path for img2img/i2v/upscale workflows")
     parser.add_argument("--input-video", help="Input video path for frame extraction workflows")
     parser.add_argument("--input-dir", help="Input directory for publish/review workflows")

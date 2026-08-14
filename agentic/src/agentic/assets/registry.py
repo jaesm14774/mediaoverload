@@ -79,16 +79,19 @@ class WorkflowManifest:
 _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
     "z_image_i2i_anime": {"denoise": 0.7},
-    "wan2.2_gguf_i2v": {"frame_rate": 16},
-    "wan2.2_gguf_i2v_audio": {"frame_rate": 16},
     "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
     "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
-    "minimax_h3_ultra_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
-    "minimax_h3_ultra_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
-    "minimax_h3_ultra_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_native_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_native_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_ref2va": {
+        "width": 608,
+        "height": 352,
+        "length": 124,
+        "frame_rate": 24,
+        "steps": 20,
+        "ref_image_size": "match",
+    },
 }
 
 
@@ -114,6 +117,8 @@ def _relative_to_project(project_root: Path, absolute_file: Path) -> str:
 
 def _infer_media_types(stem: str) -> list[str]:
     lower = stem.lower()
+    if lower == "minimax_h3_ref2va":
+        return ["native_h3_ref2va", "long_video"]
     shared_image = [
         "image",
         "storyboard",
@@ -126,7 +131,7 @@ def _infer_media_types(stem: str) -> list[str]:
         return ["image_upscale"]
     if "i2i" in lower or lower == "image_to_image":
         return ["image_refine"]
-    if "i2v" in lower or ("wan" in lower and "gguf" in lower):
+    if "i2v" in lower:
         return ["image_to_video", "image_to_video_audio", "long_video"]
     return shared_image + ["text2video", "text2img2video", "video_narrate"]
 
@@ -148,22 +153,22 @@ def _minimax_h3_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
         "minimax_h3_lowvram_i2v": "balanced-lowvram",
         "minimax_h3_lowvram_t2v": "balanced-lowvram",
         "minimax_h3_lowvram_15s_fl2va_i2v": "balanced-lowvram",
-        "minimax_h3_ultra_lowvram_i2v": "ultra-lowvram",
-        "minimax_h3_ultra_lowvram_t2v": "ultra-lowvram",
-        "minimax_h3_ultra_lowvram_15s_fl2va_i2v": "ultra-lowvram",
         "minimax_h3_native_i2v": "native-quality",
         "minimax_h3_native_t2v": "native-quality",
+        "minimax_h3_ref2va": "ref2va-lowvram",
     }.get(name)
     if not profile_name:
         return _synthetic_manifest(name, workflow_rel_path)
     payload = profile_manifest(profile_name)
+    recommended_defaults = dict(payload["recommended_defaults"])
+    recommended_defaults.update(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {}))
     return WorkflowManifest(
         name=name,
         media_types=list(payload["media_types"]),
         workflow_path=workflow_rel_path,
         summary=str(payload["summary"]),
         required_assets=[AssetRequirement.from_dict(item) for item in payload["required_assets"]],
-        recommended_defaults=dict(payload["recommended_defaults"]),
+        recommended_defaults=recommended_defaults,
         asset_extra_roots=[],
     )
 

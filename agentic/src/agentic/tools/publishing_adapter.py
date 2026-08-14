@@ -1,18 +1,45 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-from agentic.tools.social_native import MediaPost as NativeMediaPost
-from agentic.tools.social_native import PublishingService
+from agentic.tools.social_native import MediaPost, PublishingService
 
 
-@dataclass(slots=True)
-class MediaPost:
-    media_paths: list[str]
-    caption: str
-    hashtags: str | None = None
-    additional_params: dict[str, Any] | None = None
+def build_dispatch_plan(
+    media_paths: list[str],
+    caption: str,
+    hashtags: str,
+    platforms: list[str],
+    platform_bundle: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    """Normalize one platform-aware publish contract for skills and tools."""
+    effective_platforms = platforms or [str(platform) for platform in platform_bundle.keys()]
+    if not effective_platforms:
+        effective_platforms = ["generic"]
+    dispatch_plan: dict[str, dict[str, object]] = {}
+    for platform in effective_platforms:
+        bundle = platform_bundle.get(platform, {})
+        if not isinstance(bundle, dict):
+            bundle = {}
+        platform_caption = str(bundle.get("caption") or caption)
+        platform_hashtags = str(bundle.get("hashtags") or hashtags)
+        platform_media_paths = [str(path) for path in bundle.get("media_paths", media_paths)]
+        validation = bundle.get("validation", {})
+        if not isinstance(validation, dict):
+            validation = {}
+        dispatch_plan[platform] = {
+            "caption": platform_caption,
+            "hashtags": platform_hashtags,
+            "media_paths": platform_media_paths,
+            "validation": {
+                "has_caption": bool(validation.get("has_caption", platform_caption)),
+                "has_media": bool(validation.get("has_media", platform_media_paths)),
+                "is_publish_ready": bool(
+                    validation.get("is_publish_ready", bool(platform_caption) and bool(platform_media_paths))
+                ),
+            },
+        }
+    return dispatch_plan
 
 
 class PublishingAdapter:
@@ -26,13 +53,7 @@ class PublishingAdapter:
         self._service.register_platform(platform_name, platform_config)
 
     def publish(self, post: MediaPost, platforms: list[str] | None = None) -> dict[str, bool]:
-        native_post = NativeMediaPost(
-            media_paths=post.media_paths,
-            caption=post.caption,
-            hashtags=post.hashtags,
-            additional_params=post.additional_params,
-        )
-        return self._service.publish_to_social_media(post=native_post, platforms=platforms)
+        return self._service.publish_to_social_media(post=post, platforms=platforms)
 
     def get_publish_receipts(self) -> dict[str, dict[str, Any]]:
         return self._service.get_publish_receipts()

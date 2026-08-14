@@ -69,6 +69,61 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
         communicator.ws = FakeSocket()  # type: ignore[assignment]
         communicator.wait_for_completion("prompt-1")
 
+    def test_save_results_uses_preview_when_comfy_history_has_no_persistent_media(self) -> None:
+        communicator = AgenticComfyCommunicator.__new__(AgenticComfyCommunicator)
+        communicator.get_history = lambda _prompt_id: {  # type: ignore[method-assign]
+            "prompt-1": {
+                "outputs": {
+                    "preview": {
+                        "images": [
+                            {
+                                "filename": "ComfyUI_temp_preview_00001_.png",
+                                "subfolder": "",
+                                "type": "temp",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        communicator.get_media_file = lambda filename, subfolder, folder_type: (  # type: ignore[method-assign]
+            b"preview-bytes"
+        )
+
+        output_dir = Path(tempfile.mkdtemp())
+        success, saved_files = communicator.save_results("prompt-1", str(output_dir), "render")
+
+        self.assertTrue(success)
+        self.assertEqual(len(saved_files), 1)
+        self.assertEqual(Path(saved_files[0]).read_bytes(), b"preview-bytes")
+
+    def test_free_memory_uses_comfy_endpoint_with_timeout(self) -> None:
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        captured: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            captured["request"] = req
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with patch("agentic.tools.comfy_backend.request.urlopen", side_effect=fake_urlopen):
+            communicator.free_memory()
+
+        self.assertEqual(captured["timeout"], 30)
+        self.assertEqual(captured["request"].get_method(), "POST")  # type: ignore[union-attr]
+        self.assertIn(b"unload_models", captured["request"].data)  # type: ignore[union-attr]
+
 
 class TTSAdapterTests(unittest.TestCase):
     def test_generate_speech_sync_raises_when_edge_tts_missing(self) -> None:
@@ -314,6 +369,44 @@ class SocialServiceToolsTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["publish_receipts"]["facebook"]["external_id"], "video-1")
         self.assertEqual(manifest["status"], "success")
+        self.assertEqual(manifest["publication_state"], "staged")
+        self.assertFalse(manifest["publicly_visible"])
+
+    def test_publish_social_reports_public_only_after_verified_public_receipts(self) -> None:
+        tools = SocialServiceTools(Path(tempfile.mkdtemp()))
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                del post
+                platform_name = (platforms or ["youtube"])[0]
+                return {platform_name: True}
+
+            def get_publish_receipts(self) -> dict[str, dict[str, object]]:
+                return {
+                    "youtube": {
+                        "platform": "youtube",
+                        "external_id": "public-video-1",
+                        "status": "processed",
+                        "verified": True,
+                        "visibility": "public",
+                    }
+                }
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+        result = tools.publish_social(
+            {
+                "media_paths": ["clip.mp4"],
+                "caption": "public test",
+                "platforms": ["youtube"],
+                "platform_configs": {"youtube": {"config_folder_path": "configs/yt"}},
+            }
+        )
+
+        self.assertEqual(result["publication_state"], "published")
+        self.assertTrue(result["publicly_visible"])
 
 
 class InstagramGraphPlatformTests(unittest.TestCase):
@@ -497,6 +590,20 @@ class SocialServiceToolsYouTubeTests(unittest.TestCase):
 
 
 class FacebookPlatformTests(unittest.TestCase):
+    @patch.object(FacebookPlatform, "authenticate")
+    @patch.object(FacebookPlatform, "load_config")
+    def test_video_defaults_to_reels_when_no_flag_is_configured(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = FacebookPlatform("configs/social_media/credentials/kirby")
+        platform.page_access_token = "token"
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            video_path = handle.name
+        self.addCleanup(lambda: Path(video_path).unlink(missing_ok=True))
+
+        with patch.object(platform, "_upload_reel", return_value=True) as upload_reel:
+            self.assertTrue(platform.upload_post(MediaPost(media_paths=[video_path], caption="caption")))
+        upload_reel.assert_called_once()
+
     @patch.object(FacebookPlatform, "authenticate")
     @patch.object(FacebookPlatform, "load_config")
     def test_reels_finishes_upload_without_waiting_for_ready(self, load_config_mock, authenticate_mock) -> None:

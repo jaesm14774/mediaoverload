@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import urllib.error
@@ -16,7 +17,7 @@ class MiniMaxH3Asset:
     name: str
     target_dir: str
     source: str
-    expected_size: int
+    expected_size: int | None
     role: str
     trust: str
     sha256: str | None = None
@@ -45,16 +46,34 @@ class MiniMaxH3Profile:
     sampler: str
     use_spectrum_for_draft: bool
     custom_nodes: tuple[str, ...]
+    media_types: tuple[str, ...] = (
+        "image_to_video",
+        "image_to_video_audio",
+        "text2video",
+        "long_video",
+    )
 
     @property
     def total_bytes(self) -> int:
-        return sum(asset.expected_size for asset in self.assets)
+        return sum(asset.expected_size or 0 for asset in self.assets)
+
+    @property
+    def unknown_size_asset_count(self) -> int:
+        return sum(asset.expected_size is None for asset in self.assets)
+
+    @property
+    def total_size_human(self) -> str:
+        known = _format_bytes(self.total_bytes)
+        if self.unknown_size_asset_count:
+            return f"at least {known} + {self.unknown_size_asset_count} asset with unknown size"
+        return known
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["assets"] = [asset.to_dict() for asset in self.assets]
         payload["custom_nodes"] = list(self.custom_nodes)
         payload["total_bytes"] = self.total_bytes
+        payload["total_size_human"] = self.total_size_human
         return payload
 
 
@@ -62,7 +81,7 @@ def _asset(
     name: str,
     target_dir: str,
     source: str,
-    expected_size: int,
+    expected_size: int | None,
     role: str,
     trust: str,
 ) -> MiniMaxH3Asset:
@@ -118,6 +137,15 @@ _H3_TEXT_Q2 = _asset(
     "community",
 )
 
+_H3_REF2VA_Q4 = _asset(
+    "MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf",
+    "ComfyUI/models/unet",
+    "https://huggingface.co/Abiray/MiniMax-H3-Pruned-GGUF/resolve/main/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf",
+    11_564_180_576,
+    "ref2va_diffusion_model",
+    "community",
+)
+
 _NATIVE_DIFFUSION = _asset(
     "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
     "ComfyUI/models/diffusion_models",
@@ -132,6 +160,14 @@ _NATIVE_TEXT = _asset(
     "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
     15_687_142_551,
     "text_encoder",
+    "official",
+)
+_NATIVE_REF2VA_DIFFUSION = _asset(
+    "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "ComfyUI/models/diffusion_models",
+    "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    None,
+    "diffusion_model",
     "official",
 )
 
@@ -155,7 +191,7 @@ PROFILES: dict[str, MiniMaxH3Profile] = {
     ),
     "ultra-lowvram": MiniMaxH3Profile(
         name="ultra-lowvram",
-        workflow_name="minimax_h3_ultra_lowvram_i2v",
+        workflow_name="minimax_h3_lowvram_i2v",
         summary=(
             "6-8GB emergency profile: same Q4 diffusion with Q2 text encoder; "
             "use only when balanced-lowvram cannot initialize or repeatedly OOMs."
@@ -185,7 +221,114 @@ PROFILES: dict[str, MiniMaxH3Profile] = {
         use_spectrum_for_draft=True,
         custom_nodes=("xmarre/ComfyUI-Spectrum-MiniMax-H3",),
     ),
+    "ref2va-native": MiniMaxH3Profile(
+        name="ref2va-native",
+        workflow_name="minimax_h3_ref2va",
+        summary=(
+            "Official MiniMax H3 Ref2VA path for multiple reference images and "
+            "reference videos; reference audio is intentionally disabled."
+        ),
+        assets=(_NATIVE_REF2VA_DIFFUSION, _NATIVE_TEXT, _VIDEO_VAE, _AUDIO_VAE),
+        width=608,
+        height=352,
+        length=124,
+        steps=20,
+        sampler="res_multistep",
+        use_spectrum_for_draft=False,
+        custom_nodes=("Kosinkadink/ComfyUI-VideoHelperSuite",),
+        media_types=("native_h3_ref2va", "long_video"),
+    ),
+    "ref2va-lowvram": MiniMaxH3Profile(
+        name="ref2va-lowvram",
+        workflow_name="minimax_h3_ref2va",
+        summary=(
+            "RTX 4060 Ref2VA default: community pruned Q4_K_M GGUF diffusion, "
+            "existing Q4 text encoder, native H3 VAEs, and no reference audio."
+        ),
+        assets=(_H3_REF2VA_Q4, _H3_TEXT_Q4, _VIDEO_VAE, _AUDIO_VAE),
+        width=608,
+        height=352,
+        length=124,
+        steps=20,
+        sampler="res_multistep",
+        use_spectrum_for_draft=False,
+        custom_nodes=("molbal/ComfyUI-GGUF", "Kosinkadink/ComfyUI-VideoHelperSuite"),
+        media_types=("native_h3_ref2va", "long_video"),
+    ),
+    "ref2va-ultra-lowvram": MiniMaxH3Profile(
+        name="ref2va-ultra-lowvram",
+        workflow_name="minimax_h3_ref2va",
+        summary=(
+            "RTX 4060 emergency Ref2VA profile: the same Q4 Ref2VA diffusion model "
+            "with the Q2 text encoder; reference audio remains disabled."
+        ),
+        assets=(_H3_REF2VA_Q4, _H3_TEXT_Q2, _VIDEO_VAE, _AUDIO_VAE),
+        width=608,
+        height=352,
+        length=124,
+        steps=20,
+        sampler="res_multistep",
+        use_spectrum_for_draft=False,
+        custom_nodes=("molbal/ComfyUI-GGUF", "Kosinkadink/ComfyUI-VideoHelperSuite"),
+        media_types=("native_h3_ref2va", "long_video"),
+    ),
 }
+
+
+def minimax_h3_model_overrides(profile: str, *, reference_to_video: bool = False) -> dict[str, dict[str, Any]]:
+    """Return runtime loader overrides without duplicating a workflow JSON.
+
+    The canonical low-VRAM workflows use GGUF loaders. The official native
+    model set uses the corresponding native loader classes, so the override
+    includes both ``class_type`` and loader inputs. The caller remains
+    responsible for ensuring the selected model files exist in ComfyUI.
+    """
+
+    normalized = str(profile or "q4").strip().lower().replace("_", "-")
+    aliases = {
+        "balanced-lowvram": "q4",
+        "ref2va-lowvram": "q4",
+        "q4-k-m": "q4",
+        "ultra-lowvram": "q2",
+        "native-quality": "native",
+        "ref2va-native": "native",
+        "official": "native",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in {"q4", "q2"}:
+        diffusion = _H3_REF2VA_Q4 if reference_to_video else _H3_FL2VA_Q4
+        text_encoder = _H3_TEXT_Q2 if normalized == "q2" else _H3_TEXT_Q4
+        return {
+            "1": {
+                "class_type": "UnetLoaderGGUF",
+                "replace_inputs": True,
+                "inputs": {"unet_name": diffusion.name},
+            },
+            "2": {
+                "class_type": "CLIPLoaderGGUF",
+                "replace_inputs": True,
+                "inputs": {"clip_name": text_encoder.name, "type": "minimax"},
+            }
+        }
+    if normalized == "native":
+        diffusion = _NATIVE_REF2VA_DIFFUSION if reference_to_video else _NATIVE_DIFFUSION
+        return {
+            "1": {
+                "class_type": "UNETLoader",
+                "replace_inputs": True,
+                "inputs": {"unet_name": diffusion.name, "weight_dtype": "default"},
+            },
+            "2": {
+                "class_type": "CLIPLoader",
+                "replace_inputs": True,
+                "inputs": {
+                    "clip_name": _NATIVE_TEXT.name,
+                    "type": "minimax",
+                    "device": "default",
+                },
+            },
+        }
+    raise ValueError(f"Unknown MiniMax H3 model profile: {profile!r}. Choose q4, q2, or native.")
 
 
 def get_profile(name: str = "balanced-lowvram") -> MiniMaxH3Profile:
@@ -212,12 +355,12 @@ def inspect_asset(asset: MiniMaxH3Asset, comfy_root: Path) -> dict[str, Any]:
             "status": "partial" if part_path.exists() else "missing",
             "size": part_path.stat().st_size if part_path.exists() else 0,
             "expected_size": asset.expected_size,
-            "expected_size_human": _format_bytes(asset.expected_size),
+            "expected_size_human": _format_bytes(asset.expected_size) if asset.expected_size else None,
             "source": asset.source,
             "trust": asset.trust,
         }
     actual_size = path.stat().st_size
-    if actual_size != asset.expected_size:
+    if asset.expected_size is not None and actual_size != asset.expected_size:
         status = "corrupt"
     elif asset.sha256 and _sha256(path) != asset.sha256:
         status = "checksum_mismatch"
@@ -229,7 +372,7 @@ def inspect_asset(asset: MiniMaxH3Asset, comfy_root: Path) -> dict[str, Any]:
         "status": status,
         "size": actual_size,
         "expected_size": asset.expected_size,
-        "expected_size_human": _format_bytes(asset.expected_size),
+        "expected_size_human": _format_bytes(asset.expected_size) if asset.expected_size else None,
         "source": asset.source,
         "trust": asset.trust,
     }
@@ -244,7 +387,7 @@ def inspect_profile(profile: MiniMaxH3Profile | str, comfy_root: Path) -> dict[s
         "summary": resolved.summary,
         "comfy_root": str(comfy_root.expanduser().resolve()),
         "total_bytes": resolved.total_bytes,
-        "total_size_human": _format_bytes(resolved.total_bytes),
+        "total_size_human": resolved.total_size_human,
         "ready": all(item["status"] == "ready" for item in assets),
         "assets": assets,
         "custom_nodes": list(resolved.custom_nodes),
@@ -273,7 +416,7 @@ def download_profile(
         target.parent.mkdir(parents=True, exist_ok=True)
         part_path = Path(f"{target}.part")
         written = _download_asset(asset, part_path, chunk_size=chunk_size)
-        if written != asset.expected_size:
+        if asset.expected_size is not None and written != asset.expected_size:
             raise RuntimeError(
                 f"Incomplete MiniMax H3 download for {asset.name}: "
                 f"{written} bytes, expected {asset.expected_size}. The .part file is resumable."
@@ -287,7 +430,7 @@ def download_profile(
         "comfy_root": str(root),
         "dry_run": dry_run,
         "total_bytes": resolved.total_bytes,
-        "total_size_human": _format_bytes(resolved.total_bytes),
+        "total_size_human": resolved.total_size_human,
         "ready": all(item["status"] == "ready" for item in results),
         "assets": results,
     }
@@ -297,6 +440,10 @@ def _download_asset(asset: MiniMaxH3Asset, part_path: Path, *, chunk_size: int) 
     """Download a large H3 asset with Windows curl resume/retry when available."""
     curl = shutil.which("curl.exe") or shutil.which("curl")
     if curl:
+        try:
+            download_timeout = max(1, int(os.environ.get("MINIMAX_H3_DOWNLOAD_TIMEOUT_SECONDS", "1800")))
+        except ValueError:
+            download_timeout = 1800
         command = [
             curl,
             "--location",
@@ -308,13 +455,21 @@ def _download_asset(asset: MiniMaxH3Asset, part_path: Path, *, chunk_size: int) 
             "5",
             "--connect-timeout",
             "30",
+            "--max-time",
+            str(download_timeout),
             "--continue-at",
             "-",
             "--output",
             str(part_path),
             asset.source,
         ]
-        completed = subprocess.run(command, check=False)
+        try:
+            completed = subprocess.run(command, check=False, timeout=download_timeout + 30)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"Timed out downloading {asset.name} after {download_timeout} seconds; "
+                "the .part file is resumable."
+            ) from exc
         if completed.returncode:
             raise RuntimeError(
                 f"Failed to download {asset.name} with curl (exit {completed.returncode}); "
@@ -368,7 +523,7 @@ def profile_manifest(profile: MiniMaxH3Profile | str) -> dict[str, Any]:
         "name": resolved.workflow_name,
         "profile": resolved.name,
         "summary": resolved.summary,
-        "media_types": ["image_to_video", "image_to_video_audio", "text2video", "long_video"],
+        "media_types": list(resolved.media_types),
         "required_assets": manifest_asset_requirements(resolved),
         "recommended_defaults": {
             "width": resolved.width,

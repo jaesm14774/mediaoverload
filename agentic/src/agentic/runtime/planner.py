@@ -1,15 +1,39 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
 from agentic.assets.registry import AssetRegistry, WorkflowManifest
 from agentic.runtime.creativity import IdeaDirector
+
+PUBLISH_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+
+
+def _infer_publish_review_scope(goal: GoalRequest) -> str:
+    explicit_scope = str(goal.constraints.get("review_scope") or "").strip().lower()
+    if explicit_scope:
+        return explicit_scope
+    media_paths = goal.constraints.get("media_paths") or []
+    if isinstance(media_paths, str):
+        media_paths = [media_paths]
+    normalized_paths = [str(path) for path in media_paths if str(path).strip()]
+    if not normalized_paths:
+        input_dir = str(goal.constraints.get("input_dir") or "").strip()
+        if input_dir:
+            root = Path(input_dir)
+            if root.is_dir():
+                normalized_paths = [str(path) for path in root.iterdir() if path.is_file()]
+    if normalized_paths and all(Path(path).suffix.lower() in PUBLISH_VIDEO_EXTENSIONS for path in normalized_paths):
+        return "final_video"
+    return "final_media"
 
 
 class TaskPlanner:
     DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
     DEFAULT_REFINE_WORKFLOWS = ("image_to_image", "z_image_i2i_anime")
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
-    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "wan2.2_gguf_i2v", "wan2.2_gguf_i2v_audio")
+    DEFAULT_T2V_WORKFLOWS = ("minimax_h3_lowvram_t2v", "minimax_h3_native_t2v")
+    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "minimax_h3_native_i2v")
 
     def __init__(self, asset_registry: AssetRegistry, idea_director: IdeaDirector | None = None) -> None:
         self.asset_registry = asset_registry
@@ -62,6 +86,72 @@ class TaskPlanner:
             return default
         return max(1, int(value))
 
+    @staticmethod
+    def _native_h3_render_config(goal: GoalRequest, manifest: WorkflowManifest, *, default_steps: int = 16) -> dict[str, int]:
+        defaults = dict(manifest.recommended_defaults or {})
+        return {
+            "width": int(goal.constraints.get("native_h3_width") or defaults.get("width", 608)),
+            "height": int(goal.constraints.get("native_h3_height") or defaults.get("height", 352)),
+            "length": int(goal.constraints.get("native_h3_length") or defaults.get("length", 362)),
+            "steps": int(goal.constraints.get("native_h3_steps") or defaults.get("steps", default_steps)),
+            "video_count": TaskPlanner._constraint_int(goal, "video_count", 1),
+        }
+
+    @staticmethod
+    def _native_h3_storyboard_path(goal: GoalRequest, media_type: str) -> str:
+        storyboard_path = str(
+            goal.constraints.get("native_h3_storyboard_path")
+            or goal.constraints.get("storyboard_path")
+            or ""
+        )
+        if not storyboard_path:
+            raise ValueError(f"{media_type} requires native_h3_storyboard_path or storyboard_path")
+        return storyboard_path
+
+    @staticmethod
+    def _native_h3_finalize_nodes(
+        *,
+        tags: list[str],
+        include_keyframe_gate: bool,
+        frame_gate_node_id: str = "native-keyframe-gate",
+        qa_inputs: dict[str, object] | None = None,
+    ) -> list[ExecutionNode]:
+        qa_tags = ["technical-qa", "semantic-qa", "manual-review", *tags]
+        preview_tags = ["preview", *tags]
+        package_dependencies = ["native-h3-render", "native-h3-qa", "native-h3-preview"]
+        if include_keyframe_gate:
+            package_dependencies.append(frame_gate_node_id)
+        return [
+            ExecutionNode(
+                node_id="native-h3-qa",
+                skill_name="longvideo.qa_native_h3",
+                inputs={
+                    "mode": "technical_and_semantic_qa_before_optional_discord_review",
+                    **dict(qa_inputs or {}),
+                },
+                depends_on=["native-h3-render"],
+                tags=qa_tags,
+                stage="quality",
+            ),
+            ExecutionNode(
+                node_id="native-h3-preview",
+                skill_name="media.video.gif_preview",
+                inputs={"fps": 8, "scale_width": 512},
+                depends_on=["native-h3-render"],
+                tags=preview_tags,
+                tool_name="media.video_to_gif",
+                stage="package",
+            ),
+            ExecutionNode(
+                node_id="native-h3-package",
+                skill_name="longvideo.package_native_h3",
+                inputs={"render_node": "native-h3-render", "qa_node": "native-h3-qa", "preview_node": "native-h3-preview"},
+                depends_on=package_dependencies,
+                tags=["artifact", "summary", *tags],
+                stage="package",
+            ),
+        ]
+
     def create_goal(
         self,
         prompt: str,
@@ -98,7 +188,20 @@ class TaskPlanner:
         if goal.media_type == "native_h3_story":
             return self._build_native_h3_story_plan(goal)
         if goal.media_type == "native_h3_t2v_story":
+            if self._pre_video_review_enabled(goal):
+                # A pure T2V graph cannot consume the reviewed image. Under
+                # the common pre-video gate, use the native story I2V graph
+                # so the approved candidate is a real conditioning frame.
+                return self._build_native_h3_story_plan(goal)
             return self._build_native_h3_t2v_story_plan(goal)
+        if goal.media_type == "native_h3_fl2va_story":
+            return self._build_native_h3_story_plan(goal)
+        if goal.media_type == "native_h3_l2va_story":
+            return self._build_native_h3_l2va_story_plan(goal)
+        if goal.media_type == "native_h3_ref2va":
+            return self._build_native_h3_ref2va_plan(goal)
+        if goal.media_type == "text2image2native_h3_ref2va":
+            return self._build_native_h3_ref2va_plan(goal, auto_reference_generation=True)
         if goal.media_type == "video_narrate":
             return self._build_video_narrate_plan(goal)
         workflow_manifest = self._pick_goal_workflow(goal)
@@ -123,31 +226,50 @@ class TaskPlanner:
             constraint_keys=("native_h3_keyframe_workflow_name", "keyframe_workflow_name", "image_workflow_name"),
             allowed_media_types={"image"},
         )
+        native_t2v_pre_review = goal.media_type == "native_h3_t2v_story" and self._pre_video_review_enabled(goal)
         video_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_I2V_WORKFLOWS,
-            constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
+            constraint_keys=(
+                "video_workflow_name",
+                "native_h3_workflow_name",
+                "workflow_name",
+            ) if not native_t2v_pre_review else (),
             allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
         )
-        h3_defaults = dict(video_manifest.recommended_defaults or {})
-        width = int(goal.constraints.get("native_h3_width") or h3_defaults.get("width", 608))
-        height = int(goal.constraints.get("native_h3_height") or h3_defaults.get("height", 352))
-        length = int(goal.constraints.get("native_h3_length") or h3_defaults.get("length", 362))
-        steps = int(goal.constraints.get("native_h3_steps") or h3_defaults.get("steps", 16))
-        video_count = self._constraint_int(goal, "video_count", 1)
-        keyframe_candidate_count = self._constraint_int(goal, "native_h3_keyframe_candidate_count", 1)
-        require_human_review = bool(goal.constraints.get("require_human_review", False))
+        render_config = self._native_h3_render_config(goal, video_manifest)
+        lowvram_fl2va = (
+            goal.media_type == "native_h3_fl2va_story"
+            and video_manifest.name.startswith("minimax_h3_lowvram_")
+        )
+        width = int(goal.constraints.get("native_h3_fl2va_width") or (512 if lowvram_fl2va else render_config["width"]))
+        height = int(goal.constraints.get("native_h3_fl2va_height") or (288 if lowvram_fl2va else render_config["height"]))
+        length = int(goal.constraints.get("native_h3_fl2va_length") or (124 if lowvram_fl2va else render_config["length"]))
+        steps = int(goal.constraints.get("native_h3_fl2va_steps") or (16 if lowvram_fl2va else render_config["steps"]))
+        video_count = render_config["video_count"]
+        model_profile = str(
+            goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_fl2va else "q4")
+        )
+        pre_video_review = self._pre_video_review_enabled(goal)
+        pre_video_requires_human = self._pre_video_review_requires_human(goal)
+        keyframe_candidate_count = (
+            self._pre_video_candidate_count(goal)
+            if pre_video_review and pre_video_requires_human
+            else self._constraint_int(goal, "native_h3_keyframe_candidate_count", 1)
+        )
+        require_human_review = bool(goal.constraints.get("require_human_review", False)) or (
+            pre_video_review and pre_video_requires_human
+        )
+        use_last_frame = bool(goal.constraints.get("native_h3_use_last_frame", False))
         if keyframe_candidate_count > 1 and not require_human_review:
             raise ValueError(
                 "Native H3 multiple keyframe candidates require require_human_review=true; refusing to select one automatically."
             )
-        storyboard_path = str(
-            goal.constraints.get("native_h3_storyboard_path")
-            or goal.constraints.get("storyboard_path")
-            or ""
-        )
-        if not storyboard_path:
-            raise ValueError("native_h3_story requires native_h3_storyboard_path or storyboard_path")
+        if use_last_frame and not require_human_review and keyframe_candidate_count > 1:
+            raise ValueError(
+                "Native H3 use_last_frame=true with multiple ending candidates requires require_human_review=true; refusing to select one automatically."
+            )
+        storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_story")
 
         nodes = [
             ExecutionNode(
@@ -213,6 +335,8 @@ class TaskPlanner:
                         "limit": 1,
                         "review_all_candidates": True,
                         "review_scope": "first_frame",
+                        "review_phase": "opening_frame",
+                        "require_human_review": pre_video_requires_human,
                         "review_notes": (
                             "首幀人工審核：請從附件中選出 1 張最適合 MiniMax H3 I2V 的 Kirby 開場首幀。 "
                             "優先檢查 Kirby 是否清楚且只有一個、首眼是否看得到衝突或任務、構圖是否有明確焦點、 "
@@ -226,93 +350,118 @@ class TaskPlanner:
                 )
             )
             opening_source_node = opening_review_node
+        ending_source_node = ""
+        if use_last_frame:
+            nodes.append(
+                ExecutionNode(
+                    node_id="native-ending-keyframe",
+                    skill_name="media.image.generate_keyframe",
+                    inputs={
+                        "workflow_name": image_manifest.name,
+                        "prompt_key": "ending_keyframe_prompt",
+                        "width": width,
+                        "height": height,
+                        "image_count": 1,
+                        "suffix": "native_h3_ending",
+                    },
+                    depends_on=[opening_source_node, "native-story-prompt", "native-image-asset-check"],
+                    tags=["render", "image", "continuity", "native-h3"],
+                    tool_name="comfy.workflow.text_to_image",
+                    stage="render",
+                )
+            )
+            ending_source_node = "native-ending-keyframe"
+            if require_human_review:
+                nodes.append(
+                    ExecutionNode(
+                        node_id="native-ending-review",
+                        skill_name="review.assets.select",
+                        inputs={
+                            "limit": 1,
+                            "review_all_candidates": True,
+                            "review_scope": "last_frame",
+                            "review_phase": "ending_frame",
+                            "review_notes": (
+                                "末幀人工審核：請確認這張結尾幀與已選首幀、角色比例、場景地理與故事解決狀態一致。 "
+                                "如果結尾幀需要影片強行跳轉、角色或道具突然改變、或無法自然接續，請按 Reject。"
+                            ),
+                        },
+                        depends_on=["native-ending-keyframe"],
+                        tags=["review", "last-frame", "native-h3"],
+                        stage="review",
+                    )
+                )
+                ending_source_node = "native-ending-review"
+
+        gate_depends_on = [opening_source_node]
+        if ending_source_node:
+            gate_depends_on.append(ending_source_node)
+        gate_inputs = {
+            "character": str(goal.constraints.get("character") or ""),
+            "opening_node": opening_source_node,
+            "ending_node": ending_source_node,
+            "opening_prompt_key": "opening_keyframe_prompt",
+            "ending_prompt_key": "ending_keyframe_prompt",
+            "preserve_opening_frame": require_human_review,
+            "preserve_ending_frame": bool(use_last_frame and require_human_review),
+            "use_last_frame": use_last_frame,
+            "workflow_name": image_manifest.name,
+            "width": width,
+            "height": height,
+            "max_regenerations": 0,
+        }
         nodes.extend(
             [
-            ExecutionNode(
-                node_id="native-ending-keyframe",
-                skill_name="media.image.generate_keyframe",
-                inputs={
-                    "workflow_name": image_manifest.name,
-                    "prompt_key": "ending_keyframe_prompt",
-                    "width": width,
-                    "height": height,
-                    "image_count": 1,
-                    "suffix": "native_h3_ending",
-                },
-                depends_on=[opening_source_node, "native-story-prompt", "native-image-asset-check"],
-                tags=["render", "image", "continuity", "native-h3"],
-                tool_name="comfy.workflow.text_to_image",
-                stage="render",
-            ),
-            ExecutionNode(
-                node_id="native-keyframe-gate",
-                skill_name="media.image.validate_character",
-                inputs={
-                    "character": str(goal.constraints.get("character") or ""),
-                    "opening_node": opening_source_node,
-                    "ending_node": "native-ending-keyframe",
-                    "opening_prompt_key": "opening_keyframe_prompt",
-                    "ending_prompt_key": "ending_keyframe_prompt",
-                    "preserve_opening_frame": require_human_review,
-                    "workflow_name": image_manifest.name,
-                    "width": width,
-                    "height": height,
-                    "max_regenerations": 0,
-                },
-                depends_on=[opening_source_node, "native-ending-keyframe"],
-                tags=["quality", "identity", "native-h3"],
-                stage="quality",
-            ),
-            ExecutionNode(
-                node_id="native-h3-render",
-                skill_name="longvideo.render_native_h3",
-                inputs={
-                    "workflow_name": video_manifest.name,
-                    "width": width,
-                    "height": height,
-                    "length": length,
-                    "steps": steps,
-                    "video_count": video_count,
-                },
-                depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-gate"],
-                tags=["render", "video", "native-h3"],
-                tool_name="comfy.workflow.image_to_video",
-                stage="render",
-            ),
-            ExecutionNode(
-                node_id="native-h3-qa",
-                skill_name="longvideo.qa_native_h3",
-                inputs={"mode": "bypass_until_final_discord_review"},
-                depends_on=["native-h3-render"],
-                tags=["quality-bypass", "manual-review", "native-h3"],
-                stage="quality",
-            ),
-            ExecutionNode(
-                node_id="native-h3-preview",
-                skill_name="media.video.gif_preview",
-                inputs={"fps": 8, "scale_width": 512},
-                depends_on=["native-h3-render"],
-                tags=["preview", "native-h3"],
-                tool_name="media.video_to_gif",
-                stage="package",
-            ),
-            ExecutionNode(
-                node_id="native-h3-package",
-                skill_name="longvideo.package_native_h3",
-                inputs={"render_node": "native-h3-render", "qa_node": "native-h3-qa", "preview_node": "native-h3-preview"},
-                depends_on=["native-h3-render", "native-h3-qa", "native-h3-preview", "native-keyframe-gate"],
-                tags=["artifact", "summary", "native-h3"],
-                stage="package",
-            ),
+                ExecutionNode(
+                    node_id="native-keyframe-gate",
+                    skill_name="media.image.validate_character",
+                    inputs=gate_inputs,
+                    depends_on=gate_depends_on,
+                    tags=["quality", "identity", "native-h3"],
+                    stage="quality",
+                ),
+                ExecutionNode(
+                    node_id="native-h3-render",
+                    skill_name="longvideo.render_native_h3",
+                    inputs={
+                        "workflow_name": video_manifest.name,
+                        "width": width,
+                        "height": height,
+                        "length": length,
+                        "steps": steps,
+                        "video_count": video_count,
+                        "model_profile": model_profile,
+                        "use_last_frame": use_last_frame,
+                        "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
+                    },
+                    depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-gate"],
+                    tags=["render", "video", "native-h3"],
+                    tool_name="comfy.workflow.image_to_video",
+                    stage="render",
+                ),
+                *self._native_h3_finalize_nodes(
+                    tags=["native-h3"],
+                    include_keyframe_gate=True,
+                    qa_inputs=(
+                        {
+                            "target_duration": length / float(goal.constraints.get("native_h3_frame_rate") or 24),
+                            "expected_width": width,
+                            "expected_height": height,
+                            "expected_fps": float(goal.constraints.get("native_h3_frame_rate") or 24),
+                        }
+                        if lowvram_fl2va
+                        else None
+                    ),
+                ),
             ]
         )
         metadata = {
-            "recipe": "native_h3_story",
+            "recipe": "native_h3_fl2va_story" if goal.media_type == "native_h3_fl2va_story" else "native_h3_story",
             "storyboard_path": storyboard_path,
             "selected_workflow": video_manifest.name,
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "use_last_frame": use_last_frame, "lowvram_preview": lowvram_fl2va},
             "graph_overview": [node.node_id for node in nodes],
         }
         return ExecutionPlan(
@@ -320,7 +469,11 @@ class TaskPlanner:
             workflow_name=video_manifest.name,
             nodes=nodes,
             metadata=metadata,
-            description=f"Native H3 causal story from storyboard '{storyboard_path}'",
+            description=(
+                f"Native H3 first/last-frame causal story from storyboard '{storyboard_path}'"
+                if goal.media_type == "native_h3_fl2va_story"
+                else f"Native H3 causal story from storyboard '{storyboard_path}'"
+            ),
         )
 
     def _build_native_h3_t2v_story_plan(self, goal: GoalRequest) -> ExecutionPlan:
@@ -328,24 +481,20 @@ class TaskPlanner:
         video_manifest = self._manifest_from_goal_constraints(
             goal,
             "minimax_h3_lowvram_t2v",
-            "minimax_h3_ultra_lowvram_t2v",
             "minimax_h3_native_t2v",
             constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
             allowed_media_types={"text2video", "long_video"},
         )
-        h3_defaults = dict(video_manifest.recommended_defaults or {})
-        width = int(goal.constraints.get("native_h3_width") or h3_defaults.get("width", 608))
-        height = int(goal.constraints.get("native_h3_height") or h3_defaults.get("height", 352))
-        length = int(goal.constraints.get("native_h3_length") or h3_defaults.get("length", 362))
-        steps = int(goal.constraints.get("native_h3_steps") or h3_defaults.get("steps", 16))
-        video_count = self._constraint_int(goal, "video_count", 1)
-        storyboard_path = str(
-            goal.constraints.get("native_h3_storyboard_path")
-            or goal.constraints.get("storyboard_path")
-            or ""
-        )
-        if not storyboard_path:
-            raise ValueError("native_h3_t2v_story requires native_h3_storyboard_path or storyboard_path")
+        render_config = self._native_h3_render_config(goal, video_manifest)
+        lowvram_t2v = video_manifest.name.startswith("minimax_h3_lowvram_")
+        width = int(goal.constraints.get("native_h3_t2v_width") or (512 if lowvram_t2v else render_config["width"]))
+        height = int(goal.constraints.get("native_h3_t2v_height") or (288 if lowvram_t2v else render_config["height"]))
+        length = int(goal.constraints.get("native_h3_t2v_length") or (124 if lowvram_t2v else render_config["length"]))
+        steps = int(goal.constraints.get("native_h3_t2v_steps") or (16 if lowvram_t2v else render_config["steps"]))
+        video_count = render_config["video_count"]
+        frame_rate = float(goal.constraints.get("native_h3_frame_rate") or 24)
+        render_duration = round(length / frame_rate, 3)
+        storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_t2v_story")
 
         nodes = [
             ExecutionNode(
@@ -382,36 +531,26 @@ class TaskPlanner:
                     "length": length,
                     "steps": steps,
                     "video_count": video_count,
+                    "model_profile": str(
+                        goal.constraints.get("native_h3_t2v_model_profile")
+                        or goal.constraints.get("native_h3_model_profile")
+                        or ("q2" if lowvram_t2v else "q4")
+                    ),
                 },
                 depends_on=["native-story-prompt", "native-video-asset-check"],
                 tags=["render", "video", "native-h3", "t2v"],
                 tool_name="comfy.workflow.text_to_video",
                 stage="render",
             ),
-            ExecutionNode(
-                node_id="native-h3-qa",
-                skill_name="longvideo.qa_native_h3",
-                inputs={"mode": "bypass_until_final_discord_review"},
-                depends_on=["native-h3-render"],
-                tags=["quality-bypass", "manual-review", "native-h3", "t2v"],
-                stage="quality",
-            ),
-            ExecutionNode(
-                node_id="native-h3-preview",
-                skill_name="media.video.gif_preview",
-                inputs={"fps": 8, "scale_width": 512},
-                depends_on=["native-h3-render"],
-                tags=["preview", "native-h3", "t2v"],
-                tool_name="media.video_to_gif",
-                stage="package",
-            ),
-            ExecutionNode(
-                node_id="native-h3-package",
-                skill_name="longvideo.package_native_h3",
-                inputs={"render_node": "native-h3-render", "qa_node": "native-h3-qa", "preview_node": "native-h3-preview"},
-                depends_on=["native-h3-render", "native-h3-qa", "native-h3-preview"],
-                tags=["artifact", "summary", "native-h3", "t2v"],
-                stage="package",
+            *self._native_h3_finalize_nodes(
+                tags=["native-h3", "t2v"],
+                include_keyframe_gate=False,
+                qa_inputs={
+                    "target_duration": render_duration,
+                    "expected_width": width,
+                    "expected_height": height,
+                    "expected_fps": frame_rate,
+                },
             ),
         ]
         metadata = {
@@ -419,7 +558,15 @@ class TaskPlanner:
             "storyboard_path": storyboard_path,
             "selected_workflow": video_manifest.name,
             "required_assets": [asset.to_dict() for asset in video_manifest.required_assets],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds)},
+            "native_h3": {
+                "width": width,
+                "height": height,
+                "length": length,
+                "steps": steps,
+                "target_duration": render_duration,
+                "requested_duration": int(goal.duration_seconds),
+                "lowvram_preview": lowvram_t2v,
+            },
             "render_mode": "text_to_video",
             "graph_overview": [node.node_id for node in nodes],
         }
@@ -429,6 +576,436 @@ class TaskPlanner:
             nodes=nodes,
             metadata=metadata,
             description=f"Native H3 text-to-video causal story from storyboard '{storyboard_path}'",
+        )
+
+    def _build_native_h3_l2va_story_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        """Build a last-frame-only H3 causal clip.
+
+        L2VA is deliberately a separate route so an approved ending frame can
+        be treated as the immutable conditioning source rather than being
+        accidentally paired with the opening-frame connection in the FL2VA
+        template.
+        """
+        image_manifest = self._manifest_from_goal_constraints(
+            goal,
+            *self.DEFAULT_IMAGE_WORKFLOWS,
+            constraint_keys=("native_h3_keyframe_workflow_name", "keyframe_workflow_name", "image_workflow_name"),
+            allowed_media_types={"image"},
+        )
+        video_manifest = self._manifest_from_goal_constraints(
+            goal,
+            "minimax_h3_lowvram_15s_fl2va_i2v",
+            constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
+            allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
+        )
+        render_config = self._native_h3_render_config(goal, video_manifest)
+        lowvram_l2va = video_manifest.name.startswith("minimax_h3_lowvram_")
+        width = int(goal.constraints.get("native_h3_l2va_width") or (512 if lowvram_l2va else render_config["width"]))
+        height = int(goal.constraints.get("native_h3_l2va_height") or (288 if lowvram_l2va else render_config["height"]))
+        length = int(goal.constraints.get("native_h3_l2va_length") or (124 if lowvram_l2va else render_config["length"]))
+        steps = int(goal.constraints.get("native_h3_l2va_steps") or (16 if lowvram_l2va else render_config["steps"]))
+        video_count = render_config["video_count"]
+        model_profile = str(
+            goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_l2va else "q4")
+        )
+        storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_l2va_story")
+        pre_video_review = self._pre_video_review_enabled(goal)
+        pre_video_requires_human = self._pre_video_review_requires_human(goal)
+        require_human_review = bool(goal.constraints.get("require_human_review", True)) or (
+            pre_video_review and pre_video_requires_human
+        )
+        candidate_count = (
+            self._pre_video_candidate_count(goal)
+            if pre_video_review and pre_video_requires_human
+            else 1
+        )
+        ending_source_node = "native-l2va-ending-keyframe"
+        nodes = [
+            ExecutionNode(
+                node_id="native-story-prompt",
+                skill_name="longvideo.prepare_native_h3_story",
+                inputs={"storyboard_path": storyboard_path, "duration_seconds": int(goal.duration_seconds), "style": goal.style, "render_mode": "last_frame_to_video"},
+                tags=["creative", "story", "native-h3", "l2va"],
+                stage="prompting",
+            ),
+            ExecutionNode(
+                node_id="native-image-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={"workflow_name": image_manifest.name, "auto_download": goal.auto_download_assets},
+                depends_on=["native-story-prompt"],
+                tags=["assets", "image", "native-h3", "l2va"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="native-video-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={"workflow_name": video_manifest.name, "auto_download": goal.auto_download_assets},
+                depends_on=["native-story-prompt"],
+                tags=["assets", "video", "native-h3", "l2va"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id=ending_source_node,
+                skill_name="media.image.generate_keyframe",
+                inputs={"workflow_name": image_manifest.name, "prompt_key": "ending_keyframe_prompt", "width": width, "height": height, "image_count": candidate_count, "suffix": "native_h3_l2va_last"},
+                depends_on=["native-story-prompt", "native-image-asset-check"],
+                tags=["render", "image", "last-frame", "native-h3", "l2va"],
+                tool_name="comfy.workflow.text_to_image",
+                stage="render",
+            ),
+        ]
+        frame_node = ending_source_node
+        if require_human_review:
+            nodes.append(
+                ExecutionNode(
+                    node_id="native-l2va-ending-review",
+                    skill_name="review.assets.select",
+                    inputs={
+                        "limit": 1,
+                        "review_all_candidates": True,
+                        "review_scope": "last_frame",
+                        "require_human_review": pre_video_requires_human,
+                        "review_notes": "Select the final conditioning frame. This frame is immutable after approval; reject identity drift, wrong pose, or unusable composition.",
+                    },
+                    depends_on=[ending_source_node],
+                    tags=["review", "last-frame", "native-h3", "l2va"],
+                    stage="review",
+                )
+            )
+            frame_node = "native-l2va-ending-review"
+        nodes.extend(
+            [
+                ExecutionNode(
+                    node_id="native-l2va-frame-gate",
+                    skill_name="media.image.validate_last_frame",
+                    inputs={
+                        "frame_node": frame_node,
+                        "character": str(goal.constraints.get("character") or ""),
+                        "preserve_last_frame": require_human_review,
+                        "max_regenerations": 0,
+                    },
+                    depends_on=[frame_node],
+                    tags=["quality", "identity", "last-frame", "native-h3", "l2va"],
+                    stage="quality",
+                ),
+                ExecutionNode(
+                    node_id="native-h3-render",
+                    skill_name="longvideo.render_native_h3_l2va",
+                    inputs={
+                        "workflow_name": video_manifest.name,
+                        "width": width,
+                        "height": height,
+                        "length": length,
+                        "steps": steps,
+                        "video_count": video_count,
+                        "model_profile": model_profile,
+                    },
+                    depends_on=["native-story-prompt", "native-video-asset-check", "native-l2va-frame-gate"],
+                    tags=["render", "video", "native-h3", "l2va"],
+                    tool_name="comfy.workflow.image_to_video",
+                    stage="render",
+                ),
+                *self._native_h3_finalize_nodes(
+                    tags=["native-h3", "l2va"],
+                    include_keyframe_gate=True,
+                    frame_gate_node_id="native-l2va-frame-gate",
+                    qa_inputs=(
+                        {
+                            "target_duration": length / float(goal.constraints.get("native_h3_frame_rate") or 24),
+                            "expected_width": width,
+                            "expected_height": height,
+                            "expected_fps": float(goal.constraints.get("native_h3_frame_rate") or 24),
+                        }
+                        if lowvram_l2va
+                        else None
+                    ),
+                ),
+            ]
+        )
+        metadata = {
+            "recipe": "native_h3_l2va_story",
+            "storyboard_path": storyboard_path,
+            "selected_workflow": video_manifest.name,
+            "keyframe_workflow": image_manifest.name,
+            "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "require_human_review": require_human_review, "lowvram_preview": lowvram_l2va},
+            "render_mode": "last_frame_to_video",
+            "graph_overview": [node.node_id for node in nodes],
+        }
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name=video_manifest.name,
+            nodes=nodes,
+            metadata=metadata,
+            description=f"Native H3 L2VA story from storyboard '{storyboard_path}'",
+        )
+
+    def _build_native_h3_ref2va_plan(
+        self,
+        goal: GoalRequest,
+        *,
+        auto_reference_generation: bool = False,
+    ) -> ExecutionPlan:
+        """Build the multi-reference H3 route without audio refs.
+
+        ``native_h3_ref2va`` consumes references that already exist (or are
+        explicitly injected by the caller).  The composed
+        ``text2image2native_h3_ref2va`` route adds a real T2I candidate stage
+        before the same validation and Ref2VA render contract.
+        """
+        image_manifest = None
+        if auto_reference_generation:
+            image_manifest = self._manifest_from_goal_constraints(
+                goal,
+                *self.DEFAULT_IMAGE_WORKFLOWS,
+                constraint_keys=(
+                    "native_h3_reference_workflow_name",
+                    "keyframe_workflow_name",
+                    "image_workflow_name",
+                ),
+                allowed_media_types={"image"},
+            )
+        video_manifest = self._manifest_from_goal_constraints(
+            goal,
+            "minimax_h3_ref2va",
+            constraint_keys=("video_workflow_name", "native_h3_ref2va_workflow_name", "workflow_name"),
+            allowed_media_types={"native_h3_ref2va", "long_video"},
+        )
+        render_config = self._native_h3_render_config(goal, video_manifest, default_steps=20)
+        width, height = render_config["width"], render_config["height"]
+        length, steps, video_count = render_config["length"], render_config["steps"], render_config["video_count"]
+        storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_ref2va")
+        reference_manifest = list(goal.constraints.get("native_h3_reference_manifest") or goal.constraints.get("reference_manifest") or [])
+        reference_image_paths = list(goal.constraints.get("native_h3_reference_image_paths") or [])
+        reference_video_paths = list(goal.constraints.get("native_h3_reference_video_paths") or [])
+        reference_candidates = list(
+            goal.constraints.get("native_h3_reference_candidates")
+            or goal.constraints.get("media_paths")
+            or []
+        )
+        raw_selection_limit = int(goal.constraints.get("native_h3_reference_selection_limit") or 4)
+        reference_selection_limit = max(
+            1,
+            min(4 if auto_reference_generation else 12, raw_selection_limit),
+        )
+        raw_candidate_count = int(
+            (
+                goal.constraints.get("image_count")
+                if auto_reference_generation
+                else goal.constraints.get("native_h3_reference_candidate_count")
+            )
+            or goal.constraints.get("native_h3_reference_candidate_count")
+            or 4
+        )
+        reference_candidate_count = max(
+            4 if auto_reference_generation else 1,
+            min(6 if auto_reference_generation else 6, raw_candidate_count),
+        )
+        if "require_human_review" in goal.constraints:
+            require_human_review = bool(goal.constraints.get("require_human_review"))
+        else:
+            # Generated references must never silently become Ref2VA inputs.
+            # Only an explicit --no-review path may disable this gate.
+            require_human_review = auto_reference_generation or bool(reference_candidates)
+        nodes = [
+            ExecutionNode(
+                node_id="native-story-prompt",
+                skill_name="longvideo.prepare_native_h3_story",
+                inputs={"storyboard_path": storyboard_path, "duration_seconds": int(goal.duration_seconds), "style": goal.style, "render_mode": "reference_to_video"},
+                tags=["creative", "story", "native-h3", "ref2va"],
+                stage="prompting",
+            ),
+        ]
+        if auto_reference_generation:
+            nodes.extend(
+                [
+                    ExecutionNode(
+                        node_id="native-image-asset-check",
+                        skill_name="media.ensure_workflow",
+                        inputs={
+                            "workflow_name": image_manifest.name,
+                            "auto_download": goal.auto_download_assets,
+                        },
+                        depends_on=["native-story-prompt"],
+                        tags=["assets", "image", "native-h3", "ref2va"],
+                        tool_name="asset.ensure_workflow_ready",
+                        stage="assets",
+                    ),
+                    ExecutionNode(
+                        node_id="native-video-asset-check",
+                        skill_name="media.ensure_workflow",
+                        inputs={"workflow_name": video_manifest.name, "auto_download": goal.auto_download_assets},
+                        depends_on=["native-story-prompt"],
+                        tags=["assets", "video", "native-h3", "ref2va"],
+                        tool_name="asset.ensure_workflow_ready",
+                        stage="assets",
+                    ),
+                    ExecutionNode(
+                        node_id="native-ref2va-reference-candidates",
+                        skill_name="media.image.generate_keyframe",
+                        inputs={
+                            "workflow_name": image_manifest.name,
+                            "prompt_key": "opening_keyframe_prompt",
+                            "width": width,
+                            "height": height,
+                            "image_count": reference_candidate_count,
+                            "suffix": "native_h3_ref2va_reference",
+                            "max_regenerations": 0,
+                        },
+                        depends_on=["native-story-prompt", "native-image-asset-check"],
+                        tags=["render", "image", "references", "native-h3", "ref2va"],
+                        tool_name="comfy.workflow.text_to_image",
+                        stage="render",
+                    ),
+                ]
+            )
+        else:
+            nodes.append(
+                ExecutionNode(
+                    node_id="native-video-asset-check",
+                    skill_name="media.ensure_workflow",
+                    inputs={"workflow_name": video_manifest.name, "auto_download": goal.auto_download_assets},
+                    depends_on=["native-story-prompt"],
+                    tags=["assets", "video", "native-h3", "ref2va"],
+                    tool_name="asset.ensure_workflow_ready",
+                    stage="assets",
+                )
+            )
+        reference_check_dependencies = ["native-story-prompt"]
+        if auto_reference_generation:
+            candidate_node_id = "native-ref2va-reference-candidates"
+            if require_human_review:
+                nodes.append(
+                    ExecutionNode(
+                        node_id="native-ref2va-reference-review",
+                        skill_name="review.assets.select",
+                        inputs={
+                            "limit": reference_selection_limit,
+                            "review_all_candidates": True,
+                            "review_scope": "reference",
+                            "review_phase": "reference_selection",
+                            "require_human_review": require_human_review,
+                            "review_notes": str(goal.constraints.get("review_notes") or ""),
+                        },
+                        depends_on=[candidate_node_id],
+                        tags=["review", "references", "native-h3", "ref2va"],
+                        stage="review",
+                    )
+                )
+                reference_check_dependencies.append("native-ref2va-reference-review")
+            else:
+                reference_check_dependencies.append(candidate_node_id)
+        elif reference_candidates:
+            candidate_node_id = "native-ref2va-reference-candidates"
+            nodes.append(
+                ExecutionNode(
+                    node_id=candidate_node_id,
+                    skill_name="publish.media.ingest",
+                    inputs={"media_paths": reference_candidates},
+                    depends_on=["native-story-prompt"],
+                    tags=["assets", "references", "native-h3", "ref2va"],
+                    stage="assets",
+                )
+            )
+            if require_human_review:
+                nodes.append(
+                    ExecutionNode(
+                        node_id="native-ref2va-reference-review",
+                        skill_name="review.assets.select",
+                        inputs={
+                            "limit": reference_selection_limit,
+                            "review_all_candidates": True,
+                            "review_scope": "reference",
+                            "review_phase": "reference_selection",
+                            "require_human_review": True,
+                            "review_notes": str(goal.constraints.get("review_notes") or ""),
+                        },
+                        depends_on=[candidate_node_id],
+                        tags=["review", "references", "native-h3", "ref2va"],
+                        stage="review",
+                    )
+                )
+                reference_check_dependencies.append("native-ref2va-reference-review")
+            else:
+                reference_check_dependencies.append(candidate_node_id)
+        nodes.extend(
+            [
+                ExecutionNode(
+                    node_id="native-ref2va-reference-check",
+                    skill_name="longvideo.validate_native_h3_references",
+                    inputs={
+                        "reference_manifest": reference_manifest,
+                        "reference_image_paths": reference_image_paths,
+                        "reference_video_paths": reference_video_paths,
+                        "max_images": int(goal.constraints.get("native_h3_reference_max_images") or 9),
+                        "max_videos": int(goal.constraints.get("native_h3_reference_max_videos") or 3),
+                        "selection_limit": reference_selection_limit,
+                        "auto_reference_generation": auto_reference_generation,
+                    },
+                    depends_on=reference_check_dependencies,
+                    tags=["quality", "references", "native-h3", "ref2va"],
+                    stage="quality",
+                ),
+                ExecutionNode(
+                    node_id="native-h3-render",
+                    skill_name="longvideo.render_native_h3_ref2va",
+                    inputs={
+                        "workflow_name": video_manifest.name,
+                        "width": width,
+                        "height": height,
+                        "length": length,
+                        "steps": steps,
+                        "video_count": video_count,
+                        "ref_image_size": str(goal.constraints.get("native_h3_reference_image_size") or "match"),
+                        "model_profile": str(goal.constraints.get("native_h3_model_profile") or "q4"),
+                    },
+                    depends_on=["native-story-prompt", "native-video-asset-check", "native-ref2va-reference-check"],
+                    tags=["render", "video", "native-h3", "ref2va"],
+                    tool_name="comfy.workflow.reference_to_video",
+                    stage="render",
+                ),
+            ]
+        )
+        nodes.extend(self._native_h3_finalize_nodes(tags=["native-h3", "ref2va"], include_keyframe_gate=False))
+        required_assets = [asset.to_dict() for asset in video_manifest.required_assets]
+        if image_manifest is not None:
+            required_assets = [asset.to_dict() for asset in image_manifest.required_assets] + required_assets
+        metadata = {
+            "recipe": "text2image2native_h3_ref2va" if auto_reference_generation else "native_h3_ref2va",
+            "storyboard_path": storyboard_path,
+            "selected_workflow": video_manifest.name,
+            "selected_workflows": {
+                "image": image_manifest.name if image_manifest is not None else "",
+                "video": video_manifest.name,
+            },
+            "required_assets": required_assets,
+            "image_required_assets": (
+                [asset.to_dict() for asset in image_manifest.required_assets]
+                if image_manifest is not None
+                else []
+            ),
+            "video_required_assets": [asset.to_dict() for asset in video_manifest.required_assets],
+            "reference_manifest": reference_manifest,
+            "reference_candidates": reference_candidates,
+            "reference_candidate_count": reference_candidate_count if auto_reference_generation else 0,
+            "reference_selection_limit": reference_selection_limit,
+            "reference_audio_enabled": False,
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "reference_image_size": str(goal.constraints.get("native_h3_reference_image_size") or "match")},
+            "render_mode": "reference_to_video",
+            "graph_overview": [node.node_id for node in nodes],
+        }
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name=video_manifest.name,
+            nodes=nodes,
+            metadata=metadata,
+            description=(
+                f"Native H3 T2I-to-Ref2VA story from storyboard '{storyboard_path}' with reviewed generated references"
+                if auto_reference_generation
+                else f"Native H3 Ref2VA story from storyboard '{storyboard_path}' with image/video references only"
+            ),
         )
 
     @staticmethod
@@ -446,11 +1023,30 @@ class TaskPlanner:
     def _stage_review_enabled(goal: GoalRequest) -> bool:
         return bool(goal.constraints.get("enable_stage_review", False))
 
+    @staticmethod
+    def _pre_video_review_enabled(goal: GoalRequest) -> bool:
+        return bool(goal.constraints.get("pre_video_review_enabled", False))
+
+    @staticmethod
+    def _pre_video_review_requires_human(goal: GoalRequest) -> bool:
+        return bool(
+            goal.constraints.get(
+                "pre_video_review_require_human",
+                TaskPlanner._pre_video_review_enabled(goal),
+            )
+        )
+
+    @staticmethod
+    def _pre_video_candidate_count(goal: GoalRequest, default: int = 6) -> int:
+        value = goal.constraints.get("pre_video_candidate_count")
+        return max(1, int(value or default))
+
     def _build_long_video_plan(self, goal: GoalRequest, workflow_manifest: WorkflowManifest) -> ExecutionPlan:
         segment_count = self._constraint_int(goal, "segment_count", max(2, goal.duration_seconds // 10))
         use_tts = bool(goal.constraints.get("use_tts", False))
         review_loop_enabled = self._review_loop_enabled(goal)
-        stage_review_enabled = self._stage_review_enabled(goal)
+        pre_video_review = self._pre_video_review_enabled(goal)
+        stage_review_enabled = self._stage_review_enabled(goal) or pre_video_review
         review_notes = str(goal.constraints.get("review_notes", "") or "")
         selection_limit = self._review_selection_limit(goal, default=self._constraint_int(goal, "review_selection_limit", 3))
         idea_variants = self.idea_director.generate_variations(goal)
@@ -473,6 +1069,11 @@ class TaskPlanner:
             allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
         )
         image_count = self._constraint_int(goal, "image_count", 1)
+        if pre_video_review:
+            # Only the opening segment is a six-way candidate gate. Later
+            # frames remain continuity-driven from the previous video tail.
+            image_count = 1
+        pre_video_candidate_count = self._pre_video_candidate_count(goal)
         nodes = [
             ExecutionNode(
                 node_id="idea-brief",
@@ -564,7 +1165,11 @@ class TaskPlanner:
                         "segment_index": index,
                         "width": image_manifest.recommended_defaults.get("width", 1024),
                         "height": image_manifest.recommended_defaults.get("height", 1024),
-                        "image_count": image_count,
+                        "image_count": (
+                            pre_video_candidate_count
+                            if pre_video_review and index == 0
+                            else image_count
+                        ),
                     },
                     depends_on=frame_dependencies,
                     tags=["render", "image", "segment"],
@@ -579,7 +1184,14 @@ class TaskPlanner:
                     ExecutionNode(
                         node_id=stage_review_node,
                         skill_name="review.assets.select",
-                        inputs={"limit": selection_limit, "review_notes": review_notes},
+                        inputs={
+                            "limit": 1,
+                            "review_all_candidates": True,
+                            "review_scope": "first_frame",
+                            "review_phase": "opening_frame",
+                            "require_human_review": self._pre_video_review_requires_human(goal),
+                            "review_notes": review_notes,
+                        },
                         depends_on=[segment_frame_node],
                         tags=["review", "stage", "segment"],
                         stage="review",
@@ -958,6 +1570,7 @@ class TaskPlanner:
         )
 
     def _build_text2img2video_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        pre_video_review = self._pre_video_review_enabled(goal)
         image_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_IMAGE_WORKFLOWS,
@@ -977,10 +1590,14 @@ class TaskPlanner:
             allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
         )
         review_loop_enabled = self._review_loop_enabled(goal)
-        stage_review_enabled = self._stage_review_enabled(goal)
+        stage_review_enabled = self._stage_review_enabled(goal) or pre_video_review
         review_notes = str(goal.constraints.get("review_notes", "") or "")
         selection_limit = self._review_selection_limit(goal, default=self._constraint_int(goal, "review_selection_limit", 2))
-        image_count = self._constraint_int(goal, "image_count", 1)
+        image_count = (
+            self._pre_video_candidate_count(goal)
+            if pre_video_review
+            else self._constraint_int(goal, "image_count", 1)
+        )
         nodes = [
             ExecutionNode(
                 node_id="idea-brief",
@@ -1049,8 +1666,15 @@ class TaskPlanner:
                 ExecutionNode(
                     node_id="stage-review-select",
                     skill_name="review.assets.select",
-                    inputs={"limit": selection_limit, "review_notes": review_notes},
-                    depends_on=["upscale-image"],
+                    inputs={
+                        "limit": 1,
+                        "review_all_candidates": True,
+                        "review_scope": "first_frame",
+                        "review_phase": "opening_frame",
+                        "require_human_review": self._pre_video_review_requires_human(goal),
+                        "review_notes": review_notes,
+                    },
+                    depends_on=["render-image" if pre_video_review else "upscale-image"],
                     tags=["review", "stage"],
                     stage="review",
                 )
@@ -1185,7 +1809,7 @@ class TaskPlanner:
             workflow_name="text2img2video_v1",
             nodes=nodes,
             metadata=metadata,
-            description=f"Migrated text2img2video chain for goal '{goal.prompt}'",
+            description=f"Composed text2img2video chain for goal '{goal.prompt}'",
         )
 
     def _build_storyboard_plan(self, goal: GoalRequest, workflow_manifest: WorkflowManifest) -> ExecutionPlan:
@@ -1387,7 +2011,7 @@ class TaskPlanner:
             "graph_overview": [node.node_id for node in nodes],
             "input_image_path": input_image_path,
         }
-        description = f"Legacy workflow '{workflow_manifest.name}' for media_type '{goal.media_type}'"
+        description = f"Workflow '{workflow_manifest.name}' for media_type '{goal.media_type}'"
         return ExecutionPlan(
             goal=goal,
             workflow_name=workflow_manifest.name,
@@ -1477,6 +2101,7 @@ class TaskPlanner:
         )
 
     def _build_text2video_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        pre_video_review = self._pre_video_review_enabled(goal)
         image_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_IMAGE_WORKFLOWS,
@@ -1485,15 +2110,23 @@ class TaskPlanner:
         )
         video_manifest = self._manifest_from_goal_constraints(
             goal,
-            *self.DEFAULT_I2V_WORKFLOWS,
-            constraint_keys=("video_workflow_name",),
+            *(self.DEFAULT_I2V_WORKFLOWS if pre_video_review else self.DEFAULT_T2V_WORKFLOWS),
+            # A T2V manifest may advertise ``long_video`` as well, so merely
+            # filtering by media type is not enough to guarantee that the
+            # approved image becomes conditioning. Ignore the T2V override
+            # whenever the shared image gate is active.
+            constraint_keys=("video_workflow_name",) if not pre_video_review else (),
             allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
         )
         review_loop_enabled = self._review_loop_enabled(goal)
-        stage_review_enabled = self._stage_review_enabled(goal)
+        stage_review_enabled = self._stage_review_enabled(goal) or pre_video_review
         review_notes = str(goal.constraints.get("review_notes", "") or "")
         selection_limit = self._review_selection_limit(goal, default=self._constraint_int(goal, "review_selection_limit", 2))
-        image_count = self._constraint_int(goal, "image_count", 1)
+        image_count = (
+            self._pre_video_candidate_count(goal)
+            if pre_video_review
+            else self._constraint_int(goal, "image_count", 1)
+        )
         nodes = [
             ExecutionNode(
                 node_id="idea-brief",
@@ -1541,7 +2174,14 @@ class TaskPlanner:
                 ExecutionNode(
                     node_id="stage-review-select",
                     skill_name="review.assets.select",
-                    inputs={"limit": selection_limit, "review_notes": review_notes},
+                    inputs={
+                        "limit": 1,
+                        "review_all_candidates": True,
+                        "review_scope": "first_frame",
+                        "review_phase": "opening_frame",
+                        "require_human_review": self._pre_video_review_requires_human(goal),
+                        "review_notes": review_notes,
+                    },
                     depends_on=["render-image"],
                     tags=["review", "stage"],
                     stage="review",
@@ -2017,7 +2657,8 @@ class TaskPlanner:
                 skill_name="review.assets.select",
                 inputs={
                     "limit": selection_limit,
-                    "review_scope": str(goal.constraints.get("review_scope") or "final_video"),
+                    "review_scope": _infer_publish_review_scope(goal),
+                    "review_all_candidates": bool(goal.constraints.get("review_all_candidates", False)),
                 },
                 depends_on=["ingest-media"],
                 tags=["review", "publish"],

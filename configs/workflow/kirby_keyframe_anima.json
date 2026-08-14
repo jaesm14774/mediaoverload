@@ -1,5 +1,5 @@
 {
-  "1": {"inputs": {"unet_name": "anima\\anima-preview2.safetensors", "weight_dtype": "default"}, "class_type": "UNETLoader", "_meta": {"title": "Kirby keyframe Anima model"}},
+  "1": {"inputs": {"unet_name": "anima\\anima-aesthetic-v1.1.safetensors", "weight_dtype": "default"}, "class_type": "UNETLoader", "_meta": {"title": "Kirby keyframe Anima model"}},
   "2": {"inputs": {"clip_name": "anima\\qwen_3_06b_base.safetensors", "type": "stable_diffusion", "device": "cpu"}, "class_type": "CLIPLoader", "_meta": {"title": "Kirby keyframe text encoder"}},
   "3": {"inputs": {"vae_name": "anima\\qwen_image_vae.safetensors"}, "class_type": "VAELoader", "_meta": {"title": "Kirby keyframe VAE"}},
   "4": {"inputs": {"value": "Kirby, the round pink star warrior mascot, centered full body, bright red feet, oval blue eyes, tiny smiling mouth, waving one stubby arm in a glowing green meadow, clean 2D anime illustration, bold readable silhouette, no humans, no other characters, no text."}, "class_type": "PrimitiveString", "_meta": {"title": "positive_prompt"}},
