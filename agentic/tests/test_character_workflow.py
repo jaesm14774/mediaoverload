@@ -740,10 +740,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["platform_aliases"]["instagram"], "instagram_graph")
         self.assertEqual(payload["constraints"]["skipped_platforms"], ["mastodon"])
         self.assertNotIn("facebook", payload["constraints"]["platform_configs"])
-        self.assertTrue(
-            payload["constraints"]["platform_configs"]["instagram_graph"]["config_folder_path"].endswith(
-                "configs\\social_media\\credentials\\kirby"
-            )
+        self.assertEqual(
+            Path(payload["constraints"]["platform_configs"]["instagram_graph"]["config_folder_path"]).parts[-4:],
+            ("configs", "social_media", "credentials", "kirby"),
         )
 
     def test_build_goal_payload_enables_stage_review_when_discord_env_is_present(self) -> None:
