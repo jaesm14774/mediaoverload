@@ -1,0 +1,25 @@
+social_media:
+  # Leave empty: the caption model must select tags grounded in the post and media.
+  default_hashtags: []
+
+  platforms:
+    instagram_graph:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+
+    facebook:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+
+    youtube:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+
+    twitter:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      # X API requires paid credits; enable explicitly after billing validation.
+      enabled: false

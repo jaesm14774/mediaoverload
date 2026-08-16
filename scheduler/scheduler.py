@@ -1,252 +1,228 @@
-import yaml
-import schedule
-import time
+from __future__ import annotations
+
+import logging
+import os
 import random
-from pathlib import Path
-from datetime import datetime, timedelta
 import sys
-import math
-from typing import Dict, Any, Optional
-import asyncio
-import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-sys.path.append(str(Path(__file__).parent.parent))
+from dotenv import load_dotenv
 
-from lib.services.service_factory import ServiceFactory
-from lib.media_auto.character_base import ConfigurableCharacterWithSocialMedia
-from utils.logger import setup_logger, log_execution_time
+try:
+    import schedule
+except ImportError:  # pragma: no cover - exercised in environments without optional runtime deps
+    schedule = None  # type: ignore[assignment]
 
-class MediaScheduler:
-    def __init__(self, config_path: str = "scheduler/schedule_config.yaml"):
-        self.logger = setup_logger(__name__)
-        self.config_path = config_path
-        self.load_config()
-        
-        self.last_execution_times = {}  # 儲存每個角色的上次執行時間
-        self.service_factory = ServiceFactory()
-        self.orchestration_service = self.service_factory.get_orchestration_service()
-        
-        # 任務執行鎖，用於防止多個角色同時執行（使用 threading.Lock 以支持跨事件循環）
-        self.execution_lock = threading.Lock()
-        self.is_task_running = False  # 追蹤是否有任務正在執行
 
-        # 從配置文件讀取或使用默認值
-        probability_settings = self.config.get('probability_settings', {})
-        self.base_probability = float(probability_settings.get('base_probability', 4/15))    # 基礎機率（每15小時4次）
-        self.max_probability = float(probability_settings.get('max_probability', 1/2))    # 最大機率（每15小時7.5次）
-        self.min_probability = float(probability_settings.get('min_probability', 0.5/15))     # 最小機率（每15小時0.5次）
+REPO_ROOT = Path(__file__).resolve().parents[1]
+AGENTIC_SRC = REPO_ROOT / "agentic" / "src"
+for candidate in (REPO_ROOT, AGENTIC_SRC):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
-        # 設置定期清理閒置連接的任務
-        schedule.every(30).minutes.do(self.cleanup_idle_connections)
+from agentic.app.character_workflow import run_character_workflow
 
-        # 立即執行一次處理
-        asyncio.run(self.instant_execution())
 
-    @log_execution_time(logger=setup_logger(__name__))
-    def load_config(self):
-        """載入配置文件"""
-        with open(self.config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
-    
-    def calculate_time_factor(self, hours_since_last: float) -> float:
-        """
-        計算基於時間的機率調整因子。
-        使用邏輯函數（Sigmoid）來模擬增長曲線：
-        - 初期（0-4小時）：因子非常低，增長緩慢。
-        - 中期（7小時後）：因子開始快速、大幅度增長。
-        - 後期：因子趨於平穩，達到最大值。
-        """
-        if hours_since_last < 0:
-            hours_since_last = 0
+LOGGER = logging.getLogger("mediaoverload.scheduler")
 
-        min_factor = 0.1  # 初始的最小因子
-        max_factor = 10  # 可達到的最大因子
-        midpoint = 8.0    # 增長曲線的中點（小時），在7小時後開始快速增長
-        steepness = 1.5   # 曲線的陡峭程度，數值越大增長越快
 
-        # 邏輯函數（Sigmoid
-        growth = (max_factor - min_factor) / (1 + math.exp(-steepness * (hours_since_last - midpoint)))
-        factor = min_factor + growth
-        
-        return factor
+@dataclass(slots=True)
+class SchedulerConfig:
+    enabled: bool
+    mode: str
+    interval_hours: int
+    daily_time: str
+    character: str | None
+    config_path: Path | None
+    prompt: str
+    news_driven: bool
+    news_history_path: str | None
+    run_immediately: bool
+    dry_run_publish: bool
+    publish_mode: str
+    publish_platforms: list[str] | None
+    publish_after_generate: bool
+    enable_review_loop: bool
+    no_review: bool
+    review_notes: str
+    output_dir: str | None
+    comfy_host: str | None
+    comfy_port: int | None
+    comfy_root: str | None
+    auto_download_assets: bool
+    preferred_generation_type: str | None
+    duration_seconds: int | None
+    sleep_seconds: int
+    random_seed: int | None
 
-    def should_execute(self, character_name: str) -> bool:
-        """決定是否要執行處理"""
-        # 如果是角色的首次執行（通常在程式啟動時），則強制執行
-        if character_name not in self.last_execution_times:
-            self.logger.info(f"角色 {character_name} 首次執行，強制執行。")
-            return True
-            
-        current_hour = datetime.now().hour
-        if current_hour >= 22 or current_hour < 7:
-            self.logger.info("當前時間在睡眠時段（22:00-07:00），跳過執行")
-            return False
 
-        char_config = next((cfg for name, cfg in self.config['schedules'].items() 
-                          if cfg['character'] == character_name), None)
-        if not char_config:
-            return False
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
 
-        prob_settings = char_config.get('probability_settings', {})
-        base_prob = float(prob_settings.get('base_probability', self.base_probability))
-        max_prob = float(prob_settings.get('max_probability', self.max_probability))
-        min_prob = float(prob_settings.get('min_probability', self.min_probability))
 
-        last_execution_time = self.last_execution_times.get(character_name)
-        if last_execution_time:
-            hours_since_last = (datetime.now() - last_execution_time).total_seconds() / 3600
-            time_factor = self.calculate_time_factor(hours_since_last)
-            current_probability = base_prob * time_factor
-            current_probability = max(min_prob, min(current_probability, max_prob))
-            
-            self.logger.info(f"距離上次執行 {hours_since_last:.1f} 小時, "
-                           f"時間因子 {time_factor:.2f}, "
-                           f"當前執行機率 {current_probability:.3%}/小時")
-        else:
-            # 如果沒有上次執行時間，使用基礎機率
-            current_probability = base_prob
+def _parse_csv(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    values = [item.strip() for item in str(value).split(",") if item.strip()]
+    return values or None
 
-        return random.random() < current_probability
 
-    async def process_character(self, character_name: str, prompt_config: dict) -> None:
-        """處理特定角色的內容"""
-        if not self.should_execute(character_name):
-            self.logger.info(f"根據機率決定跳過執行角色 {character_name}")
-            return
+def _load_env() -> None:
+    for env_path in (REPO_ROOT / "media_overload.env", REPO_ROOT / ".env"):
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
 
-        # 檢查是否有任務正在執行
-        with self.execution_lock:
-            if self.is_task_running:
-                self.logger.info(f"檢測到有任務正在執行，跳過角色 {character_name} 的執行（不影響下次機率）")
-                return
-            
-            # 設置任務執行標記
-            self.is_task_running = True
 
-        try:
-            self.logger.info(f"開始處理角色 {character_name}")
-            
-            # 載入角色配置
-            character_config_path = f"configs/characters/{character_name.lower()}.yaml"
-            character = ConfigurableCharacterWithSocialMedia(character_config_path)
+def _resolve_character_config(character: str | None, config_path: str | None) -> Path | None:
+    if config_path:
+        return Path(config_path).resolve()
+    if character:
+        candidate = REPO_ROOT / "configs" / "characters" / f"{character.lower()}.yaml"
+        if candidate.exists():
+            return candidate
+        raise ValueError(f"Character config not found: {candidate}")
+    return None
 
-            # 註冊社群媒體平台
-            publishing_service = self.service_factory.get_publishing_service()
-            
-            # 如果使用配置檔案，從配置中註冊平台
-            if hasattr(character, '_social_media_config'):
-                for platform_name, platform_config in character._social_media_config.items():
-                    publishing_service.register_platform(platform_name, platform_config)
 
-            
-            # 執行工作流程
-            result = await self.orchestration_service.execute_workflow(
-                character=character,
-                prompt=prompt_config.get('prompt'),
-                temperature=prompt_config.get('temperature', 1.0)
-            )
-            
-            self.logger.info(f"成功處理角色 {character_name}")
-            # 只有在成功執行後才更新執行時間
-            self.last_execution_times[character_name] = datetime.now()
-            
-        except Exception as e:
-            self.logger.error(f"處理角色 {character_name} 時發生錯誤: {str(e)}", exc_info=True)
-        finally:
-            # 無論成功或失敗，都要釋放鎖
-            with self.execution_lock:
-                self.is_task_running = False
+def load_scheduler_config() -> SchedulerConfig:
+    _load_env()
+    character = str(os.getenv("SCHEDULER_CHARACTER", "")).strip() or None
+    raw_config_path = str(os.getenv("SCHEDULER_CONFIG", "")).strip() or None
+    mode = str(os.getenv("SCHEDULER_MODE", "interval")).strip().lower() or "interval"
+    interval_hours = int(os.getenv("SCHEDULER_INTERVAL_HOURS", "24"))
+    daily_time = str(os.getenv("SCHEDULER_DAILY_TIME", "09:00")).strip() or "09:00"
+    comfy_port_raw = str(os.getenv("SCHEDULER_COMFY_PORT", "")).strip()
+    duration_raw = str(os.getenv("SCHEDULER_DURATION_SECONDS", "")).strip()
+    random_seed_raw = str(os.getenv("SCHEDULER_RANDOM_SEED", "")).strip()
+    return SchedulerConfig(
+        enabled=_parse_bool(os.getenv("SCHEDULER_ENABLED"), default=True),
+        mode=mode,
+        interval_hours=max(1, interval_hours),
+        daily_time=daily_time,
+        character=character,
+        config_path=_resolve_character_config(character, raw_config_path),
+        prompt=str(os.getenv("SCHEDULER_PROMPT", "")).strip(),
+        news_driven=_parse_bool(os.getenv("SCHEDULER_NEWS_DRIVEN"), default=True),
+        news_history_path=str(os.getenv("SCHEDULER_NEWS_HISTORY_PATH", "")).strip() or None,
+        run_immediately=_parse_bool(os.getenv("SCHEDULER_RUN_IMMEDIATELY"), default=False),
+        dry_run_publish=_parse_bool(os.getenv("SCHEDULER_DRY_RUN_PUBLISH"), default=False),
+        publish_mode=str(os.getenv("SCHEDULER_PUBLISH_MODE", "")).strip().lower(),
+        publish_platforms=_parse_csv(os.getenv("SCHEDULER_PUBLISH_PLATFORMS")),
+        publish_after_generate=_parse_bool(os.getenv("SCHEDULER_PUBLISH_AFTER_GENERATE"), default=True),
+        enable_review_loop=_parse_bool(os.getenv("SCHEDULER_ENABLE_REVIEW_LOOP"), default=True),
+        no_review=_parse_bool(os.getenv("SCHEDULER_NO_REVIEW"), default=False),
+        review_notes=str(os.getenv("SCHEDULER_REVIEW_NOTES", "")).strip(),
+        output_dir=str(os.getenv("SCHEDULER_OUTPUT_DIR", "")).strip() or None,
+        comfy_host=str(os.getenv("SCHEDULER_COMFY_HOST", "")).strip() or None,
+        comfy_port=int(comfy_port_raw) if comfy_port_raw else None,
+        comfy_root=str(os.getenv("SCHEDULER_COMFY_ROOT", "")).strip() or None,
+        auto_download_assets=_parse_bool(os.getenv("SCHEDULER_AUTO_DOWNLOAD_ASSETS"), default=False),
+        preferred_generation_type=str(os.getenv("SCHEDULER_PREFERRED_GENERATION_TYPE", "")).strip() or None,
+        duration_seconds=int(duration_raw) if duration_raw else None,
+        sleep_seconds=max(5, int(os.getenv("SCHEDULER_SLEEP_SECONDS", "30"))),
+        random_seed=int(random_seed_raw) if random_seed_raw else None,
+    )
 
-    async def instant_execution(self) -> None:
-        """立即執行所有角色的處理"""
-        self.logger.info("開始執行首次啟動任務...")
-        for char_config in self.config['schedules'].values():
-            await self.process_character(
-                character_name=char_config['character'],
-                prompt_config=char_config['prompts'][0]
-            )
 
-    def setup_schedules(self) -> None:
-        """設置排程"""
-        self.logger.info("開始設置排程...")
-        
-        for char_config in self.config['schedules'].values():
-            try:
-                def schedule_next_run(char_config):
-                    now = datetime.now()
-                    next_hour = now + timedelta(hours=1)
-                    next_hour = next_hour.replace(
-                        minute=random.randint(0, 59),
-                        second=0,
-                        microsecond=0
-                    )
-                    
-                    if next_hour.hour >= 22 or next_hour.hour < 7:
-                        next_hour = next_hour.replace(hour=7, minute=random.randint(0, 59))
-                        if next_hour < now:
-                            next_hour += timedelta(days=1)
-                    
-                    schedule.every().day.at(f"{next_hour.strftime('%H:%M')}").do(
-                        self.process_and_reschedule,
-                        char_config=char_config,
-                        schedule_func=schedule_next_run
-                    ).tag(f"schedule_{char_config['character']}")
-                    
-                    self.logger.info(
-                        f"已為角色 {char_config['character']} 設置下次執行時間: {next_hour.strftime('%H:%M')}"
-                    )
-                
-                schedule_next_run(char_config)
-                
-            except Exception as e:
-                self.logger.error(f"設置排程 {char_config['character']} 時發生錯誤: {str(e)}")
+def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = None) -> dict[str, Any]:
+    if config.config_path is None:
+        raise ValueError("Scheduler requires SCHEDULER_CHARACTER or SCHEDULER_CONFIG")
+    if rng is None:
+        rng = random.Random()
+    LOGGER.info(
+        "scheduler.run | config=%s | prompt=%s | news_driven=%s | strategy_selection=%s | preferred_generation_type=%s",
+        config.config_path,
+        config.prompt or "<autonomous>",
+        config.news_driven,
+        "explicit_override" if config.preferred_generation_type else "weighted_random",
+        config.preferred_generation_type or "<weighted>",
+    )
+    result = run_character_workflow(
+        REPO_ROOT,
+        config.config_path,
+        prompt=config.prompt,
+        preferred_generation_type=config.preferred_generation_type,
+        duration_seconds=config.duration_seconds,
+        dry_run_publish=config.dry_run_publish,
+        publish_mode=config.publish_mode,
+        publish_platforms=config.publish_platforms,
+        publish_after_generate=config.publish_after_generate,
+        output_dir=config.output_dir,
+        enable_review_loop=config.enable_review_loop,
+        review_notes=config.review_notes,
+        no_review=config.no_review,
+        news_driven=config.news_driven,
+        news_history_path=config.news_history_path,
+        comfy_host=config.comfy_host,
+        comfy_port=config.comfy_port,
+        comfy_root=config.comfy_root,
+        auto_download_assets=config.auto_download_assets,
+        rng=rng,
+    )
+    LOGGER.info(
+        "scheduler.result | status=%s | strategy=%s | publish=%s",
+        result.get("status"),
+        result.get("source_generation_type"),
+        ((result.get("publish") or {}).get("result") or {}).get("status", ""),
+    )
+    return result
 
-    def process_and_reschedule(self, char_config: dict, schedule_func) -> None:
-        """處理角色並重新排程"""
-        try:
-            schedule.clear(f"schedule_{char_config['character']}")
-            
-            asyncio.run(self.process_character(
-                character_name=char_config['character'],
-                prompt_config=char_config['prompts'][0]
-            ))
-            
-            schedule_func(char_config)
-            
-        except Exception as e:
-            self.logger.error(f"處理和重新排程時發生錯誤: {str(e)}", exc_info=True)
-            schedule_func(char_config)
 
-    def cleanup_idle_connections(self):
-        """清理閒置的資料庫連接"""
-        try:
-            from lib.database import db_pool
-            db_pool.cleanup_idle_connections(max_idle_time=1800)
-        except Exception as e:
-            self.logger.error(f"清理閒置連接時發生錯誤: {str(e)}")
+def _run_scheduled_job_safe(config: SchedulerConfig, *, rng: random.Random | None = None) -> dict[str, Any]:
+    try:
+        return run_scheduled_job(config, rng=rng)
+    except Exception:
+        LOGGER.exception("scheduler.run.failed | config=%s", config.config_path)
+        return {"status": "failed", "source_generation_type": "", "error": "scheduled job failed"}
 
-    def run(self) -> None:
-        """運行排程器"""
-        self.logger.info("啟動排程器...")
-        self.setup_schedules()
-        self.logger.info("所有排程已設置完成，進入主迴圈")
-        
-        while True:
-            try:
-                schedule.run_pending()
-                time.sleep(60)
-            except Exception as e:
-                self.logger.error(f"執行排程時發生錯誤: {str(e)}", exc_info=True)
-                # 發生錯誤時，嘗試清理並重新建立連接
-                self.cleanup_idle_connections()
 
-    def cleanup(self) -> None:
-        """清理資源"""
-        self.service_factory.cleanup()
+def register_jobs(config: SchedulerConfig, *, rng: random.Random | None = None) -> None:
+    if schedule is None:
+        raise RuntimeError("Missing scheduler dependency; install the 'schedule' package")
+    if config.mode == "daily":
+        schedule.every().day.at(config.daily_time).do(_run_scheduled_job_safe, config=config, rng=rng)
+        LOGGER.info("scheduler.registered | mode=daily | at=%s", config.daily_time)
+        return
+    schedule.every(config.interval_hours).hours.do(_run_scheduled_job_safe, config=config, rng=rng)
+    LOGGER.info("scheduler.registered | mode=interval | every_hours=%s", config.interval_hours)
+
+
+def main() -> None:
+    logging.basicConfig(
+        level=os.getenv("SCHEDULER_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    config = load_scheduler_config()
+    if not config.enabled:
+        LOGGER.info("scheduler.disabled")
+        return
+    if schedule is None:
+        raise RuntimeError("Missing scheduler dependency; install the 'schedule' package")
+    if config.config_path is None:
+        raise ValueError("Scheduler requires SCHEDULER_CHARACTER or SCHEDULER_CONFIG")
+
+    rng = random.Random(config.random_seed) if config.random_seed is not None else random.Random()
+    register_jobs(config, rng=rng)
+    if config.run_immediately:
+        _run_scheduled_job_safe(config, rng=rng)
+
+    LOGGER.info("scheduler.loop.start | sleep_seconds=%s", config.sleep_seconds)
+    while True:
+        schedule.run_pending()
+        time.sleep(config.sleep_seconds)
+
 
 if __name__ == "__main__":
-    scheduler = MediaScheduler()
-    try:
-        scheduler.run()
-    finally:
-        scheduler.cleanup()
+    main()

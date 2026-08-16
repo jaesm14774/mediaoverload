@@ -1,0 +1,809 @@
+routing:
+  enabled: true
+  strategy_candidates:
+    # Disabled because current output quality is not acceptable. These routes
+    # remain available only when explicitly requested with --generation-type.
+    # - text2img
+    # - text2video
+    - text2image2video
+    - text2longvideo
+    - native_h3_story
+    - native_h3_t2v_story
+    - native_h3_fl2va_story
+    - native_h3_l2va_story
+    - native_h3_ref2va
+    - text2image2native_h3_ref2va
+    # Disabled because current output quality is not acceptable. This is the
+    # canonical name for the text2img2img strategy.
+    # - text2image2image
+    - sticker_pack
+
+  strategy_aliases:
+    t2i2native_h3_ref2va: text2image2native_h3_ref2va
+
+  # Image-conditioned routes use a human-reviewed image gate before video
+  # render. Pure T2V routes remain prompt-only. Ref2VA may bind several
+  # approved references; first-frame routes bind one approved frame.
+  pre_video_review:
+    enabled: true
+    candidate_count: 6
+    default_selection_limit: 1
+    ref2va_selection_limit: 4
+    reject_stops_workflow: true
+
+  longvideo_config:
+    mix_weights:
+      anchor_first: 1
+      anchor_first_last: 3
+      anchor_last: 2
+      reference_bundle: 2
+    review_policy: opening_only
+
+  workflow_stage_candidates:
+    text2img:
+      image_workflow_name:
+        - anima_anime
+        - z_image_plus_nova_model
+        - nova-anime-xl
+    text2video:
+      image_workflow_name:
+        - z_image_plus_nova_model
+        - nova-anime-xl
+      video_workflow_name:
+        - minimax_h3_lowvram_t2v
+        - minimax_h3_native_t2v
+    text2image2video:
+      image_workflow_name:
+        - z_image_plus_nova_model
+        - anima_anime
+      video_workflow_name:
+        - minimax_h3_lowvram_i2v
+      upscale_workflow_name:
+        - Tile Upscaler SDXL
+    text2longvideo:
+      image_workflow_name:
+        - z_image_plus_nova_model
+        - nova-anime-xl
+      video_workflow_name:
+        - minimax_h3_lowvram_i2v
+      transition_workflow_name:
+        - image_to_image
+        - z_image_i2i_anime
+    native_h3_story:
+      image_workflow_name:
+        - kirby_keyframe_anima
+        - anima_anime
+        - nova-anime-xl
+      video_workflow_name:
+        - minimax_h3_lowvram_15s_fl2va_i2v
+      refine_workflow_name:
+        - kirby_continuity_img2img
+        - kirby_identity_img2img
+    native_h3_t2v_story:
+      video_workflow_name:
+        - minimax_h3_lowvram_t2v
+        - minimax_h3_native_t2v
+    native_h3_fl2va_story:
+      image_workflow_name:
+        - kirby_keyframe_anima
+        - anima_anime
+      video_workflow_name:
+        - minimax_h3_lowvram_15s_fl2va_i2v
+    native_h3_l2va_story:
+      image_workflow_name:
+        - kirby_keyframe_anima
+        - anima_anime
+      video_workflow_name:
+        - minimax_h3_lowvram_15s_fl2va_i2v
+    native_h3_ref2va:
+      video_workflow_name:
+        - minimax_h3_ref2va
+    text2image2native_h3_ref2va:
+      image_workflow_name:
+        - kirby_keyframe_anima
+        - anima_anime
+        - nova-anime-xl
+      video_workflow_name:
+        - minimax_h3_ref2va
+    text2image2image:
+      image_workflow_name:
+        - nova_model_plus_z_image_anime
+        - nova-anime-xl
+      refine_workflow_name:
+        - image_to_image
+        - z_image_i2i_anime
+    sticker_pack:
+      image_workflow_name:
+        - anima_anime
+        - nova-anime-xl
+        - nova_model_plus_z_image_anime
+      video_workflow_name:
+        - minimax_h3_lowvram_i2v
+
+  count_policies:
+    text2img:
+      image_count:
+        min: 1
+        max: 4
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2video:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 4
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2image2video:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 4
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2longvideo:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 2
+        max: 8
+      review_selection_limit:
+        min: 1
+        max: 6
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_story:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_t2v_story:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_fl2va_story:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 2
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_l2va_story:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_ref2va:
+      image_count:
+        min: 1
+        max: 1
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      images_per_prompt:
+        min: 1
+        max: 1
+    text2image2native_h3_ref2va:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+    text2image2image:
+      image_count:
+        min: 1
+        max: 4
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 4
+      sticker_expression_count:
+        min: 1
+        max: 1
+      images_per_prompt:
+        min: 1
+        max: 1
+    sticker_pack:
+      image_count:
+        min: 1
+        max: 1
+      video_count:
+        min: 1
+        max: 2
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 6
+      sticker_expression_count:
+        min: 4
+        max: 12
+      images_per_prompt:
+        min: 1
+        max: 4
+
+  routing_hints:
+    runtime_context_schema:
+      reference_manifest_available: "Runtime boolean. True only when at least one configured image/video reference exists and every configured file is readable."
+      reference_image_count: "Runtime count of validated reference images; paths are intentionally not sent to the LLM."
+      reference_video_count: "Runtime count of validated reference videos; paths are intentionally not sent to the LLM."
+      automatic_ref2va_eligible: "Runtime boolean. True when configured references are valid or when the automatic route can create six T2I candidates for Discord reference selection."
+      reference_manifest_error_code: "Runtime status: auto_generation_available, missing_file, invalid, or empty string when validated."
+      routing_policy: "native_h3_ref2va uses existing references when available; with an empty manifest it expands into the same six-candidate Discord review contract as text2image2native_h3_ref2va."
+    workflow_stage_contracts:
+      text2img:
+        image_workflow_name: "Required static-image stage. It may produce one image or the configured candidate count; no video stage is implied."
+      text2video:
+        image_workflow_name: "Optional ideation/cover artifact only; it is not connected as video conditioning."
+        video_workflow_name: "Required T2V stage. Select only a workflow whose graph has no first_frame or last_frame input."
+      text2image2video:
+        image_workflow_name: "Required first-stage image. Its selected output becomes the first-frame input to the I2V stage."
+        video_workflow_name: "Required I2V stage. It must accept first_frame conditioning."
+      text2image2image:
+        image_workflow_name: "Required source-image stage for the refine chain."
+        refine_workflow_name: "Required img2img refine stage. It must preserve the selected source image contract while applying the requested changes."
+      text2longvideo:
+        image_workflow_name: "Required per-segment T2I anchor/reference stage selected by the segment recipe mix."
+        video_workflow_name: "Required multi-segment I2V stage. Each segment receives recipe-specific anchors or continuation frames."
+        transition_workflow_name: "Required tail-frame/transition stage before segment concatenation."
+      native_h3_story:
+        image_workflow_name: "Opening keyframe candidate; review selects one first frame."
+        video_workflow_name: "Native H3 I2VA stage. It receives first_frame and leaves the ending unconstrained."
+        refine_workflow_name: "Optional identity/continuity img2img before the opening frame is submitted."
+      native_h3_t2v_story:
+        video_workflow_name: "Required Native H3 T2V stage. It is prompt-only and must not receive first_frame, last_frame, or reference-manifest conditioning."
+      native_h3_fl2va_story:
+        image_workflow_name: "Two keyframe candidates: opening first frame and landing last frame."
+        video_workflow_name: "Native H3 FL2VA stage. It receives both first_frame and last_frame."
+      native_h3_l2va_story:
+        image_workflow_name: "Landing keyframe candidate only."
+        video_workflow_name: "Native H3 L2VA stage. It receives last_frame and leaves the opening unconstrained."
+      native_h3_ref2va:
+        video_workflow_name: "Reference-to-video stage. Existing reference images/videos are used directly; with no manifest, runtime first creates six T2I candidates and injects only Discord-selected references. Reference audio is forbidden."
+      text2image2native_h3_ref2va:
+        image_workflow_name: "Required T2I reference-candidate stage. Generate six still candidates from the native story prompt; these are reviewable reference assets, not an implicit first frame."
+        video_workflow_name: "Required native H3 Ref2VA stage. It receives only the references explicitly selected by the user in Discord; reference audio is forbidden."
+      sticker_pack:
+        image_workflow_name: "Required batch image stage. Generate the configured expression candidates with transparent-background and sticker-safe composition rules. The sticker_pack planner ends after packaging; any optional video candidate belongs to the separate explicit animated_sticker route."
+    strategy_preferences:
+      sticker_pack:
+        - sticker
+        - sticker pack
+        - reaction
+        - emotions
+        - line sticker
+        - messenger sticker
+        - emoji pack
+        - expression sheet
+        - chat reaction
+      text2longvideo:
+        - story
+        - episode
+        - narration
+        - long video
+        - multi scene
+        - storyboard
+        - sequence
+        - plot beat
+      native_h3_story:
+        - native H3
+        - one continuous story clip
+        - causal short film
+        - fifteen second story
+        - single take animation
+      text2image2native_h3_ref2va:
+        - reference candidates
+        - choose reference images
+        - multiple reference images
+        - generate references then animate
+        - multi-reference video
+        - reference-to-video from generated images
+      native_h3_t2v_story:
+        - native H3 text to video story
+        - direct text to video
+        - fifteen second animation
+        - no reference image
+        - animated short film
+      text2image2video:
+        - short clip
+        - short video
+        - animated shot
+        - turn still image into video
+        - key visual with motion
+        - cinematic reveal
+      text2video:
+        - motion
+        - animated
+        - moving scene
+        - camera movement
+        - looping motion
+        - dynamic shot
+    strategy_descriptions:
+      native_h3_t2v_story:
+        summary: "純文字驅動的 15 秒單一連續影片；沒有輸入圖、沒有指定首幀、沒有指定尾幀，也沒有 reference manifest。"
+        best_for:
+          - "需求重點是探索新的場景、動作、鏡頭或敘事點子，且可接受模型自行決定第一畫面與最後畫面。"
+          - "使用者明確說不需要參考圖、首幀、尾幀、角色設計稿或既有素材。"
+          - "需要快速驗證一個單一短故事概念，而不是精準重現既有構圖。"
+        avoid_when:
+          - "角色外觀、服裝、道具、場景或開場構圖必須精準延續既有圖片；這時應用 First Frame 或 Reference-to-Video。"
+          - "結尾畫面、角色最終位置、場景轉變或 before/after 結果必須命中；這時應用 First+Last Frame。"
+        hard_rules:
+          - "不得把它當成 Reference-to-Video、First Frame 或 Last Frame 模式；此模式沒有任何畫面控制輸入。"
+      native_h3_story:
+        summary: "角色故事導向的 First Frame I2VA 預設模式：先建立並審核開場關鍵畫面，再讓 H3 自行完成後續動作與結尾。"
+        best_for:
+          - "要做 15 秒左右、單一連續鏡頭感的 Kirby 故事，並希望開頭身份、服裝與構圖先被鎖定。"
+          - "需求包含明確衝突、行動與結果，但沒有要求一個必須命中的最後畫面。"
+          - "需要先審核角色關鍵畫面，再執行影片生成。"
+        avoid_when:
+          - "只需要快速自由發想、完全不關心開頭畫面；改用 native_h3_t2v_story。"
+          - "同時要求固定開頭與固定結尾；改用 native_h3_fl2va_story。"
+          - "只要求固定最後 reveal；改用 native_h3_l2va_story。"
+          - "有多張既有角色圖、風格圖或參考影片必須一起遵守；改用 native_h3_ref2va。"
+        hard_rules:
+          - "此模式只鎖定 first frame；不得宣稱會鎖定 last frame，也不得當成 First+Last Frame 或 Reference-to-Video。"
+          - "使用者未提供外部開場圖時，由此模式的 keyframe stage 先產生並審核開場圖；不要把『沒有外部首圖』誤判成模式不可用。"
+      native_h3_fl2va_story:
+        summary: "First+Last Frame to Video：同時鎖定第一幀與最後一幀，讓模型生成從 A 狀態明確過渡到 B 狀態的一條連續影片。"
+        best_for:
+          - "使用者明確描述開頭與結尾，例如『Kirby 在雨中抱著破傘，最後站在晴天的花田』。"
+          - "影片的價值在可驗證的轉變：變身、修復、抵達目的地、道具由破損變完整、場景由危機變結果。"
+          - "結尾姿勢、地點、關鍵道具、情緒或視覺 payoff 必須被控制與審核。"
+        avoid_when:
+          - "只有一個起始畫面或角色身份需要鎖定，但結局不重要；改用 First Frame I2V / text2image2video。"
+          - "沒有具體可視化的終點畫面，或只說『做一支有趣影片』；不要浪費控制能力，改用 T2V 或 First Frame I2V。"
+        hard_rules:
+          - "此模式必須有兩個可描述、可審核且不同的視覺狀態：opening state 與 landing state。"
+          - "不得僅因為需求提到影片就選此模式；沒有明確終點時禁止選擇。"
+      native_h3_l2va_story:
+        summary: "Last Frame to Video：以最後一幀作為不可妥協的落點，允許模型自由設計前段行動與開場，最後收束到指定畫面。"
+        best_for:
+          - "使用者最在意影片最後的 reveal、勝利姿勢、最終場景、封面級收尾或發文縮圖畫面。"
+          - "前段可以保有探索與驚喜，但最終必須抵達一個指定的可視化結果。"
+          - "需求只明確描述『最後要看到什麼』，沒有要求固定起始構圖。"
+        avoid_when:
+          - "第一幀角色外觀或構圖也必須鎖定；改用 First+Last Frame。"
+          - "沒有清楚的結尾畫面，或重點是延續既有首圖；改用 T2V、First Frame I2V 或 FL2VA。"
+        hard_rules:
+          - "必須能寫出明確的 landing frame；若無法描述最後一幀的主體、動作、場景與結果，禁止選擇。"
+      native_h3_ref2va:
+        summary: "Reference-to-Video：有效 reference manifest 會直接作為多參考條件；若 manifest 為空，runtime 會先產生六張 T2I candidates，交由 Discord 選擇後再送入 Ref2VA。"
+        best_for:
+          - "有多張 Kirby 角色設計稿、既有成品圖、風格板、場景圖，或參考影片，而且這些素材都必須影響成品。"
+          - "角色身份、配色、特定服裝、道具或畫風的一致性比自由探索更重要。"
+          - "需求明確要求『依照這些參考圖／影片』、『保持這套設計』或『沿用這個鏡頭語言』。"
+        avoid_when:
+          - "想要明確看見並命名自動候選圖 stage；此時可直接選 text2image2native_h3_ref2va。"
+          - "只有一張起始圖片且不需要多素材約束；First Frame I2V 較簡單、成本與失敗面更低。"
+        hard_rules:
+          - "若已配置 reference manifest，所有項目都必須可讀、有效且與需求相關；空 manifest 只能進入六張候選圖加 Discord 選擇 gate。"
+          - "配置了缺檔或不可讀 references 時，仍然禁止選擇 native_h3_ref2va；不可把錯誤 manifest 當成空 manifest。"
+          - "不可把未經使用者選擇的模型生成泛用首圖誤稱為多參考控制；空 manifest 必須等 Discord 選定 references 後才可送入 Ref2VA。"
+      text2image2native_h3_ref2va:
+        summary: "Auto T2I-to-Ref2VA：先由 native story prompt 產生六張 reference candidates，交由使用者在 Discord 選擇 1-4 張，再把選定素材送入 native H3 Ref2VA。"
+        best_for:
+          - "使用者需要多參考控制，但目前沒有可直接使用的 reference manifest。"
+          - "希望先比較角色、服裝、道具、場景或構圖候選，再由選定素材驅動影片。"
+          - "需要保留明確的 user selection gate，不能讓模型自行把任意首圖當成 reference。"
+        avoid_when:
+          - "已有可讀取且已確認的 reference manifest；此時直接使用 native_h3_ref2va，避免重複產圖。"
+          - "只需要一張首幀再做普通 I2V；此時 text2image2video 或 native_h3_story 較簡單。"
+        hard_rules:
+          - "T2I candidate 與 native Ref2VA 是兩個明確 stage；candidate 不得未經選擇直接偷偷成為 reference。"
+          - "正常流程必須讓使用者在 Discord 選擇 1-4 張；Reject 必須停止流程，不得自動補選。"
+          - "使用者選定後 reference asset 不可被後續 hidden refine 或 regenerate 替換。"
+      text2img:
+        summary: "用於單張或少量高品質靜態圖，適合角色立繪、封面圖、主視覺、海報感插圖與定裝圖。"
+        best_for:
+          - "需求重點是角色外觀、服裝、表情、姿勢、構圖與畫面精緻度，不要求影片。"
+          - "需要先產多張候選圖，再人工挑選最好的一張。"
+          - "要做 sticker 母圖、影片首幀或後續動畫的 key visual。"
+        avoid_when:
+          - "使用者明確要影片、鏡頭運動、長故事或聲音。"
+          - "需求明確是保留既有圖片後微調，這時比較像 text2image2image。"
+      text2video:
+        summary: "純 prompt 驅動的單一短動態片段；video stage 使用 H3 T2V，不會把同路線產生的 image stage 當成影片首幀條件。"
+        best_for:
+          - "需求是短片、loop、角色小動作、簡單運鏡或單場景展示。"
+          - "使用者要畫面動起來，但沒有明確多段故事結構。"
+          - "可接受模型自行決定開場與結尾，不要求保留既有圖片構圖。"
+        avoid_when:
+          - "需求有明顯分鏡、章節、旁白或多段敘事，應改選 text2longvideo。"
+          - "需要由指定首圖驅動 motion，應改選 text2image2video；不要把 text2video 的 optional image stage 誤當成 I2V。"
+          - "使用者其實只想先確認靜態造型，應改選 text2img。"
+        hard_rules:
+          - "video_workflow_name 必須是 T2V workflow；image_workflow_name 若存在，只代表 ideation、cover 或 review artifact，不代表 video conditioning。"
+      text2image2video:
+        summary: "先產首圖再轉影片，適合先鎖定角色外觀與構圖，再延伸成短片。"
+        best_for:
+          - "角色長相、配色、服裝需要先被固定，再加 motion。"
+          - "需求像是把插畫動起來、把海報做成短動畫、由 key visual 延伸短片。"
+          - "想兼顧首幀質感與後續動態穩定度。"
+        avoid_when:
+          - "只要純靜態圖。"
+          - "需要長篇故事、多段轉場與段落銜接，應改選 text2longvideo。"
+      text2longvideo:
+        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡，會同時考慮首圖、片段與轉場。"
+        best_for:
+          - "需求有起承轉合、腳本段落、章節、旁白、storyboard 或多個 scene beat。"
+          - "使用者提到 story、episode、narration、multi-scene 這類語意。"
+          - "需要透過 segment_count 控制故事拆分密度。"
+        avoid_when:
+          - "只有單一鏡頭或單一動作。"
+          - "只是要 sticker 或單張海報。"
+      text2image2image:
+        summary: "先出圖再做 img2img refine，適合保留原構圖與角色辨識度，同時重繪細節、換風格或修正局部。"
+        best_for:
+          - "需求像是同一張圖再修一下、保留構圖但更精緻、換風格但不要整張重來。"
+          - "首輪生成不錯，但臉、手、服裝、背景一致性需要修。"
+          - "需要 transition frame、風格統一或角色定稿後微調。"
+        avoid_when:
+          - "需求本質是影片。"
+          - "使用者想要大量不同構圖候選圖，直接 text2img 更適合。"
+      sticker_pack:
+        summary: "專門給多表情聊天貼圖使用，重點是角色一致性、情緒區隔清楚、可批量產出。"
+        best_for:
+          - "需求出現 sticker、reaction、line sticker、emoji pack、表情包。"
+          - "同一角色要做多個情緒版本，例如開心、生氣、無奈、驚訝、哭泣。"
+          - "需要透過 sticker_expression_count 與 images_per_prompt 批次出圖。"
+        avoid_when:
+          - "目標是單張高完成度插圖或完整故事影片。"
+    selection_rules:
+      - "先判斷控制素材：有多張或多種既有參考素材且必須保留身份／風格／鏡頭語言時，reference manifest 非空且可讀取才選 native_h3_ref2va。"
+      - "若需要多參考控制但沒有既有 reference manifest，canonical 命名是 text2image2native_h3_ref2va，先產生六張候選圖，再經 Discord 選擇後送入 Ref2VA；直接選 native_h3_ref2va 也會走同一個空 manifest 自動 gate。"
+      - "再判斷結尾控制：需求同時明確描述可驗證的第一畫面與最後畫面，或必須完成 A 到 B 的視覺狀態轉換時，選 native_h3_fl2va_story。"
+      - "若只明確要求最後的 reveal、抵達、勝利姿勢或發文縮圖結果，而開頭可自由創作，選 native_h3_l2va_story。"
+      - "若只需鎖定角色第一畫面、身份或構圖，結尾可自由發展，選 text2image2video 的 First Frame I2V，不要選 FL2VA 或 L2VA。"
+      - "若沒有可用參考素材、沒有指定首幀或尾幀，且目標是自由探索的一支單一短片，選 native_h3_t2v_story。"
+      - "若要一支有明確因果故事、需要先審核開場關鍵畫面，但結尾可由模型自然發展，選 native_h3_story（First Frame I2VA）。"
+      - "native_h3_ref2va 的空 manifest 必須進入六張候選圖加 Discord 選擇 gate，不得繞過選擇直接送入；缺檔或不可讀的已配置 references 仍然禁止。"
+      - "禁止選 native_h3_fl2va_story：無法描述不同的 opening state 與 landing state 時。"
+      - "禁止選 native_h3_l2va_story：無法描述具體 landing frame 時。"
+      - "若使用者明確要求 sticker、line 貼圖、reaction pack、聊天表情包，優先選 sticker_pack。"
+      - "若需求包含連續故事、旁白、章節、分鏡、episode、multi-scene，優先選 text2longvideo。"
+      - "若需求是短影片，但角色外觀必須先鎖定，優先選 text2image2video。"
+      - "若需求只有單鏡頭動態或展示型 motion，沒有長篇敘事，優先選 text2video。"
+      - "若使用者描述保留原圖、原構圖、原角色，只做修圖或風格微調，優先選 text2image2image。"
+      - "若需求重點是單張高品質畫面、角色立繪、封面、海報、概念圖，優先選 text2img。"
+    workflow_preferences:
+      anima_anime:
+        - anime character
+        - line sticker
+        - expressive face
+        - clean anime line art
+        - simple background
+        - mascot style
+      nova-anime-xl:
+        - anime character
+        - line sticker
+        - detailed illustration
+        - scenic background
+        - polished key visual
+        - fantasy scene
+        - 2.5d anime
+      z_image_plus_nova_model:
+        - anime character
+        - fast ideation
+        - multiple candidates
+        - quick anime render
+        - dynamic composition
+      nova_model_plus_z_image_anime:
+        - hybrid anime refinement
+        - SDXL base then Z-Image Anime
+        - controlled redraw
+        - identity-preserving polish
+        - fast key visual iteration
+      kirby_keyframe_anima:
+        - Kirby opening keyframe
+        - character identity lock
+        - approved first frame
+        - direct Anima render
+        - story keyframe candidates
+      kirby_continuity_img2img:
+        - Kirby continuity frame
+        - subtle identity correction
+        - preserve previous frame
+        - low-denoise img2img
+        - story frame refinement
+      kirby_identity_img2img:
+        - Kirby identity refinement
+        - stronger redraw
+        - preserve character appearance
+        - anime consistency
+        - keyframe cleanup
+      minimax_h3_lowvram_t2v:
+        - text to video
+        - prompt driven video
+        - native audio
+        - continuous short story
+        - camera movement
+      minimax_h3_native_t2v:
+        - native H3 text to video fallback
+        - official INT8 H3 model
+        - prompt driven video
+        - native stereo audio
+        - higher quality fallback
+      minimax_h3_lowvram_i2v:
+        - image to video
+        - animate still image
+        - cinematic motion
+        - camera move
+        - short sequence
+      minimax_h3_lowvram_15s_fl2va_i2v:
+        - first and last frame video
+        - H3 I2VA
+        - H3 FL2VA
+        - H3 L2VA
+        - low VRAM 15 second story
+        - native audio
+      minimax_h3_ref2va:
+        - reference to video
+        - multiple reference images
+        - reference video motion
+        - identity and style preservation
+        - no reference audio
+      image_to_image:
+        - preserve composition
+        - refine existing image
+        - redraw with same layout
+        - fix anatomy
+      z_image_i2i_anime:
+        - anime refine
+        - preserve anime identity
+        - expressive anime cleanup
+        - style-consistent redraw
+      Tile Upscaler SDXL:
+        - upscale final image
+        - recover details
+        - higher resolution
+        - texture enhancement
+    workflow_descriptions:
+      anima_anime:
+        summary: "Anima Preview 2 路線的 anime 生圖 workflow，內建 anime upscaling，偏乾淨線條、角色表情與純二次元視覺。"
+        strengths:
+          - "workflow 使用可用的 `anima-aesthetic-v1.1`、`qwen_image_vae` 與 `qwen_3_06b_base`，適合 anime 角色主體明確的出圖。"
+          - "相對適合 line sticker、角色立繪、Q 版或簡潔背景場景。"
+          - "推薦預設有固定 steps 與 cfg，適合穩定產生角色母圖。"
+        tradeoffs:
+          - "對超複雜背景、厚塗質感、封面級大場景不一定比 SDXL 類 anime checkpoint 強。"
+      nova-anime-xl:
+        summary: "以 SDXL anime checkpoint 為主的高完成度插畫 workflow，適合精緻角色圖、背景完整的場景圖與主視覺。"
+        strengths:
+          - "manifest 顯示依賴 `novaAnimeXL_ilV140`、`reiXL_NB11`、`waiIllustriousSDXL_v150`，偏向高完成度角色與插畫感。"
+          - "更適合 detailed illustration、奇幻場景、封面圖、主視覺與背景敘事。"
+          - "當需求提到高細節、精緻背景、2.5D anime 時可優先考慮。"
+        tradeoffs:
+          - "若目標是快速多輪試稿，速度通常不如 turbo 類流程。"
+      nova_model_plus_z_image_anime:
+        summary: "結合 Nova 與 Z-Image Turbo Anime 的快速 anime workflow，偏 8-step、快速試稿、多候選探索與 prompt 迭代。"
+        strengths:
+          - "manifest 顯示依賴 `zImageTurboAnime_aioBF16` 與 8-step control 類資產，定位偏快而不是極限精修。"
+          - "適合先看方向、做多張候選、快速 A/B 測試。"
+          - "較適合拿來做第一輪 key visual 或影片首幀探索。"
+        tradeoffs:
+          - "若要單張最終成品感與高細節堆疊，常常仍會輸給 nova-anime-xl。"
+      z_image_plus_nova_model:
+        summary: "先用 Z Image Turbo 生成構圖，再以 SDXL reference-attention 路線做二階段細化的混合 workflow。"
+        strengths:
+          - "graph 同時包含 `z_image_turbo_bf16`、Qwen 3 文字編碼與 SDXL `waiIllustriousSDXL_v150`。"
+          - "第二階段使用 reference preprocessor、reference ControlNet 與 SDXL sampler，適合快速探索後再穩定構圖。"
+          - "適合 text2img 的動態構圖與需要多候選的 anime 初稿。"
+        tradeoffs:
+          - "這是兩階段靜態圖 workflow，不是 video workflow；reference image 只屬於此圖像細化階段。"
+          - "比單一 turbo 出圖更吃顯存與執行時間。"
+      kirby_keyframe_anima:
+        summary: "Kirby 專用 Anima 直接生圖 keyframe workflow，用於 native H3 故事的開場候選與人工審核。"
+        strengths:
+          - "graph 直接載入 Anima Preview 2、Qwen 文字編碼與 Qwen image VAE，輸出單張 landscape keyframe。"
+          - "適合先固定 Kirby 身份、服裝、構圖與故事開場，再交給 H3 I2VA。"
+          - "SaveImage 輸出可作為 immutable first frame 的上游素材。"
+        tradeoffs:
+          - "它只產生圖片，不會產生影片，也不會鎖定 H3 的最後一幀。"
+      kirby_continuity_img2img:
+        summary: "Kirby 連續性低 denoise img2img workflow，讀取上一張 frame 並做輕量身份與畫面延續修正。"
+        strengths:
+          - "graph 讀取前一張 Kirby frame、以 VAEEncode 進入 latent，並使用 Anima denoise 0.18。"
+          - "適合故事段落間的 continuity refine，不應被當成全新構圖生成。"
+        tradeoffs:
+          - "低 denoise 會保留較多原圖；若需要較強重繪，改用 kirby_identity_img2img。"
+      kirby_identity_img2img:
+        summary: "Kirby 身份一致性 img2img workflow，讀取既有 frame 並以較高 denoise 做角色外觀修正。"
+        strengths:
+          - "graph 讀取前一張 frame、使用同一套 Anima 模型，denoise 0.35 比 continuity 路線更能修正身份細節。"
+          - "適合角色辨識度、臉部、服裝或局部一致性需要加強的 keyframe refine。"
+        tradeoffs:
+          - "比 kirby_continuity_img2img 允許更多重繪，可能改變原始構圖或細節。"
+      minimax_h3_lowvram_15s_fl2va_i2v:
+        summary: "MiniMax H3 低 VRAM 15 秒影像條件 workflow；同一個 ImageToVideo node 可依輸入綁定 first frame、last frame 或兩者。"
+        strengths:
+          - "graph 明確包含 optional `first_frame` 與 `last_frame`，因此可承載 I2VA、FL2VA 與 L2VA 三種契約。"
+          - "使用 Q4 GGUF、system-RAM Spectrum accelerator 與 H3 audio VAE，適合目前的 balanced-lowvram profile。"
+          - "輸出 CreateVideo 並合成原生 stereo audio。"
+        tradeoffs:
+          - "它不是純 T2V；至少需要由上游產生或審核可用的 frame condition。"
+          - "15 秒與低 VRAM 設定是固定取向，長篇內容應改用 text2longvideo。"
+      minimax_h3_native_t2v:
+        summary: "MiniMax H3 官方 INT8 native T2V fallback workflow，以 prompt 直接生成影片與原生音訊。"
+        strengths:
+          - "graph 的 MiniMaxH3ImageToVideo node 沒有 first_frame 或 last_frame input，契約是純 prompt T2V。"
+          - "使用官方 INT8 diffusion、NVFP4 text encoder 與 H3 video/audio VAE。"
+        tradeoffs:
+          - "沒有畫面條件輸入，不能保證既有角色圖的身份或構圖延續；低 VRAM profile 優先使用 minimax_h3_lowvram_t2v。"
+      minimax_h3_ref2va:
+        summary: "MiniMax H3 Reference-to-Video workflow，runtime 綁定多張圖片與可選參考影片，不接受 reference audio。"
+        strengths:
+          - "graph 使用 `MiniMaxH3ReferenceToVideo` node，reference slots 在 runtime 由已驗證 manifest 動態注入。"
+          - "適合需要共同保留角色身份、風格、場景、道具或 motion/camera 語言的多素材需求。"
+          - "輸出原生 H3 video 與 generated stereo audio，reference audio 被明確排除。"
+        tradeoffs:
+          - "已配置但缺檔或不可讀的 image/video manifest 會被拒絕；空 manifest 則可走六張候選圖加 Discord 選擇 gate。單一首圖需求應改用一般 I2V。"
+          - "reference 約束越多，prompt 與素材角色標註越重要，也會增加 runtime 資源壓力。"
+      minimax_h3_lowvram_t2v:
+        summary: "MiniMax H3 原生 text-to-video workflow，適合純 prompt 驅動的連續短片，並保留 H3 原生音訊輸出。"
+        strengths:
+          - "適合探索新的場景、動作與鏡頭，不需要先準備輸入圖片。"
+          - "H3 原生 audio VAE 會依 prompt 產生聲音，適合有環境聲或效果音的短片。"
+          - "適合 text2video 與沒有既有首幀約束的單一連續故事。"
+        tradeoffs:
+          - "若角色外觀或開場構圖必須延續既有圖片，應改選 `minimax_h3_lowvram_i2v`。"
+      minimax_h3_lowvram_i2v:
+        summary: "MiniMax H3 原生 image-to-video workflow，適合把已定稿圖片轉成帶原生音訊的短影片。"
+        strengths:
+          - "以輸入圖片鎖定角色身份與開場構圖，再生成連續動作、鏡頭運動與聲音。"
+          - "適合 text2image2video、text2longvideo 與動態貼圖的片段動畫核心。"
+          - "balanced-lowvram profile 使用 608x352、24 fps 與 system-RAM offload。"
+        tradeoffs:
+          - "需要先有可讀取的輸入圖片與 H3 模型資產，VRAM／system RAM 壓力高於一般生圖。"
+          - "若沒有既有畫面控制需求，純 prompt 的 `minimax_h3_lowvram_t2v` 更直接。"
+      image_to_image:
+        summary: "通用 img2img refine workflow，適合保留原圖構圖與主體後，做較明顯的風格重繪與細節修正。"
+        strengths:
+          - "manifest 推薦 `denoise: 0.7`，代表不是只做輕微修飾，而是允許中度改寫。"
+          - "適合修手、修臉、補背景、統一畫風或做 transition frame。"
+        tradeoffs:
+          - "若需求強調 anime identity 延續，通常不如 `z_image_i2i_anime` 對口。"
+      z_image_i2i_anime:
+        summary: "anime 向 img2img refine workflow，適合維持 anime 語彙、角色 identity 與色彩一致性。"
+        strengths:
+          - "manifest 直接綁定 `zImageTurboAnime_aioBF16`，更偏 anime 角色修圖。"
+          - "適合 anime 化重繪、角色一致化、表情修正與局部 cleanup。"
+        tradeoffs:
+          - "若要跨風格或偏寫實重構，泛用 `image_to_image` 可能更彈性。"
+      Tile Upscaler SDXL:
+        summary: "最終放大與細節回填 workflow，適合交付前提升解析度、紋理細節與局部清晰度。"
+        strengths:
+          - "manifest 顯示依賴 SDXL checkpoint、lightning lora 與 tile controlnet，定位是交付前 quality lift。"
+          - "適合 higher resolution、detail enhancement、final upscale。"
+        tradeoffs:
+          - "這不是重做構圖的 workflow，應放在成品後段而不是創作前段。"
+    count_guidance:
+      text2img:
+        image_count_rule: "單張主視覺預設 1；若需求包含 variants、options、AB test、挑圖，可提高到 2-4。"
+      text2video:
+        image_count_rule: "若需要先做 ideation 或 cover review 可產生 2-4 張；這些圖片不會成為 T2V 的 conditioning。"
+        video_count_rule: "單一需求預設 1；只有要不同 motion 版本時再增加到 2-4。"
+      text2image2video:
+        image_count_rule: "建議先用 1-3 張首圖做篩選，再從最佳首圖延伸影片。"
+        video_count_rule: "通常 1 支影片就夠；只有要多種動作版本時才增加。"
+      text2image2native_h3_ref2va:
+        image_count_rule: "先產生六張 reference candidates；這些是等待使用者挑選的參考素材，不是未經選擇的首幀 conditioning。"
+        review_selection_limit_rule: "Discord 正常流程選 1-4 張；Reject 時停止，不自動替換或補選。"
+        video_count_rule: "候選 reference 通過選擇後，預設只生成 1 支 native H3 Ref2VA 影片。"
+      text2longvideo:
+        segment_count_rule: "只有需求具備多段敘事時才提高 segment_count；2-4 適合短故事，5-8 適合明確分章節內容。"
+      text2image2image:
+        image_count_rule: "通常 1-2 張 refine 結果已足夠；只有要比對不同修圖方向時才拉到 3-4。"
+      sticker_pack:
+        sticker_expression_count_rule: "基本貼圖組可用 4-6 個表情；完整聊天貼圖組可用 8-12。"
+        images_per_prompt_rule: "每個表情 1 張適合高一致性；若想為同表情挑版本，可提高到 2-4。"

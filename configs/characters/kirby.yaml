@@ -1,75 +1,159 @@
-# Kirby Long-Form Video Character Configuration
-# =================================================================
-# Extended configuration with long-form video generation support
-# Based on kirby.yaml with added text2longvideo strategy
-
-# Character Identity
-# -----------------------------------------------------------------
 character:
-  name: Kirby  # Character name
-  group_name: Kirby  # Character group
+  name: Kirby
+  group_name: Kirby
 
-# Generation Settings
-# -----------------------------------------------------------------
 generation:
-  output_dir: /app/output_media
-
-  # Generation Type Weights
-  # Added text2longvideo with 30% probability
-  generation_type_weights:
-    text2img: 1
-    text2video: 0
-    text2image2video: 1
-    text2longvideo: 1
-    image2image: 0
-    text2image2image: 0.5
-    sticker_pack: 1
-
-  # Workflow Path Configuration
-  workflows:
-    text2img: /app/configs/workflow/z_image_plus_nova_model_anime.json
-    text2video: /app/configs/workflow/wan2.1_t2v_audio.json
-    text2image2video: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
-    image2image: /app/configs/workflow/image_to_image.json
-    sticker_pack: /app/configs/workflow/nova-anime-xl.json
-
-  # Quality Control
-  similarity_threshold: 0.7
-
-  # Prompt Generation Method Weights
-  prompt_method_weights:
-    arbitrary: 0.15
-    news: 0.85
-
-  # Image System Prompt Weights（頂層預設，可被策略覆蓋）
-  image_system_prompt_weights:
-    stable_diffusion_prompt: 0.25
-    warm_scene_description_system_prompt: 0.25
-    sticker_prompt_system_prompt: 0.25
-    two_character_interaction_generate_system_prompt: 0.25
-
-  # Visual Style Weights
+  output_dir: D:/MediaOverload/output
+  h3_profile: balanced-lowvram
   style_weights:
-    "minimalism style with pure background": 0.1
-    "A highly saturated, dreamy-colored digital illustration style, utilizing soft volumetric lighting and meticulous detail rendering to portray dynamic/slice-of-life scenes of cute Chibi-style characters": 0.3
-    "watercolor painting style with pure background": 0.1
-    "Vibrant high-fantasy character concept art, bold clean line art, stylized cartoon illustration, cell-shaded with soft gradients, whimsical adventure aesthetic": 0.2
-    "Papercraft / Digital 2D Paper Cutout Style": 0.1
-    "3D cinematic animation style, high quality CGI, Pixar-esque, magical atmosphere, sparkling particle effects and stardust trail, volumetric lighting, detailed textures, snowy winter night, glowing warm city lights in background with bokeh, deep blue sky, octane render, 8k resolution, whimsical and dreamy": 0.1
-    "": 0
+    polished 2D anime: 4
+    cel-shaded animation: 2
+    hand-painted storybook anime: 1
+  keyframe_workflow_name: kirby_keyframe_anima
+  identity_refine_workflow_name: kirby_continuity_img2img
+  storyboard_path: configs/storyboards/kirby_meadow_adventure.yaml
+  input_gate: kirby-pink-red-silhouette
+  native_h3_quality:
+    semantic_qa_blocking: true
+    creative_brief: >-
+      Make this a highly shareable cute micro-gag, not an action-film lore scene:
+      one Kirby, one simple physical prop, one dominant motion, one readable
+      setback, and one visible reversal/payoff. The first second must already
+      contain motion and a clear expressive reaction. Prefer a close readable
+      face or body reaction, exaggerated but charming timing, a small absurd
+      surprise, and a final visual joke that lands without dialogue. Translate
+      the news into one unmarked physical object or effect only. Do not show
+      Kirby fighting a duplicate, multiple characters, readable interfaces,
+      GitHub/web text, abstract symbols, or Kirby standing still while looking
+      at a portal.
+  native_h3_story:
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    duration_seconds: 15
+    workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
+    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_candidate_count: 6
+    require_human_review: true
+    semantic_qa_required: true
+    use_last_frame: false
+    width: 608
+    height: 352
+    length: 362
+    steps: 16
+    frame_rate: 24
+    require_audio: true
+    require_stereo_audio: true
+    analyze_audio: true
+  native_h3_t2v_story:
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    duration_seconds: 15
+    workflow_name: minimax_h3_lowvram_t2v
+    width: 608
+    height: 352
+    length: 362
+    steps: 16
+    frame_rate: 24
+    require_audio: true
+    require_stereo_audio: true
+    analyze_audio: true
+  native_h3_fl2va_story:
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    duration_seconds: 15
+    workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
+    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_candidate_count: 1
+    require_human_review: true
+    semantic_qa_required: true
+    use_last_frame: true
+    width: 608
+    height: 352
+    length: 362
+    steps: 16
+    frame_rate: 24
+    require_audio: true
+    require_stereo_audio: true
+    analyze_audio: true
+  native_h3_l2va_story:
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    duration_seconds: 15
+    workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
+    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_candidate_count: 1
+    require_human_review: true
+    semantic_qa_required: true
+    last_frame_only: true
+    width: 608
+    height: 352
+    length: 362
+    steps: 16
+    frame_rate: 24
+    require_audio: true
+    require_stereo_audio: true
+    analyze_audio: true
+  native_h3_ref2va:
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    duration_seconds: 15
+    workflow_name: minimax_h3_ref2va
+    reference_manifest: []
+    reference_image_size: match
+    reference_candidate_count: 6
+    reference_selection_limit: 4
+    reference_max_images: 9
+    reference_max_videos: 3
+    model_profile: q4
+    semantic_qa_required: true
+    width: 608
+    height: 352
+    length: 362
+    steps: 20
+    frame_rate: 24
+    require_audio: true
+    require_stereo_audio: true
+    analyze_audio: true
+  text2image2native_h3_ref2va:
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    duration_seconds: 15
+    keyframe_workflow_name: kirby_keyframe_anima
+    workflow_name: minimax_h3_ref2va
+    reference_candidate_count: 6
+    reference_selection_limit: 4
+    reference_max_images: 9
+    reference_max_videos: 3
+    reference_image_size: match
+    model_profile: q2
+    require_human_review: true
+    semantic_qa_required: true
+    width: 608
+    height: 352
+    length: 362
+    steps: 20
+    frame_rate: 24
+    require_audio: true
+    require_stereo_audio: true
+    analyze_audio: true
+  video_defaults:
+    width: 608
+    height: 352
+    length: 124
+    frame_rate: 24
+    steps: 20
+    draft_acceleration: spectrum
+  generation_type_weights:
+    text2image2video: 1
+    text2longvideo: 2
+    native_h3_story: 1
+    native_h3_t2v_story: 1
+    native_h3_fl2va_story: 1
+    native_h3_l2va_story: 1
+    native_h3_ref2va: 1
+    text2image2native_h3_ref2va: 1
+    sticker_pack: 2
 
-# Social Media Configuration
-# -----------------------------------------------------------------
 social_media:
-  default_hashtags:
-    - カービィ
-    - 星のカービィ
-  
-  platforms:
-    # instagram:
-    #   config_folder_path: /app/configs/social_media/credentials/kirby
-    #   enabled: true
+  # Hashtags are generated from the final article and visible media.
+  # Do not hard-code internal project names here.
+  default_hashtags: []
 
+  platforms:
     instagram_graph:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""
@@ -80,132 +164,13 @@ social_media:
       prefix: ""
       enabled: true
 
-    twitter:
+    youtube:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""
       enabled: true
 
-# Additional Generation Parameters
-# -----------------------------------------------------------------
-additional_params:
-  is_negative: false
-
-  # General Parameters (shared across all strategies)
-  general:
-    images_per_description: 4
-    images_per_input: 2
-    videos_per_description: 2
-    videos_per_image: 1
-    denoise: 0.7
-    
-    enable_upscale: true
-    upscale_workflow_path: /app/configs/workflow/Tile Upscaler SDXL.json
-    custom_node_updates: []
-
-  # Strategy-Specific Parameters
-  strategies:
-    # Text-to-Image Strategy
-    text2img:
-      images_per_description: 9
-      optimize_prompt_for_sd: false
-      custom_node_updates:
-        - node_type: "PrimitiveInt"
-          inputs:
-            value: 1024
-
-    # Text-to-Image-to-Image Strategy
-    text2image2image:
-      first_stage:
-        images_per_description: 9
-        workflow_path: /app/configs/workflow/z_image_plus_nova_model_anime.json
-      second_stage:
-        images_per_input: 1
-        workflow_path: /app/configs/workflow/z_image_i2i_anime.json
-        denoise: 0.5
-
-    # Text-to-Image-to-Video Strategy
-    text2image2video:
-      first_stage:
-        image_system_prompt_weights:
-          stable_diffusion_prompt: 3
-          sticker_prompt_system_prompt: 3
-          two_character_interaction_generate_system_prompt: 1
-        images_per_description: 9
-        t2i_workflow_path: /app/configs/workflow/z_image_plus_nova_model_anime.json
-        enable_upscale: false
-        upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
-    
-      
-      video:
-        i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v_audio.json
-        videos_per_image: 2
-        use_noise_seed: true
-        custom_node_updates: []
-
-    # ✨ NEW: Text-to-Long-Form-Video Strategy
-    # =================================================================
-    # Multi-segment video generation with frame continuity
-    text2longvideo:
-      # Long-video specific configuration
-      longvideo_config:
-        segment_count: 5              # Number of video segments (e.g., 5 segments × 5 seconds = 25 second video)
-        segment_duration: 5           # Duration per segment in seconds
-        use_tts: true                 # Enable TTS narration
-        tts_voice: "en-US-AriaNeural"  # Edge-TTS voice (English female)
-        # Available voices:
-        # English: en-US-AriaNeural, en-US-GuyNeural, en-GB-SoniaNeural
-        # Chinese: zh-CN-XiaoxiaoNeural, zh-TW-HsiaoChenNeural
-        # Japanese: ja-JP-NanamiNeural
-        tts_rate: "+0%"               # Speech rate: -50% to +50%
-        fps: 16                       # Video frame rate
-
-      # First Stage: Generate first-frame candidates (Text-to-Image)
-      # User will select best candidate via Discord
-      first_stage:
-        workflow_path: /app/configs/workflow/z_image_plus_nova_model_anime.json
-        batch_size: 9
-        style: "minimalism style with pure background"
-        enable_upscale: false
-        upscale_workflow_path: "configs/workflow/Tile Upscaler SDXL.json"
-        
-        image_system_prompt_weights:
-          stable_diffusion_prompt: 3
-          sticker_prompt_system_prompt: 3
-          buddhist_combined_image_system_prompt: 1
-        
-        custom_node_updates:
-          - node_type: "PrimitiveInt"
-            inputs:
-              value: 1024  # Resolution for first frame
-
-      # Video Generation: Sequential Image-to-Video for each segment
-      # Each segment uses last frame of previous segment as input
-      video_generation:
-        workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
-        use_noise_seed: true
-
-      # Frame Transition: Use I2I to regenerate high-quality first frames
-      # This prevents character degradation and ensures story progression
-      frame_transition:
-        enabled: true                    # Enable I2I transition to regenerate frames
-        workflow_path: /app/configs/workflow/z_image_i2i_anime.json
-        denoise: 0.5                    # Denoise strength (0.5-0.6 recommended for balance, lower = more detail preservation)
-        style_continuity_prompt: "maintain visual style, color palette, and artistic consistency, ensure character accuracy"
-        custom_node_updates: []
-
-    sticker_pack:
-      style: "LINE sticker style, chibi proportions, white outline, simple background"
-      static_config:
-        workflow_path: /app/configs/workflow/nova-anime-xl.json
-        images_per_expression: 1
-      animated_config:
-        enabled: true
-        gif_probability: 0.5
-        i2v_workflow_path: /app/configs/workflow/wan2.2_gguf_i2v.json
-        # Sticker GIF 專用參數（短動畫）
-        total_frames: 36
-        video_fps: 12
-        gif_fps: 10             # GIF fps
-        gif_max_colors: 256
-        gif_scale_width: 512
-
+    twitter:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      # X API is pay-per-use now; keep it out of free scheduled runs.
+      enabled: false

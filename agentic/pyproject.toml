@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mediaoverload-agentic"
+version = "0.1.0"
+description = "Clean-slate agentic media runtime for MediaOverload."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Cursor Agent" }]
+dependencies = [
+    "Pillow>=10.1.0",
+    "PyYAML>=6.0.1",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "schedule>=1.2.1",
+    "websocket-client>=1.7.0",
+    "edge-tts==7.2.6",
+    "google-api-python-client>=2.126.0",
+    "google-auth>=2.29.0",
+    "google-auth-oauthlib>=1.2.0",
+]
+
+[project.scripts]
+agentic = "agentic.app.main:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

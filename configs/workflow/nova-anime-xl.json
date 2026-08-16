@@ -19,7 +19,7 @@
   },
   "182": {
     "inputs": {
-      "value": " A low-angle perspective captures the intimate scene within the high-backed salon chair, focusing on the Waddle Dee's blissful expression as its head tilts back. Soft, volumetric sunlight pours through a large window, bathing the character in a warm, dreamy glow that highlights the glossy sheen of the perm solution being carefully brushed onto dark, curly hair. In the foreground, the stylist’s crisp white coat and the precise grip on a perm rod create a delicate focal point, while the background dissolves into a soft-focus haze of gleaming chrome tools and luxury product cases. The highly saturated colors of the navy blue vest contrast with the polished marble and sleek grey floor, where a subtle mirror reflection captures the stylists' concentrated faces, freezing this meticulous, cute moment in a bubble of serene, saturated light."
+      "value": "A pixel art illustration of a derpy, slightly grotesque yet oddly adorable pink Kirby stumbling drunk with empty champagne bottles scattered around. The creature has exaggerated googly eyes pointing in different directions with spiral pupils, a goofy slack-jawed expression with drool and bubbles dripping from its mouth, and awkwardly charming proportions with stubby legs wobbling and a chunky body swaying. It features a crooked \"2026\" party hat sliding off its head, and one stubby arm holding a half-empty champagne bottle while hiccup effects float above. Standing on a dark gray stone tile ground with scattered bones and debris around it. Cloudy overcast sky background. Retro 16-bit game aesthetic with detailed pixel shading, rough textures, muted color palette. Pixelated text at the top reads \"HANGOVER KIRBY 2026\" in retro game font. Silly, derpy, oddly endearing, intentionally ugly-cute (kimo-kawaii) style."
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -86,7 +86,7 @@
   },
   "260:257": {
     "inputs": {
-      "seed": 162,
+      "seed": 183,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -145,7 +145,7 @@
   },
   "260:252": {
     "inputs": {
-      "ckpt_name": "sdxl\\noobaiXLNAIXL_vPred10Version.safetensors"
+      "ckpt_name": "sdxl\\novaAnimeXL_ilV180.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -185,7 +185,7 @@
     },
     "class_type": "LoraLoader",
     "_meta": {
-      "title": "Load LoRA"
+      "title": "Load LoRA (Model and CLIP)"
     }
   },
   "269:264": {
@@ -222,7 +222,7 @@
   },
   "269:266": {
     "inputs": {
-      "seed": 159,
+      "seed": 180,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
@@ -288,7 +288,7 @@
       "title": "Load Checkpoint"
     }
   },
-  "272:262": {
+  "272:273": {
     "inputs": {
       "width": [
         "171",
@@ -305,33 +305,33 @@
       "title": "Empty Latent Image"
     }
   },
-  "272:263": {
+  "272:274": {
     "inputs": {
       "lora_name": "sdxl\\reiXL_NB11.safetensors",
       "strength_model": 0.8000000000000002,
       "strength_clip": 0.8500000000000002,
       "model": [
-        "272:261",
+        "272:280",
         0
       ],
       "clip": [
-        "272:261",
+        "272:280",
         1
       ]
     },
     "class_type": "LoraLoader",
     "_meta": {
-      "title": "Load LoRA"
+      "title": "Load LoRA (Model and CLIP)"
     }
   },
-  "272:264": {
+  "272:275": {
     "inputs": {
       "text": [
         "182",
         0
       ],
       "clip": [
-        "272:263",
+        "272:274",
         1
       ]
     },
@@ -340,14 +340,14 @@
       "title": "positive prompt"
     }
   },
-  "272:265": {
+  "272:276": {
     "inputs": {
       "text": [
         "183",
         0
       ],
       "clip": [
-        "272:263",
+        "272:274",
         1
       ]
     },
@@ -356,28 +356,28 @@
       "title": "negative prompt"
     }
   },
-  "272:266": {
+  "272:277": {
     "inputs": {
-      "seed": 159,
+      "seed": 180,
       "steps": 25,
       "cfg": 8,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "272:263",
+        "272:274",
         0
       ],
       "positive": [
-        "272:264",
+        "272:275",
         0
       ],
       "negative": [
-        "272:265",
+        "272:276",
         0
       ],
       "latent_image": [
-        "272:262",
+        "272:273",
         0
       ]
     },
@@ -386,14 +386,14 @@
       "title": "KSampler"
     }
   },
-  "272:267": {
+  "272:278": {
     "inputs": {
       "samples": [
-        "272:266",
+        "272:277",
         0
       ],
       "vae": [
-        "272:261",
+        "272:280",
         2
       ]
     },
@@ -402,11 +402,11 @@
       "title": "VAE Decode"
     }
   },
-  "272:268": {
+  "272:279": {
     "inputs": {
       "filename_prefix": "model3",
       "images": [
-        "272:267",
+        "272:278",
         0
       ]
     },
@@ -415,7 +415,7 @@
       "title": "Save Image"
     }
   },
-  "272:261": {
+  "272:280": {
     "inputs": {
       "ckpt_name": "sdxl\\novaAnimeXL_ilV140.safetensors"
     },
