@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -15,6 +16,18 @@ from agentic.runtime.model_backends import (
 
 
 class OpenRouterStaticPoolTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._api_key_patch = patch.dict(
+            os.environ,
+            {
+                "open_router_token": "test-openrouter-key",
+                "OPENROUTER_API_KEY": "test-openrouter-key",
+                "OPENROUTER_API_TOKEN": "test-openrouter-key",
+            },
+        )
+        self._api_key_patch.start()
+        self.addCleanup(self._api_key_patch.stop)
+
     def test_scheduler_uses_static_pool_without_catalog_request(self) -> None:
         backend = {
             "openrouter_discover_models": False,

@@ -22,8 +22,20 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             paths = [asset.target_path(root) for asset in profile.assets]
-        self.assertTrue(any(str(path).endswith(r"ComfyUI\models\unet\minimax_h3_fl2va_pruned_fp8_Q4_0.gguf") for path in paths))
-        self.assertTrue(any(str(path).endswith(r"ComfyUI\models\clip\qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf") for path in paths))
+        self.assertTrue(
+            any(
+                path.parts[-4:]
+                == ("ComfyUI", "models", "unet", "minimax_h3_fl2va_pruned_fp8_Q4_0.gguf")
+                for path in paths
+            )
+        )
+        self.assertTrue(
+            any(
+                path.parts[-4:]
+                == ("ComfyUI", "models", "clip", "qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf")
+                for path in paths
+            )
+        )
         self.assertEqual(profile.width, 608)
         self.assertEqual(profile.height, 352)
         self.assertEqual(profile.length, 124)
