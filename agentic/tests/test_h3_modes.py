@@ -72,12 +72,21 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertNotIn("native-ending-review", node_ids)
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(render.inputs["h3_mode"], "fl2va")
+        story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
+        self.assertEqual(story_prompt.inputs["render_mode"], "first_last_frame_to_video")
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_15s_fl2va_i2v")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
 
     def test_ref2va_plan_records_manifest_and_disables_reference_audio(self) -> None:
         plan = self._plan("native_h3_ref2va")
+        node_ids = [node.node_id for node in plan.nodes]
+        self.assertIn("native-ref2va-reference-candidates", node_ids)
+        self.assertIn("native-ref2va-reference-review", node_ids)
+        candidates = next(node for node in plan.nodes if node.node_id == "native-ref2va-reference-candidates")
+        self.assertEqual(candidates.inputs["image_count"], 6)
+        review = next(node for node in plan.nodes if node.node_id == "native-ref2va-reference-review")
+        self.assertEqual(review.inputs["limit"], 4)
         reference = next(node for node in plan.nodes if node.node_id == "native-ref2va-reference-check")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(plan.workflow_name, "minimax_h3_ref2va")
@@ -109,17 +118,17 @@ class H3ModePlanTests(unittest.TestCase):
             {"image": "kirby_keyframe_anima", "video": "minimax_h3_ref2va"},
         )
 
-    def test_pre_video_native_t2v_uses_reviewed_first_frame_i2v(self) -> None:
+    def test_native_t2v_stays_prompt_only_even_with_shared_review_enabled(self) -> None:
         plan = self._plan("native_h3_t2v_story")
-        opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
-        review = next(node for node in plan.nodes if node.node_id == "native-opening-review")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
+        node_ids = [node.node_id for node in plan.nodes]
 
-        self.assertEqual(opening.inputs["image_count"], 6)
-        self.assertEqual(review.inputs["limit"], 1)
-        self.assertTrue(review.inputs["require_human_review"])
-        self.assertEqual(render.skill_name, "longvideo.render_native_h3")
-        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_i2v")
+        self.assertNotIn("native-opening-keyframe", node_ids)
+        self.assertNotIn("native-opening-review", node_ids)
+        self.assertEqual(render.skill_name, "longvideo.render_native_h3_t2v")
+        self.assertEqual(render.tool_name, "comfy.workflow.text_to_video")
+        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_t2v")
+        self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
 
     def test_pre_video_l2va_uses_six_candidates_and_one_approved_last_frame(self) -> None:
         plan = self._plan("native_h3_l2va_story")
@@ -315,6 +324,77 @@ class H3ModePlanTests(unittest.TestCase):
             result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "batch-qa").generate_keyframe(context)
         self.assertEqual(result.status, "success")
         self.assertEqual(inspect.call_count, 2)
+
+    def test_kirby_batch_keeps_valid_candidates_when_one_candidate_is_rejected(self) -> None:
+        class FakeTools:
+            def call(self, _name, _payload):
+                return {"saved_files": ["bad.png", "good.png", "also-good.png"]}
+
+        context = SimpleNamespace(
+            node=SimpleNamespace(
+                inputs={
+                    "workflow_name": "kirby_keyframe_anima",
+                    "image_count": 3,
+                    "max_regenerations": 0,
+                },
+                depends_on=[],
+            ),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Kirby protects a glowing seed",
+                    style="anime",
+                    constraints={"character": "kirby"},
+                )
+            ),
+            state=SimpleNamespace(node_outputs={}),
+        )
+        rejected = SimpleNamespace(passed=False, reasons=("duplicate Kirby protagonist silhouettes are blocked",))
+        accepted = SimpleNamespace(passed=True, reasons=())
+        with patch(
+            "agentic.skills.agent_primitives.inspect_kirby_input",
+            side_effect=[rejected, accepted, accepted],
+        ):
+            result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "partial-batch").generate_keyframe(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["saved_files"], ["good.png", "also-good.png"])
+        self.assertEqual(result.outputs["rejected_files"], ["bad.png"])
+
+    def test_continuity_keyframe_preserves_multi_reference_candidate_count(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            def call(self, name, payload):
+                calls.append((name, payload))
+                return {"saved_files": ["one.png", "two.png", "three.png", "four.png"]}
+
+        context = SimpleNamespace(
+            node=SimpleNamespace(
+                inputs={
+                    "image_count": 4,
+                    "prompt": "Kirby protects a glowing seed",
+                },
+                depends_on=["prior-tail"],
+            ),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Kirby protects a glowing seed",
+                    style="anime",
+                    constraints={"character": "kirby"},
+                )
+            ),
+            state=RunState(
+                goal={},
+                metadata={},
+                node_outputs={"prior-tail": {"frame_path": "tail.png"}},
+            ),
+        )
+
+        result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "multi-ref-candidates").generate_keyframe(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0][0], "comfy.workflow.image_to_image")
+        self.assertEqual(calls[0][1]["image_count"], 4)
 
     def test_ref2va_deduplicates_selected_asset_against_string_manifest_entry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

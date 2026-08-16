@@ -207,7 +207,7 @@ PROFILES: dict[str, MiniMaxH3Profile] = {
     ),
     "native-quality": MiniMaxH3Profile(
         name="native-quality",
-        workflow_name="minimax_h3_native_i2v",
+        workflow_name="minimax_h3_native_t2v",
         summary=(
             "Official native H3 quantized set: preferred when fidelity matters more "
             "than download size; still uses the same low-resolution 8GB strategy."

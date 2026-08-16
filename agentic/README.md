@@ -82,7 +82,7 @@ agentic --goal "kirby explores a surreal city at night" \
         --comfy-root D:\ComfyUI_windows_portable
 ```
 
-This chain now uses the new runtime to compose `segment prompt -> first keyframe -> tail-frame guided img2img -> i2v -> concat -> gif preview`. Add `--use-tts` if you also want per-segment narration generation and final mux.
+This chain now uses the new runtime to compose `segment prompt -> recipe-specific anchors/references -> I2V segments -> tail/continuation or transition -> concat -> gif preview`. The selected mix can use first, first+last, last, or reference-bundle conditioning per segment; it is not a single fixed first-keyframe path. Add `--use-tts` if you also want per-segment narration generation and final mux.
 
 Additional runtime primitives are available:
 

@@ -55,12 +55,12 @@ pip install -e .
 | `text2img` | `image` | 靜態圖（可多张候選） |
 | `text2video` | `text2video` | 短影片／單鏡頭動態（預設路由檔中可註解關閉） |
 | `text2image2video` | `text2img2video` | 先圖後短片（可含 upscale 階） |
-| `text2longvideo` | `long_video` | 多段故事／分鏡／轉場 |
+| `text2longvideo` | `long_video` | 文字→關鍵圖／reference→多段 I2V→轉場→合成；不是純 T2V，也非固定 15 秒 |
 | `native_h3_story` | `native_h3_story` | Native H3 I2VA：單一 approved opening image 進連續故事 |
 | `native_h3_t2v_story` | `native_h3_t2v_story` | Native H3 T2VA：純文字直接生影片 |
 | `native_h3_fl2va_story` | `native_h3_fl2va_story` | Native H3 FL2VA：opening + landing 兩端 conditioning |
 | `native_h3_l2va_story` | `native_h3_l2va_story` | Native H3 L2VA：只使用 landing frame conditioning |
-| `native_h3_ref2va` | `native_h3_ref2va` | Native H3 Ref2VA：reference image/video manifest |
+| `native_h3_ref2va` | `native_h3_ref2va` | Native H3 Ref2VA：有效 manifest 直接使用；空 manifest 自動六張候選圖→Discord 選擇 |
 | `text2image2image` | `text2img2img` | 先圖後 img2img refine |
 | `sticker_pack` | `sticker_pack` | 多表情貼圖批次 |
 | `image2image` | `image` | 單純 img2img 路線（路由需納入候選時才會被選到） |
@@ -230,6 +230,8 @@ additional_params:
 
 **會用到的鍵**：`image_workflow_name`、`video_workflow_name`、`transition_workflow_name`。
 
+這不是單純的 text-to-long-video。planner 會把 story 拆成多個 segment，依每段抽到的 recipe 產生 anchor/reference 圖，接著跑多段 I2V、tail/continuation 或 transition，最後 concat；總時長由 `segment_count × segment_duration` 決定，不固定為 Native H3 的 15 秒。
+
 **CLI 範例**：
 
 ```bash
@@ -384,7 +386,7 @@ python run_media_interface.py @e2e --prompt '單鏡頭短動畫，角色在雨�
 # 3. 先圖後短片：z_image_plus_nova_model -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
 python run_media_interface.py @e2e --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
 
-# 4. 長片／多段故事：z_image_plus_nova_model -> minimax_h3_lowvram_i2v -> image_to_image
+# 4. 長片／多段故事：每段依 recipe 產生 anchor/reference -> I2V -> tail/transition -> concat
 python run_media_interface.py @e2e --prompt '三段式故事：相遇、追逐、收尾；每段要有狀態轉移' --generation-type text2longvideo
 
 # 5. Native H3 I2VA：generated opening image -> minimax_h3_lowvram_15s_fl2va_i2v
@@ -399,7 +401,7 @@ python run_media_interface.py @e2e --prompt 'Native H3 首尾幀故事，起點�
 # 8. Native H3 L2VA：generated landing only -> minimax_h3_lowvram_15s_fl2va_i2v
 python run_media_interface.py @e2e --prompt 'Native H3 以最後一幀作為故事落點，前段保持因果動作' --generation-type native_h3_l2va_story
 
-# 9. Native H3 Ref2VA：reference manifest -> minimax_h3_ref2va
+# 9. Native H3 Ref2VA：valid manifest 直用；空 manifest -> 六張候選圖 -> Discord 選擇 -> minimax_h3_ref2va
 python run_media_interface.py @e2e --prompt 'Native H3 參考圖與參考影片共同控制身份和運鏡' --generation-type native_h3_ref2va
 
 # 10. 先圖後 img2img refine：nova_model_plus_z_image_anime -> image_to_image
@@ -411,7 +413,9 @@ python run_media_interface.py @e2e --prompt '聊天貼圖表情包：開心、�
 
 ### 自動路由與加權隨機
 
-這兩種模式要分開理解：不帶 `--generation-type` 是交給 LLM 依 prompt 選策略；加權隨機則讀取角色 YAML 的 `generation.generation_type_weights`，先抽出一個策略，再把抽中的策略明確傳給 CLI。Kirby 目前的權重是 `text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 3`、`native_h3_fl2va_story: 2`。
+角色流程的策略選擇與內容生成要分開：scheduler 預設先讀取角色 YAML 的 `generation.generation_type_weights` 做 weighted/random selection，再把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不再決定 scheduler 要走哪一種 strategy。Kirby 目前的權重是 `text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`。
+
+直接呼叫 Python API 時若沒有傳入 `rng`，仍可保留 LLM strategy routing 作為低階相容模式；scheduler 會固定傳入 RNG，因此排程執行一定走 weighted/random。
 
 ```powershell
 # LLM 自動路由（不指定 --generation-type）
@@ -456,7 +460,7 @@ H3 runner 的 canonical workflow 對應：`t2va → minimax_h3_lowvram_t2v`、`i
 
 ### 測試順序與 publish 邊界
 
-建議順序是先跑 `text2img` 確認基礎 ComfyUI 與 Discord，再跑四種 native H3，接著跑一般影片／長片／貼圖，最後跑 Ref2VA 與隨機。每條命令都應保留 `run_id`、`log_path`、`review_session_path`、輸出媒體與 `publish_review_summary.json`。
+建議順序是先跑 `text2img` 確認基礎 ComfyUI 與 Discord，再跑五種 native H3，接著跑一般影片／長片／貼圖，最後跑 Ref2VA 與隨機。每條命令都應保留 `run_id`、`log_path`、`review_session_path`、輸出媒體與 `publish_review_summary.json`。
 
 本機測試不會自動公開發佈：`--dry-run-publish` 只驗證 publish/review graph；即使 Discord 通過，也不會送出社群平台。若要做不公開的平台 adapter smoke test，使用 `--publish-mode safe_poc`（YouTube private、Facebook draft、Instagram container-only）；不要在未經人工確認前使用 `--publish-mode live`。
 

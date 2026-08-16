@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import random
 import logging
 import shutil
 import tempfile
@@ -16,10 +17,12 @@ from agentic.app.character_workflow import (
     _extract_failure_details,
     _extract_publish_visual_grounding,
     _collect_count_policies,
+    _route_generation_from_character_config,
     _select_fresh_news,
     _resolve_publish_prompt,
     build_goal_payload_from_character_config,
     collect_media_paths_from_run_result,
+    load_character_config,
     run_character_workflow,
 )
 from agentic.tools.context_services import NewsContextService, NewsSelection
@@ -41,6 +44,77 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             output_root = Path(temp_dir) / "generated"
             _allow_runtime_output_for_visual_evidence(output_root)
             self.assertIn(str(output_root.resolve()), os.environ["AGENTIC_ALLOWED_IMAGE_ROOTS"])
+
+    def test_duration_policy_selects_single_action_or_native_story(self) -> None:
+        short = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby swats one glowing orb into a target",
+            duration_seconds=5,
+            publish_after_generate=False,
+        )
+        self.assertEqual(short["source_generation_type"], "text2image2video")
+        self.assertEqual(short["media_type"], "text2img2video")
+        self.assertEqual(short["duration_seconds"], 5)
+        self.assertEqual(short["constraints"]["duration_profile"], "single_action")
+        self.assertEqual(short["constraints"]["duration_override_seconds"], 5)
+
+        native = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby protects one glowing orb from a sudden gust",
+            duration_seconds=15,
+            publish_after_generate=False,
+        )
+        self.assertEqual(native["source_generation_type"], "native_h3_story")
+        self.assertEqual(native["duration_seconds"], 15)
+        self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("kirby_native_15s.yaml"))
+        self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
+
+    def test_weighted_route_selects_strategy_before_content_prompt(self) -> None:
+        payload = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby protects a glowing orb in a clear three-beat story",
+            rng=random.Random(0),
+            publish_after_generate=False,
+        )
+
+        self.assertEqual(payload["source_generation_type"], "sticker_pack")
+        self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
+        self.assertEqual(payload["constraints"]["routing_prompt_mode"], "weighted_random")
+        self.assertEqual(payload["prompt"], "Kirby protects a glowing orb in a clear three-beat story")
+
+    def test_weighted_route_can_select_sticker_without_llm_strategy_routing(self) -> None:
+        config = load_character_config(self.kirby_config)
+        config["generation"]["generation_type_weights"] = {"sticker_pack": 1}
+
+        with patch("agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy") as route:
+            result = _route_generation_from_character_config(
+                self.repo_root,
+                config,
+                character_name="Kirby",
+                style="polished 2D anime",
+                prompt="Kirby chat sticker reactions",
+                preferred_generation_type=None,
+                requested_duration_seconds=None,
+                rng=random.Random(0),
+            )
+
+        route.assert_not_called()
+        self.assertEqual(result["generation_type"], "sticker_pack")
+        self.assertEqual(result["selection_source"], "weighted_random")
+
+    def test_native_h3_rejects_unsupported_duration_override(self) -> None:
+        with self.assertRaisesRegex(ValueError, "supports duration_seconds=15"):
+            build_goal_payload_from_character_config(
+                self.repo_root,
+                self.kirby_config,
+                prompt="Kirby swats one glowing orb into a target",
+                preferred_generation_type="native_h3_story",
+                duration_seconds=5,
+                publish_after_generate=False,
+            )
 
     def test_extract_failure_details_promotes_node_log(self) -> None:
         details = _extract_failure_details(
@@ -445,6 +519,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["prompt_source"], "news")
         self.assertEqual(payload["constraints"]["prompt_mode"], "news")
         self.assertEqual(payload["constraints"]["news_context"]["keyword"], "panda")
+        self.assertIn("cute micro-gag", payload["constraints"]["native_h3_creative_brief"])
+        self.assertTrue(payload["constraints"]["native_h3_semantic_qa_blocking"])
 
     def test_news_driven_random_mode_overrides_generic_prompt_and_persists_selection(self) -> None:
         news = NewsSelection(
@@ -483,6 +559,41 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["news_context"]["title"], news.title)
         self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
         self.assertEqual(history_payload[0]["title"], news.title)
+
+    def test_weighted_news_run_selects_strategy_before_news_content_generation(self) -> None:
+        news = NewsSelection(
+            title="Taipei panda steals zongzi",
+            keyword="panda",
+            category="technology",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "agentic.app.character_workflow.NewsContextService.get_random_news",
+            return_value=news,
+        ), patch(
+            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            return_value={
+                "prompt": "Kirby turns the panda news into a playful multi-scene story",
+                "source": "autonomous_llm",
+                "prompt_mode": "llm",
+                "creative_seed": news.title,
+                "news_context": news.to_dict(),
+            },
+        ) as generate_prompt:
+            payload = build_goal_payload_from_character_config(
+                self.repo_root,
+                self.kirby_config,
+                prompt="",
+                news_driven=True,
+                news_history_path=str(Path(temp_dir) / "news-history.json"),
+                rng=random.Random(1),
+                output_dir=str(Path(temp_dir) / "output"),
+                publish_after_generate=False,
+            )
+
+        self.assertEqual(payload["source_generation_type"], "text2longvideo")
+        self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
+        self.assertEqual(payload["prompt"], "Kirby turns the panda news into a playful multi-scene story")
+        self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
 
     def test_select_fresh_news_excludes_previous_keys_and_records_each_selection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

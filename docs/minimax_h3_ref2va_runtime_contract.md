@@ -24,6 +24,12 @@ Typical API payload:
 }
 ```
 
+This low-level binding receives a validated manifest. At planner level,
+`native_h3_ref2va` with an empty configured manifest first creates six image
+candidates and waits for Discord selection; the selected assets are then
+normalized into the manifest shown above. `text2image2native_h3_ref2va` names
+the same candidate stage explicitly.
+
 The native profile still requires its model files to exist in the configured D: or E: ComfyUI model directories; selecting it does not download anything implicitly.
 
 These are valid and distinct modes: image-only, video-only, and explicitly mixed image+video. On an RTX 4060, start with one identity image; add a second image only when it contributes a different view or controlled appearance detail. Add a reference video only when motion, camera, or timing is actually needed. Sending duplicate image and video content increases VRAM and runtime without adding a useful constraint.

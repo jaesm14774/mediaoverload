@@ -100,7 +100,7 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[2]
         candidates = {
             "text2video": {"video_workflow_name": ["minimax_h3_lowvram_t2v", "minimax_h3_native_t2v"]},
-            "text2longvideo": {"video_workflow_name": ["minimax_h3_lowvram_i2v", "minimax_h3_native_i2v"]},
+            "text2longvideo": {"video_workflow_name": ["minimax_h3_lowvram_i2v"]},
         }
         _prioritize_h3_profile(repo_root, {"h3_profile": "ultra-lowvram"}, candidates, list(candidates))
         self.assertEqual(candidates["text2video"]["video_workflow_name"][0], "minimax_h3_lowvram_t2v")
@@ -168,6 +168,20 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
             self.assertGreaterEqual(accepted.pink_ratio, 0.0025)
             self.assertGreaterEqual(accepted.red_ratio, 0.001)
 
+    def test_kirby_input_gate_ignores_boundary_connected_pink_background(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "kirby_pink_sky.png"
+            image = Image.new("RGB", (608, 352), (214, 136, 203))
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((300, 70, 540, 300), fill=(210, 100, 155))
+            draw.rectangle((345, 260, 420, 345), fill=(220, 30, 30))
+            image.save(path)
+
+            accepted = inspect_kirby_input(path)
+
+            self.assertTrue(accepted.passed, accepted)
+            self.assertFalse(accepted.duplicate_protagonist_detected)
+
     def test_kirby_input_gate_blocks_multi_panel_outside_ref2va(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "kirby_collage.png"
@@ -230,6 +244,17 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("overall_soundscape:", prompt)
         self.assertIn("non_diegetic_music:", prompt)
         self.assertIn("first-frame image is authoritative", prompt)
+
+    def test_first_last_frame_prompt_carries_ending_condition(self) -> None:
+        prompt = compose_minimax_h3_prompt(
+            duration_seconds=15,
+            character="Kirby",
+            style="polished 2D anime",
+            shots=[{"time": "0-15s", "action": "Kirby reaches the closing gate", "state_change": "the gate opens"}],
+            render_mode="first_last_frame_to_video",
+        )
+        self.assertIn("first-frame image is authoritative", prompt)
+        self.assertIn("supplied last-frame state", prompt)
 
     def test_visual_prompt_has_stable_subject_action_camera_order(self) -> None:
         prompt = structured_visual_prompt(

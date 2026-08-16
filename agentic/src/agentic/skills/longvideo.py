@@ -102,14 +102,24 @@ class LongVideoSkills:
             or 15
         )
         style = str(context.node.inputs.get("style") or context.plan.goal.style)
-        creative_brief = str(context.plan.goal.prompt or "").strip()
+        configured_brief = str(
+            context.plan.goal.constraints.get("native_h3_creative_brief") or ""
+        ).strip()
+        user_brief = str(context.plan.goal.prompt or "").strip()
         # When no user prompt was supplied, the character workflow has already
         # selected news and may have produced an autonomous scene brief. That
         # brief is optional inspiration, not a second user objective. Passing
         # it into the news-grounding validator makes harmless scene details
         # look like mandatory constraints and can reject a valid news story.
         if str(context.plan.goal.constraints.get("prompt_source") or "").strip().lower() != "user":
-            creative_brief = ""
+            user_brief = ""
+        creative_brief = configured_brief
+        if user_brief:
+            creative_brief = (
+                f"{configured_brief}\nUser objective: {user_brief}"
+                if configured_brief
+                else user_brief
+            )
         news_context = context.plan.goal.constraints.get("news_context") or {}
         if not isinstance(news_context, dict):
             raise RuntimeError("Native H3 news_context must be a mapping")
@@ -143,6 +153,7 @@ class LongVideoSkills:
                 "opening_keyframe_prompt": opening_prompt,
                 "ending_keyframe_prompt": ending_prompt,
                 "story_spine": dict(storyboard.get("story_spine") or {}),
+                "gag_card": dict(storyboard.get("gag_card") or {}),
                 "native_audio": str(storyboard.get("native_audio") or ""),
                 "duration_seconds": duration_seconds,
                 "prompt_mode": str(story_payload["prompt_mode"]),
@@ -189,54 +200,119 @@ class LongVideoSkills:
     def render_segment_video(self, context: SkillContext) -> SkillResult:
         segment = self._segment(context)
         run_dir = self._build_run_dir(context.plan.goal.prompt, f"{segment['segment_id']}_video")
-        image_path = self._optional_dependency_value(context, ("frame_path", "saved_files"))
-        if not image_path:
-            raise RuntimeError(f"Missing frame input for node '{context.node.node_id}'")
-
+        recipe = str(context.node.inputs.get("recipe") or "anchor_first")
         workflow_name = str(
-            context.plan.goal.constraints.get("video_workflow_name")
-            or context.node.inputs["workflow_name"]
-        )
+            context.node.inputs.get("workflow_name")
+            or context.plan.goal.constraints.get("video_workflow_name")
+            or ""
+        ).strip()
+        if not workflow_name:
+            raise RuntimeError(f"Long-video recipe '{recipe}' has no workflow_name")
+
+        def dependency_value(node_id: str, keys: tuple[str, ...]) -> str | None:
+            if not node_id:
+                return None
+            output = context.state.node_outputs.get(node_id)
+            if not isinstance(output, dict):
+                return None
+            for key in keys:
+                value = output.get(key)
+                if isinstance(value, list) and value:
+                    first = value[0]
+                    if isinstance(first, str):
+                        return first
+                elif isinstance(value, str) and value:
+                    return value
+            return None
+
+        anchor_nodes = dict(context.node.inputs.get("anchor_nodes") or {})
+        first_frame = dependency_value(str(anchor_nodes.get("first") or ""), ("frame_path", "selected_frame_path", "saved_files", "selected_assets"))
+        last_frame = dependency_value(str(anchor_nodes.get("last") or ""), ("frame_path", "selected_frame_path", "saved_files", "selected_assets"))
+        reference_node = str(context.node.inputs.get("reference_node") or "")
+        reference_output = context.state.node_outputs.get(reference_node) if reference_node else {}
+        reference_manifest = reference_output.get("reference_manifest", []) if isinstance(reference_output, dict) else []
+
+        if recipe in {"anchor_first", "anchor_first_last"} and not first_frame:
+            raise RuntimeError(f"Conditioning plan '{recipe}' did not resolve a first anchor")
+        if recipe in {"anchor_last", "anchor_first_last"} and not last_frame:
+            raise RuntimeError(f"Conditioning plan '{recipe}' did not resolve a last anchor")
+        if recipe == "reference_bundle" and not reference_manifest:
+            raise RuntimeError("Conditioning plan 'reference_bundle' did not resolve a reference manifest")
+
         prompt = f"{segment['visual']}, {context.plan.goal.style}, motion continuity, coherent action"
+        prompt_anchor = first_frame or last_frame
         if workflow_name.startswith("minimax_h3_"):
             prompt = build_minimax_h3_prompt(
                 context.plan.goal,
                 segment,
-                prior_frame=image_path,
+                prior_frame=prompt_anchor,
             )["prompt"]
-        width = context.node.inputs.get("width")
-        height = context.node.inputs.get("height")
-        length = context.node.inputs.get("length")
-        steps = context.node.inputs.get("steps")
+
+        constraints = context.plan.goal.constraints
+        width = context.node.inputs.get("width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
+        height = context.node.inputs.get("height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
+        length = context.node.inputs.get("length") or constraints.get("longvideo_length") or constraints.get("longvideo_h3_length")
+        steps = context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps")
         if workflow_name.startswith("minimax_h3_"):
-            # Long-video renders queue several H3 jobs in one run. Use a
-            # smaller per-segment draft than the standalone H3 workflows so
-            # an 8GB GPU can release/reload the graph between segments without
-            # an allocation failure. Callers can override these through the
-            # goal constraints when more VRAM is available.
-            constraints = context.plan.goal.constraints
-            width = constraints.get("longvideo_h3_width", width or 512)
-            height = constraints.get("longvideo_h3_height", height or 288)
-            length = constraints.get("longvideo_h3_length", length or 81)
-            steps = constraints.get("longvideo_h3_steps", steps or 16)
-        result = self.tools.call(
-            "comfy.render_image_to_video",
-            {
-                "workflow_name": workflow_name,
-                "run_dir": str(run_dir),
-                "image_path": image_path,
-                "prompt": prompt,
-                "width": width if width is not None else (608 if workflow_name.startswith("minimax_h3_") else None),
-                "height": height if height is not None else (352 if workflow_name.startswith("minimax_h3_") else None),
-                "length": length,
-                "steps": steps,
-            },
+            width = width or 512
+            height = height or 288
+            length = length or 81
+            steps = steps or 16
+
+        h3_mode = {
+            "anchor_first": "i2va",
+            "anchor_first_last": "fl2va",
+            "anchor_last": "l2va",
+            "reference_bundle": "ref2va",
+        }.get(recipe, recipe)
+        idea_brief = context.state.node_outputs.get("idea-brief")
+        if not isinstance(idea_brief, dict):
+            idea_brief = {}
+        payload: dict[str, object] = {
+            "workflow_name": workflow_name,
+            "run_dir": str(run_dir),
+            "prompt": prompt,
+            "negative_prompt": str(idea_brief.get("negative_prompt", "")),
+            "character": str(constraints.get("character") or ""),
+            "use_first_frame": bool(first_frame),
+            "use_last_frame": bool(last_frame),
+            "h3_mode": h3_mode,
+            "width": width,
+            "height": height,
+            "length": length,
+            "steps": steps,
+            "video_count": int(context.node.inputs.get("video_count") or 1),
+            "model_profile": str(context.node.inputs.get("model_profile") or "q2"),
+        }
+        if first_frame:
+            payload["image_path"] = first_frame
+        if last_frame:
+            payload["last_image_path"] = last_frame
+        if reference_manifest:
+            payload["reference_manifest"] = reference_manifest
+
+        render_tool = str(context.node.inputs.get("render_tool") or "").strip()
+        tool_name = (
+            "comfy.render_reference_to_video"
+            if render_tool == "comfy.workflow.reference_to_video" or recipe == "reference_bundle"
+            else "comfy.render_image_to_video"
         )
+        result = self.tools.call(tool_name, payload)
+        outputs: dict[str, object] = {
+            **result,
+            "recipe": recipe,
+            "workflow_name": workflow_name,
+            "h3_mode": h3_mode,
+            "first_frame_path": first_frame or "",
+            "last_frame_path": last_frame or "",
+            "reference_manifest": reference_manifest,
+            "conditioning_plan": dict(context.node.inputs.get("conditioning_plan") or {}),
+        }
         return SkillResult(
             status="success",
-            outputs=result,
-            metrics={"video_count": len(result.get("saved_files", []))},
-            logs=[f"Rendered {segment['segment_id']} clip."],
+            outputs=outputs,
+            metrics={"video_count": len(result.get("saved_files", [])), "recipe": recipe},
+            logs=[f"Rendered {segment['segment_id']} clip with {recipe} conditioning."],
         )
 
     def render_native_h3(self, context: SkillContext) -> SkillResult:
@@ -315,6 +391,7 @@ class LongVideoSkills:
             "last_frame_path": last_frame,
             "use_last_frame": use_last_frame,
             "native_h3_prompt": story["prompt"],
+            "creative_brief": story.get("creative_brief", ""),
             "story_source": story.get("story_source", "news_llm"),
             "creative_seed": story.get("creative_seed", ""),
             "news_context": story.get("news_context", {}),
@@ -330,8 +407,13 @@ class LongVideoSkills:
                 f"Rendered one continuous native H3 story with '{workflow_name}' ({'first + last frame' if use_last_frame else 'first frame only'})."
             ],
         )
+    def validate_references(self, context: SkillContext) -> SkillResult:
+        return self._validate_reference_manifest(context, label="workflow")
 
     def validate_native_h3_references(self, context: SkillContext) -> SkillResult:
+        return self._validate_reference_manifest(context, label="H3")
+
+    def _validate_reference_manifest(self, context: SkillContext, *, label: str) -> SkillResult:
         constraints = dict(getattr(context.plan.goal, "constraints", {}) or {})
         manifest = context.node.inputs.get("reference_manifest")
         selected_assets = self._collect_accepted_reference_assets(context)
@@ -355,20 +437,36 @@ class LongVideoSkills:
                 existing_paths.add(canonical)
         references = normalize_reference_manifest(
             manifest_entries or None,
-            image_paths=context.node.inputs.get("reference_image_paths") or constraints.get("native_h3_reference_image_paths"),
-            video_paths=context.node.inputs.get("reference_video_paths") or constraints.get("native_h3_reference_video_paths"),
+            image_paths=context.node.inputs.get("reference_image_paths")
+            or constraints.get("reference_image_paths")
+            or constraints.get("native_h3_reference_image_paths"),
+            video_paths=context.node.inputs.get("reference_video_paths")
+            or constraints.get("reference_video_paths")
+            or constraints.get("native_h3_reference_video_paths"),
             require_files=True,
             max_images=int(
                 context.node.inputs.get("max_images")
+                or constraints.get("longvideo_reference_max_images")
                 or constraints.get("native_h3_reference_max_images")
                 or 3
             ),
             max_videos=int(
                 context.node.inputs.get("max_videos")
+                or constraints.get("longvideo_reference_max_videos")
                 or constraints.get("native_h3_reference_max_videos")
                 or 1
             ),
         )
+        selection_limit = int(context.node.inputs.get("selection_limit") or 0)
+        if selection_limit and len(references) > selection_limit:
+            raise ValueError(
+                f"Reference bundle contains {len(references)} assets, exceeding the explicit selection limit {selection_limit}; "
+                "select a smaller bundle instead of silently truncating it"
+            )
+        if len(references) < int(context.node.inputs.get("minimum_references") or 1):
+            raise ValueError(
+                f"Reference recipe requires at least {context.node.inputs.get('minimum_references') or 1} usable reference asset(s)"
+            )
         return SkillResult(
             status="success",
             outputs={
@@ -380,10 +478,9 @@ class LongVideoSkills:
                 "reference_image_count": sum(ref["type"] == "image" for ref in references),
                 "reference_video_count": sum(ref["type"] == "video" for ref in references),
             },
-            logs=[
-                f"Validated H3 Ref2VA references ({len(references)} accepted image/video assets); reference audio is disabled."
-            ],
+            logs=[f"Validated {label} reference bundle ({len(references)} accepted image/video assets)."],
         )
+
 
     @staticmethod
     def _collect_accepted_reference_assets(context: SkillContext) -> list[str]:
@@ -734,6 +831,15 @@ class LongVideoSkills:
             )
         )
         require_human_review = bool(constraints.get("require_human_review", False))
+        semantic_qa_blocking = bool(
+            context.node.inputs.get(
+                "semantic_qa_blocking",
+                constraints.get(
+                    "native_h3_semantic_qa_blocking",
+                    native_recipe.get("semantic_qa_blocking", False),
+                ),
+            )
+        )
         semantic_qa: dict[str, object]
         if not semantic_qa_required:
             semantic_qa = {
@@ -753,6 +859,7 @@ class LongVideoSkills:
                 native_shots=[item for item in (storyboard.get("native_shots") or []) if isinstance(item, dict)],
                 news_context=dict(story.get("news_context") or {}),
                 rendered_prompt=str(story.get("prompt") or render.get("native_h3_prompt") or ""),
+                duration_seconds=int(context.plan.goal.duration_seconds or 0),
                 news_anchor_terms=[
                     str(item)
                     for item in (dict(storyboard.get("news_trace") or {}).get("visual_anchors") or [])
@@ -761,7 +868,8 @@ class LongVideoSkills:
             )
             semantic_qa["enabled"] = True
             semantic_qa["required"] = semantic_qa_required
-            semantic_qa["blocking"] = semantic_qa_required and not require_human_review
+            semantic_qa["blocking"] = semantic_qa_required and semantic_qa_blocking
+            semantic_qa["blocking_policy"] = "hard_gate" if semantic_qa_blocking else "advisory"
 
         technical_passed = bool(technical_qa.get("passed"))
         semantic_blocked = bool(semantic_qa.get("blocking")) and semantic_qa.get("passed") is not True
@@ -774,7 +882,7 @@ class LongVideoSkills:
             if passed
             else "Native H3 QA failed: " + ", ".join(failures)
         )
-        if semantic_qa_required and require_human_review and semantic_qa.get("passed") is not True:
+        if semantic_qa_required and require_human_review and not semantic_qa_blocking and semantic_qa.get("passed") is not True:
             log_message += " Semantic result is advisory because Discord human review remains authoritative."
         return SkillResult(
             status="success" if passed else "failed",
@@ -900,6 +1008,7 @@ def register_longvideo_skills(
     skill_registry.register("longvideo.prepare_native_h3_story", skills.prepare_native_h3_story, "Prepare one causal native H3 storyboard prompt")
     skill_registry.register("longvideo.render_initial_frame", skills.render_initial_frame, "Render the opening seed frame")
     skill_registry.register("longvideo.render_segment_video", skills.render_segment_video, "Render one long-video segment")
+    skill_registry.register("longvideo.validate_references", skills.validate_references, "Validate a typed long-video reference bundle")
     skill_registry.register("longvideo.render_native_h3", skills.render_native_h3, "Render one continuous native H3 story clip")
     skill_registry.register("longvideo.render_native_h3_t2v", skills.render_native_h3_t2v, "Render one continuous native H3 text-to-video story clip")
     skill_registry.register("longvideo.validate_native_h3_references", skills.validate_native_h3_references, "Validate H3 Ref2VA image/video references and provenance")

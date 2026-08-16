@@ -1,13 +1,15 @@
 # MiniMax H3 進階玩法：L2VA 與 Ref2VA
 
-這個 repo 現在把 H3 拆成四條可追溯路徑：
+這個 repo 現在把 Native H3 拆成五條可追溯策略路徑，另有一條明確的自動 reference 組合路徑：
 
 | mode | 條件影像 | 適合用途 |
 |---|---|---|
 | `native_h3_story` | opening frame，可選 approved last frame | 角色一致性的標準 causal I2V |
+| `native_h3_fl2va_story` | approved opening + approved landing frame | 明確的起點到結局狀態轉換 |
 | `native_h3_l2va_story` | 只有 approved last frame | 從結尾姿態／構圖反推一段新片，避免 opening frame 污染 |
 | `native_h3_t2v_story` | 無影像 | 純 prompt 探索 |
-| `native_h3_ref2va` | 多張 reference image + reference video | identity、style、motion、camera、environment 的組合控制 |
+| `native_h3_ref2va` | 有效 manifest 直接使用；空 manifest 產生六張候選圖後 Discord 選擇 | identity、style、motion、camera、environment 的組合控制 |
+| `text2image2native_h3_ref2va` | 明確的六張 T2I candidates + Discord 選擇 | 沒有既有 references 時的可見自動組合流程 |
 
 Ref2VA 本地實作只允許 image/video reference。`audio`、`reference_audio`、音訊檔案作為 reference 都會在 manifest、skill 和 Comfy binding 邊界被拒絕；影片內的聲音仍由 H3 原生 audio VAE 依 prompt 生成。
 
@@ -35,7 +37,14 @@ python run_media_interface.py `
 
 若暫時不要 Discord review，可以加 `--no-review`；這會只產生一個 ending candidate，且不自動重生 continuity frame。
 
-## P1：Ref2VA reference manifest
+## P1：Ref2VA reference manifest 或自動候選
+
+`native_h3_ref2va` 不會因為 `reference_manifest: []` 就直接失敗。有效
+manifest 會直接送入 Ref2VA；空 manifest 會自動產生六張 T2I candidate，
+交給 Discord 使用者選擇 1-4 張，再建立最終 reference manifest。若希望在
+策略名稱上明確表達這個前置 stage，可選 `text2image2native_h3_ref2va`，
+兩者使用相同的六張候選圖與人工選擇契約。已配置但缺檔、不可讀或格式錯誤
+的 references 仍然是錯誤，不會被當成空 manifest。
 
 在 `configs/characters/kirby.yaml` 的 `generation.native_h3_ref2va` 填入 reference。每筆 record 至少需要 `path`；建議明確指定 `type`、`role`、`retention`：
 
@@ -60,7 +69,7 @@ python run_media_interface.py `
         notes: use as motion/camera reference only
     width: 608
     height: 352
-    length: 124
+    length: 362
     steps: 20
 ```
 
@@ -103,12 +112,12 @@ Reference video 先以 24 fps 讀入，讓 H3 VAE 保留時間訊息；H3 的 Qw
 
 建議每次只改一個軸，並保留 run summary：
 
-1. 先固定 608×352、124 frames、20 steps。
+1. 先固定 608×352、362 frames、20 steps（Kirby production profile 為 15 秒）。
 2. 先用 1 identity image；確認角色後再加 1 motion/camera video。
 3. identity 漂移時，先提高 identity reference 的明確 retention，不要先增加 reference 數量。
 4. 動作不對時，加入 `role: motion` 或 `role: camera` video；不要把 style image 當 motion reference。
 5. VRAM 壓力高時，先減少 reference 數量、length、steps，再考慮升高解析度。
-6. 只在 approved last frame 穩定後才用 L2VA；只在 reference lineage 完整後才用 Ref2VA。
+6. 只在 approved last frame 穩定後才用 L2VA；只在 reference manifest 已驗證或候選圖完成 Discord 選擇、lineage 完整後才用 Ref2VA。
 
 ## 相關程式位置
 

@@ -502,6 +502,34 @@ class LLMEngineTests(unittest.TestCase):
         self.assertNotIn("Caption:", result["caption"])
         self.assertNotIn("Hashtags:", result["caption"])
 
+    def test_publish_article_repair_preserves_initial_hashtags_when_repair_omits_them(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"A short sentence.","hashtags":"#kirby #toolbox","platform_captions":{"facebook":"A short sentence."}}',
+                    '{"caption":"A strong hook opens the story.\\n\\nThe visible conflict gives the moment meaning.\\n\\n1. Kirby faces the toolbox.\\n2. The obstacle changes the outcome.\\n3. The repair creates the payoff.\\n\\nWhich beat would you remember? Save this idea for later.","hashtags":"","platform_captions":{}}',
+                ]
+            ),
+        )
+
+        result = engine.prepare_publish_caption(
+            GoalRequest(
+                prompt="publish Kirby toolbox story",
+                media_type="publish_review",
+                style="social promo",
+                constraints={"social_post_format": True},
+            ),
+            prefix="",
+            hashtags=[],
+            platforms=["facebook"],
+            media_paths=["C:\\kirby.mp4"],
+        )
+
+        self.assertEqual(result["hashtags"], "#kirby #toolbox")
+        self.assertEqual(result["platform_captions"]["facebook"], result["caption"])
+        self.assertEqual(len(engine._manager.text_model.calls), 2)
+
     def test_prepare_publish_caption_fails_when_caption_provider_fails(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
@@ -939,6 +967,12 @@ class LLMEngineTests(unittest.TestCase):
                                     "primary_action_visible": True,
                                     "news_anchor_visible": True,
                                     "progression_visible": True,
+                                    "cute_hit": True,
+                                    "expression_visible": True,
+                                    "single_gag": True,
+                                    "first_second_action": True,
+                                    "action_completion_visible": True,
+                                    "payoff_visible": True,
                                     "unwanted_extra_characters": False,
                                 },
                                 "observed_story": "Kirby carries the glowing seed through the storm.",
@@ -991,6 +1025,12 @@ class LLMEngineTests(unittest.TestCase):
                     "primary_action_visible": True,
                     "news_anchor_visible": True,
                     "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
                     "unwanted_extra_characters": True,
                 },
                 "issues": [],
@@ -1013,6 +1053,12 @@ class LLMEngineTests(unittest.TestCase):
                     "primary_action_visible": True,
                     "news_anchor_visible": False,
                     "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
                     "unwanted_extra_characters": False,
                 },
                 "observed_story": "Kirby protects a glowing golden orb from shadowy tendrils and restores it.",
@@ -1046,6 +1092,12 @@ class LLMEngineTests(unittest.TestCase):
                                     "primary_action_visible": True,
                                     "news_anchor_visible": True,
                                     "progression_visible": True,
+                                    "cute_hit": True,
+                                    "expression_visible": True,
+                                    "single_gag": True,
+                                    "first_second_action": True,
+                                    "action_completion_visible": True,
+                                    "payoff_visible": True,
                                     "unwanted_extra_characters": False,
                                 },
                                 "observed_story": "Kirby advances through a baseball story in a stylized panel layout.",
@@ -1069,6 +1121,65 @@ class LLMEngineTests(unittest.TestCase):
             self.assertEqual(result["status"], "fail")
             self.assertFalse(result["passed"])
             self.assertFalse(result["advisory_only"])
+
+    def test_video_semantic_qa_blocks_a_clip_without_completed_action_or_payoff(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 94,
+                "checks": {
+                    "protagonist_clear": True,
+                    "primary_action_visible": True,
+                    "news_anchor_visible": True,
+                    "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": False,
+                    "payoff_visible": False,
+                    "unwanted_extra_characters": False,
+                },
+                "observed_story": "Kirby remains beside the orb while the camera pushes in.",
+                "issues": [],
+                "caption_guidance": "Do not claim a completed rescue.",
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "fail")
+
+    def test_video_semantic_qa_blocks_a_generic_clip_without_a_cute_gag(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 96,
+                "checks": {
+                    "protagonist_clear": True,
+                    "primary_action_visible": True,
+                    "news_anchor_visible": True,
+                    "progression_visible": True,
+                    "cute_hit": False,
+                    "expression_visible": False,
+                    "single_gag": False,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
+                    "unwanted_extra_characters": False,
+                },
+                "observed_story": "Kirby stands beside a glowing portal while the camera moves in.",
+                "issues": [],
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "fail")
 
 
 if __name__ == "__main__":

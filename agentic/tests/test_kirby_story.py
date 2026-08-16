@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.prompting import build_minimax_h3_prompt, build_story_segments
+from agentic.runtime.prompting import build_goal_brief, build_minimax_h3_prompt, build_story_segments
 from agentic.storyboard import StoryboardError, build_story_plan, build_storyboard_segments, format_native_h3_prompt, load_storyboard
 
 
@@ -94,6 +94,18 @@ class KirbyStoryboardTests(unittest.TestCase):
         self.assertIn("SHOT 3", prompt)
         self.assertIn("not a montage", prompt)
         self.assertLess(len(prompt.split()), 600)
+
+    def test_five_second_brief_is_one_completed_action(self) -> None:
+        goal = GoalRequest(
+            prompt="Kirby swats one glowing orb into a target",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="cinematic anime",
+            constraints={"character": "Kirby"},
+        )
+        brief = build_goal_brief(goal, goal.style, [])
+        self.assertIn("one clear physical action only", brief["prompt"])
+        self.assertIn("completed end state", brief["prompt"])
 
 
 if __name__ == "__main__":

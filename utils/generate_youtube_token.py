@@ -49,7 +49,7 @@ def generate_token(character: str, client_secret_path: Path) -> Path:
         f"YOUTUBE_CLIENT_ID={client_id}",
         f"YOUTUBE_CLIENT_SECRET={client_secret}",
         f"YOUTUBE_REFRESH_TOKEN={credentials.refresh_token}",
-        "YOUTUBE_PRIVACY_STATUS=private",
+        "YOUTUBE_PRIVACY_STATUS=public",
         "YOUTUBE_CATEGORY_ID=22",
         "YOUTUBE_NOTIFY_SUBSCRIBERS=false",
         "YOUTUBE_MADE_FOR_KIDS=false",

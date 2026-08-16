@@ -9,6 +9,26 @@ from typing import Any
 from agentic.assets.minimax_h3 import profile_manifest
 
 
+def _load_workflow_metadata(workflow_dir: Path) -> dict[str, dict[str, Any]]:
+    """Load optional workflow contracts without making YAML a hard dependency."""
+
+    config_path = workflow_dir / "workflow_config.yaml"
+    if not config_path.exists():
+        return {}
+    try:
+        import yaml
+
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        raw = payload.get("workflows", {}) if isinstance(payload, dict) else {}
+        return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
+    except Exception:
+        return {}
+
+
+def _metadata_for_workflow(metadata: dict[str, dict[str, Any]], name: str) -> dict[str, Any]:
+    return dict(metadata.get(name) or metadata.get(f"{name}.json") or {})
+
+
 @dataclass(slots=True)
 class AssetRequirement:
     name: str
@@ -61,6 +81,7 @@ class WorkflowManifest:
     required_assets: list[AssetRequirement] = field(default_factory=list)
     recommended_defaults: dict[str, Any] = field(default_factory=dict)
     asset_extra_roots: list[str] = field(default_factory=list)
+    conditioning: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -70,6 +91,7 @@ class WorkflowManifest:
             "summary": self.summary,
             "required_assets": [asset.to_dict() for asset in self.required_assets],
             "recommended_defaults": self.recommended_defaults,
+            "conditioning": self.conditioning,
         }
         if self.asset_extra_roots:
             payload["asset_extra_roots"] = list(self.asset_extra_roots)
@@ -82,7 +104,6 @@ _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
     "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
-    "minimax_h3_native_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_native_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_ref2va": {
         "width": 608,
@@ -136,7 +157,12 @@ def _infer_media_types(stem: str) -> list[str]:
     return shared_image + ["text2video", "text2img2video", "video_narrate"]
 
 
-def _synthetic_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
+def _synthetic_manifest(
+    name: str,
+    workflow_rel_path: str,
+    metadata: dict[str, Any] | None = None,
+) -> WorkflowManifest:
+    values = dict(metadata or {})
     return WorkflowManifest(
         name=name,
         media_types=_infer_media_types(name),
@@ -145,20 +171,25 @@ def _synthetic_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
         required_assets=[],
         recommended_defaults=dict(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
         asset_extra_roots=[],
+        conditioning=dict(values.get("conditioning") or {}),
     )
 
 
-def _minimax_h3_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
+def _minimax_h3_manifest(
+    name: str,
+    workflow_rel_path: str,
+    metadata: dict[str, Any] | None = None,
+) -> WorkflowManifest:
+    values = dict(metadata or {})
     profile_name = {
         "minimax_h3_lowvram_i2v": "balanced-lowvram",
         "minimax_h3_lowvram_t2v": "balanced-lowvram",
         "minimax_h3_lowvram_15s_fl2va_i2v": "balanced-lowvram",
-        "minimax_h3_native_i2v": "native-quality",
         "minimax_h3_native_t2v": "native-quality",
         "minimax_h3_ref2va": "ref2va-lowvram",
     }.get(name)
     if not profile_name:
-        return _synthetic_manifest(name, workflow_rel_path)
+        return _synthetic_manifest(name, workflow_rel_path, values)
     payload = profile_manifest(profile_name)
     recommended_defaults = dict(payload["recommended_defaults"])
     recommended_defaults.update(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {}))
@@ -170,6 +201,7 @@ def _minimax_h3_manifest(name: str, workflow_rel_path: str) -> WorkflowManifest:
         required_assets=[AssetRequirement.from_dict(item) for item in payload["required_assets"]],
         recommended_defaults=recommended_defaults,
         asset_extra_roots=[],
+        conditioning=dict(values.get("conditioning") or {}),
     )
 
 
@@ -184,10 +216,11 @@ class AssetRegistry:
         manifests: dict[str, WorkflowManifest] = {}
         if not self._workflow_dir.is_dir():
             return manifests
+        metadata = _load_workflow_metadata(self._workflow_dir)
         for path in sorted(self._workflow_dir.glob("*.json")):
             stem = path.stem
             rel = _relative_to_project(self.project_root, path)
-            manifests[stem] = _minimax_h3_manifest(stem, rel)
+            manifests[stem] = _minimax_h3_manifest(stem, rel, _metadata_for_workflow(metadata, stem))
         return manifests
 
     def all_manifests(self) -> list[WorkflowManifest]:

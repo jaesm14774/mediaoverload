@@ -13,8 +13,21 @@ generation:
   identity_refine_workflow_name: kirby_continuity_img2img
   storyboard_path: configs/storyboards/kirby_meadow_adventure.yaml
   input_gate: kirby-pink-red-silhouette
+  native_h3_quality:
+    semantic_qa_blocking: true
+    creative_brief: >-
+      Make this a highly shareable cute micro-gag, not an action-film lore scene:
+      one Kirby, one simple physical prop, one dominant motion, one readable
+      setback, and one visible reversal/payoff. The first second must already
+      contain motion and a clear expressive reaction. Prefer a close readable
+      face or body reaction, exaggerated but charming timing, a small absurd
+      surprise, and a final visual joke that lands without dialogue. Translate
+      the news into one unmarked physical object or effect only. Do not show
+      Kirby fighting a duplicate, multiple characters, readable interfaces,
+      GitHub/web text, abstract symbols, or Kirby standing still while looking
+      at a portal.
   native_h3_story:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: kirby_keyframe_anima
@@ -31,7 +44,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_t2v_story:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_t2v
     width: 608
@@ -43,7 +56,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_fl2va_story:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: kirby_keyframe_anima
@@ -60,7 +73,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_l2va_story:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: kirby_keyframe_anima
@@ -77,11 +90,12 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_ref2va:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_ref2va
     reference_manifest: []
     reference_image_size: match
+    reference_candidate_count: 6
     reference_selection_limit: 4
     reference_max_images: 9
     reference_max_videos: 3
@@ -96,11 +110,11 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   text2image2native_h3_ref2va:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     keyframe_workflow_name: kirby_keyframe_anima
     workflow_name: minimax_h3_ref2va
-    reference_candidate_count: 4
+    reference_candidate_count: 6
     reference_selection_limit: 4
     reference_max_images: 9
     reference_max_videos: 3
@@ -126,8 +140,13 @@ generation:
   generation_type_weights:
     text2image2video: 1
     text2longvideo: 2
-    native_h3_story: 3
-    native_h3_fl2va_story: 2
+    native_h3_story: 1
+    native_h3_t2v_story: 1
+    native_h3_fl2va_story: 1
+    native_h3_l2va_story: 1
+    native_h3_ref2va: 1
+    text2image2native_h3_ref2va: 1
+    sticker_pack: 2
 
 social_media:
   # Hashtags are generated from the final article and visible media.

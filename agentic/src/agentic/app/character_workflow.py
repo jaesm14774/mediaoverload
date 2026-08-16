@@ -119,6 +119,7 @@ def build_goal_payload_from_character_config(
     prompt: str = "",
     temperature: float = 1.0,
     preferred_generation_type: str | None = None,
+    duration_seconds: int | None = None,
     dry_run_publish: bool = False,
     publish_mode: str = "",
     publish_platforms: list[str] | None = None,
@@ -137,6 +138,9 @@ def build_goal_payload_from_character_config(
     generation = dict(config.get("generation", {}) or {})
     additional_params = dict(config.get("additional_params", {}) or {})
     strategies = dict(additional_params.get("strategies", {}) or {})
+    requested_duration_seconds = duration_seconds
+    if requested_duration_seconds is not None and int(requested_duration_seconds) <= 0:
+        raise ValueError("duration_seconds must be a positive integer")
     social_media = _merge_social_media_config(
         dict(load_global_social_config(repo_root).get("social_media", {}) or {}),
         dict(config.get("social_media", {}) or {}),
@@ -151,26 +155,30 @@ def build_goal_payload_from_character_config(
         style=style,
         prompt=prompt,
         preferred_generation_type=preferred_generation_type,
+        requested_duration_seconds=requested_duration_seconds,
         rng=rng,
     )
     config_generation_type = str(routing["generation_type"])
     agentic_media_type = CONFIG_MEDIA_TYPE_MAP.get(config_generation_type, "long_video")
+    native_recipe = dict(_native_recipe_for_generation(generation, config_generation_type))
+    configured_reference_values = any(
+        native_recipe.get(key) or generation.get(key)
+        for key in ("reference_manifest", "reference_image_paths", "reference_video_paths")
+    )
+    auto_reference_generation = (
+        config_generation_type == "text2image2native_h3_ref2va"
+        or (config_generation_type == "native_h3_ref2va" and not configured_reference_values)
+    )
     pre_video_review_config = dict(routing.get("pre_video_review", {}) or {})
-    video_generation_types = {
-        "text2video",
-        "text2image2video",
-        "text2longvideo",
-        "native_h3_story",
-        "native_h3_t2v_story",
-        "native_h3_fl2va_story",
-        "native_h3_l2va_story",
-        "text2image2native_h3_ref2va",
-    }
-    # Direct Ref2VA reviews the configured reference manifest. The composed
-    # route is the one that must first create six T2I candidates.
+    # Ref2VA uses configured references when present. With an empty manifest,
+    # it expands into the six-candidate T2I plus Discord reference gate.
     pre_video_review_enabled = bool(
         pre_video_review_config.get("enabled", False)
-        and config_generation_type in video_generation_types
+        and config_generation_type not in {"text2video", "native_h3_t2v_story"}
+        and (
+            config_generation_type != "native_h3_ref2va"
+            or auto_reference_generation
+        )
     )
     pre_video_candidate_count = max(1, int(pre_video_review_config.get("candidate_count") or 6))
     pre_video_selection_limit = max(
@@ -178,7 +186,7 @@ def build_goal_payload_from_character_config(
         int(
             pre_video_review_config.get(
                 "ref2va_selection_limit"
-                if config_generation_type == "text2image2native_h3_ref2va"
+                if config_generation_type in {"native_h3_ref2va", "text2image2native_h3_ref2va"}
                 else "default_selection_limit",
             )
             or (4 if config_generation_type == "text2image2native_h3_ref2va" else 1)
@@ -211,6 +219,7 @@ def build_goal_payload_from_character_config(
         strategies,
         generation=generation,
         routed_segment_count=routing.get("count_plan", {}).get("segment_count"),
+        requested_duration_seconds=requested_duration_seconds,
     )
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
@@ -230,21 +239,17 @@ def build_goal_payload_from_character_config(
             name: config for name, config in platform_configs.items() if name in selected_platforms
         }
     hashtags = [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag]
-    use_tts = bool(
-        (
-            dict(strategies.get("text2longvideo", {}) or {})
-            .get("longvideo_config", {})
-            or {}
-        ).get("use_tts", False)
+    longvideo_config = dict(routing.get("longvideo_config", {}) or {})
+    longvideo_config.update(
+        dict(dict(strategies.get("text2longvideo", {}) or {}).get("longvideo_config", {}) or {})
     )
+    use_tts = bool(longvideo_config.get("use_tts", False))
 
-    native_recipe = dict(_native_recipe_for_generation(generation, config_generation_type))
     native_keyframe_candidate_count = max(1, int(native_recipe.get("keyframe_candidate_count") or 1))
     if (
         pre_video_review_enabled
         and config_generation_type in {
             "native_h3_story",
-            "native_h3_t2v_story",
             "native_h3_fl2va_story",
             "native_h3_l2va_story",
         }
@@ -256,16 +261,29 @@ def build_goal_payload_from_character_config(
         or routing.get("count_plan", {}).get("image_count")
         or 4
     )
-    if config_generation_type == "text2image2native_h3_ref2va" and pre_video_review_enabled:
+    if auto_reference_generation and pre_video_review_enabled:
         native_reference_candidate_count = pre_video_candidate_count
     if no_review and config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
         native_recipe["keyframe_candidate_count"] = 1
         native_keyframe_candidate_count = 1
         native_recipe["require_human_review"] = False
-        if config_generation_type == "text2image2native_h3_ref2va":
+        if auto_reference_generation:
             native_recipe["reference_selection_limit"] = 1
-        if config_generation_type != "native_h3_fl2va_story":
-            native_recipe["use_last_frame"] = False
+    if config_generation_type != "native_h3_fl2va_story":
+        native_recipe["use_last_frame"] = False
+    native_h3_quality = dict(generation.get("native_h3_quality") or {})
+    native_h3_creative_brief = str(
+        native_recipe.get("creative_brief")
+        or native_h3_quality.get("creative_brief")
+        or generation.get("native_h3_creative_brief")
+        or ""
+    ).strip()
+    native_h3_semantic_qa_blocking = bool(
+        native_recipe.get(
+            "semantic_qa_blocking",
+            native_h3_quality.get("semantic_qa_blocking", False),
+        )
+    )
     constraints = {
         "character": character_name,
         "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
@@ -289,6 +307,7 @@ def build_goal_payload_from_character_config(
         "native_h3_reference_candidate_count": int(
             native_reference_candidate_count
         ),
+        "auto_reference_generation": auto_reference_generation,
         "native_h3_model_profile": str(
             native_recipe.get("model_profile")
             or generation.get("model_profile")
@@ -342,12 +361,19 @@ def build_goal_payload_from_character_config(
             else False
         ),
         "native_h3_semantic_qa_required": bool(native_recipe.get("semantic_qa_required", False)),
+        "native_h3_semantic_qa_blocking": native_h3_semantic_qa_blocking,
+        "native_h3_creative_brief": native_h3_creative_brief,
         "native_h3_use_last_frame": bool(native_recipe.get("use_last_frame", False)),
         "output_dir": str(resolved_output_dir),
         "use_tts": use_tts if agentic_media_type == "long_video" else False,
         "source_temperature": temperature,
         "source_config_path": str(path),
         "source_generation_type": config_generation_type,
+        "duration_override_seconds": (
+            max(1, int(requested_duration_seconds)) if requested_duration_seconds is not None else None
+        ),
+        "duration_profile": _duration_profile(requested_duration_seconds),
+        "video_frame_rate": int(dict(generation.get("video_defaults", {}) or {}).get("frame_rate", 24)),
         "workflow_name": routing.get("workflow_name", ""),
         "image_workflow_name": routing.get("workflow_plan", {}).get("image_workflow_name", ""),
         "video_workflow_name": routing.get("workflow_plan", {}).get("video_workflow_name", ""),
@@ -361,6 +387,7 @@ def build_goal_payload_from_character_config(
         "sticker_expression_count": routing.get("count_plan", {}).get("sticker_expression_count"),
         "images_per_prompt": routing.get("count_plan", {}).get("images_per_prompt"),
         "routing_reason": routing.get("reason", ""),
+        "routing_selection_source": routing.get("selection_source", ""),
         "routing_runtime_context": dict(routing.get("routing_runtime_context", {}) or {}),
         "routing_prompt_mode": routing.get("prompt_mode", ""),
         "workflow_stage_candidates": routing.get("workflow_stage_candidates", {}),
@@ -380,7 +407,7 @@ def build_goal_payload_from_character_config(
             and
             os.getenv("discord_review_bot_token")
             and os.getenv("discord_review_channel_id")
-            and agentic_media_type in {"text2video", "text2img2video", "long_video", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}
+            and agentic_media_type in {"text2img2video", "long_video", "native_h3_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}
         ),
     }
     constraints.update(
@@ -418,6 +445,34 @@ def build_goal_payload_from_character_config(
             ),
         }
     )
+    if agentic_media_type == "long_video":
+        # Keep long-video policy in the shared strategy config.  The planner
+        # consumes provider-neutral names; legacy H3 aliases are normalized at
+        # that boundary without creating an H3-only planner path.
+        longvideo_config_keys = {
+            "mix_weights": "longvideo_mix_weights",
+            "mix_seed": "longvideo_mix_seed",
+            "review_policy": "longvideo_review_policy",
+            "workflow_names": "longvideo_workflow_names",
+            "frame_candidate_count": "longvideo_frame_candidate_count",
+            "reference_candidate_count": "longvideo_reference_candidate_count",
+            "reference_selection_limit": "longvideo_reference_selection_limit",
+            "width": "longvideo_width",
+            "height": "longvideo_height",
+            "length": "longvideo_length",
+            "steps": "longvideo_steps",
+            "model_profile": "longvideo_model_profile",
+        }
+        for source_key, target_key in longvideo_config_keys.items():
+            value = longvideo_config.get(source_key)
+            if value not in (None, "", []):
+                constraints[target_key] = (
+                    dict(value)
+                    if isinstance(value, dict)
+                    else list(value)
+                    if isinstance(value, list)
+                    else value
+                )
     return {
         "prompt": resolved_prompt,
         "media_type": agentic_media_type,
@@ -458,6 +513,7 @@ def run_character_workflow(
     prompt: str = "",
     temperature: float = 1.0,
     preferred_generation_type: str | None = None,
+    duration_seconds: int | None = None,
     dry_run_publish: bool = False,
     publish_mode: str = "",
     publish_platforms: list[str] | None = None,
@@ -486,6 +542,7 @@ def run_character_workflow(
         prompt=prompt,
         temperature=temperature,
         preferred_generation_type=preferred_generation_type,
+        duration_seconds=duration_seconds,
         dry_run_publish=dry_run_publish,
         publish_mode=publish_mode,
         publish_platforms=publish_platforms,
@@ -876,6 +933,29 @@ def _weighted_choice(weights: dict[str, Any], rng: random.Random | None = None) 
     return filtered[-1][0]
 
 
+def _weighted_candidate_choice(
+    weights: dict[str, Any],
+    candidates: list[str],
+    *,
+    aliases: dict[str, Any] | None = None,
+    rng: random.Random | None = None,
+) -> str:
+    """Pick a configured strategy without selecting an unavailable route."""
+    allowed = {str(candidate).strip() for candidate in candidates if str(candidate).strip()}
+    normalized_weights: dict[str, float] = {}
+    for name, raw_weight in weights.items():
+        normalized = _normalize_generation_type(str(name), aliases)
+        try:
+            weight = float(raw_weight)
+        except (TypeError, ValueError):
+            continue
+        if normalized and normalized in allowed and weight > 0:
+            normalized_weights[normalized] = weight
+    if not normalized_weights:
+        normalized_weights = {candidate: 1.0 for candidate in candidates if str(candidate).strip()}
+    return _weighted_choice(normalized_weights, rng=rng)
+
+
 def _route_generation_from_character_config(
     repo_root: Path,
     config: dict[str, Any],
@@ -884,9 +964,9 @@ def _route_generation_from_character_config(
     style: str,
     prompt: str,
     preferred_generation_type: str | None,
+    requested_duration_seconds: int | None,
     rng: random.Random | None,
 ) -> dict[str, Any]:
-    del rng
     generation = dict(config.get("generation", {}) or {})
     additional_params = dict(config.get("additional_params", {}) or {})
     strategies = dict(additional_params.get("strategies", {}) or {})
@@ -917,8 +997,14 @@ def _route_generation_from_character_config(
         generation_type_candidates,
         workflow_stage_candidates=workflow_stage_candidates,
     )
-    if preferred_generation_type:
-        selected_generation_type = str(preferred_generation_type).strip()
+
+    def build_fixed_route(
+        selected_generation_type: str,
+        reason: str,
+        *,
+        selection_source: str,
+        prompt_mode: str,
+    ) -> dict[str, Any]:
         workflow_plan = {
             stage_key: (workflow_stage_candidates.get(selected_generation_type, {}).get(stage_key, [""])[0] or "")
             for stage_key in (
@@ -938,15 +1024,53 @@ def _route_generation_from_character_config(
             "workflow_name": _primary_workflow_name(selected_generation_type, workflow_plan),
             "workflow_plan": workflow_plan,
             "count_plan": count_plan,
-            "reason": "preferred_generation_type override",
-            "prompt_mode": "override",
+            "reason": reason,
+            "prompt_mode": prompt_mode,
+            "selection_source": selection_source,
             "llm_backend": {},
             "workflow_stage_candidates": workflow_stage_candidates,
             "generation_type_candidates": generation_type_candidates,
             "count_policies": count_policies,
             "routing_runtime_context": routing_runtime_context,
             "pre_video_review": dict(merged_routing.get("pre_video_review", {}) or {}),
+            "longvideo_config": dict(merged_routing.get("longvideo_config", {}) or {}),
         }
+
+    if preferred_generation_type:
+        selected_generation_type = str(preferred_generation_type).strip()
+        return build_fixed_route(
+            selected_generation_type,
+            "preferred_generation_type override",
+            selection_source="explicit_override",
+            prompt_mode="override",
+        )
+
+    duration_strategy = _duration_strategy_override(
+        requested_duration_seconds,
+        generation_type_candidates,
+    )
+    if duration_strategy:
+        return build_fixed_route(
+            duration_strategy,
+            f"duration policy selected {duration_strategy} for {int(requested_duration_seconds)} seconds",
+            selection_source="duration_policy",
+            prompt_mode="duration_policy",
+        )
+
+    if rng is not None:
+        selected_generation_type = _weighted_candidate_choice(
+            dict(generation.get("generation_type_weights", {}) or {}),
+            generation_type_candidates,
+            aliases=dict(routing_config.get("strategy_aliases", {}) or {}),
+            rng=rng,
+        )
+        return build_fixed_route(
+            selected_generation_type,
+            f"weighted random selected {selected_generation_type} from character generation_type_weights",
+            selection_source="weighted_random",
+            prompt_mode="weighted_random",
+        )
+
     route_prompt = str(prompt).strip() or character_name
     engine = LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
     raw_routing_hints = merged_routing.get("routing_hints", {})
@@ -972,12 +1096,14 @@ def _route_generation_from_character_config(
         "count_plan": count_plan,
         "reason": str(result.get("reason") or "").strip(),
         "prompt_mode": str(result["prompt_mode"]),
+        "selection_source": "llm",
         "llm_backend": result.get("llm_backend") or engine.backend_info(),
         "workflow_stage_candidates": workflow_stage_candidates,
         "generation_type_candidates": generation_type_candidates,
         "count_policies": count_policies,
         "routing_runtime_context": routing_runtime_context,
         "pre_video_review": dict(merged_routing.get("pre_video_review", {}) or {}),
+        "longvideo_config": dict(merged_routing.get("longvideo_config", {}) or {}),
     }
 
 
@@ -1037,8 +1163,10 @@ def _build_h3_reference_runtime_context(
         "reference_manifest_available": False,
         "reference_image_count": 0,
         "reference_video_count": 0,
-        "automatic_ref2va_eligible": False,
-        "reference_manifest_error_code": "missing" if not has_configured_values else "unverified",
+        # An empty manifest is not a dead end: the automatic Ref2VA route can
+        # create six T2I candidates and ask Discord to select references.
+        "automatic_ref2va_eligible": not has_configured_values,
+        "reference_manifest_error_code": "auto_generation_available" if not has_configured_values else "unverified",
     }
     if not has_configured_values:
         return base_context
@@ -1542,17 +1670,52 @@ def _resolve_duration_seconds(
     strategies: dict[str, Any],
     generation: dict[str, Any] | None = None,
     routed_segment_count: Any | None = None,
+    requested_duration_seconds: int | None = None,
 ) -> int:
+    requested = max(1, int(requested_duration_seconds)) if requested_duration_seconds is not None else None
     if config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
         native_recipe = _native_recipe_for_generation(dict(generation or {}), config_generation_type)
-        return max(1, int(native_recipe.get("duration_seconds", 15)))
+        native_duration = max(1, int(native_recipe.get("duration_seconds", 15)))
+        if requested is not None and requested != native_duration:
+            raise ValueError(
+                f"{config_generation_type} supports duration_seconds={native_duration}; "
+                "use text2image2video for a 5-second clip."
+            )
+        return native_duration
     if config_generation_type != "text2longvideo":
-        return 30
+        return requested or 30
     longvideo = dict(strategies.get("text2longvideo", {}) or {})
     longvideo_config = dict(longvideo.get("longvideo_config", {}) or {})
     segment_count = int(routed_segment_count or longvideo_config.get("segment_count", 3))
     segment_duration = int(longvideo_config.get("segment_duration", 5))
     return max(10, segment_count * segment_duration)
+
+
+def _duration_strategy_override(
+    requested_duration_seconds: int | None,
+    generation_type_candidates: list[str],
+) -> str:
+    """Keep short clips on a single-action route and 15s clips on native H3."""
+    if requested_duration_seconds is None:
+        return ""
+    duration = max(1, int(requested_duration_seconds))
+    candidates = set(generation_type_candidates)
+    if duration <= 6 and "text2image2video" in candidates:
+        return "text2image2video"
+    if duration == 15 and "native_h3_story" in candidates:
+        return "native_h3_story"
+    return ""
+
+
+def _duration_profile(duration_seconds: int | None) -> str:
+    if duration_seconds is None:
+        return "config_default"
+    duration = max(1, int(duration_seconds))
+    if duration <= 6:
+        return "single_action"
+    if duration <= 15:
+        return "compact_story"
+    return "extended_story"
 
 
 def _build_routing_summary(
@@ -1593,6 +1756,7 @@ def _build_routing_summary(
         "count_plan": count_plan,
         "reason": str(routing.get("reason", "")),
         "prompt_mode": str(routing.get("prompt_mode", "")),
+        "selection_source": str(routing.get("selection_source", "")),
         "routing_runtime_context": dict(routing.get("routing_runtime_context", {}) or {}),
         "llm_backend": backend_summary,
         "duration_seconds": int(duration_seconds),

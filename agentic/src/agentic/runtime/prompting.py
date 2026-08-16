@@ -286,6 +286,16 @@ def _style_directive(style: str) -> str:
 
 def _action_directive(media_type: str, duration_seconds: int) -> str:
     if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "animated_sticker", "image_to_video"}:
+        if int(duration_seconds or 0) <= 6:
+            return (
+                "one clear physical action only: show a visible start state, one decisive continuous motion, "
+                "and a completed end state within the clip; no montage, no multi-plot beats, no static posing"
+            )
+        if int(duration_seconds or 0) <= 15:
+            return (
+                "one compact causal mini-story in one to three strong action beats: each beat changes the visible "
+                "state, and the final beat delivers one memorable physical payoff"
+            )
         return f"meaningful action sequence that can sustain {duration_seconds} seconds"
     return "clear action and visual intent"
 

@@ -4,6 +4,8 @@ services:
     volumes:
       # 開發模式：掛載整個專案目錄
       - .:/app
+      - ./output:/app/output
+      - D:/ComfyUI_windows_portable:/comfyui:ro
     env_file:
       - media_overload.env
     restart: always
@@ -14,3 +16,8 @@ services:
         max-file: "3"
     environment:
       - TZ=Asia/Taipei
+      # The MySQL container publishes its host port (8787 -> 3306); localhost
+      # inside this container would point back to media-scheduler itself.
+      - mysql_host=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

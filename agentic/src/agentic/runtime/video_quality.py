@@ -17,6 +17,12 @@ VIDEO_SEMANTIC_QA_SCHEMA: dict[str, Any] = {
                 "primary_action_visible": {"type": "boolean"},
                 "news_anchor_visible": {"type": "boolean"},
                 "progression_visible": {"type": "boolean"},
+                "cute_hit": {"type": "boolean"},
+                "expression_visible": {"type": "boolean"},
+                "single_gag": {"type": "boolean"},
+                "first_second_action": {"type": "boolean"},
+                "action_completion_visible": {"type": "boolean"},
+                "payoff_visible": {"type": "boolean"},
                 "unwanted_extra_characters": {"type": "boolean"},
             },
             "required": [
@@ -24,6 +30,12 @@ VIDEO_SEMANTIC_QA_SCHEMA: dict[str, Any] = {
                 "primary_action_visible",
                 "news_anchor_visible",
                 "progression_visible",
+                "cute_hit",
+                "expression_visible",
+                "single_gag",
+                "first_second_action",
+                "action_completion_visible",
+                "payoff_visible",
                 "unwanted_extra_characters",
             ],
             "additionalProperties": False,
@@ -44,6 +56,7 @@ def build_video_semantic_qa_prompt(
     native_shots: list[dict[str, Any]],
     news_context: dict[str, Any],
     rendered_prompt: str,
+    duration_seconds: int | float | None = None,
 ) -> str:
     return "\n".join(
         [
@@ -55,6 +68,8 @@ def build_video_semantic_qa_prompt(
             "The attached image is a contact sheet sampled from the final video in time order.",
             "Judge only what is visibly supported by the sampled frames; do not infer missing events from the prompt.",
             "Pass only when one protagonist is clear, the primary action is visible, the concrete news-derived visual anchor is present, and the frames show meaningful progression. 'news-derived visual anchor' means the translated object/action from story.news_trace (for example a glowing orb or shadowy tendrils), not a literal news logo, headline, anchorperson, or readable text.",
+            "Cute-hit contract: cute_hit is true only when the sampled frames show an immediate, memorable cute or comedic visual beat with a clear emotional read; a generic standing pose, pretty background, or lore reveal is not a cute hit. expression_visible is true only when the protagonist's face or body reaction is readable at a glance. single_gag is true only when one dominant prop/action/reversal carries the clip; multiple plot devices, combat lore, duplicate characters, or abstract exposition fail it. first_second_action is true only when the visible action begins within the first second, not after an atmospheric hold.",
+            f"Duration contract: {int(duration_seconds or 0)} seconds. For clips of 6 seconds or less, action_completion_visible is true only when one physical action clearly starts, changes, and finishes in the sampled frames; a zoom, pan, reaction, or repeated holding pose is not completion. For a 15-second clip, payoff_visible is true only when the final sampled frames show the same objective resolved with concrete physical evidence; a static hold or unexplained camera change is not a payoff.",
             "Set unwanted_extra_characters=true only when extra human/child/duplicate characters are clearly visible and not required by the rendered story; set it to false when no such extra character is visible.",
             "The news title must not be treated as visual evidence. If the video is visually unrelated to the story anchor, fail it.",
             "Ignore the grid used to package these sampled frames as a QA contact sheet. For the rendered content itself, a multi-panel, collage, or split-screen layout is a hard visual issue outside the ref2va reference-video route; do not downgrade it to a subjective style advisory.",
@@ -80,6 +95,12 @@ def normalize_video_semantic_qa(
             "primary_action_visible",
             "news_anchor_visible",
             "progression_visible",
+            "cute_hit",
+            "expression_visible",
+            "single_gag",
+            "first_second_action",
+            "action_completion_visible",
+            "payoff_visible",
             "unwanted_extra_characters",
         )
     }
@@ -111,7 +132,18 @@ def normalize_video_semantic_qa(
         model_status = "pass"
     required_checks_passed = all(
         checks[key]
-        for key in ("protagonist_clear", "primary_action_visible", "news_anchor_visible", "progression_visible")
+        for key in (
+            "protagonist_clear",
+            "primary_action_visible",
+            "news_anchor_visible",
+            "progression_visible",
+            "cute_hit",
+            "expression_visible",
+            "single_gag",
+            "first_second_action",
+            "action_completion_visible",
+            "payoff_visible",
+        )
     )
     issue_text = " ".join(str(item).strip().lower() for item in (data.get("issues") or []))
     multipanel_issue = any(

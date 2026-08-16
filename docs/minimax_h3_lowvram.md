@@ -8,7 +8,7 @@
 | --- | --- | ---: | --- |
 | `balanced-lowvram` | 預設；Q4 diffusion + Q4_K_M text encoder | 約 29.59 GiB | `minimax_h3_lowvram_i2v` |
 | `ultra-lowvram` | balanced 初始化或反覆 OOM 時；只把 text encoder 降到 Q2_K | 約 23.92 GiB | `minimax_h3_lowvram_i2v` + `model_profile: q2` |
-| `native-quality` | 官方 INT8 ConvRot + NVFP4 對照組 | 約 39.55 GiB | `minimax_h3_native_i2v` |
+| `native-quality` | 官方 INT8 ConvRot + NVFP4 對照組 | 約 39.55 GiB | `minimax_h3_native_t2v` |
 
 所有 profile 都固定從 608×352、124 frames（24 fps，約 5 秒）開始。這個尺寸是低配 draft 的起點；先完成構圖、角色辨識與動作，再提高解析度或關閉 Spectrum 做 final。
 
@@ -99,7 +99,7 @@ D:\ComfyUI_windows_portable\ComfyUI\user\default\workflows\
 
 這兩張畫布 workflow 是以 repo 現有結構擴增而成，不會取代原本給自動化程式使用的 API graph。
 
-Spectrum 是近似加速器，不是 lossless mode。預設只作 draft；需要品質對照時，改用 `minimax_h3_native_i2v` 或把 Spectrum node 的 `enabled` 設為 `false`，並比較同 seed 的結果。不要同一 model branch 同時疊加 EasyCache 與 Spectrum。
+Spectrum 是近似加速器，不是 lossless mode。預設只作 draft；需要品質對照時，改用 `minimax_h3_native_t2v` 或把 Spectrum node 的 `enabled` 設為 `false`，並比較同 seed 的結果。不要同一 model branch 同時疊加 EasyCache 與 Spectrum。
 
 ## 研究依據與限制
 

@@ -276,6 +276,11 @@ class AgentMediaSkills:
                     "image_path": prior_frame_path,
                     "prompt": self._resolve_prompt(context),
                     "negative_prompt": self._resolve_negative_prompt(context),
+                    # Continuity refinement is also the source of auto-generated
+                    # Ref2VA candidates. Preserve the requested bundle size
+                    # instead of collapsing every prior-tail refinement to one
+                    # image before reference validation.
+                    "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
                 },
             )
             log = "Generated a continuity keyframe from a prior frame."
@@ -301,6 +306,7 @@ class AgentMediaSkills:
             result: dict[str, object] = {}
             rejected_reasons: list[str] = []
             final_reports: list[tuple[str, object | None]] = []
+            accepted_paths: list[str] = []
             for attempt in range(attempts):
                 result = self.tools.call(
                     "comfy.workflow.text_to_image",
@@ -327,11 +333,31 @@ class AgentMediaSkills:
                     for path in candidate_paths
                 ]
                 final_reports = reports
+                accepted_reports = [
+                    (path, report)
+                    for path, report in reports
+                    if report is not None and report.passed
+                ]
                 failed_reports = [
                     (path, report)
                     for path, report in reports
                     if not report or not report.passed
                 ]
+                if accepted_reports:
+                    accepted_paths = [path for path, _report in accepted_reports]
+                    rejected_paths = [path for path, _report in failed_reports]
+                    result = dict(result)
+                    result["generated_files"] = list(candidate_paths)
+                    result["saved_files"] = list(accepted_paths)
+                    result["rejected_files"] = rejected_paths
+                    result["rejected_asset_details"] = [
+                        {
+                            "path": path,
+                            "reasons": list(getattr(report, "reasons", ())) if report else ["keyframe output is missing"],
+                        }
+                        for path, report in failed_reports
+                    ]
+                    break
                 if candidate_paths and not failed_reports:
                     break
                 if failed_reports:
@@ -342,21 +368,14 @@ class AgentMediaSkills:
                 else:
                     rejected_reasons.append("keyframe output is missing")
             if character == "kirby":
-                candidate_paths = self._output_paths(result)
-                if not final_reports and candidate_paths:
-                    final_reports = [
-                        (path, inspect_kirby_input(path))
-                        for path in candidate_paths
-                    ]
-                failed_reports = [
-                    (path, report)
-                    for path, report in final_reports
-                    if not report or not report.passed
-                ]
-                if not candidate_paths or failed_reports:
+                if not accepted_paths:
                     details = " | ".join(rejected_reasons) or "unknown Kirby keyframe validation failure"
                     raise ValueError(f"Kirby keyframe generation failed after {attempts} attempts: {details}")
-            log = "Generated an opening keyframe from text."
+            log = (
+                f"Generated {len(accepted_paths)} validated Kirby keyframe candidate(s) from text."
+                if character == "kirby"
+                else "Generated an opening keyframe from text."
+            )
         return SkillResult(
             status="success",
             outputs=result,
@@ -527,6 +546,8 @@ class AgentMediaSkills:
                     "model_profile": str(constraints.get("longvideo_h3_model_profile", "q2")),
                 }
             )
+        elif workflow_name.startswith("minimax_h3_") and context.node.inputs.get("length") is not None:
+            payload["length"] = int(context.node.inputs["length"])
         result = self.tools.call(
             "comfy.workflow.image_to_video",
             payload,

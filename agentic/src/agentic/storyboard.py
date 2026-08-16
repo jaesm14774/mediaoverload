@@ -170,6 +170,54 @@ def evaluate_native_h3_story_quality(
     if not checks["objective_payoff_link"]:
         errors.append("the payoff must resolve the original objective instead of starting a new quest")
 
+    gag_card = story.get("gag_card") if isinstance(story, dict) else None
+    if gag_card is not None:
+        required_gag_fields = (
+            "hook_frame",
+            "character_desire",
+            "prop_rule",
+            "setback",
+            "expressive_reaction",
+            "payoff_reversal",
+            "loop_reason",
+        )
+        checks["gag_card_complete"] = isinstance(gag_card, dict) and all(
+            str(gag_card.get(key) or "").strip() for key in required_gag_fields
+        )
+        if not checks["gag_card_complete"]:
+            errors.append(
+                "gag_card must define one hook, one desire, one prop rule, one setback, one expressive reaction, one payoff reversal, and one replay reason"
+            )
+        else:
+            gag_text = " ".join(str(gag_card.get(key) or "") for key in required_gag_fields)
+            checks["gag_card_has_physical_prop"] = bool(_NATIVE_MOTION_PATTERN.search(gag_text))
+            if not checks["gag_card_has_physical_prop"]:
+                errors.append("gag_card must describe a visible physical prop or action, not lore or exposition")
+            hook_terms = _native_story_terms(gag_card.get("hook_frame"))
+            opening_terms = _native_story_terms(
+                " ".join(
+                    (
+                        str(story.get("opening_keyframe_prompt") or ""),
+                        actions[0] if actions else "",
+                    )
+                )
+            )
+            checks["gag_card_hook_alignment"] = bool(hook_terms & opening_terms)
+            if not checks["gag_card_hook_alignment"]:
+                errors.append("gag_card.hook_frame must match the visible opening keyframe and first shot action")
+            payoff_terms = _native_story_terms(gag_card.get("payoff_reversal"))
+            final_terms = _native_story_terms(
+                " ".join(
+                    (
+                        actions[-1] if actions else "",
+                        states[-1] if states else "",
+                    )
+                )
+            )
+            checks["gag_card_payoff_alignment"] = bool(payoff_terms & final_terms)
+            if not checks["gag_card_payoff_alignment"]:
+                errors.append("gag_card.payoff_reversal must be visible in the final shot action or state change")
+
     total = len(checks)
     score = round(sum(1 for passed in checks.values() if passed) / total * 100) if total else 0
     return {"passed": not errors, "score": score, "checks": checks, "errors": errors}
@@ -553,6 +601,7 @@ def merge_native_h3_storyboard(
     spine = generated_story.get("story_spine")
     world = generated_story.get("world")
     news_trace = generated_story.get("news_trace")
+    gag_card = generated_story.get("gag_card")
     shots = generated_story.get("native_shots")
     expected_times = native_h3_shot_times(base_storyboard)
     if (
@@ -570,6 +619,8 @@ def merge_native_h3_storyboard(
     missing_spine = [key for key in required_spine if not str(spine.get(key) or "").strip()]
     if missing_spine:
         raise StoryboardError("Generated native H3 story_spine missing values: " + ", ".join(missing_spine))
+    if gag_card is not None and not isinstance(gag_card, dict):
+        raise StoryboardError("Generated native H3 gag_card must be a mapping when present")
     story_quality = evaluate_native_h3_story_quality(generated_story, expected_times=expected_times)
     if not story_quality["passed"]:
         raise StoryboardError("Generated native H3 story quality is insufficient: " + "; ".join(story_quality["errors"]))
@@ -614,6 +665,7 @@ def merge_native_h3_storyboard(
             "ending_keyframe_prompt": str(generated_story["ending_keyframe_prompt"]).strip(),
             "negative_prompt": str(generated_story["negative_prompt"]).strip(),
             "news_trace": deepcopy(news_trace),
+            **({"gag_card": deepcopy(gag_card)} if isinstance(gag_card, dict) else {}),
             "story_spine": deepcopy(spine),
             "world": {
                 **base_world,
@@ -883,6 +935,18 @@ def format_native_h3_prompt(
         continuity_rules=continuity,
     )
     prompt += "\nAudience story contract: the first beat creates a concrete question, the middle worsens the obstacle or reverses the plan, and the final beat answers the original question with visible payoff evidence."
+    gag_card = storyboard.get("gag_card")
+    if isinstance(gag_card, dict):
+        prompt += (
+            "\nSingle visual gag contract: "
+            f"Hook already happening: {str(gag_card.get('hook_frame') or '').strip()}. "
+            f"Desire: {str(gag_card.get('character_desire') or '').strip()}. "
+            f"Prop rule: {str(gag_card.get('prop_rule') or '').strip()}. "
+            f"Setback: {str(gag_card.get('setback') or '').strip()}. "
+            f"Readable reaction: {str(gag_card.get('expressive_reaction') or '').strip()}. "
+            f"Final reversal: {str(gag_card.get('payoff_reversal') or '').strip()}. "
+            f"Replay reason: {str(gag_card.get('loop_reason') or '').strip()}."
+        )
     news_trace = storyboard.get("news_trace")
     if isinstance(news_trace, dict):
         visual_translation = str(news_trace.get("visual_translation") or "").strip()

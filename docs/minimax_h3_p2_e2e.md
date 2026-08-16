@@ -2,6 +2,11 @@
 
 P2 now exposes five explicit H3 modes through one conditioning contract:
 
+The lengths in this table are defaults for the standalone `run_h3_modes_e2e.py`
+smoke runner. Kirby production character routes use the 15-second profile
+(362 frames at 24 fps) for all five modes, including Ref2VA; the standalone
+Ref2VA smoke profile remains a shorter 124-frame asset to control test cost.
+
 | Mode | Conditioning | Canonical workflow | Default E2E length |
 | --- | --- | --- | --- |
 | T2VA | prompt only | `minimax_h3_lowvram_t2v` | 362 frames / 15 s |

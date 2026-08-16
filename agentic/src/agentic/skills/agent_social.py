@@ -209,6 +209,7 @@ class AgentSocialSkills:
         review_phase = str(context.node.inputs.get("review_phase") or "").strip().lower()
         first_frame_review = review_scope == "first_frame" or review_phase == "opening_frame"
         last_frame_review = review_scope == "last_frame"
+        anchor_set_review = review_scope in {"anchor_set", "anchors"} or review_phase == "anchor_set"
         reference_review = review_scope == "reference" or review_phase == "reference_selection"
         final_video_review = review_scope == "final_video"
         final_media_review = review_scope == "final_media"
@@ -258,16 +259,24 @@ class AgentSocialSkills:
                 "Final media review: inspect every attached image or video, choose the media to publish, and verify the "
                 "prepared caption and hashtags. Accept to approve, Edit to update the caption, or Reject to stop publishing."
             )
-        if first_frame_review or last_frame_review:
+        if first_frame_review or last_frame_review or anchor_set_review:
             bundle = {
                 "selected_assets": ranked[:limit],
                 "ranked_candidates": heuristic_ranked,
                 "selection_rationale": (
-                    "Six opening-frame candidates are waiting for mandatory human selection."
+                    f"{len(ranked)} opening-frame candidates are waiting for mandatory human selection."
                     if first_frame_review
                     else "The generated ending frame is waiting for mandatory human approval."
+                    if last_frame_review
+                    else "The first/last anchor set is waiting for explicit paired selection."
                 ),
-                "prompt_mode": "human_first_frame" if first_frame_review else "human_last_frame",
+                "prompt_mode": (
+                    "human_first_frame"
+                    if first_frame_review
+                    else "human_last_frame"
+                    if last_frame_review
+                    else "human_anchor_set"
+                ),
             }
         elif final_video_review:
             bundle = {
@@ -297,7 +306,7 @@ class AgentSocialSkills:
         caption_media_paths = review_media_paths if (review_all_candidates or final_video_review or final_media_review) else (selected or ranked[:limit])
         hashtags = context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or [])]
-        if first_frame_review or last_frame_review or reference_review:
+        if first_frame_review or last_frame_review or anchor_set_review or reference_review:
             caption_bundle = {"caption": context.plan.goal.prompt, "hashtags": ""}
         else:
             caption_bundle = self.prompt_engine.prepare_publish_caption(
@@ -317,8 +326,13 @@ class AgentSocialSkills:
             review_text = self._build_opening_frame_review_text(
                 story_summary=self._story_review_summary(context),
                 candidate_count=len(review_media_paths),
+                strategy=review_metadata["strategy"],
             )
         elif last_frame_review:
+            review_text = self._build_ending_frame_review_text(
+                story_summary=self._story_review_summary(context),
+            )
+        elif anchor_set_review:
             review_text = self._build_ending_frame_review_text(
                 story_summary=self._story_review_summary(context),
             )
@@ -358,11 +372,11 @@ class AgentSocialSkills:
                 text=review_text,
                 media_paths=review_media_paths,
                 timeout_seconds=int(context.plan.goal.constraints.get("discord_review_timeout_seconds") or 3600),
-                allow_asset_selection=first_frame_review or reference_review or final_media_review,
-                allow_text_edit=not (first_frame_review or last_frame_review or reference_review),
-                selection_mode="single" if first_frame_review else "multi",
-                selection_required=first_frame_review or reference_review or final_media_review,
-                selection_limit=1 if first_frame_review else (limit if reference_review else None),
+                allow_asset_selection=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
+                allow_text_edit=not (first_frame_review or last_frame_review or anchor_set_review or reference_review),
+                selection_mode="single" if (first_frame_review or last_frame_review) else "multi",
+                selection_required=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
+                selection_limit=(1 if (first_frame_review or last_frame_review) else (limit if (anchor_set_review or reference_review) else None)),
                 review_scope=review_scope,
             )
         if require_human_review and (decision is None or getattr(decision, "review_mode", "") != "discord"):
@@ -445,6 +459,29 @@ class AgentSocialSkills:
                         logs=[f"Blocked workflow because {frame_label}-frame Discord review did not select exactly one candidate."],
                     )
                 selected = decision_selected[:limit]
+            elif anchor_set_review:
+                decision_selected = [path for path in (decision.selected_paths or []) if path in ranked]
+                required_count = int(context.node.inputs.get("anchor_set_size") or 2)
+                if len(decision_selected) != required_count:
+                    return SkillResult(
+                        status="blocked",
+                        outputs={
+                            "media_paths": [],
+                            "selected_assets": [],
+                            "selected_count": 0,
+                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
+                            "rejected_assets": ranked,
+                            "selection_rationale": f"Anchor-set review must select exactly {required_count} paired assets.",
+                            "review_mode": decision.review_mode,
+                            "review_scope": review_scope,
+                            "reviewer": decision.reviewer,
+                            "review_session_id": decision.session_id,
+                            "review_session_path": decision.session_path,
+                            "fallback_reason": f"Select exactly {required_count} paired anchor assets in Discord before pressing Accept.",
+                        },
+                        logs=["Blocked workflow because the anchor-set Discord review did not select the required pair."],
+                    )
+                selected = decision_selected
             elif reference_review:
                 decision_selected = [path for path in (decision.selected_paths or []) if path in ranked]
                 if not decision_selected or len(decision_selected) > limit:
@@ -677,12 +714,16 @@ class AgentSocialSkills:
         return {"strategy": strategy or "unknown", "workflow": workflow or "unknown"}
 
     @staticmethod
-    def _build_opening_frame_review_text(*, story_summary: str, candidate_count: int) -> str:
+    def _build_opening_frame_review_text(
+        *, story_summary: str, candidate_count: int, strategy: str = "unknown"
+    ) -> str:
         story = story_summary or "未提供故事摘要"
         return (
+            f"策略：{strategy or 'unknown'}\n\n"
             f"故事：{story}\n\n"
             f"請選擇最適合的開場首幀：Asset 1-{max(1, candidate_count)}\n"
-            "六張都不合格請按 Reject。"
+            "判斷依據：第一眼要有可愛爆擊或清楚表情；第一秒已開始動作；只有一個 Kirby；一個簡單道具形成單一可讀笑點；畫面沒有文字、水印、複雜入口或多角色對峙。\n"
+            "不要選只是站著看光球或入口、只有漂亮背景、或看不懂任務的畫面。所有候選都不合格請按 Reject。"
         )
 
     @staticmethod

@@ -35,7 +35,6 @@ class AgentAuthoringTools:
             profile_name = profile_name or {
                 "minimax_h3_lowvram_i2v": "balanced-lowvram",
                 "minimax_h3_lowvram_t2v": "balanced-lowvram",
-                "minimax_h3_native_i2v": "native-quality",
                 "minimax_h3_native_t2v": "native-quality",
             }.get(workflow_name, "balanced-lowvram")
             comfy_root = Path(str(payload.get("comfy_root") or self.asset_registry.asset_root))

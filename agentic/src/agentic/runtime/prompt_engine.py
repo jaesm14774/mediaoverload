@@ -205,6 +205,7 @@ class PromptEngine:
         news_context: dict[str, Any],
         rendered_prompt: str,
         news_anchor_terms: list[str] | None = None,
+        duration_seconds: int | float | None = None,
     ) -> dict[str, Any]:
         return self.llm_engine.evaluate_video_contact_sheet(
             contact_sheet_path=contact_sheet_path,
@@ -214,6 +215,7 @@ class PromptEngine:
             news_context=news_context,
             rendered_prompt=rendered_prompt,
             news_anchor_terms=news_anchor_terms,
+            duration_seconds=duration_seconds,
         )
 
     def review_asset_candidates(

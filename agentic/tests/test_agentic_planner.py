@@ -239,7 +239,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("agent.story.segment", skill_names)
         self.assertIn("agent.segment.prepare", skill_names)
         self.assertIn("media.image.generate_keyframe", skill_names)
-        self.assertIn("media.image.animate", skill_names)
+        self.assertIn("longvideo.render_segment_video", skill_names)
         self.assertIn("media.video.extract_last_frame", skill_names)
         self.assertIn("media.audio.narrate", skill_names)
         self.assertIn("media.video.concat", skill_names)
@@ -380,6 +380,32 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertIn("persist-text2img2video-summary", [node.node_id for node in plan.nodes])
 
+    def test_five_second_text2img2video_uses_exact_frame_override(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="Kirby swats one glowing orb into a target",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={"duration_override_seconds": 5, "video_frame_rate": 24},
+        )
+        plan = self.planner.build_plan(goal)
+        animate = next(node for node in plan.nodes if node.node_id == "animate-video")
+        self.assertEqual(animate.inputs["length"], 120)
+
+    def test_native_h3_story_prompt_declares_first_frame_i2v(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="Kirby protects one glowing orb from a sudden gust",
+            media_type="native_h3_story",
+            duration_seconds=15,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={"native_h3_storyboard_path": "configs/storyboards/kirby_native_15s.yaml"},
+        )
+        plan = self.planner.build_plan(goal)
+        prompt_node = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
+        self.assertEqual(prompt_node.inputs["render_mode"], "image_to_video")
+
     def test_text2img2video_stage_review_gates_video_generation(self) -> None:
         goal = self.planner.create_goal(
             prompt="kirby rainy ramen alley short",
@@ -444,7 +470,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertTrue(stage_review.inputs["review_all_candidates"])
         self.assertIn("stage-review-select", animate_node.depends_on)
 
-    def test_pre_video_gate_generates_six_and_switches_t2v_to_i2v(self) -> None:
+    def test_shared_pre_video_gate_does_not_change_t2v_conditioning(self) -> None:
         goal = self.planner.create_goal(
             prompt="Kirby protects a glowing seed",
             media_type="text2video",
@@ -460,14 +486,12 @@ class AgenticPlannerTests(unittest.TestCase):
         )
         plan = self.planner.build_plan(goal)
         render = next(node for node in plan.nodes if node.node_id == "render-image")
-        review = next(node for node in plan.nodes if node.node_id == "stage-review-select")
         animate = next(node for node in plan.nodes if node.node_id == "animate-video")
 
-        self.assertEqual(render.inputs["image_count"], 6)
-        self.assertEqual(review.inputs["limit"], 1)
-        self.assertTrue(review.inputs["require_human_review"])
-        self.assertEqual(animate.inputs["workflow_name"], "minimax_h3_lowvram_i2v")
-        self.assertIn("stage-review-select", animate.depends_on)
+        self.assertEqual(render.inputs["image_count"], 1)
+        self.assertNotIn("stage-review-select", [node.node_id for node in plan.nodes])
+        self.assertEqual(animate.inputs["workflow_name"], "minimax_h3_lowvram_t2v")
+        self.assertNotIn("stage-review-select", animate.depends_on)
 
     def test_pre_video_gate_only_expands_first_long_video_segment(self) -> None:
         goal = self.planner.create_goal(
@@ -481,19 +505,20 @@ class AgenticPlannerTests(unittest.TestCase):
                 "pre_video_candidate_count": 6,
                 "pre_video_review_require_human": True,
                 "segment_count": 2,
+                "longvideo_mix_weights": {"anchor_first": 1},
             },
         )
         plan = self.planner.build_plan(goal)
         first_frame = next(node for node in plan.nodes if node.node_id == "segment-frame-01")
-        second_frame = next(node for node in plan.nodes if node.node_id == "segment-frame-02")
         review = next(node for node in plan.nodes if node.node_id == "stage-review-01")
         first_video = next(node for node in plan.nodes if node.node_id == "segment-video-01")
+        second_video = next(node for node in plan.nodes if node.node_id == "segment-video-02")
 
         self.assertEqual(first_frame.inputs["image_count"], 6)
-        self.assertEqual(second_frame.inputs["image_count"], 1)
         self.assertEqual(review.inputs["limit"], 1)
         self.assertTrue(review.inputs["require_human_review"])
         self.assertIn("stage-review-01", first_video.depends_on)
+        self.assertEqual(second_video.inputs["conditioning_plan"]["anchors"]["first"], "segment-tail-01")
 
     def test_long_video_stage_review_gates_first_segment_video(self) -> None:
         goal = self.planner.create_goal(
@@ -502,7 +527,10 @@ class AgenticPlannerTests(unittest.TestCase):
             duration_seconds=20,
             style="anime cinematic travel film",
             auto_download_assets=False,
-            constraints={"enable_stage_review": True},
+            constraints={
+                "enable_stage_review": True,
+                "longvideo_mix_weights": {"anchor_first": 1},
+            },
         )
         plan = self.planner.build_plan(goal)
         stage_review = next(node for node in plan.nodes if node.node_id == "stage-review-01")
@@ -563,6 +591,7 @@ class AgenticPlannerTests(unittest.TestCase):
                 "review_selection_limit": 5,
                 "review_notes": "stronger motion and cleaner framing",
                 "video_workflow_name": "minimax_h3_lowvram_i2v",
+                "longvideo_mix_weights": {"anchor_first": 1},
             },
         )
         plan = self.planner.build_plan(goal)
@@ -573,6 +602,31 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(script_plan.inputs["segment_count"], 4)
         self.assertEqual(review_select.inputs["limit"], 5)
         self.assertEqual(segment_video.inputs["workflow_name"], "minimax_h3_lowvram_i2v")
+
+    def test_long_video_every_segment_review_generates_multi_anchor_candidates(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="kirby explores a rainy cyberpunk alley",
+            media_type="long_video",
+            duration_seconds=20,
+            style="anime cinematic travel film",
+            auto_download_assets=False,
+            constraints={
+                "segment_count": 2,
+                "require_human_review": True,
+                "longvideo_review_policy": "every_segment",
+                "longvideo_frame_candidate_count": 4,
+                "longvideo_mix_weights": {"anchor_first": 1},
+            },
+        )
+        plan = self.planner.build_plan(goal)
+
+        second_first = next(node for node in plan.nodes if node.node_id == "segment-frame-02")
+        second_first_review = next(node for node in plan.nodes if node.node_id == "segment-anchor-first-select-02")
+
+        self.assertEqual(second_first.inputs["image_count"], 4)
+        self.assertIn("segment-tail-01", second_first.depends_on)
+        self.assertEqual(second_first_review.inputs["review_scope"], "first_frame")
+        self.assertTrue(second_first_review.inputs["require_human_review"])
 
     def test_text2video_plan_respects_video_count(self) -> None:
         goal = self.planner.create_goal(

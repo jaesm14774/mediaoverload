@@ -60,11 +60,13 @@ def compose_minimax_h3_prompt(
     spine = dict(story_spine or {})
     identity = subject_identity_lock(character)
     mode = clean_prompt_text(render_mode).lower()
-    if prior_frame or mode in {"image_to_video", "i2v"}:
+    if prior_frame or mode in {"image_to_video", "i2v", "first_last_frame_to_video", "fl2va"}:
         input_relation = (
             "Input relation: the first-frame image is authoritative for the opening appearance, composition, and subject identity; "
             "start moving from that exact image and describe temporal evolution rather than redrawing a new still image"
         )
+        if mode in {"first_last_frame_to_video", "fl2va"}:
+            input_relation += "; guide the causal motion toward the supplied last-frame state instead of inventing a disconnected ending"
     else:
         input_relation = (
             "Input relation: direct text-to-video; establish the protagonist's identity in the first moving action, "

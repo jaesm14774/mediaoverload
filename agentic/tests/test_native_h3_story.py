@@ -79,9 +79,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         keyframe_gate = next(node for node in plan.nodes if node.node_id == "native-keyframe-gate")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
+        story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
         self.assertEqual(opening.inputs["image_count"], 6)
         self.assertEqual(opening_review.inputs["review_all_candidates"], True)
         self.assertEqual(opening_review.inputs["review_scope"], "first_frame")
+        self.assertIn("可愛爆擊", opening_review.inputs["review_notes"])
+        self.assertIn("實際附件", opening_review.inputs["review_notes"])
         self.assertEqual(opening_review.depends_on, ["native-opening-keyframe"])
         self.assertEqual(keyframe_gate.inputs["opening_node"], "native-opening-review")
         self.assertTrue(keyframe_gate.inputs["preserve_opening_frame"])
@@ -91,6 +94,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("native-opening-review", keyframe_gate.depends_on)
         self.assertIn("native-keyframe-gate", render.depends_on)
         self.assertFalse(render.inputs["use_last_frame"])
+        self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
         self.assertEqual(qa.inputs["mode"], "technical_and_semantic_qa_before_optional_discord_review")
         self.assertIsNone(qa.tool_name)
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
@@ -197,6 +201,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                     constraints={
                         "character": "Kirby",
                         "prompt_source": "news",
+                        "native_h3_creative_brief": "cute micro-gag with one prop and a visible payoff",
                         "news_context": {"title": "AI companion robot arrives", "keyword": "AI;robot"},
                     },
                 )
@@ -216,7 +221,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         ).prepare_native_h3_story(context)
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(captured["creative_brief"], "")
+        self.assertEqual(captured["creative_brief"], "cute micro-gag with one prop and a visible payoff")
 
     def test_native_h3_workflow_manifest_has_runtime_prompt_placeholder(self) -> None:
         workflow_path = self.repo_root / "configs" / "workflow" / "minimax_h3_lowvram_15s_fl2va_i2v.json"
@@ -279,6 +284,102 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("??", prompt)
         self.assertIn("15-second", prompt)
 
+    def test_native_prompt_carries_the_single_visual_gag_contract(self) -> None:
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard["gag_card"] = {
+            "hook_frame": "Kirby is already being dragged by a runaway cushion",
+            "character_desire": "Kirby wants one soft nap",
+            "prop_rule": "The cushion springs away whenever Kirby lands on it",
+            "setback": "The cushion slings Kirby into a fluffy tumble",
+            "expressive_reaction": "Kirby freezes wide-eyed, then puffs his cheeks",
+            "payoff_reversal": "The cushion snaps back and hugs Kirby instead",
+            "loop_reason": "The final hug looks like the opening bounce in reverse",
+        }
+
+        prompt = format_native_h3_prompt(storyboard, duration_seconds=15)
+
+        self.assertIn("Single visual gag contract", prompt)
+        self.assertIn("Prop rule", prompt)
+        self.assertIn("Final reversal", prompt)
+        self.assertIn("Replay reason", prompt)
+
+    def test_native_gag_card_is_preserved_when_story_is_merged(self) -> None:
+        base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        generated_story = {
+            "name": "Kirby and the Runaway Cushion",
+            "base_prompt": "One Kirby, polished 2D anime, squash-and-stretch comedy motion.",
+            "opening_keyframe_prompt": "Kirby is already dragged sideways by a runaway cushion.",
+            "ending_keyframe_prompt": "The cushion rebounds and hugs Kirby in a soft pile.",
+            "negative_prompt": "humans, duplicate Kirby, readable text, watermark",
+            "news_trace": {
+                "source_title": "cushion delivery delay",
+                "source_concepts": ["cushion"],
+                "visual_translation": "The delay becomes a runaway cushion that refuses to arrive calmly.",
+                "visual_anchors": ["runaway cushion"],
+                "integration": "The cushion's strange movement creates Kirby's one simple physical problem.",
+            },
+            "gag_card": {
+                "hook_frame": "Kirby is already dragged sideways by a runaway cushion.",
+                "character_desire": "Kirby wants to settle onto the cushion for a nap.",
+                "prop_rule": "The cushion springs away whenever Kirby lands on it.",
+                "setback": "The cushion slings Kirby into a fluffy tumble.",
+                "expressive_reaction": "Kirby freezes wide-eyed and puffs his cheeks.",
+                "payoff_reversal": "The cushion snaps back and hugs Kirby instead.",
+                "loop_reason": "The final hug echoes the opening sideways bounce in reverse.",
+            },
+            "story_spine": {
+                "premise": "A runaway cushion keeps escaping Kirby's nap.",
+                "objective": "Kirby must catch the cushion and settle onto it.",
+                "obstacle": "The cushion springs away whenever he lands.",
+                "stakes": "Kirby loses his one chance for a cozy nap.",
+                "emotional_arc": "sleepy confidence becomes surprise and delighted relief",
+                "climax": "Kirby stops chasing and lets the cushion bounce into him.",
+                "resolution": "The cushion hugs Kirby and the nap finally begins.",
+            },
+            "world": {
+                "setting": "a sunny meadow with one oversized pastel cushion",
+                "visual_language": "bright candy colors, soft rounded shapes, playful squash-and-stretch",
+                "continuity_rules": ["Keep the same oversized cushion visible across all beats."],
+            },
+            "native_audio": "soft boings, one surprised squeak, then a warm sleepy chime",
+            "native_shots": [
+                {"time": "0-4s", "title": "Cushion escapes", "action": "The cushion springs away and drags Kirby sideways while he reaches for it.", "camera": "Push in and follow the sideways slide.", "state_change": "Kirby commits to catching the runaway cushion."},
+                {"time": "4-10s", "title": "Cushion wins", "action": "Kirby lands on the cushion, but it rebounds and tumbles him through the grass.", "camera": "Track the bounce into a close reaction shot.", "state_change": "Kirby loses his nap and stops chasing the cushion."},
+                {"time": "10-15s", "title": "Cushion hugs back", "action": "The cushion rebounds into Kirby's arms and wraps him in a soft hug.", "camera": "Pull out as the tumble settles into a cozy close-up.", "state_change": "Kirby gets the nap he wanted and the cushion is safely with him."},
+            ],
+        }
+
+        merged = merge_native_h3_storyboard(base_storyboard, generated_story)
+
+        self.assertEqual(merged["gag_card"]["prop_rule"], generated_story["gag_card"]["prop_rule"])
+        prompt = format_native_h3_prompt(merged, duration_seconds=15)
+        self.assertIn("runaway cushion", prompt)
+        self.assertIn("cushion hugs back", prompt.lower())
+
+    def test_native_gag_card_quality_rejects_missing_content(self) -> None:
+        story = {
+            "story_spine": {
+                "premise": "A cushion escapes Kirby.",
+                "objective": "Kirby must catch the cushion.",
+                "obstacle": "The cushion springs away.",
+                "stakes": "Kirby loses his nap.",
+                "climax": "Kirby lets the cushion bounce into him.",
+                "resolution": "The cushion hugs Kirby.",
+            },
+            "gag_card": {"hook_frame": "Kirby is dragged by a cushion"},
+            "native_shots": [
+                {"action": "The cushion springs away and drags Kirby.", "camera": "Follow the slide.", "state_change": "Kirby chases the cushion."},
+                {"action": "The cushion bounces Kirby into the grass.", "camera": "Push into Kirby's reaction.", "state_change": "Kirby loses his nap."},
+                {"action": "The cushion hugs Kirby.", "camera": "Pull out on the cozy pile.", "state_change": "Kirby gets his nap."},
+            ],
+        }
+
+        quality = evaluate_native_h3_story_quality(story)
+
+        self.assertFalse(quality["passed"])
+        self.assertFalse(quality["checks"]["gag_card_complete"])
+        self.assertTrue(any("gag_card" in error for error in quality["errors"]))
+
     def test_character_route_builds_direct_t2v_story_graph(self) -> None:
         payload = build_goal_payload_from_character_config(
             self.repo_root,
@@ -305,15 +406,15 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(goal.media_type, "native_h3_t2v_story")
         self.assertEqual(goal.duration_seconds, 15)
-        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_i2v")
+        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_t2v")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-        self.assertEqual(render.tool_name, "comfy.workflow.image_to_video")
-        self.assertEqual(plan.metadata["recipe"], "native_h3_story")
+        self.assertEqual(render.tool_name, "comfy.workflow.text_to_video")
+        self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
         self.assertEqual(plan.metadata["native_h3"]["length"], 362)
-        self.assertFalse(plan.metadata["native_h3"]["lowvram_preview"])
+        self.assertTrue(plan.metadata["native_h3"]["lowvram_preview"])
         self.assertEqual(plan.metadata["native_h3"]["steps"], 16)
-        self.assertIn("native-opening-keyframe", [node.node_id for node in plan.nodes])
-        self.assertIn("native-opening-review", [node.node_id for node in plan.nodes])
+        self.assertNotIn("native-opening-keyframe", [node.node_id for node in plan.nodes])
+        self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
 
     def test_native_h3_timing_allows_adjusted_contiguous_20_second_beats(self) -> None:
         shots = [
@@ -762,6 +863,58 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("forms", lowered)
         self.assertIn("consequential setback", lowered)
 
+    def test_native_h3_hook_alignment_repair_targets_hook_and_opening_fields(self) -> None:
+        repair_prompt = LLMPromptEngine._build_native_h3_repair_prompt(
+            "Return the native H3 story.",
+            PromptGenerationError(
+                "Native H3 story quality is insufficient: gag_card.hook_frame must match the visible opening keyframe and first shot action"
+            ),
+            previous_payload={
+                "story": {
+                    "opening_keyframe_prompt": "Kirby clutches a glowing coin as blue wind ribbons whip around him.",
+                    "gag_card": {"hook_frame": "0s"},
+                    "native_shots": [{"action": "Kirby leaps while the wind knocks the coin loose."}],
+                }
+            },
+            patch_mode=True,
+        )
+
+        lowered = repair_prompt.lower()
+        self.assertIn("story_patch.gag_card.hook_frame", lowered)
+        self.assertIn("timestamp-only", lowered)
+        self.assertIn("opening_keyframe_prompt", lowered)
+        self.assertIn("native_shots[0].action", lowered)
+
+    def test_native_h3_normalizes_timestamp_only_hook_from_opening_prompt(self) -> None:
+        payload = {
+            "story": {
+                "opening_keyframe_prompt": "Kirby clutches a glowing coin as blue wind ribbons whip around him.",
+                "gag_card": {"hook_frame": "0s"},
+                "native_shots": [
+                    {"action": "Kirby leaps while the wind knocks the glowing coin loose."}
+                ],
+            }
+        }
+
+        normalized = LLMPromptEngine._normalize_native_h3_story_payload(payload)
+
+        self.assertEqual(
+            normalized["story"]["gag_card"]["hook_frame"],
+            payload["story"]["opening_keyframe_prompt"],
+        )
+
+        mismatched = {
+            "story": {
+                "opening_keyframe_prompt": "Kirby clutches a glowing coin as blue wind ribbons whip around him.",
+                "gag_card": {"hook_frame": "0s"},
+                "native_shots": [{"action": "Kirby watches a red apple roll across a quiet table."}],
+            }
+        }
+
+        still_invalid = LLMPromptEngine._normalize_native_h3_story_payload(mismatched)
+
+        self.assertEqual(still_invalid["story"]["gag_card"]["hook_frame"], "0s")
+
     def test_native_h3_repair_prompt_repeats_nested_story_envelope(self) -> None:
         repair_prompt = LLMPromptEngine._build_native_h3_repair_prompt(
             "Return the native H3 story.",
@@ -844,6 +997,54 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
         self.assertEqual(patched["story"]["native_shots"][0]["time"], "0-15s")
 
+    def test_native_h3_normalizes_provider_gag_card_aliases(self) -> None:
+        payload = {
+            "story": {
+                "gag_card": {
+                    "hook_frame": "Kirby is already dragged by a glowing flower",
+                    "simple_desire": "Kirby wants the flower to bloom",
+                    "prop_rule": "The flower wilts when the connection slips",
+                    "failed_attempt": "The flower wilts and slips away",
+                    "reaction": "Kirby freezes wide-eyed and puffs his cheeks",
+                    "final_visual_reversal": "The flower wraps around Kirby and blooms",
+                    "replayable_reason": "The final hug echoes the opening drag in reverse",
+                },
+                "news_trace": {
+                    "source_concepts": "Plug and Pwn, USB security",
+                    "visual_anchors": "glowing flower; hollow tree",
+                },
+            }
+        }
+
+        normalized = LLMPromptEngine._normalize_native_h3_story_payload(payload)
+        gag_card = normalized["story"]["gag_card"]
+
+        self.assertEqual(gag_card["character_desire"], "Kirby wants the flower to bloom")
+        self.assertEqual(gag_card["setback"], "The flower wilts and slips away")
+        self.assertEqual(gag_card["expressive_reaction"], "Kirby freezes wide-eyed and puffs his cheeks")
+        self.assertEqual(gag_card["payoff_reversal"], "The flower wraps around Kirby and blooms")
+        self.assertEqual(gag_card["loop_reason"], "The final hug echoes the opening drag in reverse")
+        self.assertNotIn("simple_desire", gag_card)
+        self.assertNotIn("failed_attempt", gag_card)
+        self.assertEqual(normalized["story"]["news_trace"]["source_concepts"], ["Plug and Pwn", "USB security"])
+        self.assertEqual(normalized["story"]["news_trace"]["visual_anchors"], ["glowing flower", "hollow tree"])
+
+    def test_native_h3_gag_card_repair_prompt_targets_only_missing_fields(self) -> None:
+        repair_prompt = LLMPromptEngine._build_native_h3_repair_prompt(
+            "Return the native H3 story.",
+            PromptGenerationError(
+                "Native H3 gag_card missing required values: character_desire, setback, expressive_reaction, payoff_reversal, loop_reason"
+            ),
+            previous_payload={"story": {"gag_card": {"hook_frame": "Kirby is dragged by a flower"}}},
+            patch_mode=True,
+        )
+
+        lowered = repair_prompt.lower()
+        self.assertIn("story_patch.gag_card", lowered)
+        self.assertIn("character_desire", repair_prompt)
+        self.assertIn("payoff_reversal", repair_prompt)
+        self.assertIn("do not change any other story field", lowered)
+
     def test_native_h3_patch_normalizes_flat_story_spine_synopsis(self) -> None:
         previous = {"story": {"story_spine": {"objective": "Save the orb."}, "native_shots": []}}
         patched = LLMPromptEngine._apply_native_h3_story_patch(
@@ -855,6 +1056,42 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIsInstance(spine, dict)
         self.assertNotEqual(spine["climax"], spine["resolution"])
         self.assertIn("unstable orb", spine["objective"])
+
+    def test_native_h3_patch_merges_partial_gag_card_without_dropping_existing_fields(self) -> None:
+        previous = {
+            "story": {
+                "gag_card": {
+                    "hook_frame": "Kirby is dragged by a glowing crystal orb",
+                    "character_desire": "Kirby wants to keep the crystal orb",
+                    "prop_rule": "The orb is blown away by a strong gust",
+                    "setback": "The orb slips through Kirby's hands",
+                    "expressive_reaction": "Kirby freezes wide-eyed and puffs his cheeks",
+                }
+            }
+        }
+
+        patched = LLMPromptEngine._apply_native_h3_story_patch(
+            previous,
+            {
+                "story_patch": {
+                    "gag_card": {
+                        "payoff_reversal": "The orb flies back and hugs Kirby",
+                        "loop_reason": "The return flight echoes the opening gust in reverse",
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(
+            patched["story"]["gag_card"]["hook_frame"],
+            previous["story"]["gag_card"]["hook_frame"],
+        )
+        self.assertEqual(patched["story"]["gag_card"]["setback"], "The orb slips through Kirby's hands")
+        self.assertEqual(patched["story"]["gag_card"]["payoff_reversal"], "The orb flies back and hugs Kirby")
+        self.assertEqual(
+            patched["story"]["gag_card"]["loop_reason"],
+            "The return flight echoes the opening gust in reverse",
+        )
 
     def test_native_h3_normalizes_point_timestamps_to_expected_beat_ranges(self) -> None:
         payload = {
@@ -1100,6 +1337,68 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(result.outputs["story_quality"]["score"], 42)
         self.assertFalse(result.outputs["technical_qa"]["bypassed"])
         self.assertTrue(result.outputs["technical_qa"]["checks"]["duration"])
+
+    def test_native_h3_semantic_failure_is_a_hard_gate_when_recipe_requires_it(self) -> None:
+        class FakeTools:
+            def call(self, tool_name: str, payload: dict[str, object]) -> dict[str, object]:
+                return {
+                    "passed": True,
+                    "video_path": str(payload["video_path"]),
+                    "duration": 15.0,
+                    "target_duration": 15.0,
+                    "errors": [],
+                    "warnings": [],
+                    "contact_sheet_path": "contact_sheet.jpg",
+                }
+
+        class FakePromptEngine:
+            def evaluate_video_contact_sheet(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "passed": False,
+                    "status": "fail",
+                    "score": 40,
+                    "checks": {"cute_hit": False, "payoff_visible": False},
+                    "issues": ["generic pose without a visible cute payoff"],
+                }
+
+        video_path = self.repo_root / ".tmp-tests" / "semantic-gate.mp4"
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        video_path.write_bytes(b"test")
+        self.addCleanup(lambda: video_path.unlink(missing_ok=True))
+        state = RunState(
+            goal={},
+            metadata={},
+            node_outputs={
+                "native-story-prompt": {"story_quality": {"passed": True}},
+                "native-h3-render": {"saved_files": [str(video_path)], "run_dir": str(video_path.parent)},
+            },
+        )
+        context = SimpleNamespace(
+            state=state,
+            node=SimpleNamespace(inputs={"semantic_qa_required": True}),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="",
+                    duration_seconds=15,
+                    constraints={
+                        "character": "Kirby",
+                        "native_h3_semantic_qa_blocking": True,
+                        "require_human_review": True,
+                    },
+                )
+            ),
+        )
+
+        result = LongVideoSkills(
+            FakeTools(),
+            self.repo_root / ".tmp-tests" / "semantic-gate",
+            prompt_engine=FakePromptEngine(),
+        ).qa_native_h3(context)
+
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.outputs["passed"])
+        self.assertTrue(result.outputs["semantic_qa"]["blocking"])
+        self.assertEqual(result.outputs["semantic_qa"]["blocking_policy"], "hard_gate")
 
 
 class OpenRouterCatalogTests(unittest.TestCase):

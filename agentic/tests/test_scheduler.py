@@ -31,6 +31,8 @@ class SchedulerTests(unittest.TestCase):
             {
                 "SCHEDULER_CHARACTER": "kirby",
                 "SCHEDULER_PROMPT": "Kirby neon short",
+                "SCHEDULER_NEWS_DRIVEN": "true",
+                "SCHEDULER_NEWS_HISTORY_PATH": "/tmp/kirby-news.json",
                 "SCHEDULER_DRY_RUN_PUBLISH": "true",
                 "SCHEDULER_ENABLE_REVIEW_LOOP": "false",
             },
@@ -50,8 +52,11 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(args[0], REPO_ROOT)
         self.assertEqual(args[1], Path(config.config_path))
         self.assertEqual(kwargs["prompt"], "Kirby neon short")
+        self.assertTrue(kwargs["news_driven"])
+        self.assertEqual(kwargs["news_history_path"], "/tmp/kirby-news.json")
         self.assertTrue(kwargs["dry_run_publish"])
         self.assertFalse(kwargs["enable_review_loop"])
+        self.assertIsNotNone(kwargs["rng"])
 
 
 if __name__ == "__main__":

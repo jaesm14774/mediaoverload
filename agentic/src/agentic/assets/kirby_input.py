@@ -111,20 +111,31 @@ def _detect_duplicate_kirby_silhouettes(image: Image.Image) -> bool:
             red, green, blue = pixels[x, y]
             if red >= 120 and red > green * 1.18 and blue >= green * 0.85:
                 mask.add((x, y))
-    components: list[int] = []
+    components: list[tuple[int, bool]] = []
     while mask:
         start = mask.pop()
         pending = [start]
         size = 1
+        min_x = max_x = start[0]
+        min_y = max_y = start[1]
         while pending:
             x, y = pending.pop()
+            min_x = min(min_x, x)
+            max_x = max(max_x, x)
+            min_y = min(min_y, y)
+            max_y = max(max_y, y)
             for neighbor in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
                 if neighbor in mask:
                     mask.remove(neighbor)
                     pending.append(neighbor)
                     size += 1
-        components.append(size)
-    return sum(size >= 320 for size in components) >= 2
+        touches_border = min_x == 0 or min_y == 0 or max_x == 63 or max_y == 63
+        components.append((size, touches_border))
+    # A pink sky, gradient, or other background wash can form a large color
+    # component that touches the frame boundary. It is not a second
+    # protagonist, so do not count boundary-connected regions as silhouettes.
+    interior_components = [size for size, touches_border in components if not touches_border]
+    return sum(size >= 320 for size in interior_components) >= 2
 
 
 def inspect_kirby_input(

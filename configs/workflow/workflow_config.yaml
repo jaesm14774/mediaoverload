@@ -21,3 +21,37 @@ workflows:
   "Tile Upscaler SDXL.json":
     node_aliases:
       load_image: "225"
+
+  "minimax_h3_lowvram_i2v.json":
+    conditioning:
+      provider: "minimax_h3"
+      recipes:
+        anchor_first:
+          anchors: [first]
+          continuation: "previous_tail_as_first"
+          render_tool: "comfy.workflow.image_to_video"
+
+  "minimax_h3_lowvram_15s_fl2va_i2v.json":
+    conditioning:
+      provider: "minimax_h3"
+      recipes:
+        anchor_first_last:
+          anchors: [first, last]
+          continuation: "previous_tail_as_first"
+          render_tool: "comfy.workflow.image_to_video"
+        anchor_last:
+          anchors: [last]
+          continuation: "none"
+          render_tool: "comfy.workflow.image_to_video"
+
+  "minimax_h3_ref2va.json":
+    conditioning:
+      provider: "minimax_h3"
+      recipes:
+        reference_bundle:
+          references: [image, video]
+          reference_minimum: 1
+          reference_maximum: 4
+          reference_selection_limit: 4
+          continuation: "none"
+          render_tool: "comfy.workflow.reference_to_video"

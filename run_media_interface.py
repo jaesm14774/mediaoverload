@@ -32,6 +32,11 @@ def main() -> None:
     parser.add_argument("--prompt", type=str, default="", help="Prompt text")
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature parameter")
     parser.add_argument("--generation-type", type=str, help="Override generation type, for example text2longvideo")
+    parser.add_argument(
+        "--duration-seconds",
+        type=int,
+        help="Requested clip duration; 5 seconds uses one clear action, 15 seconds uses a compact native H3 story",
+    )
     parser.add_argument("--dry-run-publish", action="store_true", help="Run publish stage in dry-run mode")
     parser.add_argument(
         "--publish-mode",
@@ -69,6 +74,7 @@ def main() -> None:
         prompt=args.prompt,
         temperature=args.temperature,
         preferred_generation_type=args.generation_type,
+        duration_seconds=args.duration_seconds,
         dry_run_publish=args.dry_run_publish,
         publish_mode=args.publish_mode,
         publish_platforms=args.publish_platforms,

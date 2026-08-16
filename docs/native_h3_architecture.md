@@ -1,19 +1,31 @@
 # Native MiniMax H3 story recipe
 
-`native_h3_story` is the first-class MiniMax H3 generation type. It uses the
-same automation surface as every other media strategy; generation starts at
+The five Native H3 modes are first-class MiniMax H3 generation types:
+`native_h3_story`, `native_h3_t2v_story`, `native_h3_fl2va_story`,
+`native_h3_l2va_story`, and `native_h3_ref2va`. The composed
+`text2image2native_h3_ref2va` route adds an explicit candidate-image stage.
+They use the same automation surface as every other media strategy; generation starts at
 `run_media_interface.py` or the scheduler and reaches ComfyUI through the
 agentic runtime.
 
 ## Current short-video contract
 
-The production Kirby native-H3 recipes use a single 15-second clip with five
-causal beats: hook, promise, escalation, reversal, and payoff. The story
-combines the user creative brief with the current news item; the repository
-preset supplies only the character/style/continuity contract. The LLM must
-return a `news_trace` that maps source concepts to concrete visual anchors, and
-the validator rejects a generic story when those anchors do not reach the hook
-and later causal beats. Beat boundaries may move slightly, but
+The production Kirby native-H3 recipes use a single 15-second clip with three
+causal beats: hook, escalation, and payoff. The Kirby quality brief turns each
+episode into one readable cute micro-gag: one Kirby, one simple prop, one
+dominant motion, one setback, and one visible reversal. The first second must
+already contain motion and an expressive reaction; the episode must not become
+an action-film lore scene, duplicate-character fight, or static portal reveal.
+The generated story also carries a `gag_card` with `hook_frame`,
+`character_desire`, `prop_rule`, `setback`, `expressive_reaction`,
+`payoff_reversal`, and `loop_reason`. This is the content source of truth:
+the opening keyframe, three native beats, and final H3 prompt must all express
+the same physical joke before technical QA runs.
+The story combines that creative brief with the current news item; the
+repository preset supplies only the character/style/continuity contract. The
+LLM must return a `news_trace` that maps source concepts to concrete visual
+anchors, and the validator rejects a generic story when those anchors do not
+reach the hook and later causal beats. Beat boundaries may move slightly, but
 they must remain contiguous from 0 to 15 seconds and the final beat must solve
 the original objective.
 
@@ -25,9 +37,11 @@ the system does not silently shorten it or substitute a fallback.
 
 `native_h3_t2v_story` is the direct text-to-video route. It calls the existing
 `comfy.workflow.text_to_video` tool and has no keyframe/image nodes.
-`native_h3_story` is the image-to-video route and uses the existing keyframe
-and identity-gate nodes before calling `comfy.workflow.image_to_video`. Both
-routes share the same news-grounded story validator and QA/package nodes.
+`native_h3_story` is the first-frame image-to-video route; `native_h3_fl2va_story`
+adds a reviewed landing frame, `native_h3_l2va_story` keeps only the reviewed
+landing frame, and `native_h3_ref2va` consumes either a validated manifest or
+the six-candidate Discord reference gate when its manifest is empty. All modes
+share the same news-grounded story validator and QA/package nodes.
 
 ## Runtime path
 
@@ -35,7 +49,7 @@ routes share the same news-grounded story validator and QA/package nodes.
 schedule / run_media_interface.py
   -> agentic.app.character_workflow.run_character_workflow
   -> routing.yaml generation_type + workflow candidates
-  -> TaskPlanner._build_native_h3_story_plan
+  -> TaskPlanner dispatches the selected Native H3 route
   -> SkillRegistry / WorkflowRunner
   -> ComfyWorkflowToolset
   -> ComfyUI API graph
@@ -44,12 +58,14 @@ schedule / run_media_interface.py
 The native graph is:
 
 ```text
-storyboard prompt
-   -> opening keyframe  ─┐
-   -> ending keyframe   ─┼-> character identity gate
-                        └-> MiniMax H3 first-frame + last-frame I2V
-                              -> shared technical QA + sampled-frame semantic QA
-                              -> contact sheet + GIF + packaged video
+selected Native H3 route
+   -> T2V: prompt -> MiniMax H3 T2V
+   -> I2VA: six opening candidates -> Discord -> first-frame I2V
+   -> FL2VA: opening + landing candidates -> Discord -> first+last-frame I2V
+   -> L2VA: six landing candidates -> Discord -> last-frame I2V
+   -> Ref2VA: valid manifest OR six T2I candidates -> Discord -> Ref2VA
+   -> shared technical QA + sampled-frame semantic QA
+   -> contact sheet + GIF + packaged video
 ```
 
 `longvideo.prepare_native_h3_story` delegates news selection and LLM story
@@ -82,17 +98,17 @@ them):
 
 ```dotenv
 SCHEDULER_CHARACTER=kirby
-SCHEDULER_PREFERRED_GENERATION_TYPE=native_h3_story
+SCHEDULER_PREFERRED_GENERATION_TYPE=
 SCHEDULER_RUN_IMMEDIATELY=false
 SCHEDULER_COMFY_HOST=127.0.0.1
 SCHEDULER_COMFY_PORT=8188
 SCHEDULER_COMFY_ROOT=D:/ComfyUI_windows_portable
 ```
 
-For a mixed content calendar, leave
-`SCHEDULER_PREFERRED_GENERATION_TYPE` empty. The existing router will choose
-from the configured generation candidates; Kirby's `native_h3_story` weight is
-currently higher than the segmented long-video recipe.
+Leave `SCHEDULER_PREFERRED_GENERATION_TYPE` empty for the mixed content
+calendar. The scheduler passes an RNG into the character workflow, which then
+samples the configured Kirby weighted pool; the LLM writes the story for the
+already-selected strategy and does not select the strategy.
 
 ## OpenRouter free model pool
 
@@ -143,10 +159,13 @@ recipe enables `semantic_qa_required`, the shared Prompt Engine sends that
 contact sheet to the configured vision model and records the full request and
 response under `agentic/logs/runs/<run_id>/llm/`. The semantic judge checks
 protagonist identity, visible action, the news-derived visual anchor,
-progression, and unwanted extra characters; it must not infer evidence from
-the title or prompt. In `--no-review` mode an unavailable or failing semantic
-judge blocks publication. With Discord human review enabled, semantic failure
-is advisory and the human decision remains authoritative.
+progression, cute hit, readable expression, single-gag focus, first-second
+action, completed action, payoff, and unwanted extra characters; it must not
+infer evidence from the title or prompt. A recipe can set
+`semantic_qa_blocking: true` to make a failed semantic result a hard
+pre-publication gate. Kirby's checked-in recipe enables that policy, so
+Discord approval cannot turn a generic pose or missing payoff into a publishable
+video. Recipes without that flag may retain advisory semantic QA.
 
 ## Automated social publishing
 
@@ -188,9 +207,14 @@ uses pay-per-use credits; it is not part of the free safe POC.
 Kirby's production `native_h3_story` recipe treats the opening frame as a
 hard human gate. The same news-grounded story is generated once, then the
 opening image workflow renders six low-cost candidates in one batch. Discord
-receives all six attachments in order; the reviewer must select exactly one or
-reject the batch. Missing Discord configuration, timeout, API failure, and
-reject are blocking outcomes. The runtime never silently selects candidate 1.
+receives the usable attachments in order; the reviewer must select exactly one
+or reject the batch. The review asks for a visible cute hit or expression,
+motion already starting in the first second, one Kirby, one simple prop, and a
+single readable gag. Static portal gazes, abstract lore, duplicate characters,
+and multi-character conflict are reject signals. The displayed Asset range is
+derived from the attachments actually delivered, not hard-coded to six.
+Missing Discord configuration, timeout, API failure, and reject are blocking
+outcomes. The runtime never silently selects candidate 1.
 
 After approval, the selected image is immutable: it is passed directly to the
 MiniMax H3 I2V workflow without identity img2img refinement or automatic

@@ -41,6 +41,35 @@ class _FakeGenerator:
         return [str(saved_file)]
 
 
+class _OomOnceGenerator(_FakeGenerator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed_once = False
+        self.communicator = SimpleNamespace(free_memory=self._free_memory)
+        self.free_memory_calls = 0
+
+    def _free_memory(self) -> None:
+        self.free_memory_calls += 1
+
+    def generate(
+        self,
+        *,
+        workflow_path: str,
+        updates: list[dict[str, object]],
+        output_dir: str,
+        file_prefix: str,
+    ) -> list[str]:
+        if not self.failed_once:
+            self.failed_once = True
+            raise RuntimeError("Allocation on device 0 would exceed allowed memory (out of memory)")
+        return super().generate(
+            workflow_path=workflow_path,
+            updates=updates,
+            output_dir=output_dir,
+            file_prefix=file_prefix,
+        )
+
+
 class _FakeAdapter:
     def __init__(self) -> None:
         self.generator = _FakeGenerator()
@@ -92,6 +121,34 @@ class _FakeAssetRegistry:
 
 
 class ComfyWorkflowToolsetTests(unittest.TestCase):
+    def test_execute_retries_same_workflow_after_provider_oom(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            asset_registry = _FakeAssetRegistry(temp_root)
+            with patch.object(ComfyWorkflowToolset, "_build_specs", return_value={}):
+                toolset = ComfyWorkflowToolset(asset_registry=asset_registry, output_root=temp_root)
+            adapter = _FakeAdapter()
+            adapter.generator = _OomOnceGenerator()
+            toolset.adapter = adapter
+            toolset.specs = {
+                "comfy.workflow.image_to_video": ComfyWorkflowSpec(
+                    name="comfy.workflow.image_to_video",
+                    workflow_name="demo",
+                    output_folder="videos",
+                    file_prefix="agentic_i2v",
+                    count_payload_key="video_count",
+                )
+            }
+            with patch.object(toolset, "_check_server"):
+                result = toolset.execute(
+                    "comfy.workflow.image_to_video",
+                    {"workflow_name": "demo", "run_dir": str(temp_root), "video_count": 1},
+                )
+
+        self.assertEqual(result["memory_retry_count"], 1)
+        self.assertEqual(adapter.generator.free_memory_calls, 1)
+        self.assertEqual(len(result["saved_files"]), 1)
+
     def test_ref2va_model_profile_overrides_loader_nodes_without_mutating_template(self) -> None:
         workflow = {
             "1": {
@@ -176,6 +233,7 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
             )
 
         self.assertEqual(updates[-1], {"node_type": "MiniMaxH3ImageToVideo", "node_index": 0, "inputs": {"last_frame": None}})
+        self.assertEqual(updates[1]["filter"], {"title": "native 15s first frame"})
         self.assertEqual(toolset.adapter.generator.upload_calls, [r"C:\opening.png"])
 
     def test_build_updates_uses_alias_binding_and_uploaded_image(self) -> None:

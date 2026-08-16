@@ -981,7 +981,7 @@ class YouTubePlatform(BaseConfigPlatform):
         self.client_secret: str | None = None
         self.refresh_token: str | None = None
         self.channel_id: str | None = None
-        self.default_privacy_status = "private"
+        self.default_privacy_status = "public"
         self.default_category_id = "22"
         self.default_notify_subscribers = False
         self.default_made_for_kids = False
@@ -998,7 +998,7 @@ class YouTubePlatform(BaseConfigPlatform):
         self.client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
         self.refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN")
         self.channel_id = os.getenv("YOUTUBE_CHANNEL_ID")
-        self.default_privacy_status = str(os.getenv("YOUTUBE_PRIVACY_STATUS", "private")).strip().lower() or "private"
+        self.default_privacy_status = str(os.getenv("YOUTUBE_PRIVACY_STATUS", "public")).strip().lower() or "public"
         self.default_category_id = str(os.getenv("YOUTUBE_CATEGORY_ID", "22")).strip() or "22"
         self.default_notify_subscribers = _coerce_bool(os.getenv("YOUTUBE_NOTIFY_SUBSCRIBERS"), default=False)
         self.default_made_for_kids = _coerce_bool(os.getenv("YOUTUBE_MADE_FOR_KIDS"), default=False)

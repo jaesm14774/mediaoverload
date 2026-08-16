@@ -52,12 +52,16 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("video conditioning", " ".join(descriptions["text2video"]["hard_rules"]).lower())
 
         stage_contracts = self.hints["workflow_stage_contracts"]
+        for strategy in self.routing["strategy_candidates"]:
+            self.assertIn(strategy, stage_contracts)
         self.assertIn("not connected as video conditioning", stage_contracts["text2video"]["image_workflow_name"])
         self.assertIn("first_frame", stage_contracts["native_h3_story"]["video_workflow_name"])
+        self.assertIn("T2V", stage_contracts["native_h3_t2v_story"]["video_workflow_name"])
         self.assertIn("last_frame", stage_contracts["native_h3_fl2va_story"]["video_workflow_name"])
         self.assertIn("reference images/videos", stage_contracts["native_h3_ref2va"]["video_workflow_name"])
+        self.assertIn("segment", stage_contracts["text2longvideo"]["video_workflow_name"])
         auto_contract = stage_contracts["text2image2native_h3_ref2va"]
-        self.assertIn("4-6", auto_contract["image_workflow_name"])
+        self.assertIn("six", auto_contract["image_workflow_name"])
         self.assertIn("explicitly selected", auto_contract["video_workflow_name"])
 
     def test_shared_pre_video_review_contract_is_fixed_six_and_bounded(self) -> None:
@@ -77,6 +81,23 @@ class RoutingContractTests(unittest.TestCase):
             "text2image2native_h3_ref2va",
         ):
             self.assertEqual(self.routing["count_policies"][strategy]["image_count"], {"min": 6, "max": 6})
+
+    def test_kirby_weighted_pool_covers_all_routes_with_requested_weights(self) -> None:
+        config = yaml.safe_load(self.character_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            config["generation"]["generation_type_weights"],
+            {
+                "text2image2video": 1,
+                "text2longvideo": 2,
+                "native_h3_story": 1,
+                "native_h3_t2v_story": 1,
+                "native_h3_fl2va_story": 1,
+                "native_h3_l2va_story": 1,
+                "native_h3_ref2va": 1,
+                "text2image2native_h3_ref2va": 1,
+                "sticker_pack": 2,
+            },
+        )
 
     def test_workflow_graph_inputs_match_h3_stage_contracts(self) -> None:
         def graph_inputs(name: str) -> dict[str, object]:
@@ -98,7 +119,7 @@ class RoutingContractTests(unittest.TestCase):
         self.assertNotIn("first_frame", t2v)
         self.assertNotIn("last_frame", t2v)
 
-        i2v = graph_inputs("minimax_h3_native_i2v")
+        i2v = graph_inputs("minimax_h3_lowvram_i2v")
         self.assertIn("first_frame", i2v)
         self.assertNotIn("last_frame", i2v)
 
@@ -113,7 +134,7 @@ class RoutingContractTests(unittest.TestCase):
         self.assertEqual(ref_node["class_type"], "MiniMaxH3ReferenceToVideo")
         self.assertNotIn("ref_audios", ref2va)
 
-    def test_automatic_routing_excludes_unavailable_ref2va_and_exposes_context(self) -> None:
+    def test_automatic_routing_keeps_ref2va_available_for_candidate_generation(self) -> None:
         route_result = {
             "generation_type": "text2video",
             "workflow_plan": {
@@ -146,12 +167,12 @@ class RoutingContractTests(unittest.TestCase):
             )
 
         call = route.call_args.kwargs
-        self.assertNotIn("native_h3_ref2va", call["generation_type_candidates"])
+        self.assertIn("native_h3_ref2va", call["generation_type_candidates"])
         self.assertIn("text2image2native_h3_ref2va", call["generation_type_candidates"])
         context = call["routing_hints"]["runtime_context"]
         self.assertFalse(context["reference_manifest_available"])
-        self.assertFalse(context["automatic_ref2va_eligible"])
-        self.assertEqual(context["reference_manifest_error_code"], "missing")
+        self.assertTrue(context["automatic_ref2va_eligible"])
+        self.assertEqual(context["reference_manifest_error_code"], "auto_generation_available")
         self.assertEqual(payload["constraints"]["routing_runtime_context"], context)
 
     def test_valid_configured_reference_manifest_enables_automatic_ref2va(self) -> None:
@@ -179,7 +200,8 @@ class RoutingContractTests(unittest.TestCase):
             publish_after_generate=False,
         )
         self.assertEqual(payload["source_generation_type"], "native_h3_ref2va")
-        self.assertFalse(payload["constraints"]["routing_runtime_context"]["automatic_ref2va_eligible"])
+        self.assertTrue(payload["constraints"]["routing_runtime_context"]["automatic_ref2va_eligible"])
+        self.assertTrue(payload["constraints"]["auto_reference_generation"])
         self.assertEqual(payload["constraints"]["generation_type_candidates"], ["native_h3_ref2va"])
 
     def test_auto_ref2va_alias_resolves_to_canonical_strategy(self) -> None:

@@ -61,7 +61,7 @@ class ComfyWorkflowToolset:
     DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
     DEFAULT_REFINE_WORKFLOWS = ("kirby_identity_img2img", "z_image_i2i_anime", "image_to_image")
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
-    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v", "minimax_h3_native_i2v")
+    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v",)
 
     def __init__(self, asset_registry: AssetRegistry, output_root: Path, comfy_host: str | None = None, comfy_port: int | None = None) -> None:
         self.asset_registry = asset_registry
@@ -114,7 +114,13 @@ class ComfyWorkflowToolset:
         requested_workflow_name = str(merged_payload.get("workflow_name") or spec.workflow_name)
         h3_mode = merged_payload.get("h3_mode") or merged_payload.get("generation_type")
         if h3_mode and requested_workflow_name.startswith("minimax_h3_"):
-            validate_h3_payload(str(h3_mode), merged_payload)
+            generic_to_h3 = {
+                "anchor_first": "i2va",
+                "anchor_first_last": "fl2va",
+                "anchor_last": "l2va",
+                "reference_bundle": "ref2va",
+            }
+            validate_h3_payload(generic_to_h3.get(str(h3_mode), str(h3_mode)), merged_payload)
         manifest = self.asset_registry.get_manifest(requested_workflow_name)
         workflow_path = self.asset_registry.materialize_workflow(manifest)
         workflow = self.adapter.load_workflow(workflow_path)
@@ -148,6 +154,7 @@ class ComfyWorkflowToolset:
         output_dir.mkdir(parents=True, exist_ok=True)
         render_count = max(1, int(merged_payload.get(spec.count_payload_key, 1)))
         saved_files: list[str] = []
+        memory_retry_count = 0
         try:
             for run_index in range(render_count):
                 iteration_payload = dict(merged_payload)
@@ -169,7 +176,18 @@ class ComfyWorkflowToolset:
                 }
                 if reference_info or model_overrides:
                     generate_kwargs["workflow"] = runtime_workflow
-                saved_files.extend(generator.generate(**generate_kwargs))
+                try:
+                    saved_files.extend(generator.generate(**generate_kwargs))
+                except Exception as exc:
+                    # Sequential long-video segments can leave a previous
+                    # provider graph resident in ComfyUI.  Retry the exact
+                    # same recipe once after the server-side unload boundary;
+                    # never switch to another workflow as an implicit fallback.
+                    if not self._is_memory_error(exc):
+                        raise
+                    self._release_comfy_memory(generator)
+                    memory_retry_count += 1
+                    saved_files.extend(generator.generate(**generate_kwargs))
         except Exception as exc:
             raise RuntimeError(f"ComfyUI generation failed for {spec_name}: {exc}") from exc
 
@@ -181,6 +199,7 @@ class ComfyWorkflowToolset:
             "workflow_path": str(workflow_path),
             "saved_files": saved_files,
             "payload": self._serialize_payload(merged_payload),
+            "memory_retry_count": memory_retry_count,
             "comfy_host": self.comfy_host or "127.0.0.1",
             "comfy_port": self.comfy_port or 8188,
         }
@@ -192,12 +211,28 @@ class ComfyWorkflowToolset:
             "summary_path": str(summary_path),
             "workflow_name": manifest.name,
             "h3_mode": str(h3_mode or ""),
+            "memory_retry_count": memory_retry_count,
         }
         if not saved_files:
             fallback = merged_payload.get("image_path") or merged_payload.get("input_image_path")
             if fallback:
                 result["image_path"] = str(fallback)
         return result
+
+    @staticmethod
+    def _is_memory_error(error: BaseException) -> bool:
+        message = str(error).lower()
+        return "out of memory" in message or "cuda out of memory" in message or "allocation on device" in message
+
+    @staticmethod
+    def _release_comfy_memory(generator: Any) -> None:
+        communicator = getattr(generator, "communicator", None)
+        free_memory = getattr(communicator, "free_memory", None)
+        if callable(free_memory):
+            try:
+                free_memory()
+            except Exception:
+                return
 
     def _build_updates(
         self,
@@ -228,28 +263,45 @@ class ComfyWorkflowToolset:
 
         image_path = payload.get("image_path") or payload.get("input_image_path")
         requested_workflow = str(payload.get("workflow_name") or spec.workflow_name)
+        generic_to_h3 = {
+            "anchor_first": "i2va",
+            "anchor_first_last": "fl2va",
+            "anchor_last": "l2va",
+            "reference_bundle": "ref2va",
+        }
+        normalized_h3_mode = generic_to_h3.get(str(payload.get("h3_mode") or ""), str(payload.get("h3_mode") or "")).strip().lower()
         if image_path and spec.name == "comfy.workflow.image_to_video" and requested_workflow.startswith("minimax_h3_"):
             prompt_text = str(payload.get("prompt") or "").lower()
             if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
-                h3_mode = str(payload.get("h3_mode") or "").strip().lower().replace("-", "_")
                 assert_kirby_input(
                     image_path,
                     allow_external=bool(payload.get("allow_external_reference", False)),
-                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
+                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or normalized_h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
                 )
-        if spec.image_binding and image_path:
+        image_binding = spec.image_binding
+        if image_path and requested_workflow.endswith("_15s_fl2va_i2v") and image_binding:
+            # The FLF graph has two LoadImage nodes.  Bind the opening anchor by
+            # its semantic title instead of relying on node insertion order.
+            image_binding = NodeBinding(
+                kind=image_binding.kind,
+                node_type=image_binding.node_type,
+                node_index=image_binding.node_index,
+                title="native 15s first frame",
+                alias=image_binding.alias,
+                input_key=image_binding.input_key,
+            )
+        if image_binding and image_path:
             image_filename = generator.upload_image(str(image_path))
-            updates.append(self._binding_update(spec.image_binding, image_filename, str(workflow_path)))
+            updates.append(self._binding_update(image_binding, image_filename, str(workflow_path)))
 
         last_image_path = payload.get("last_image_path") or payload.get("last_frame_path")
         if last_image_path and spec.last_image_binding and requested_workflow.startswith("minimax_h3_"):
             prompt_text = str(payload.get("prompt") or "").lower()
             if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
-                h3_mode = str(payload.get("h3_mode") or "").strip().lower().replace("-", "_")
                 assert_kirby_input(
                     last_image_path,
                     allow_external=bool(payload.get("allow_external_reference", False)),
-                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
+                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or normalized_h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
                 )
             last_image_filename = generator.upload_image(str(last_image_path))
             updates.append(self._binding_update(spec.last_image_binding, last_image_filename, str(workflow_path)))
