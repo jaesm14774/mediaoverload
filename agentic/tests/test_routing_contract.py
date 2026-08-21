@@ -87,6 +87,7 @@ class RoutingContractTests(unittest.TestCase):
         self.assertEqual(
             config["generation"]["generation_type_weights"],
             {
+                "text2img": 1,
                 "text2image2video": 1,
                 "text2longvideo": 2,
                 "native_h3_story": 1,
@@ -215,7 +216,7 @@ class RoutingContractTests(unittest.TestCase):
         )
         self.assertEqual(payload["source_generation_type"], "text2image2native_h3_ref2va")
         self.assertEqual(payload["media_type"], "text2image2native_h3_ref2va")
-        self.assertEqual(payload["constraints"]["image_workflow_name"], "kirby_keyframe_anima")
+        self.assertEqual(payload["constraints"]["image_workflow_name"], "krea2_turbo")
         self.assertEqual(payload["constraints"]["video_workflow_name"], "minimax_h3_ref2va")
 
 

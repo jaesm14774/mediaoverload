@@ -27,6 +27,7 @@ from agentic.app.character_workflow import run_character_workflow
 
 
 LOGGER = logging.getLogger("mediaoverload.scheduler")
+QUIET_HOURS_END = 6
 
 
 @dataclass(slots=True)
@@ -57,6 +58,7 @@ class SchedulerConfig:
     duration_seconds: int | None
     sleep_seconds: int
     random_seed: int | None
+    routing_history_path: str | None = None
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:
@@ -106,6 +108,7 @@ def load_scheduler_config() -> SchedulerConfig:
     comfy_port_raw = str(os.getenv("SCHEDULER_COMFY_PORT", "")).strip()
     duration_raw = str(os.getenv("SCHEDULER_DURATION_SECONDS", "")).strip()
     random_seed_raw = str(os.getenv("SCHEDULER_RANDOM_SEED", "")).strip()
+    routing_history_path = str(os.getenv("SCHEDULER_ROUTING_HISTORY_PATH", "")).strip() or None
     return SchedulerConfig(
         enabled=_parse_bool(os.getenv("SCHEDULER_ENABLED"), default=True),
         mode=mode,
@@ -133,6 +136,7 @@ def load_scheduler_config() -> SchedulerConfig:
         duration_seconds=int(duration_raw) if duration_raw else None,
         sleep_seconds=max(5, int(os.getenv("SCHEDULER_SLEEP_SECONDS", "30"))),
         random_seed=int(random_seed_raw) if random_seed_raw else None,
+        routing_history_path=routing_history_path,
     )
 
 
@@ -165,6 +169,10 @@ def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = No
         no_review=config.no_review,
         news_driven=config.news_driven,
         news_history_path=config.news_history_path,
+        routing_history_path=(
+            config.routing_history_path
+            or str(REPO_ROOT / "agentic" / "state" / "routing_selection" / f"{config.config_path.stem}.json")
+        ),
         comfy_host=config.comfy_host,
         comfy_port=config.comfy_port,
         comfy_root=config.comfy_root,
@@ -181,6 +189,10 @@ def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = No
 
 
 def _run_scheduled_job_safe(config: SchedulerConfig, *, rng: random.Random | None = None) -> dict[str, Any]:
+    local_hour = time.localtime().tm_hour
+    if local_hour < QUIET_HOURS_END:
+        LOGGER.info("scheduler.skip | reason=quiet_hours | local_hour=%s", local_hour)
+        return {"status": "skipped", "reason": "quiet_hours"}
     try:
         return run_scheduled_job(config, rng=rng)
     except Exception:

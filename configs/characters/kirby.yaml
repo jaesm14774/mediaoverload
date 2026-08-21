@@ -9,20 +9,41 @@ generation:
     polished 2D anime: 4
     cel-shaded animation: 2
     hand-painted storybook anime: 1
-  keyframe_workflow_name: kirby_keyframe_anima
-  identity_refine_workflow_name: kirby_continuity_img2img
-  storyboard_path: configs/storyboards/kirby_meadow_adventure.yaml
+  keyframe_workflow_name: krea2_turbo
+  identity_refine_workflow_name: krea2_turbo_img2img
+  # Longvideo stories are generated from the current brief/news context. A
+  # static meadow preset here silently replaced unrelated news prompts.
+  storyboard_path: ""
   input_gate: kirby-pink-red-silhouette
+  visual_style_contract: >-
+    Tactile pastel 2D anime gag animation: keep one small Kirby readable inside
+    one dominant news mechanism or oversized physical environment, with a clear
+    focal silhouette, generous negative space, one dominant palette, and a close
+    readable reaction.
+    Use squash-and-stretch, wobble, recoil, or elastic snap only when caused by
+    the visible action. Prefer a stable ending image that echoes the opening
+    prop or pose so a short clip can replay cleanly after its payoff. Choose one
+    visual language per clip: soft paper-grain storybook, clean cel-shaded
+    sticker, warm tabletop food comedy, cozy container scale contrast, or a
+    saturated sky/firework spectacle; do not stack them all together.
   native_h3_quality:
     semantic_qa_blocking: true
     creative_brief: >-
       Make this a highly shareable cute micro-gag, not an action-film lore scene:
-      one Kirby, one simple physical prop, one dominant motion, one readable
-      setback, and one visible reversal/payoff. The first second must already
-      contain motion and a clear expressive reaction. Prefer a close readable
-      face or body reaction, exaggerated but charming timing, a small absurd
-      surprise, and a final visual joke that lands without dialogue. Translate
-      the news into one unmarked physical object or effect only. Do not show
+      one Kirby, one dominant news mechanism, one readable setback, and one
+      visible reversal/payoff. The first second must already contain motion and
+      a clear expressive reaction. Prefer a close readable face or body
+      reaction, exaggerated but charming timing, a small absurd surprise, a
+      strong small-versus-large scale contrast, and a final visual joke that
+      lands without dialogue. Translate every news item through three visible
+      layers: source context, active mechanism, and physical consequence. A
+      prop is optional; use architecture, environmental force, spatial
+      relationship, synchronized change, or a prop only when it is the best
+      expression of the news mechanism. Avoid defaulting to an orb, ball,
+      balloon, wallet, ribbon, or seal when the source event does not require
+      that shape. End with a concrete settled result that can echo the opening
+      for a loop.
+      Do not show
       Kirby fighting a duplicate, multiple characters, readable interfaces,
       GitHub/web text, abstract symbols, or Kirby standing still while looking
       at a portal.
@@ -30,7 +51,7 @@ generation:
     storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
-    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 6
     require_human_review: true
     semantic_qa_required: true
@@ -47,6 +68,8 @@ generation:
     storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_t2v
+    semantic_qa_required: true
+    semantic_qa_blocking: true
     width: 608
     height: 352
     length: 362
@@ -59,7 +82,7 @@ generation:
     storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
-    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 1
     require_human_review: true
     semantic_qa_required: true
@@ -76,7 +99,7 @@ generation:
     storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
-    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 1
     require_human_review: true
     semantic_qa_required: true
@@ -112,7 +135,7 @@ generation:
   text2image2native_h3_ref2va:
     storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
-    keyframe_workflow_name: kirby_keyframe_anima
+    keyframe_workflow_name: krea2_turbo
     workflow_name: minimax_h3_ref2va
     reference_candidate_count: 6
     reference_selection_limit: 4
@@ -138,6 +161,7 @@ generation:
     steps: 20
     draft_acceleration: spectrum
   generation_type_weights:
+    text2img: 1
     text2image2video: 1
     text2longvideo: 2
     native_h3_story: 1

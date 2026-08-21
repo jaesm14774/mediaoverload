@@ -1,0 +1,163 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "krea2_turbo_bf16-Q4_0.gguf",
+      "weight_dtype": "default"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Krea 2 Turbo Q4_0 diffusion"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+      "type": "krea2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoaderGGUF",
+    "_meta": {
+      "title": "Krea 2 Qwen3-VL 4B text encoder"
+    }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Krea 2 Qwen Image VAE"
+    }
+  },
+  "4": {
+    "inputs": {
+      "value": "Kirby in a green meadow, clean 2D anime illustration, clear 16:9 composition"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "5": {
+    "inputs": {
+      "text": [
+        "4",
+        0
+      ],
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Krea 2 positive prompt"
+    }
+  },
+  "6": {
+    "inputs": {
+      "conditioning": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "Krea 2 Turbo zero negative"
+    }
+  },
+  "7": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "width"
+    }
+  },
+  "8": {
+    "inputs": {
+      "value": 576
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "height"
+    }
+  },
+  "9": {
+    "inputs": {
+      "width": [
+        "7",
+        0
+      ],
+      "height": [
+        "8",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Krea 2 16:9 low VRAM latent"
+    }
+  },
+  "10": {
+    "inputs": {
+      "seed": 20260819,
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Krea 2 Turbo official 8-step sampler"
+    }
+  },
+  "11": {
+    "inputs": {
+      "samples": [
+        "10",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Krea 2 VAE decode"
+    }
+  },
+  "12": {
+    "inputs": {
+      "filename_prefix": "krea2_turbo",
+      "images": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Krea 2 Turbo frame"
+    }
+  }
+}

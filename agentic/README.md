@@ -54,7 +54,7 @@ agentic --goal "kirby in a neon ramen alley" \
         --comfy-port 8188
 ```
 
-This uses the existing `z_image.json` graph in the repo and writes actual ComfyUI outputs into `agentic/output/`. ComfyUI must already be running and reachable.
+This uses the active `krea2_turbo.json` graph in the repo and writes actual ComfyUI outputs into `agentic/output/`. ComfyUI must already be running and reachable.
 
 For the `text2img2video` chain:
 

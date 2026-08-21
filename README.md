@@ -136,8 +136,8 @@ payload = build_goal_payload_from_character_config(
 additional_params:
   strategies:
     text2img:
-      workflow_name: anima_anime        # 或
-      workflow_path: configs/workflow/anima_anime.json
+      workflow_name: krea2_turbo
+      workflow_path: configs/workflow/krea2_turbo.json
 ```
 
 ---
@@ -178,7 +178,7 @@ print(result["status"], result.get("routing_summary", {}))
 ```yaml
 generation:
   workflows:
-    text2img: z_image_plus_nova_model
+    text2img: krea2_turbo
     text2video: minimax_h3_lowvram_t2v
 ```
 
@@ -216,8 +216,8 @@ additional_params:
   strategies:
     text2image2video:
       first_stage:
-        workflow_name: z_image_plus_nova_model
-        t2i_workflow_path: configs/workflow/z_image_plus_nova_model.json
+        workflow_name: krea2_turbo
+        t2i_workflow_path: configs/workflow/krea2_turbo.json
         upscale_workflow_name: Tile Upscaler SDXL
       video:
         workflow_name: minimax_h3_lowvram_i2v
@@ -262,11 +262,11 @@ additional_params:
   strategies:
     text2longvideo:
       first_stage:
-        workflow_name: z_image_plus_nova_model
+        workflow_name: krea2_turbo
       video_generation:
         workflow_name: minimax_h3_lowvram_i2v
       frame_transition:
-        workflow_name: image_to_image
+        workflow_name: krea2_turbo_img2img
       longvideo_config:
         segment_count: 4
         segment_duration: 5
@@ -292,10 +292,10 @@ additional_params:
   strategies:
     text2image2image:
       first_stage:
-        workflow_name: nova_model_plus_z_image_anime
+        workflow_name: krea2_turbo
       second_stage:
-        workflow_name: z_image_i2i_anime
-        workflow_path: configs/workflow/z_image_i2i_anime.json
+        workflow_name: krea2_turbo_img2img
+        workflow_path: configs/workflow/krea2_turbo_img2img.json
 ```
 
 ---
@@ -317,7 +317,7 @@ additional_params:
   strategies:
     sticker_pack:
       static_config:
-        workflow_name: anima_anime
+        workflow_name: krea2_turbo
       animated_config:
         workflow_name: minimax_h3_lowvram_i2v
         i2v_workflow_path: configs/workflow/minimax_h3_lowvram_i2v.json
@@ -350,8 +350,8 @@ payload = build_goal_payload_from_character_config(
 additional_params:
   strategies:
     image2image:
-      workflow_name: z_image_i2i_anime
-      workflow_path: configs/workflow/z_image_i2i_anime.json
+      workflow_name: krea2_turbo_img2img
+      workflow_path: configs/workflow/krea2_turbo_img2img.json
 ```
 
 ---
@@ -377,13 +377,13 @@ $e2e = @(
 逐一呼叫各策略（每個命令都要在 Discord 完成審核；若成果不合格，請在 Discord 選 reject/block）：
 
 ```powershell
-# 1. 靜態圖：anima_anime
+# 1. 靜態圖：krea2_turbo
 python run_media_interface.py @e2e --prompt '高完成度角色主視覺，霓虹夜市，清楚輪廓' --generation-type text2img
 
-# 2. 短影片／單鏡頭：z_image_plus_nova_model -> minimax_h3_lowvram_t2v
+# 2. 短影片／單鏡頭：minimax_h3_lowvram_t2v
 python run_media_interface.py @e2e --prompt '單鏡頭短動畫，角色在雨中奔跑，鏡頭跟拍' --generation-type text2video
 
-# 3. 先圖後短片：z_image_plus_nova_model -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
+# 3. 先圖後短片：krea2_turbo -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
 python run_media_interface.py @e2e --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
 
 # 4. 長片／多段故事：每段依 recipe 產生 anchor/reference -> I2V -> tail/transition -> concat
@@ -404,16 +404,20 @@ python run_media_interface.py @e2e --prompt 'Native H3 以最後一幀作為故�
 # 9. Native H3 Ref2VA：valid manifest 直用；空 manifest -> 六張候選圖 -> Discord 選擇 -> minimax_h3_ref2va
 python run_media_interface.py @e2e --prompt 'Native H3 參考圖與參考影片共同控制身份和運鏡' --generation-type native_h3_ref2va
 
-# 10. 先圖後 img2img refine：nova_model_plus_z_image_anime -> image_to_image
+# 10. 先圖後 img2img refine：krea2_turbo -> krea2_turbo_img2img
 python run_media_interface.py @e2e --prompt '保留構圖與角色身份，只修正光影和細節' --generation-type text2image2image
 
-# 11. 貼圖包：anima_anime -> minimax_h3_lowvram_i2v（動態貼圖階段）
+# 11. 貼圖包：krea2_turbo -> minimax_h3_lowvram_i2v（動態貼圖階段）
 python run_media_interface.py @e2e --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
 ```
 
 ### 自動路由與加權隨機
 
-角色流程的策略選擇與內容生成要分開：scheduler 預設先讀取角色 YAML 的 `generation.generation_type_weights` 做 weighted/random selection，再把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不再決定 scheduler 要走哪一種 strategy。Kirby 目前的權重是 `text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`。
+角色流程的策略選擇與內容生成要分開：scheduler 預設先讀取角色 YAML 的 `generation.generation_type_weights` 做 weighted selection，再把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不再決定 scheduler 要走哪一種 strategy。scheduler 會把候選 route 放進持久化 shuffle bag（狀態預設在 `agentic/state/routing_selection/<config>.json`），所以短窗口不會因隨機抽樣連續撞到同一路由，但整體仍遵守 YAML 權重。Kirby 目前的權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`。
+
+固定 route 的 image/refine/transition workflow 會先經過 `AssetRegistry` 的 required-asset readiness，再依 `configs/routing.yaml` 的 `workflow_selection_weights` 選擇；空的 required-asset manifest 只代表未驗證，不會被當成 ready。當前這台 ComfyUI 只有 Krea 的 image assets 被明確驗證，因此 Krea 集中是資產可用性結果，不是機率失效；先補齊並登錄其他 workflow assets，權重才會在它們之間生效。explicit generation-type override 只固定策略家族，若 scheduler 有 RNG，stage workflow 仍會依權重抽樣。若要指定 routing bag 檔案，可設定 `SCHEDULER_ROUTING_HISTORY_PATH`。
+
+`text2image2video` 的正常 review path 仍保留 6 張 raw keyframe 候選，但不再先跑未被 review 消費的 upscale。Discord 明確 Reject 仍會停止；若 review 發生 timeout、連線錯誤或沒有決策，`pre_video_review.failure_policy: fallback_to_top` 會選 deterministic top-ranked frame 繼續 I2V，並在 run manifest 留下 fallback evidence。
 
 直接呼叫 Python API 時若沒有傳入 `rng`，仍可保留 LLM strategy routing 作為低階相容模式；scheduler 會固定傳入 RNG，因此排程執行一定走 weighted/random。
 
@@ -488,7 +492,7 @@ H3 runner 的 canonical workflow 對應：`t2va → minimax_h3_lowvram_t2v`、`i
 | `auto_download_assets` | `bool` | 是否允許自動準備 workflow 資產 |
 | `rng` | `random.Random \| None` | 僅影響未強制策略時的加權抽樣（若未來啟用） |
 
-**回傳 dict** 主要鍵：`status`、`run_id`、`plan`、`generation`、`routing`、`routing_summary`、`publish`、`memory` 等。
+**回傳 dict** 主要鍵：`status`、`run_id`、`plan`、`generation`、`routing`、`routing_summary`、`publish`、`stage_status`、`artifacts`、`memory` 等。即使 review、caption 或 publish 失敗，`artifacts.media_paths` 仍會保留已產生的影片／圖片；image-only route 也不會把 YouTube 當成可用影片平台。
 
 ---
 
@@ -508,7 +512,7 @@ import json
 from pathlib import Path
 from agentic.tools.comfy_backend import AgenticNodeManager, AgenticMediaGenerator
 
-workflow_path = Path("configs/workflow/anima_anime.json")
+workflow_path = Path("configs/workflow/krea2_turbo.json")
 workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
 
 updates = AgenticNodeManager.generate_updates(

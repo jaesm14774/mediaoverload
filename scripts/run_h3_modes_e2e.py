@@ -27,7 +27,16 @@ from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
 from agentic.tools.media_services import register_media_service_tools
 
 
-IMAGE_WORKFLOW_CANDIDATES = ("kirby_keyframe_anima", "anima_anime", "nova_model_plus_z_image_anime")
+# Krea2 is the first live-verified candidate; retained non-pure-Z image
+# workflows remain available for explicit/asset-complete comparisons.
+IMAGE_WORKFLOW_CANDIDATES = (
+    "krea2_turbo",
+    "nova-anime-xl",
+    "nova_model_plus_z_image_anime",
+    "z_image_plus_nova_model",
+    "anima_anime",
+    "kirby_keyframe_anima",
+)
 CANVAS = {"width": 608, "height": 352, "frame_rate": 24}
 MODE_PROFILES: dict[H3Mode, dict[str, Any]] = {
     H3Mode.T2VA: {"length": 362, "steps": 16, "duration": 362 / 24},

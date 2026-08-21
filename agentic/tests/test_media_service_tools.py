@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -68,6 +69,98 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
 
         communicator.ws = FakeSocket()  # type: ignore[assignment]
         communicator.wait_for_completion("prompt-1")
+
+    def test_wait_for_completion_sets_timeout_on_underlying_socket(self) -> None:
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188, timeout=0.2)
+
+        class FakeSocket:
+            def __init__(self) -> None:
+                self.connected = True
+                self.sock = self
+                self.timeout_values: list[float] = []
+
+            def settimeout(self, value: float) -> None:
+                self.timeout_values.append(value)
+
+            def recv(self):
+                raise socket.timeout()
+
+        fake_socket = FakeSocket()
+        communicator.ws = fake_socket  # type: ignore[assignment]
+        with self.assertRaises(TimeoutError):
+            communicator.wait_for_completion("prompt-timeout")
+        self.assertTrue(fake_socket.timeout_values)
+
+    def test_cancel_prompt_deletes_only_a_pending_prompt(self) -> None:
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
+
+        class FakeResponse:
+            def __init__(self, payload: bytes) -> None:
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return self.payload
+
+        calls = []
+        with patch("agentic.tools.comfy_backend.request.urlopen") as urlopen:
+            urlopen.side_effect = [
+                FakeResponse(
+                    json.dumps(
+                        {
+                            "queue_running": [[1, "other-prompt"]],
+                            "queue_pending": [[2, "stale-prompt"]],
+                        }
+                    ).encode()
+                ),
+                FakeResponse(b"{}"),
+            ]
+            communicator.cancel_prompt("stale-prompt")
+            calls.extend(urlopen.call_args_list)
+
+        self.assertEqual(len(calls), 2)
+        delete_request = calls[1].args[0]
+        self.assertEqual(delete_request.method, "DELETE")
+        self.assertIn("stale-prompt", delete_request.data.decode())
+
+    def test_cancel_prompt_interrupts_only_a_running_prompt(self) -> None:
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
+
+        class FakeResponse:
+            def __init__(self, payload: bytes = b"{}") -> None:
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return self.payload
+
+        with patch("agentic.tools.comfy_backend.request.urlopen") as urlopen:
+            urlopen.side_effect = [
+                FakeResponse(
+                    json.dumps(
+                        {
+                            "queue_running": [[1, "owned-prompt"]],
+                            "queue_pending": [[2, "other-prompt"]],
+                        }
+                    ).encode()
+                ),
+                FakeResponse(b"{}"),
+            ]
+            communicator.cancel_prompt("owned-prompt")
+
+        interrupt_request = urlopen.call_args_list[1].args[0]
+        self.assertEqual(interrupt_request.method, "POST")
+        self.assertIn("/interrupt", interrupt_request.full_url)
 
     def test_save_results_uses_preview_when_comfy_history_has_no_persistent_media(self) -> None:
         communicator = AgenticComfyCommunicator.__new__(AgenticComfyCommunicator)
@@ -165,6 +258,32 @@ class MediaServiceToolsTests(unittest.TestCase):
 
 
 class SocialServiceToolsTests(unittest.TestCase):
+    def test_publish_social_skips_youtube_for_image_only_media(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                del post, platforms
+                raise AssertionError("YouTube must not receive image-only media")
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+        result = tools.publish_social(
+            {
+                "media_paths": ["still.png"],
+                "caption": "image post",
+                "platforms": ["youtube"],
+                "platform_configs": {"youtube": {"config_folder_path": "configs/yt"}},
+            }
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["dispatch_status"], "skipped")
+        self.assertEqual(result["skipped_platforms"], {"youtube": "requires_video_media"})
+        self.assertEqual(result["publication_state"], "not_applicable")
+
     def test_publish_social_delegates_to_agentic_publishing_adapter(self) -> None:
         tools = SocialServiceTools(Path.cwd())
 

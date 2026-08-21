@@ -99,8 +99,9 @@ class WorkflowManifest:
 
 
 _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
+    "krea2_turbo": {"width": 1024, "height": 576, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple"},
+    "krea2_turbo_img2img": {"steps": 8, "cfg": 1.0, "denoise": 0.25, "sampler_name": "euler", "scheduler": "simple"},
     "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
-    "z_image_i2i_anime": {"denoise": 0.7},
     "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
     "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
@@ -150,7 +151,7 @@ def _infer_media_types(stem: str) -> list[str]:
     ]
     if "upscal" in lower or "tile" in lower:
         return ["image_upscale"]
-    if "i2i" in lower or lower == "image_to_image":
+    if "i2i" in lower or "img2img" in lower or lower == "image_to_image":
         return ["image_refine"]
     if "i2v" in lower:
         return ["image_to_video", "image_to_video_audio", "long_video"]
@@ -163,12 +164,18 @@ def _synthetic_manifest(
     metadata: dict[str, Any] | None = None,
 ) -> WorkflowManifest:
     values = dict(metadata or {})
+    raw_required_assets = values.get("required_assets") or []
+    required_assets = [
+        AssetRequirement.from_dict(item)
+        for item in raw_required_assets
+        if isinstance(item, dict) and item.get("name") and item.get("kind") and item.get("target_dir")
+    ]
     return WorkflowManifest(
         name=name,
         media_types=_infer_media_types(name),
         workflow_path=workflow_rel_path,
-        summary="",
-        required_assets=[],
+        summary=str(values.get("summary") or ""),
+        required_assets=required_assets,
         recommended_defaults=dict(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
         asset_extra_roots=[],
         conditioning=dict(values.get("conditioning") or {}),

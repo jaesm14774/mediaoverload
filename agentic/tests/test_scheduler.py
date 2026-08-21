@@ -3,9 +3,15 @@ from __future__ import annotations
 import os
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from scheduler.scheduler import REPO_ROOT, load_scheduler_config, run_scheduled_job
+from scheduler.scheduler import (
+    REPO_ROOT,
+    _run_scheduled_job_safe,
+    load_scheduler_config,
+    run_scheduled_job,
+)
 
 
 class SchedulerTests(unittest.TestCase):
@@ -57,6 +63,45 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(kwargs["dry_run_publish"])
         self.assertFalse(kwargs["enable_review_loop"])
         self.assertIsNotNone(kwargs["rng"])
+
+    def test_scheduled_job_is_skipped_during_quiet_hours(self) -> None:
+        config = self._load_kirby_config()
+
+        with (
+            patch("scheduler.scheduler.time.localtime", return_value=SimpleNamespace(tm_hour=2)),
+            patch("scheduler.scheduler.run_scheduled_job") as job_mock,
+        ):
+            result = _run_scheduled_job_safe(config)
+
+        self.assertEqual(result, {"status": "skipped", "reason": "quiet_hours"})
+        job_mock.assert_not_called()
+
+    def test_scheduled_job_runs_at_quiet_hours_end(self) -> None:
+        config = self._load_kirby_config()
+
+        with (
+            patch("scheduler.scheduler.time.localtime", return_value=SimpleNamespace(tm_hour=6)),
+            patch(
+                "scheduler.scheduler.run_scheduled_job",
+                return_value={"status": "success"},
+            ) as job_mock,
+        ):
+            result = _run_scheduled_job_safe(config)
+
+        self.assertEqual(result, {"status": "success"})
+        job_mock.assert_called_once_with(config, rng=None)
+
+    @staticmethod
+    def _load_kirby_config():
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEDULER_CHARACTER": "kirby",
+                "SCHEDULER_MODE": "interval",
+            },
+            clear=False,
+        ):
+            return load_scheduler_config()
 
 
 if __name__ == "__main__":

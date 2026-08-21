@@ -115,7 +115,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(plan.metadata["recipe"], "text2image2native_h3_ref2va")
         self.assertEqual(
             plan.metadata["selected_workflows"],
-            {"image": "kirby_keyframe_anima", "video": "minimax_h3_ref2va"},
+            {"image": "krea2_turbo", "video": "minimax_h3_ref2va"},
         )
 
     def test_native_t2v_stays_prompt_only_even_with_shared_review_enabled(self) -> None:

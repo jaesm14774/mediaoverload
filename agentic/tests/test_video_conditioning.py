@@ -106,7 +106,7 @@ class VideoConditioningTests(unittest.TestCase):
                     "script-plan": {
                         "segments": [
                             {
-                                "segment_id": "segment-01",
+                                "segment_id": "segment/01:opening",
                                 "visual": "Kirby takes one determined step",
                                 "action": "walks through the rain",
                                 "camera": "slow tracking shot",
@@ -126,3 +126,4 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertTrue(captured["use_last_frame"])
         self.assertNotIn("image_path", captured)
         self.assertEqual(captured["last_image_path"], "C:/tmp/ending.png")
+        self.assertIn("segment-01-opening_video", str(captured["run_dir"]))

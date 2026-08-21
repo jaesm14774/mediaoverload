@@ -49,12 +49,15 @@ world:
   setting: generated from the selected news item at runtime
   visual_language: >-
     polished 2D anime, cel-shaded animation, hand-painted background, strong
-    silhouette, expressive squash-and-stretch, clear screen geography, dynamic
-    camera, readable cause-and-effect, stable Kirby identity
+    silhouette, tactile pastel surfaces, generous negative space, one dominant
+    prop or environmental force, expressive squash-and-stretch, clear screen
+    geography, dynamic camera, readable cause-and-effect, stable Kirby identity
   continuity_rules:
     - Kirby remains the only protagonist and keeps the same identity, proportions, silhouette, and palette in every beat.
     - The resolved story must preserve one stable world geography across all five beats.
     - The same central prop or threat must visibly change state rather than being replaced by unrelated spectacle.
+    - The dominant prop or force must visibly cause Kirby's setback, reaction, and payoff; do not add a second gag.
+    - When loopable, the final settled image should echo the opening prop or direction while preserving the resolved result.
     - Every beat must change the mission state and hand off a question or consequence to the next beat.
     - The final beat must visibly resolve the original objective without introducing a new quest.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 import textwrap
 
@@ -213,6 +214,7 @@ class AgentSocialSkills:
         reference_review = review_scope == "reference" or review_phase == "reference_selection"
         final_video_review = review_scope == "final_video"
         final_media_review = review_scope == "final_media"
+        auto_select_for_probe = bool(context.node.inputs.get("auto_select_for_probe", False))
         if final_video_review:
             media_paths = [path for path in media_paths if Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS]
         elif final_media_review:
@@ -259,7 +261,7 @@ class AgentSocialSkills:
                 "Final media review: inspect every attached image or video, choose the media to publish, and verify the "
                 "prepared caption and hashtags. Accept to approve, Edit to update the caption, or Reject to stop publishing."
             )
-        if first_frame_review or last_frame_review or anchor_set_review:
+        if (first_frame_review or last_frame_review or anchor_set_review) and not auto_select_for_probe:
             bundle = {
                 "selected_assets": ranked[:limit],
                 "ranked_candidates": heuristic_ranked,
@@ -293,12 +295,41 @@ class AgentSocialSkills:
                 "prompt_mode": "final_media_deterministic",
             }
         else:
-            bundle = self.prompt_engine.review_asset_candidates(
-                context.plan.goal,
-                media_paths=ranked,
-                review_notes=review_notes,
-                selection_limit=limit,
-            )
+            review_goal = context.plan.goal
+            if auto_select_for_probe:
+                story_output = context.state.node_outputs.get("native-story-prompt", {})
+                story_prompt = ""
+                if isinstance(story_output, dict):
+                    story_prompt = str(
+                        story_output.get("opening_keyframe_prompt")
+                        or story_output.get("prompt")
+                        or ""
+                    ).strip()
+                if story_prompt:
+                    review_goal = replace(context.plan.goal, prompt=story_prompt)
+            try:
+                bundle = self.prompt_engine.review_asset_candidates(
+                    review_goal,
+                    media_paths=ranked,
+                    review_notes=review_notes,
+                    selection_limit=limit,
+                )
+            except Exception as exc:
+                if not auto_select_for_probe:
+                    raise
+                if any(
+                    marker in str(exc)
+                    for marker in ("stage_probe_quality_gate:", "asset_review_hard_gate:")
+                ):
+                    raise
+                bundle = {
+                    "selected_assets": ranked[:limit],
+                    "ranked_candidates": heuristic_ranked,
+                    "selection_rationale": "Automatic candidate review timed out or was unavailable; used the deterministic ranked candidate.",
+                    "regeneration_notes": review_notes or "Retry vision review before human-facing publication.",
+                    "prompt_mode": "automatic_timeout_fallback",
+                    "fallback_reason": f"{type(exc).__name__}: {exc}",
+                }
         selected = [path for path in bundle.get("selected_assets", []) if path in ranked][:limit]
         if not selected:
             selected = ranked[:limit]
@@ -362,9 +393,12 @@ class AgentSocialSkills:
                 review_scope=review_scope,
             )
         human_review_enabled = bool(
-            context.plan.goal.constraints.get("enable_stage_review", False)
-            or context.plan.goal.constraints.get("enable_review_loop", False)
-            or require_human_review
+            not auto_select_for_probe
+            and (
+                context.plan.goal.constraints.get("enable_stage_review", False)
+                or context.plan.goal.constraints.get("enable_review_loop", False)
+                or require_human_review
+            )
         )
         decision = None
         if human_review_enabled:
@@ -417,6 +451,32 @@ class AgentSocialSkills:
                     logs=["Blocked workflow because the Discord reviewer rejected the candidate set."],
                 )
             if decision.status == "failed":
+                failure_policy = str(
+                    context.plan.goal.constraints.get("pre_video_review_failure_policy") or "block"
+                ).strip().lower()
+                fallback_selected = ranked[:limit]
+                if failure_policy == "fallback_to_top" and fallback_selected:
+                    fallback_reason = str(getattr(decision, "fallback_reason", "") or "Discord review did not complete")
+                    return SkillResult(
+                        status="success",
+                        outputs={
+                            "media_paths": fallback_selected,
+                            "selected_assets": fallback_selected,
+                            "selected_count": len(fallback_selected),
+                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
+                            "rejected_assets": [],
+                            "selection_rationale": "Discord review did not complete; used the deterministic top-ranked candidate.",
+                            "regeneration_notes": decision.edited_text or str(context.node.inputs.get("review_notes") or ""),
+                            "review_mode": decision.review_mode,
+                            "reviewer": decision.reviewer,
+                            "review_session_id": decision.session_id,
+                            "review_session_path": decision.session_path,
+                            "prompt_mode": str(bundle.get("prompt_mode", "template")),
+                            "fallback_reason": fallback_reason,
+                            "review_fallback_used": True,
+                        },
+                        logs=["Discord review did not complete; continued with the deterministic top-ranked candidate."],
+                    )
                 return SkillResult(
                     status="blocked",
                     outputs={
@@ -526,6 +586,10 @@ class AgentSocialSkills:
             selection_logs.append(
                 "Discord review disabled for this run; selection was automatic. Use --no-review only when that is intentional."
             )
+        if str(bundle.get("prompt_mode") or "") == "automatic_timeout_fallback":
+            selection_logs.append(
+                "Automatic vision/text review timed out; deterministic selection was recorded as a stage fallback."
+            )
         return SkillResult(
             status="success",
             outputs={
@@ -550,8 +614,9 @@ class AgentSocialSkills:
                 "review_delivery": review_delivery,
                 "edited_review_text": edited_review_text,
                 "fallback_reason": fallback_reason,
+                "auto_select_for_probe": auto_select_for_probe,
             },
-            metrics={"selected_count": len(selected)},
+            metrics={"selected_count": len(selected), "candidate_count": len(ranked), "auto_select_for_probe": auto_select_for_probe},
             logs=selection_logs,
         )
 
@@ -572,6 +637,20 @@ class AgentSocialSkills:
             summary = f"{name}: {premise}"
         else:
             summary = premise or objective
+        if not summary:
+            segment_output = context.state.node_outputs.get("script-plan", {})
+            segments = segment_output.get("segments", []) if isinstance(segment_output, dict) else []
+            segments = [item for item in segments if isinstance(item, dict)]
+            if segments:
+                first = str(segments[0].get("visual") or segments[0].get("narration") or "").strip()
+                last = str(segments[-1].get("end_state") or segments[-1].get("effect") or "").strip()
+                if first and last:
+                    summary = f"{first}；最後必須到達：{last}"
+                else:
+                    summary = first or last
+        if not summary:
+            goal_prompt = str(getattr(context.plan.goal, "prompt", "") or "").strip()
+            summary = goal_prompt
         if not summary:
             summary = "未提供故事摘要"
         return textwrap.shorten(" ".join(summary.split()), width=280, placeholder="...")
@@ -651,19 +730,9 @@ class AgentSocialSkills:
 
     @staticmethod
     def _legacy_build_frame_review_text(*, story_summary: str, review_scope: str, candidate_count: int) -> str:
-        """Keep mandatory frame reviews focused on the decision the user must make."""
-        story = story_summary or "未提供故事摘要"
-        if review_scope == "first_frame":
-            last_asset = max(1, candidate_count)
-            return (
-                f"故事：{story}\n\n"
-                f"請選擇最適合的開場首幀：Asset 1-{last_asset}\n"
-                "六張都不合格請按 Reject。"
-            )
-        return (
-            f"故事：{story}\n\n"
-            "請確認結尾畫面是否符合故事。符合請按 Accept，不符合請按 Reject。"
-        )
+        """Keep the retired frame-review helper compatible without old copy."""
+        del story_summary, review_scope, candidate_count
+        return "stage: preview"
 
     @staticmethod
     def _legacy_build_review_text(
@@ -717,31 +786,18 @@ class AgentSocialSkills:
     def _build_opening_frame_review_text(
         *, story_summary: str, candidate_count: int, strategy: str = "unknown"
     ) -> str:
-        story = story_summary or "未提供故事摘要"
-        return (
-            f"策略：{strategy or 'unknown'}\n\n"
-            f"故事：{story}\n\n"
-            f"請選擇最適合的開場首幀：Asset 1-{max(1, candidate_count)}\n"
-            "判斷依據：第一眼要有可愛爆擊或清楚表情；第一秒已開始動作；只有一個 Kirby；一個簡單道具形成單一可讀笑點；畫面沒有文字、水印、複雜入口或多角色對峙。\n"
-            "不要選只是站著看光球或入口、只有漂亮背景、或看不懂任務的畫面。所有候選都不合格請按 Reject。"
-        )
+        del story_summary, candidate_count, strategy
+        return "stage: preview"
 
     @staticmethod
     def _build_ending_frame_review_text(*, story_summary: str) -> str:
-        story = story_summary or "未提供故事摘要"
-        return (
-            f"故事：{story}\n\n"
-            "請確認結尾畫面是否符合故事。符合請按 Accept，不符合請按 Reject。"
-        )
+        del story_summary
+        return "stage: preview"
 
     @staticmethod
     def _build_reference_review_text(*, story_summary: str, candidate_count: int) -> str:
-        story = story_summary or "未提供故事摘要"
-        return (
-            f"故事：{story}\n\n"
-            f"請選擇要提供給後續生成使用的參考素材：Asset 1-{max(1, candidate_count)}\n"
-            "可選一個或多個；全部不合格請按 Reject。"
-        )
+        del story_summary, candidate_count
+        return "stage: preview"
 
     @staticmethod
     def _build_review_text(

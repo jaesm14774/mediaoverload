@@ -65,6 +65,29 @@ class AgenticPlannerTests(unittest.TestCase):
         video_check = next(node for node in plan.nodes if node.node_id == "video-asset-check")
         self.assertEqual(video_check.inputs["workflow_name"], "minimax_h3_lowvram_t2v")
 
+    def test_stage_probe_text2video_reviews_cover_without_conditioning_video(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="Kirby crosses one visible news-derived obstacle",
+            media_type="text2video",
+            duration_seconds=30,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "image_workflow_name": "krea2_turbo",
+                "video_workflow_name": "minimax_h3_lowvram_t2v",
+                "image_count": 6,
+                "enable_stage_review": True,
+                "stage_probe_auto_select": True,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        preview = next(node for node in plan.nodes if node.node_id == "stage-review-select")
+        animate = next(node for node in plan.nodes if node.node_id == "animate-video")
+
+        self.assertEqual(preview.inputs["review_scope"], "first_frame")
+        self.assertTrue(preview.inputs["auto_select_for_probe"])
+        self.assertIn("stage-review-select", animate.depends_on)
+
     def test_segment_prepare_does_not_append_ordinary_idea_prompt_as_review_direction(self) -> None:
         class FakePromptEngine:
             def prepare_segment(self, *args, **kwargs):
@@ -133,6 +156,49 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(plan.workflow_name, "text2img2img_v1")
         self.assertIn("refine-image", [node.node_id for node in plan.nodes])
 
+    def test_stage_probe_image_plan_keeps_candidates_and_auto_selects_one(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="Kirby catches one visible news-derived object",
+            media_type="image",
+            duration_seconds=30,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "workflow_name": "krea2_turbo",
+                "image_count": 4,
+                "review_selection_limit": 1,
+                "stage_probe_auto_select": True,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        preview = next(node for node in plan.nodes if node.node_id == "stage-preview-select")
+
+        self.assertEqual(preview.inputs["limit"], 1)
+        self.assertTrue(preview.inputs["auto_select_for_probe"])
+        self.assertFalse(preview.inputs["require_human_review"])
+        self.assertEqual(preview.depends_on, ["render-image"])
+
+    def test_stage_probe_text2img2img_refines_selected_candidate(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="Kirby catches one visible news-derived object",
+            media_type="text2img2img",
+            duration_seconds=30,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "image_workflow_name": "krea2_turbo",
+                "refine_workflow_name": "krea2_turbo_img2img",
+                "image_count": 4,
+                "stage_probe_auto_select": True,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        preview = next(node for node in plan.nodes if node.node_id == "stage-preview-select")
+        refine = next(node for node in plan.nodes if node.node_id == "refine-image")
+
+        self.assertTrue(preview.inputs["auto_select_for_probe"])
+        self.assertIn("stage-preview-select", refine.depends_on)
+
     def test_sticker_pack_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
             prompt="cute reaction pack for rainy ramen shop",
@@ -143,7 +209,7 @@ class AgenticPlannerTests(unittest.TestCase):
             constraints={"character": "Kirby"},
         )
         plan = self.planner.build_plan(goal)
-        self.assertEqual(plan.workflow_name, "nova_model_plus_z_image_anime")
+        self.assertEqual(plan.workflow_name, "krea2_turbo")
         self.assertEqual(
             [node.skill_name for node in plan.nodes],
             [
@@ -164,16 +230,16 @@ class AgenticPlannerTests(unittest.TestCase):
             auto_download_assets=False,
             constraints={
                 "character": "Kirby",
-                "workflow_name": "nova-anime-xl",
-                "image_workflow_name": "nova-anime-xl",
+                "workflow_name": "krea2_turbo",
+                "image_workflow_name": "krea2_turbo",
             },
         )
         plan = self.planner.build_plan(goal)
         render_node = next(node for node in plan.nodes if node.node_id == "render-stickers")
 
-        self.assertEqual(plan.workflow_name, "nova-anime-xl")
-        self.assertEqual(plan.metadata["selected_workflow"], "nova-anime-xl")
-        self.assertEqual(render_node.inputs["workflow_name"], "nova-anime-xl")
+        self.assertEqual(plan.workflow_name, "krea2_turbo")
+        self.assertEqual(plan.metadata["selected_workflow"], "krea2_turbo")
+        self.assertEqual(render_node.inputs["workflow_name"], "krea2_turbo")
 
     def test_animated_sticker_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
@@ -450,6 +516,29 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertTrue(review.inputs["require_human_review"])
         self.assertIn("stage-review-select", animate.depends_on)
 
+    def test_pre_video_text2img2video_can_skip_unconsumed_upscale(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="Kirby taps one glowing jelly cube",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "pre_video_review_enabled": True,
+                "pre_video_candidate_count": 6,
+                "pre_video_review_require_human": True,
+                "skip_upscale_for_i2v": True,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        node_ids = [node.node_id for node in plan.nodes]
+        review = next(node for node in plan.nodes if node.node_id == "stage-review-select")
+        video_check = next(node for node in plan.nodes if node.node_id == "video-asset-check")
+
+        self.assertNotIn("upscale-image", node_ids)
+        self.assertEqual(review.depends_on, ["render-image"])
+        self.assertEqual(video_check.depends_on, ["render-image"])
+
     def test_text2video_stage_review_gates_video_generation(self) -> None:
         goal = self.planner.create_goal(
             prompt="robot chef in rainy alley",
@@ -551,7 +640,7 @@ class AgenticPlannerTests(unittest.TestCase):
             style="anime key visual",
             auto_download_assets=False,
             constraints={
-                "image_workflow_name": "nova-anime-xl",
+                "image_workflow_name": "krea2_turbo",
                 "video_workflow_name": "minimax_h3_lowvram_i2v",
                 "upscale_workflow_name": "Tile Upscaler SDXL",
                 "image_count": 3,
@@ -561,9 +650,49 @@ class AgenticPlannerTests(unittest.TestCase):
         render_node = next(node for node in plan.nodes if node.node_id == "render-image")
         video_check_node = next(node for node in plan.nodes if node.node_id == "video-asset-check")
 
-        self.assertEqual(render_node.inputs["workflow_name"], "nova-anime-xl")
+        self.assertEqual(render_node.inputs["workflow_name"], "krea2_turbo")
         self.assertEqual(render_node.inputs["image_count"], 3)
         self.assertEqual(video_check_node.inputs["workflow_name"], "minimax_h3_lowvram_i2v")
+
+    def test_text2img2video_without_pre_video_review_renders_one_keyframe(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="kirby rainy ramen alley short",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "pre_video_review_enabled": False,
+                "image_count": 1,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        render_node = next(node for node in plan.nodes if node.node_id == "render-image")
+
+        self.assertEqual(render_node.inputs["image_count"], 1)
+        self.assertNotIn("stage-review-select", [node.node_id for node in plan.nodes])
+
+    def test_text2img2video_can_skip_unconsumed_upscale_for_raw_i2v_frame(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="kirby taps one jelly cube",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "pre_video_review_enabled": False,
+                "image_count": 1,
+                "skip_upscale_for_i2v": True,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        node_ids = [node.node_id for node in plan.nodes]
+        video_check = next(node for node in plan.nodes if node.node_id == "video-asset-check")
+        animate = next(node for node in plan.nodes if node.node_id == "animate-video")
+
+        self.assertNotIn("upscale-image", node_ids)
+        self.assertEqual(video_check.depends_on, ["render-image"])
+        self.assertNotIn("upscale-image", animate.depends_on)
 
     def test_image_plan_render_node_depends_on_idea_brief(self) -> None:
         # Regression test: render-image must depend on idea-brief so that the

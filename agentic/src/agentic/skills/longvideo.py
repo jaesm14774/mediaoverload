@@ -5,11 +5,16 @@ from pathlib import Path
 from agentic.h3_reference import build_reference_lineage, format_ref2va_prompt, normalize_reference_manifest
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.minimax_prompting import structured_visual_prompt
-from agentic.runtime.prompting import build_minimax_h3_prompt, build_story_segments
+from agentic.runtime.prompting import (
+    build_minimax_h3_prompt,
+    build_story_segments,
+    validate_story_anchor,
+    validate_story_segments,
+)
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
-from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value
+from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
 from agentic.storyboard import format_native_h3_prompt, load_storyboard
 
 
@@ -70,6 +75,7 @@ class LongVideoSkills:
         segment_count = int(context.node.inputs["segment_count"])
         brief = str(context.state["idea-brief"]["creative_brief"])
         segments = build_story_segments(context.plan.goal, brief, segment_count, "playful cinematic escalation")
+        validate_story_anchor(context.plan.goal, validate_story_segments(segments, segment_count))
         return SkillResult(
             status="success",
             outputs={"segments": segments, "segment_count": segment_count},
@@ -102,6 +108,11 @@ class LongVideoSkills:
             or 15
         )
         style = str(context.node.inputs.get("style") or context.plan.goal.style)
+        style_contract = str(
+            context.plan.goal.constraints.get("native_h3_visual_style_contract") or ""
+        ).strip()
+        if style_contract:
+            style = f"{style}; {style_contract}"
         configured_brief = str(
             context.plan.goal.constraints.get("native_h3_creative_brief") or ""
         ).strip()
@@ -199,7 +210,8 @@ class LongVideoSkills:
 
     def render_segment_video(self, context: SkillContext) -> SkillResult:
         segment = self._segment(context)
-        run_dir = self._build_run_dir(context.plan.goal.prompt, f"{segment['segment_id']}_video")
+        segment_slug = slug_path_component(segment.get("segment_id"), default="segment")
+        run_dir = self._build_run_dir(context.plan.goal.prompt, f"{segment_slug}_video")
         recipe = str(context.node.inputs.get("recipe") or "anchor_first")
         workflow_name = str(
             context.node.inputs.get("workflow_name")

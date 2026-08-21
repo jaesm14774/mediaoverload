@@ -6,7 +6,10 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
+YOUTUBE_SCOPE = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+]
 
 
 def _read_client_config(client_secret_path: Path) -> tuple[str, str]:
@@ -36,7 +39,7 @@ def generate_token(character: str, client_secret_path: Path) -> Path:
     credentials = flow.run_local_server(
         host="localhost",
         port=0,
-        authorization_prompt_message="Open the browser to authorize YouTube upload access.",
+        authorization_prompt_message="Open the browser to authorize YouTube upload and read-only access.",
         success_message="YouTube authorization succeeded. You can close this tab.",
         access_type="offline",
         prompt="consent",

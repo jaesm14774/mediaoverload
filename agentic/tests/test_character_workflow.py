@@ -14,9 +14,11 @@ from unittest.mock import patch
 import yaml
 
 from agentic.app.character_workflow import (
+    _effective_publish_after_generate,
     _extract_failure_details,
     _extract_publish_visual_grounding,
     _collect_count_policies,
+    _asset_qualified_workflow_candidates,
     _route_generation_from_character_config,
     _select_fresh_news,
     _resolve_publish_prompt,
@@ -71,6 +73,82 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("kirby_native_15s.yaml"))
         self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
 
+        default_short = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby taps one glowing jelly cube",
+            preferred_generation_type="text2image2video",
+            publish_after_generate=False,
+        )
+        self.assertEqual(default_short["duration_seconds"], 5)
+
+    def test_no_review_text2image2video_uses_one_keyframe_without_pre_video_gate(self) -> None:
+        payload = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby taps one glowing jelly cube and it wobbles back into place",
+            preferred_generation_type="text2image2video",
+            no_review=True,
+            publish_after_generate=False,
+        )
+
+        self.assertEqual(payload["routing"]["count_plan"]["image_count"], 1)
+        self.assertEqual(payload["constraints"]["image_count"], 1)
+        self.assertFalse(payload["constraints"]["pre_video_review_enabled"])
+        self.assertFalse(payload["constraints"]["enable_stage_review"])
+        self.assertTrue(payload["constraints"]["skip_upscale_for_i2v"])
+
+    def test_reviewed_text2image2video_keeps_six_candidates_but_skips_unconsumed_upscale(self) -> None:
+        payload = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby taps one glowing jelly cube and it wobbles back into place",
+            preferred_generation_type="text2image2video",
+            publish_after_generate=False,
+        )
+
+        self.assertEqual(payload["routing"]["count_plan"]["image_count"], 6)
+        self.assertTrue(payload["constraints"]["pre_video_review_enabled"])
+        self.assertTrue(payload["constraints"]["skip_upscale_for_i2v"])
+
+    def test_explicit_generation_override_still_randomizes_stage_workflow(self) -> None:
+        first = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby taps one glowing jelly cube",
+            preferred_generation_type="text2image2video",
+            publish_after_generate=False,
+            rng=random.Random(0),
+        )
+        second = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby taps one glowing jelly cube",
+            preferred_generation_type="text2image2video",
+            publish_after_generate=False,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(first["constraints"]["routing_selection_source"], "explicit_override")
+        self.assertEqual(first["routing"]["workflow_selection_mode"], "weighted_random")
+        self.assertNotEqual(
+            first["routing"]["workflow_plan"]["image_workflow_name"],
+            second["routing"]["workflow_plan"]["image_workflow_name"],
+        )
+
+    def test_empty_asset_manifest_is_not_treated_as_ready_for_routing(self) -> None:
+        class Registry:
+            def ensure_workflow_ready(self, name, auto_download):
+                del auto_download
+                if name == "ready":
+                    return {"asset_status": [{"status": "ready"}]}
+                return {"asset_status": []}
+
+        self.assertEqual(
+            _asset_qualified_workflow_candidates(["unverified", "ready"], Registry()),
+            ["ready"],
+        )
+
     def test_weighted_route_selects_strategy_before_content_prompt(self) -> None:
         payload = build_goal_payload_from_character_config(
             self.repo_root,
@@ -84,6 +162,25 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
         self.assertEqual(payload["constraints"]["routing_prompt_mode"], "weighted_random")
         self.assertEqual(payload["prompt"], "Kirby protects a glowing orb in a clear three-beat story")
+
+    def test_bare_character_command_defaults_to_autonomous_e2e_route(self) -> None:
+        config = load_character_config(self.kirby_config)
+
+        result = _route_generation_from_character_config(
+            self.repo_root,
+            config,
+            character_name="Kirby",
+            style="polished 2D anime",
+            prompt="",
+            preferred_generation_type=None,
+            requested_duration_seconds=None,
+            rng=random.Random(0),
+        )
+
+        self.assertEqual(result["generation_type"], "native_h3_story")
+        self.assertEqual(result["selection_source"], "autonomous_e2e_default")
+        self.assertEqual(result["prompt_mode"], "autonomous_e2e")
+        self.assertTrue(result["workflow_plan"]["video_workflow_name"])
 
     def test_weighted_route_can_select_sticker_without_llm_strategy_routing(self) -> None:
         config = load_character_config(self.kirby_config)
@@ -239,6 +336,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(result["failure_reason"], "PromptGenerationError: hook motion missing")
         self.assertEqual(result["failure_node"], "native-story-prompt")
         self.assertEqual(result["failure_skill"], "longvideo.prepare_native_h3_story")
+        self.assertEqual(result["stage_status"]["render"]["status"], "failed")
+        self.assertEqual(result["stage_status"]["publish"]["status"], "not_requested")
+        self.assertEqual(result["artifacts"]["media_paths"], [])
 
     def test_build_goal_payload_uses_llm_routed_strategy_and_workflow(self) -> None:
         with patch(
@@ -479,6 +579,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 self.repo_root,
                 self.kirby_config,
                 prompt="",
+                preferred_generation_type="text2video",
             )
 
         self.assertEqual(
@@ -585,7 +686,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 prompt="",
                 news_driven=True,
                 news_history_path=str(Path(temp_dir) / "news-history.json"),
-                rng=random.Random(1),
+                rng=random.Random(3),
                 output_dir=str(Path(temp_dir) / "output"),
                 publish_after_generate=False,
             )
@@ -668,6 +769,43 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertIn("youtube", payload["constraints"]["platforms"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "Kirby")
         self.assertNotIn("twitter", payload["character_config_summary"]["enabled_platforms"])
+
+    def test_image_only_route_removes_youtube_from_publish_platforms(self) -> None:
+        with patch(
+            "agentic.app.character_workflow.load_global_social_config",
+            return_value={
+                "social_media": {
+                    "platforms": {
+                        "youtube": {
+                            "config_folder_path": "/app/configs/social_media/credentials/kirby",
+                            "enabled": True,
+                        },
+                        "instagram_graph": {
+                            "config_folder_path": "/app/configs/social_media/credentials/kirby",
+                            "enabled": True,
+                        },
+                    }
+                }
+            },
+        ), patch(
+            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            return_value={"prompt": "Kirby portrait", "source": "template", "prompt_mode": "template", "news_context": {}},
+        ):
+            payload = build_goal_payload_from_character_config(
+                self.repo_root,
+                self.kirby_config,
+                preferred_generation_type="text2img",
+                publish_after_generate=True,
+            )
+
+        self.assertNotIn("youtube", payload["constraints"]["platforms"])
+        self.assertIn("youtube:image_only_route", payload["constraints"]["skipped_platforms"])
+        self.assertIn("instagram_graph", payload["constraints"]["platforms"])
+
+    def test_stage_probe_cannot_publish_auto_selected_artifact(self) -> None:
+        self.assertFalse(_effective_publish_after_generate(requested=True, stage_probe=True))
+        self.assertTrue(_effective_publish_after_generate(requested=True, stage_probe=False))
+        self.assertFalse(_effective_publish_after_generate(requested=False, stage_probe=False))
 
     def test_build_goal_payload_skips_disabled_and_unsupported_platforms(self) -> None:
         temp_dir = self.repo_root / ".tmp-tests" / "character-workflow"
@@ -784,10 +922,19 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 prompt="Kirby short rainy alley clip",
                 enable_review_loop=True,
             )
+            probe_payload = build_goal_payload_from_character_config(
+                self.repo_root,
+                self.kirby_config,
+                prompt="Kirby text to video stage probe",
+                preferred_generation_type="text2video",
+                stage_probe=True,
+            )
 
         self.assertEqual(automatic_payload["media_type"], "text2img2video")
         self.assertFalse(automatic_payload["constraints"]["enable_stage_review"])
         self.assertTrue(reviewed_payload["constraints"]["enable_stage_review"])
+        self.assertEqual(probe_payload["source_generation_type"], "text2video")
+        self.assertTrue(probe_payload["constraints"]["enable_stage_review"])
 
 
 if __name__ == "__main__":

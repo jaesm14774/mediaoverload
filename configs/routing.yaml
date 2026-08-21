@@ -1,9 +1,9 @@
 routing:
   enabled: true
   strategy_candidates:
-    # Disabled because current output quality is not acceptable. These routes
-    # remain available only when explicitly requested with --generation-type.
-    # - text2img
+    - text2img
+    # Disabled because current output quality is not acceptable. This route
+    # remains available only when explicitly requested with --generation-type.
     # - text2video
     - text2image2video
     - text2longvideo
@@ -19,6 +19,7 @@ routing:
     - sticker_pack
 
   strategy_aliases:
+    t2i: text2img
     t2i2native_h3_ref2va: text2image2native_h3_ref2va
 
   # Image-conditioned routes use a human-reviewed image gate before video
@@ -30,6 +31,9 @@ routing:
     default_selection_limit: 1
     ref2va_selection_limit: 4
     reject_stops_workflow: true
+    # A Discord transport/timeout failure should not erase a valid keyframe
+    # run. Explicit human Reject remains a hard stop.
+    failure_policy: fallback_to_top
 
   longvideo_config:
     mix_weights:
@@ -39,44 +43,100 @@ routing:
       reference_bundle: 2
     review_policy: opening_only
 
+  # Scheduler runs use a persisted shuffle bag so a short run window cannot
+  # accidentally repeat the same strategy while still respecting weights.
+  route_diversity:
+    enabled: true
+    history_window: 24
+
+  # These are applied only after workflow JSON candidates are resolved and
+  # locally available required assets are checked.  Keep Krea available, but
+  # do not make it the implicit first-choice winner for every image stage.
+  workflow_selection_weights:
+    image_workflow_name:
+      krea2_turbo: 3
+      anima_anime: 2
+      nova-anime-xl: 2
+      z_image_plus_nova_model: 1
+      nova_model_plus_z_image_anime: 1
+      kirby_keyframe_anima: 1
+    refine_workflow_name:
+      krea2_turbo_img2img: 3
+      image_to_image: 2
+      kirby_continuity_img2img: 1
+      kirby_identity_img2img: 1
+    transition_workflow_name:
+      krea2_turbo_img2img: 3
+      image_to_image: 2
+      kirby_continuity_img2img: 1
+      kirby_identity_img2img: 1
+    video_workflow_name:
+      minimax_h3_lowvram_i2v: 3
+      minimax_h3_lowvram_t2v: 3
+      minimax_h3_lowvram_15s_fl2va_i2v: 3
+      minimax_h3_ref2va: 2
+      minimax_h3_native_t2v: 1
+
   workflow_stage_candidates:
     text2img:
       image_workflow_name:
+        - krea2_turbo
         - anima_anime
-        - z_image_plus_nova_model
         - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
     text2video:
       image_workflow_name:
-        - z_image_plus_nova_model
+        - krea2_turbo
+        - anima_anime
         - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_t2v
         - minimax_h3_native_t2v
     text2image2video:
       image_workflow_name:
-        - z_image_plus_nova_model
+        - krea2_turbo
         - anima_anime
+        - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_i2v
       upscale_workflow_name:
         - Tile Upscaler SDXL
     text2longvideo:
       image_workflow_name:
-        - z_image_plus_nova_model
+        - krea2_turbo
+        - anima_anime
         - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_i2v
       transition_workflow_name:
+        - krea2_turbo_img2img
         - image_to_image
-        - z_image_i2i_anime
+        - kirby_continuity_img2img
+        - kirby_identity_img2img
     native_h3_story:
       image_workflow_name:
-        - kirby_keyframe_anima
+        - krea2_turbo
         - anima_anime
         - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_15s_fl2va_i2v
       refine_workflow_name:
+        - krea2_turbo_img2img
+        - image_to_image
         - kirby_continuity_img2img
         - kirby_identity_img2img
     native_h3_t2v_story:
@@ -85,14 +145,22 @@ routing:
         - minimax_h3_native_t2v
     native_h3_fl2va_story:
       image_workflow_name:
-        - kirby_keyframe_anima
+        - krea2_turbo
         - anima_anime
+        - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_15s_fl2va_i2v
     native_h3_l2va_story:
       image_workflow_name:
-        - kirby_keyframe_anima
+        - krea2_turbo
         - anima_anime
+        - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_15s_fl2va_i2v
     native_h3_ref2va:
@@ -100,23 +168,35 @@ routing:
         - minimax_h3_ref2va
     text2image2native_h3_ref2va:
       image_workflow_name:
-        - kirby_keyframe_anima
+        - krea2_turbo
         - anima_anime
         - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_ref2va
     text2image2image:
       image_workflow_name:
-        - nova_model_plus_z_image_anime
-        - nova-anime-xl
-      refine_workflow_name:
-        - image_to_image
-        - z_image_i2i_anime
-    sticker_pack:
-      image_workflow_name:
+        - krea2_turbo
         - anima_anime
         - nova-anime-xl
+        - z_image_plus_nova_model
         - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
+      refine_workflow_name:
+        - krea2_turbo_img2img
+        - image_to_image
+        - kirby_continuity_img2img
+        - kirby_identity_img2img
+    sticker_pack:
+      image_workflow_name:
+        - krea2_turbo
+        - anima_anime
+        - nova-anime-xl
+        - z_image_plus_nova_model
+        - nova_model_plus_z_image_anime
+        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_lowvram_i2v
 
@@ -573,10 +653,25 @@ routing:
       - "若使用者明確要求 sticker、line 貼圖、reaction pack、聊天表情包，優先選 sticker_pack。"
       - "若需求包含連續故事、旁白、章節、分鏡、episode、multi-scene，優先選 text2longvideo。"
       - "若需求是短影片，但角色外觀必須先鎖定，優先選 text2image2video。"
+      - "若需求是 5-9 秒、單一可愛 physical gag、食物／桌面互動、誇張伸縮、反應 loop 或小角色對大物件的比例笑點，優先選 text2image2video；先審核一張首幀，再用 I2V 完成一個可回看的動作。"
+      - "短 gag 只需要一個主道具、一個主動作、一個反應和一個 settled payoff；不要為了填滿時長改走 text2longvideo 或堆疊多個劇情裝置。"
       - "若需求只有單鏡頭動態或展示型 motion，沒有長篇敘事，優先選 text2video。"
       - "若使用者描述保留原圖、原構圖、原角色，只做修圖或風格微調，優先選 text2image2image。"
       - "若需求重點是單張高品質畫面、角色立繪、封面、海報、概念圖，優先選 text2img。"
     workflow_preferences:
+      krea2_turbo:
+        - Kirby character
+        - anime character
+        - text to image
+        - semantic prompt understanding
+        - clean 2D illustration
+        - 16:9 keyframe
+      krea2_turbo_img2img:
+        - Kirby identity continuity
+        - preserve composition
+        - subtle redraw
+        - image refinement
+        - low denoise
       anima_anime:
         - anime character
         - line sticker
@@ -586,7 +681,6 @@ routing:
         - mascot style
       nova-anime-xl:
         - anime character
-        - line sticker
         - detailed illustration
         - scenic background
         - polished key visual
@@ -610,6 +704,11 @@ routing:
         - approved first frame
         - direct Anima render
         - story keyframe candidates
+      image_to_image:
+        - preserve composition
+        - refine existing image
+        - redraw with same layout
+        - fix anatomy
       kirby_continuity_img2img:
         - Kirby continuity frame
         - subtle identity correction
@@ -653,77 +752,76 @@ routing:
         - reference video motion
         - identity and style preservation
         - no reference audio
-      image_to_image:
-        - preserve composition
-        - refine existing image
-        - redraw with same layout
-        - fix anatomy
-      z_image_i2i_anime:
-        - anime refine
-        - preserve anime identity
-        - expressive anime cleanup
-        - style-consistent redraw
       Tile Upscaler SDXL:
         - upscale final image
         - recover details
         - higher resolution
         - texture enhancement
     workflow_descriptions:
+      krea2_turbo:
+        summary: "本機 RTX 4060 8GB 取向的 Krea 2 Turbo 低 VRAM T2I workflow；以 Q4_0 GGUF、Qwen3-VL 4B 與 Qwen Image VAE 產生 Kirby 首幀或參考圖。"
+        strengths:
+          - "使用官方 Krea 2 Turbo 的 8-step、Euler、simple、CFG 1 取向，並關閉 prompt enhancer，避免模型自行補入角色外觀描述。"
+          - "正面 prompt 由 runtime 的原始需求直接注入；預設 placeholder 只有角色名稱、場景與畫面比例，不暗藏 Kirby 外觀特徵。"
+          - "16:9 1024x576 預設與現有 H3 608x352 影片畫面對齊，適合先產生可審核首幀再交給 I2V。"
+        tradeoffs:
+          - "Krea 2 Turbo 是 T2I，不是原生 T2V；影片仍由 MiniMax H3 I2V 或純 T2V workflow 完成。"
+          - "Q4_0 GGUF 是 8GB GPU 的可行起點，會比官方 FP8／BF16 有較明顯的量化取捨；需以本機實際 render 驗證品質。"
+      krea2_turbo_img2img:
+        summary: "Krea 2 Turbo 低 denoise img2img workflow，用於 Kirby 首幀審核後的 continuity／identity 微調。"
+        strengths:
+          - "沿用相同 Krea 2 Turbo、Qwen3-VL 4B 與 VAE，提供首幀與修圖階段的低 VRAM 連續性選項；Anima、Nova 與混合 workflow 仍保留作為其他候選。"
+          - "預設 8 steps、Euler、simple、CFG 1 與 denoise 0.25，偏向保留輸入構圖，而非重新生成另一個角色。"
+        tradeoffs:
+          - "這是影像修正階段，不是影片生成；過高 denoise 仍可能改變角色身份或構圖。"
       anima_anime:
-        summary: "Anima Preview 2 路線的 anime 生圖 workflow，內建 anime upscaling，偏乾淨線條、角色表情與純二次元視覺。"
+        summary: "Anima Preview 2 anime 生圖 workflow，保留作為 Krea2 之外的角色與貼圖候選。"
         strengths:
-          - "workflow 使用可用的 `anima-aesthetic-v1.1`、`qwen_image_vae` 與 `qwen_3_06b_base`，適合 anime 角色主體明確的出圖。"
-          - "相對適合 line sticker、角色立繪、Q 版或簡潔背景場景。"
-          - "推薦預設有固定 steps 與 cfg，適合穩定產生角色母圖。"
+          - "偏乾淨線條、角色表情與簡潔二次元構圖。"
         tradeoffs:
-          - "對超複雜背景、厚塗質感、封面級大場景不一定比 SDXL 類 anime checkpoint 強。"
+          - "需要本機 Anima 資產；未安裝時 runtime 會在資產檢查階段拒絕執行。"
       nova-anime-xl:
-        summary: "以 SDXL anime checkpoint 為主的高完成度插畫 workflow，適合精緻角色圖、背景完整的場景圖與主視覺。"
+        summary: "Nova SDXL anime workflow，適合高完成度角色圖、完整背景與主視覺。"
         strengths:
-          - "manifest 顯示依賴 `novaAnimeXL_ilV140`、`reiXL_NB11`、`waiIllustriousSDXL_v150`，偏向高完成度角色與插畫感。"
-          - "更適合 detailed illustration、奇幻場景、封面圖、主視覺與背景敘事。"
-          - "當需求提到高細節、精緻背景、2.5D anime 時可優先考慮。"
+          - "偏精緻角色、場景敘事與封面級構圖。"
         tradeoffs:
-          - "若目標是快速多輪試稿，速度通常不如 turbo 類流程。"
-      nova_model_plus_z_image_anime:
-        summary: "結合 Nova 與 Z-Image Turbo Anime 的快速 anime workflow，偏 8-step、快速試稿、多候選探索與 prompt 迭代。"
-        strengths:
-          - "manifest 顯示依賴 `zImageTurboAnime_aioBF16` 與 8-step control 類資產，定位偏快而不是極限精修。"
-          - "適合先看方向、做多張候選、快速 A/B 測試。"
-          - "較適合拿來做第一輪 key visual 或影片首幀探索。"
-        tradeoffs:
-          - "若要單張最終成品感與高細節堆疊，常常仍會輸給 nova-anime-xl。"
+          - "需要本機 Nova/SDXL 資產，速度與顯存需求高於 Krea2 Q4。"
       z_image_plus_nova_model:
-        summary: "先用 Z Image Turbo 生成構圖，再以 SDXL reference-attention 路線做二階段細化的混合 workflow。"
+        summary: "Z-Image Turbo 先構圖、Nova SDXL 後細化的混合 workflow；保留為明確的混合候選，不是純 Z-Image 路線。"
         strengths:
-          - "graph 同時包含 `z_image_turbo_bf16`、Qwen 3 文字編碼與 SDXL `waiIllustriousSDXL_v150`。"
-          - "第二階段使用 reference preprocessor、reference ControlNet 與 SDXL sampler，適合快速探索後再穩定構圖。"
-          - "適合 text2img 的動態構圖與需要多候選的 anime 初稿。"
+          - "適合快速探索後再做 reference-attention 細化。"
         tradeoffs:
-          - "這是兩階段靜態圖 workflow，不是 video workflow；reference image 只屬於此圖像細化階段。"
-          - "比單一 turbo 出圖更吃顯存與執行時間。"
+          - "兩階段圖像流程較吃資源，且需要 Z-Image 與 Nova 資產。"
+      nova_model_plus_z_image_anime:
+        summary: "Nova 與 Z-Image Anime 混合 workflow，保留作為 hybrid anime refine/key visual 候選。"
+        strengths:
+          - "可用於受控重繪、快速 key visual 迭代與身份保留。"
+        tradeoffs:
+          - "需要完整 Nova 與 Z-Image Anime 資產；不等同於純 Z-Image workflow。"
       kirby_keyframe_anima:
-        summary: "Kirby 專用 Anima 直接生圖 keyframe workflow，用於 native H3 故事的開場候選與人工審核。"
+        summary: "Kirby 專用 Anima keyframe workflow，保留作為角色故事開場候選。"
         strengths:
-          - "graph 直接載入 Anima Preview 2、Qwen 文字編碼與 Qwen image VAE，輸出單張 landscape keyframe。"
-          - "適合先固定 Kirby 身份、服裝、構圖與故事開場，再交給 H3 I2VA。"
-          - "SaveImage 輸出可作為 immutable first frame 的上游素材。"
+          - "直接產生 landscape keyframe，可接 H3 I2V。"
         tradeoffs:
-          - "它只產生圖片，不會產生影片，也不會鎖定 H3 的最後一幀。"
+          - "需要 Anima 資產，Krea2 是目前已完成本機 live 驗證的首選。"
+      image_to_image:
+        summary: "通用 img2img refine workflow，保留給需要明顯構圖與細節重繪的需求。"
+        strengths:
+          - "可保留輸入構圖並做中度風格與細節修正。"
+        tradeoffs:
+          - "不是 Krea2 identity continuity 的低 denoise 預設。"
       kirby_continuity_img2img:
-        summary: "Kirby 連續性低 denoise img2img workflow，讀取上一張 frame 並做輕量身份與畫面延續修正。"
+        summary: "Kirby 低 denoise continuity workflow，保留前一幀身份與構圖。"
         strengths:
-          - "graph 讀取前一張 Kirby frame、以 VAEEncode 進入 latent，並使用 Anima denoise 0.18。"
-          - "適合故事段落間的 continuity refine，不應被當成全新構圖生成。"
+          - "適合故事段落間的連續性修正。"
         tradeoffs:
-          - "低 denoise 會保留較多原圖；若需要較強重繪，改用 kirby_identity_img2img。"
+          - "需要 Anima 資產，Krea2 img2img 是本機已驗證替代方案。"
       kirby_identity_img2img:
-        summary: "Kirby 身份一致性 img2img workflow，讀取既有 frame 並以較高 denoise 做角色外觀修正。"
+        summary: "Kirby identity refine workflow，保留作為較強角色修正候選。"
         strengths:
-          - "graph 讀取前一張 frame、使用同一套 Anima 模型，denoise 0.35 比 continuity 路線更能修正身份細節。"
-          - "適合角色辨識度、臉部、服裝或局部一致性需要加強的 keyframe refine。"
+          - "比 continuity 路線允許更多身份細節重繪。"
         tradeoffs:
-          - "比 kirby_continuity_img2img 允許更多重繪，可能改變原始構圖或細節。"
+          - "需要 Anima 資產，較高 denoise 可能改變原始構圖。"
       minimax_h3_lowvram_15s_fl2va_i2v:
         summary: "MiniMax H3 低 VRAM 15 秒影像條件 workflow；同一個 ImageToVideo node 可依輸入綁定 first frame、last frame 或兩者。"
         strengths:
@@ -766,20 +864,6 @@ routing:
         tradeoffs:
           - "需要先有可讀取的輸入圖片與 H3 模型資產，VRAM／system RAM 壓力高於一般生圖。"
           - "若沒有既有畫面控制需求，純 prompt 的 `minimax_h3_lowvram_t2v` 更直接。"
-      image_to_image:
-        summary: "通用 img2img refine workflow，適合保留原圖構圖與主體後，做較明顯的風格重繪與細節修正。"
-        strengths:
-          - "manifest 推薦 `denoise: 0.7`，代表不是只做輕微修飾，而是允許中度改寫。"
-          - "適合修手、修臉、補背景、統一畫風或做 transition frame。"
-        tradeoffs:
-          - "若需求強調 anime identity 延續，通常不如 `z_image_i2i_anime` 對口。"
-      z_image_i2i_anime:
-        summary: "anime 向 img2img refine workflow，適合維持 anime 語彙、角色 identity 與色彩一致性。"
-        strengths:
-          - "manifest 直接綁定 `zImageTurboAnime_aioBF16`，更偏 anime 角色修圖。"
-          - "適合 anime 化重繪、角色一致化、表情修正與局部 cleanup。"
-        tradeoffs:
-          - "若要跨風格或偏寫實重構，泛用 `image_to_image` 可能更彈性。"
       Tile Upscaler SDXL:
         summary: "最終放大與細節回填 workflow，適合交付前提升解析度、紋理細節與局部清晰度。"
         strengths:

@@ -6,7 +6,7 @@ from typing import Any
 from agentic.storyboard import build_storyboard_segments, load_storyboard, story_state_contract
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt
+from agentic.minimax_prompting import compose_minimax_h3_prompt, short_action_contract, structured_visual_prompt
 
 
 LONG_VIDEO_SYSTEM_PROMPT = """
@@ -22,6 +22,8 @@ Non-negotiable rules:
 - Do not recreate a headline literally or stage a newsroom/documentary frame unless explicitly requested.
 - The named character must remain the hero, while the news-derived element gives the hero a concrete objective, obstacle, or consequence.
 - For news-grounded workflows, preserve one recognizable news anchor across the hook, a later causal beat, and the payoff.
+- Default to one named protagonist, one dominant news mechanism, and one readable obstacle or prop; do not add supporting characters, crowds, or a duplicate protagonist unless the user explicitly requires an interaction.
+- Do not introduce speech bubbles, signs, screens, interfaces, readable symbols, pseudo-text, or scribbles; when the source involves communication, translate it into an unmarked physical object or visible action unless literal text is explicitly required.
 - Prefer tangible visuals over abstract summaries: props, architecture, lighting, weather, symbols, motion.
 - Prefer substantial actions that can sustain a full clip, not tiny repetitive motions.
 - Each shot must visibly progress from the previous one.
@@ -30,6 +32,9 @@ Non-negotiable rules:
 - For image-to-video, treat the first frame as authoritative and describe how it starts moving and evolves instead of redrawing it.
 - For text-to-video, establish the identity inside the first moving action instead of opening on a posed portrait.
 - When a clip has multiple beats, write timestamped shot progression in chronological order and include the cause/effect handoff.
+- For cute short-form work, prefer one dominant tactile prop or environmental force, one readable reaction, and one visible reversal; a small character against an oversized object or setting is a useful scale joke when it remains legible.
+- Physical comedy should have anticipation, contact or impact, reaction, and a settled result. Use squash-and-stretch, wobble, recoil, or elastic snap only when the visible action causes it.
+- If the clip is intended to loop, let the final settled composition echo the opening direction, prop, or pose without hiding the completed payoff.
 - Make the result generation-ready for diffusion and image-to-video models.
 """.strip()
 
@@ -42,6 +47,8 @@ Non-negotiable rules:
 - Exaggerated facial expression and body language.
 - Clean background, strong outline, simple shape language.
 - One emotion per sticker, visually obvious in under a second.
+- Prefer a locked or nearly locked camera and a clean, uncluttered field so the emotion survives thumbnail viewing.
+- For animated stickers, use one anticipation -> impact -> settle cycle, with elastic deformation caused by the action and an ending pose that can return to the opening pose cleanly.
 - If news context exists, reduce it to tiny symbolic accents instead of literal reporting.
 """.strip()
 
@@ -52,13 +59,17 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     news_context = _news_context(goal)
     action_directive = _action_directive(goal.media_type, goal.duration_seconds)
     continuity_directive = _continuity_directive(goal.media_type)
+    style_contract = str(goal.constraints.get("visual_style_contract") or "").strip()
+    style_direction = _style_directive(selected_style)
+    if style_contract:
+        style_direction = "; ".join(part for part in (style_direction, style_contract) if part)
     visual_prompt = structured_visual_prompt(
         subject=_hero_subject_clause(subject_anchor),
         scene=_core_scene_clause(goal.prompt, goal.media_type, news_context),
         action=action_directive,
         environment=f"{_news_fusion_clause(news_context)}; {continuity_directive}",
         camera=_camera_beat(0, 2) if goal.media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "image_to_video"} else "clear focal composition",
-        style=_style_directive(selected_style),
+        style=style_direction,
         quality=_quality_clause(goal.media_type),
     )
     negative_prompt = ", ".join(
@@ -75,6 +86,13 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
             "headline text",
             "news ticker",
             "literal newspaper layout",
+            "speech bubble",
+            "readable signs",
+            "pseudo-text",
+            "scribbles",
+            "interface",
+            "extra characters",
+            "crowd",
             "watermark",
             "text",
             "minimal motion",
@@ -100,12 +118,20 @@ def build_story_segments(
     storyboard_path = str(goal.constraints.get("storyboard_path", "") or "").strip()
     if storyboard_path:
         storyboard = load_storyboard(storyboard_path)
-        return build_storyboard_segments(
+        storyboard_segments = build_storyboard_segments(
             storyboard,
             segment_count=segment_count,
             tone=tone,
             style=goal.style,
             creative_brief=creative_brief,
+        )
+        for segment in storyboard_segments:
+            action_beats = segment.get("action_beats")
+            if not str(segment.get("action") or "").strip() and isinstance(action_beats, list):
+                segment["action"] = " ".join(str(beat).strip() for beat in action_beats if str(beat).strip())
+        return validate_story_segments(
+            storyboard_segments,
+            segment_count,
         )
     character = str(goal.constraints.get("character", "") or "").strip()
     subject_anchor = character or goal.prompt
@@ -118,6 +144,12 @@ def build_story_segments(
         motion = _motion_beat(index, segment_count)
         environment = _environment_beat(goal.prompt, index, segment_count, motif_pool)
         motif_clause = _segment_motif_clause(motif_pool, index)
+        start_state = (
+            segments[-1]["end_state"]
+            if segments
+            else f"{subject_anchor} is present at the opening location before the first action"
+        )
+        end_state = f"{subject_anchor} has completed the {stage} movement and the primary visual state has changed"
         visual = structured_visual_prompt(
             subject=_hero_subject_clause(subject_anchor),
             scene=f"story stage: {stage}; tone: {tone}",
@@ -137,8 +169,61 @@ def build_story_segments(
                 "narration": narration,
                 "stage": stage,
                 "camera": camera,
+                "action": motion,
+                "start_state": start_state,
+                "end_state": end_state,
+                "cause": f"{subject_anchor} takes the next physical action because the previous state creates a clear immediate objective",
+                "effect": f"The changed state opens the {('next' if index < segment_count - 1 else 'resolved')} story beat",
                 "creative_brief": creative_brief,
             }
+        )
+    return validate_story_segments(segments, segment_count)
+
+
+def validate_story_segments(
+    segments: list[dict[str, Any]],
+    expected_count: int,
+) -> list[dict[str, Any]]:
+    """Fail before rendering when a story cannot express visible causality."""
+    required_fields = (
+        "segment_id",
+        "visual",
+        "narration",
+        "action",
+        "camera",
+        "start_state",
+        "end_state",
+        "cause",
+        "effect",
+    )
+    errors: list[str] = []
+    if len(segments) != expected_count:
+        errors.append(f"expected {expected_count} segments, received {len(segments)}")
+    for index, segment in enumerate(segments):
+        missing = [field for field in required_fields if not str(segment.get(field) or "").strip()]
+        if missing:
+            errors.append(f"segment {index + 1} missing: {', '.join(missing)}")
+    if errors:
+        raise ValueError("Story segment contract failed: " + "; ".join(errors))
+    return segments
+
+
+def validate_story_anchor(goal: GoalRequest, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Reject a long-video plan that has no visible anchor from the current brief."""
+    if goal.media_type != "long_video":
+        return segments
+    prompt_terms = _story_anchor_terms(goal.prompt)
+    if not prompt_terms:
+        return segments
+    story_text = " ".join(
+        str(segment.get(field) or "")
+        for segment in segments
+        for field in ("visual", "action", "narration", "start_state", "end_state", "cause", "effect")
+    ).lower()
+    story_terms = set(_story_anchor_terms(story_text))
+    if not story_terms.intersection(prompt_terms):
+        raise ValueError(
+            "Story anchor contract failed: generated segments share no meaningful term with the current brief"
         )
     return segments
 
@@ -228,7 +313,7 @@ def build_sticker_prompt(character: str, expression: str, prompt_prefix: str, st
             prompt_prefix,
             style,
             "single character sticker, centered composition, transparent-friendly clean background",
-            "bold outline, readable silhouette, exaggerated body language, polished 2D sticker finish, symbolic accents only",
+            "bold outline, readable silhouette, exaggerated body language, one dominant prop or symbolic accent, polished 2D sticker finish",
         )
         if part
     )
@@ -244,8 +329,10 @@ def build_animated_sticker_motion_prompt(goal: GoalRequest) -> str:
             _core_scene_clause(goal.prompt, goal.media_type, news_context),
             _news_fusion_clause(news_context),
             _style_directive(goal.style),
-            "simple loopable full-body motion, expressive bounce, clear silhouette preservation",
-            "avoid camera drift, avoid identity drift, preserve sticker readability",
+            "simple loopable full-body motion with one anticipation, one impact or peak, and one settle; expressive bounce, squash-and-stretch, wobble, or elastic recoil must be caused by the visible action",
+            "the final pose or prop position should echo the opening so the loop seam is gentle while the emotion remains readable",
+            "minimal uncluttered background, locked camera, clear silhouette preservation",
+            "avoid camera drift, avoid identity drift, avoid multiple actions or stacked effects",
         )
         if part
     )
@@ -286,15 +373,14 @@ def _style_directive(style: str) -> str:
 
 def _action_directive(media_type: str, duration_seconds: int) -> str:
     if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "animated_sticker", "image_to_video"}:
-        if int(duration_seconds or 0) <= 6:
-            return (
-                "one clear physical action only: show a visible start state, one decisive continuous motion, "
-                "and a completed end state within the clip; no montage, no multi-plot beats, no static posing"
-            )
+        short_contract = short_action_contract(duration_seconds, media_type=media_type)
+        if short_contract:
+            return short_contract
         if int(duration_seconds or 0) <= 15:
             return (
                 "one compact causal mini-story in one to three strong action beats: each beat changes the visible "
-                "state, and the final beat delivers one memorable physical payoff"
+                "state, one simple prop or force remains the visual anchor, the protagonist has one readable reaction, "
+                "and the final beat delivers one memorable physical payoff; if loopable, echo the opening composition"
             )
         return f"meaningful action sequence that can sustain {duration_seconds} seconds"
     return "clear action and visual intent"
@@ -395,6 +481,33 @@ def _segment_motif_clause(motif_pool: list[str], index: int) -> str:
     if secondary and secondary != primary:
         return f"motif focus: {primary}, supported by {secondary}"
     return f"motif focus: {primary}"
+
+
+def _story_anchor_terms(prompt: str) -> list[str]:
+    ignored = {
+        "about",
+        "anime",
+        "camera",
+        "cinematic",
+        "character",
+        "clear",
+        "composition",
+        "environment",
+        "film",
+        "following",
+        "image",
+        "kirby",
+        "main",
+        "polished",
+        "protagonist",
+        "scene",
+        "story",
+        "style",
+        "video",
+        "visual",
+    }
+    terms = re.findall(r"[a-z][a-z0-9'-]{3,}|[\u4e00-\u9fff]{2,}", str(prompt or "").lower())
+    return [term for term in terms if term not in ignored]
 
 
 def _quality_clause(media_type: str) -> str:

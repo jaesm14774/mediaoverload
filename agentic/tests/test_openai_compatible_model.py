@@ -54,7 +54,7 @@ class OpenAICompatibleModelTests(unittest.TestCase):
         self.assertEqual(model.base_url, "https://openrouter.ai/api/v1/chat/completions")
         self.assertEqual(model.headers["X-Title"], "MediaOverload")
 
-    def test_chat_completion_sends_openai_payload_and_extracts_text(self) -> None:
+    def test_chat_completion_omits_incompatible_mistral_schema_parameter(self) -> None:
         with patch.dict(os.environ, {"MISTRAL_API_KEY": "test-key"}, clear=False):
             model = build_model("mistral", ModelConfig(model_name="model-a", temperature=0.2, max_tokens=64))
 
@@ -69,7 +69,7 @@ class OpenAICompatibleModelTests(unittest.TestCase):
         self.assertEqual(payload["model"], "model-a")
         self.assertEqual(payload["temperature"], 0.2)
         self.assertEqual(payload["max_tokens"], 64)
-        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertNotIn("response_format", payload)
         self.assertEqual(post.call_args.kwargs["timeout"], (10.0, 30.0))
 
     def test_groq_omits_json_schema_response_format_for_llama(self) -> None:

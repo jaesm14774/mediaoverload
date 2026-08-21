@@ -29,8 +29,8 @@ def _infer_publish_review_scope(goal: GoalRequest) -> str:
 
 
 class TaskPlanner:
-    DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
-    DEFAULT_REFINE_WORKFLOWS = ("image_to_image", "z_image_i2i_anime")
+    DEFAULT_IMAGE_WORKFLOWS = ("krea2_turbo",)
+    DEFAULT_REFINE_WORKFLOWS = ("krea2_turbo_img2img",)
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
     DEFAULT_T2V_WORKFLOWS = ("minimax_h3_lowvram_t2v", "minimax_h3_native_t2v")
     DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v",)
@@ -95,6 +95,28 @@ class TaskPlanner:
             "length": int(goal.constraints.get("native_h3_length") or defaults.get("length", 362)),
             "steps": int(goal.constraints.get("native_h3_steps") or defaults.get("steps", default_steps)),
             "video_count": TaskPlanner._constraint_int(goal, "video_count", 1),
+        }
+
+    @staticmethod
+    def _video_qa_inputs(goal: GoalRequest, manifest: WorkflowManifest) -> dict[str, object]:
+        defaults = dict(manifest.recommended_defaults or {})
+        fps = float(defaults.get("frame_rate") or goal.constraints.get("video_frame_rate") or 24)
+        length = defaults.get("length")
+        target_duration = goal.constraints.get("duration_override_seconds")
+        if target_duration in {None, ""} and length not in {None, ""} and fps > 0:
+            target_duration = float(length) / fps
+        return {
+            "expected_width": defaults.get("width"),
+            "expected_height": defaults.get("height"),
+            "expected_fps": fps,
+            "target_duration": target_duration,
+            "duration_tolerance": 0.6,
+            "require_audio": manifest.name.startswith("minimax_h3_"),
+            "require_stereo_audio": manifest.name.startswith("minimax_h3_"),
+            "analyze_audio": manifest.name.startswith("minimax_h3_"),
+            "frame_count": 6,
+            "columns": 3,
+            "scale_width": 480,
         }
 
     @staticmethod
@@ -249,20 +271,21 @@ class TaskPlanner:
         )
         pre_video_review = self._pre_video_review_enabled(goal)
         pre_video_requires_human = self._pre_video_review_requires_human(goal)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         keyframe_candidate_count = (
             self._pre_video_candidate_count(goal)
-            if pre_video_review and pre_video_requires_human
+            if pre_video_review and (pre_video_requires_human or stage_probe_auto_select)
             else self._constraint_int(goal, "native_h3_keyframe_candidate_count", 1)
         )
         require_human_review = bool(goal.constraints.get("require_human_review", False)) or (
             pre_video_review and pre_video_requires_human
         )
         use_last_frame = bool(goal.constraints.get("native_h3_use_last_frame", False))
-        if keyframe_candidate_count > 1 and not require_human_review:
+        if keyframe_candidate_count > 1 and not require_human_review and not stage_probe_auto_select:
             raise ValueError(
                 "Native H3 multiple keyframe candidates require require_human_review=true; refusing to select one automatically."
             )
-        if use_last_frame and not require_human_review and keyframe_candidate_count > 1:
+        if use_last_frame and not require_human_review and not stage_probe_auto_select and keyframe_candidate_count > 1:
             raise ValueError(
                 "Native H3 use_last_frame=true with multiple ending candidates requires require_human_review=true; refusing to select one automatically."
             )
@@ -327,7 +350,7 @@ class TaskPlanner:
             ),
         ]
         opening_source_node = "native-opening-keyframe"
-        if require_human_review:
+        if require_human_review or stage_probe_auto_select:
             opening_review_node = "native-opening-review"
             nodes.append(
                 ExecutionNode(
@@ -339,13 +362,8 @@ class TaskPlanner:
                         "review_scope": "first_frame",
                         "review_phase": "opening_frame",
                         "require_human_review": pre_video_requires_human,
-                        "review_notes": (
-                            "首幀人工審核：請從實際附件中選出 1 張最適合 MiniMax H3 I2V 的 Kirby 開場首幀。 "
-                            "優先檢查：第一眼是否已經有可愛爆擊或明確表情、動作是否在第一秒就開始、是否只有一個 Kirby、 "
-                            "是否有一個簡單道具形成單一可讀笑點、構圖焦點是否清楚、背景是否足夠簡潔可動畫化、是否沒有文字或水印。 "
-                            "不要選 Kirby 只是站著看光球／入口、純氣氛背景、複雜世界觀、戰鬥對峙或多角色畫面。請以 Discord 實際附件的 Asset 編號選擇； "
-                            "若所有附件都不合格請按 Reject，不要勉強選擇。"
-                        ),
+                        "auto_select_for_probe": stage_probe_auto_select,
+                        "review_notes": "stage: preview",
                     },
                     depends_on=["native-opening-keyframe"],
                     tags=["review", "first-frame", "native-h3"],
@@ -384,10 +402,7 @@ class TaskPlanner:
                             "review_all_candidates": True,
                             "review_scope": "last_frame",
                             "review_phase": "ending_frame",
-                            "review_notes": (
-                                "末幀人工審核：請確認這張結尾幀與已選首幀、角色比例、場景地理與故事解決狀態一致。 "
-                                "如果結尾幀需要影片強行跳轉、角色或道具突然改變、或無法自然接續，請按 Reject。"
-                            ),
+                            "review_notes": "stage: preview",
                         },
                         depends_on=["native-ending-keyframe"],
                         tags=["review", "last-frame", "native-h3"],
@@ -464,7 +479,7 @@ class TaskPlanner:
             "selected_workflow": video_manifest.name,
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "use_last_frame": use_last_frame, "lowvram_preview": lowvram_fl2va},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "use_last_frame": use_last_frame, "lowvram_preview": lowvram_fl2va},
             "graph_overview": [node.node_id for node in nodes],
         }
         return ExecutionPlan(
@@ -630,12 +645,15 @@ class TaskPlanner:
         storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_l2va_story")
         pre_video_review = self._pre_video_review_enabled(goal)
         pre_video_requires_human = self._pre_video_review_requires_human(goal)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         require_human_review = bool(goal.constraints.get("require_human_review", True)) or (
             pre_video_review and pre_video_requires_human
         )
+        if stage_probe_auto_select:
+            require_human_review = False
         candidate_count = (
             self._pre_video_candidate_count(goal)
-            if pre_video_review and pre_video_requires_human
+            if pre_video_review and (pre_video_requires_human or stage_probe_auto_select)
             else 1
         )
         ending_source_node = "native-l2va-ending-keyframe"
@@ -676,7 +694,7 @@ class TaskPlanner:
             ),
         ]
         frame_node = ending_source_node
-        if require_human_review:
+        if require_human_review or stage_probe_auto_select:
             nodes.append(
                 ExecutionNode(
                     node_id="native-l2va-ending-review",
@@ -686,6 +704,7 @@ class TaskPlanner:
                         "review_all_candidates": True,
                         "review_scope": "last_frame",
                         "require_human_review": pre_video_requires_human,
+                        "auto_select_for_probe": stage_probe_auto_select,
                         "review_notes": "Select the final conditioning frame. This frame is immutable after approval; reject identity drift, wrong pose, or unusable composition.",
                     },
                     depends_on=[ending_source_node],
@@ -702,7 +721,7 @@ class TaskPlanner:
                     inputs={
                         "frame_node": frame_node,
                         "character": str(goal.constraints.get("character") or ""),
-                        "preserve_last_frame": require_human_review,
+                        "preserve_last_frame": bool(require_human_review or stage_probe_auto_select),
                         "max_regenerations": 0,
                     },
                     depends_on=[frame_node],
@@ -749,7 +768,7 @@ class TaskPlanner:
             "selected_workflow": video_manifest.name,
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "require_human_review": require_human_review, "lowvram_preview": lowvram_l2va},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "lowvram_preview": lowvram_l2va},
             "render_mode": "last_frame_to_video",
             "graph_overview": [node.node_id for node in nodes],
         }
@@ -823,12 +842,15 @@ class TaskPlanner:
             4 if auto_reference_generation else 1,
             min(6 if auto_reference_generation else 6, raw_candidate_count),
         )
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         if "require_human_review" in goal.constraints:
             require_human_review = bool(goal.constraints.get("require_human_review"))
         else:
             # Generated references must never silently become Ref2VA inputs.
             # Only an explicit --no-review path may disable this gate.
             require_human_review = auto_reference_generation or bool(reference_candidates)
+        if stage_probe_auto_select:
+            require_human_review = False
         nodes = [
             ExecutionNode(
                 node_id="native-story-prompt",
@@ -896,7 +918,7 @@ class TaskPlanner:
         reference_check_dependencies = ["native-story-prompt"]
         if auto_reference_generation:
             candidate_node_id = "native-ref2va-reference-candidates"
-            if require_human_review:
+            if require_human_review or stage_probe_auto_select:
                 nodes.append(
                     ExecutionNode(
                         node_id="native-ref2va-reference-review",
@@ -907,6 +929,7 @@ class TaskPlanner:
                             "review_scope": "reference",
                             "review_phase": "reference_selection",
                             "require_human_review": require_human_review,
+                            "auto_select_for_probe": stage_probe_auto_select,
                             "review_notes": str(goal.constraints.get("review_notes") or ""),
                         },
                         depends_on=[candidate_node_id],
@@ -929,7 +952,7 @@ class TaskPlanner:
                     stage="assets",
                 )
             )
-            if require_human_review:
+            if require_human_review or stage_probe_auto_select:
                 nodes.append(
                     ExecutionNode(
                         node_id="native-ref2va-reference-review",
@@ -939,7 +962,8 @@ class TaskPlanner:
                             "review_all_candidates": True,
                             "review_scope": "reference",
                             "review_phase": "reference_selection",
-                            "require_human_review": True,
+                            "require_human_review": require_human_review,
+                            "auto_select_for_probe": stage_probe_auto_select,
                             "review_notes": str(goal.constraints.get("review_notes") or ""),
                         },
                         depends_on=[candidate_node_id],
@@ -988,7 +1012,13 @@ class TaskPlanner:
                 ),
             ]
         )
-        nodes.extend(self._native_h3_finalize_nodes(tags=["native-h3", "ref2va"], include_keyframe_gate=False))
+        nodes.extend(
+            self._native_h3_finalize_nodes(
+                tags=["native-h3", "ref2va"],
+                include_keyframe_gate=False,
+                qa_inputs={"frame_count": 12, "columns": 4},
+            )
+        )
         required_assets = [asset.to_dict() for asset in video_manifest.required_assets]
         if image_manifest is not None:
             required_assets = [asset.to_dict() for asset in image_manifest.required_assets] + required_assets
@@ -1012,7 +1042,7 @@ class TaskPlanner:
             "reference_candidate_count": reference_candidate_count if auto_reference_generation else 0,
             "reference_selection_limit": reference_selection_limit,
             "reference_audio_enabled": False,
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "reference_image_size": str(goal.constraints.get("native_h3_reference_image_size") or "match")},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "reference_image_size": str(goal.constraints.get("native_h3_reference_image_size") or "match"), "stage_probe_auto_select": stage_probe_auto_select},
             "render_mode": "reference_to_video",
             "graph_overview": [node.node_id for node in nodes],
         }
@@ -1072,6 +1102,7 @@ class TaskPlanner:
         use_tts = bool(goal.constraints.get("use_tts", False))
         review_loop_enabled = self._review_loop_enabled(goal)
         pre_video_review = self._pre_video_review_enabled(goal)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         review_notes = str(goal.constraints.get("review_notes", "") or "")
         selection_limit = self._review_selection_limit(goal, default=self._constraint_int(goal, "review_selection_limit", 3))
         review_policy = str(
@@ -1179,6 +1210,8 @@ class TaskPlanner:
             or goal.constraints.get("enable_stage_review", False)
             or pre_video_review
         )
+        if stage_probe_auto_select:
+            require_human_review = False
         review_all_anchors = review_policy in {"anchors", "every_segment"}
         human_anchor_review = require_human_review and review_all_anchors
         opening_human_review = require_human_review and (
@@ -1222,6 +1255,15 @@ class TaskPlanner:
                 or goal.constraints.get("native_h3_reference_selection_limit")
                 or 4
             ),
+        )
+        segment_frame_rate = float(
+            goal.constraints.get("longvideo_frame_rate")
+            or goal.constraints.get("video_frame_rate")
+            or 24
+        )
+        segment_default_length = max(
+            1,
+            round((float(goal.duration_seconds) / max(1, segment_count)) * segment_frame_rate),
         )
 
         idea_variants = self.idea_director.generate_variations(goal)
@@ -1377,6 +1419,7 @@ class TaskPlanner:
                                     "review_scope": "first_frame",
                                     "review_phase": "opening_frame",
                                     "require_human_review": opening_human_review or human_anchor_review,
+                                    "auto_select_for_probe": stage_probe_auto_select,
                                     "review_notes": review_notes,
                                 },
                                 depends_on=[first_candidate],
@@ -1429,6 +1472,7 @@ class TaskPlanner:
                                 "review_scope": "last_frame",
                                 "review_phase": "ending_frame",
                                 "require_human_review": human_anchor_review,
+                                "auto_select_for_probe": stage_probe_auto_select,
                                 "review_notes": review_notes,
                             },
                             depends_on=[last_candidate],
@@ -1488,7 +1532,7 @@ class TaskPlanner:
                         )
                     )
                     reference_source = reference_candidate
-                    reference_review_enabled = require_human_review and (
+                    reference_review_enabled = (require_human_review or stage_probe_auto_select) and (
                         review_policy == "every_segment" or index == 0
                     )
                     if reference_review_enabled:
@@ -1502,7 +1546,8 @@ class TaskPlanner:
                                     "review_all_candidates": True,
                                     "review_scope": "reference",
                                     "review_phase": "reference_selection",
-                                    "require_human_review": True,
+                                    "require_human_review": require_human_review,
+                                    "auto_select_for_probe": stage_probe_auto_select,
                                     "review_notes": review_notes,
                                 },
                                 depends_on=[reference_candidate],
@@ -1549,7 +1594,11 @@ class TaskPlanner:
                 "continuation": recipe.continuation,
                 "width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
                 "height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
-                "length": int(goal.constraints.get("longvideo_length") or goal.constraints.get("longvideo_h3_length") or 81),
+                "length": int(
+                    goal.constraints.get("longvideo_length")
+                    or goal.constraints.get("longvideo_h3_length")
+                    or segment_default_length
+                ),
                 "steps": int(goal.constraints.get("longvideo_steps") or goal.constraints.get("longvideo_h3_steps") or 16),
                 "model_profile": str(
                     goal.constraints.get("longvideo_model_profile")
@@ -1652,12 +1701,36 @@ class TaskPlanner:
             )
             preview_dependency = "mux-final-video"
 
+        longvideo_qa_inputs = {
+            "expected_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
+            "expected_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
+            "expected_fps": segment_frame_rate,
+            "target_duration": float(goal.duration_seconds) if goal.duration_seconds > 0 else None,
+            "duration_tolerance": 0.6,
+            "require_audio": use_tts,
+            "require_stereo_audio": False,
+            "analyze_audio": use_tts,
+            "frame_count": 8,
+            "columns": 4,
+            "scale_width": 480,
+        }
+        nodes.append(
+            ExecutionNode(
+                node_id="longvideo-video-qa",
+                skill_name="media.video.qa",
+                inputs=longvideo_qa_inputs,
+                depends_on=[preview_dependency],
+                tags=["quality", "technical-qa", "video", "longvideo"],
+                tool_name="media.video_qa",
+                stage="quality",
+            )
+        )
         nodes.append(
             ExecutionNode(
                 node_id="preview-gif",
                 skill_name="media.video.gif_preview",
                 inputs={"fps": 12, "scale_width": 512},
-                depends_on=[preview_dependency],
+                depends_on=[preview_dependency, "longvideo-video-qa"],
                 tags=["preview", "gif"],
                 tool_name="media.video_to_gif",
                 stage="package",
@@ -1669,7 +1742,7 @@ class TaskPlanner:
                 node_id=collect_node,
                 skill_name="agent.output.collect",
                 inputs={"keys": ["saved_files", "video_path", "audio_path", "gif_path", "frame_path"]},
-                depends_on=[preview_dependency, "preview-gif", *segment_video_nodes, *tts_nodes],
+                depends_on=[preview_dependency, "longvideo-video-qa", "preview-gif", *segment_video_nodes, *tts_nodes],
                 tags=["artifact", "summary"],
                 stage="package",
             )
@@ -1743,10 +1816,21 @@ class TaskPlanner:
                 retry_preview_dependency = "review-mux-final-video"
             nodes.append(
                 ExecutionNode(
+                    node_id="review-longvideo-video-qa",
+                    skill_name="media.video.qa",
+                    inputs=longvideo_qa_inputs,
+                    depends_on=[retry_preview_dependency],
+                    tags=["quality", "technical-qa", "video", "longvideo", "retry"],
+                    tool_name="media.video_qa",
+                    stage="quality",
+                )
+            )
+            nodes.append(
+                ExecutionNode(
                     node_id="review-preview-gif",
                     skill_name="media.video.gif_preview",
                     inputs={"fps": 12, "scale_width": 512},
-                    depends_on=[retry_preview_dependency],
+                    depends_on=[retry_preview_dependency, "review-longvideo-video-qa"],
                     tags=["preview", "gif", "retry"],
                     tool_name="media.video_to_gif",
                     stage="package",
@@ -1758,7 +1842,7 @@ class TaskPlanner:
                     node_id=retry_collect,
                     skill_name="agent.output.collect",
                     inputs={"keys": ["saved_files", "video_path", "audio_path", "gif_path", "frame_path"]},
-                    depends_on=[retry_preview_dependency, "review-preview-gif", *retry_video_nodes, *retry_tts_nodes],
+                    depends_on=[retry_preview_dependency, "review-longvideo-video-qa", "review-preview-gif", *retry_video_nodes, *retry_tts_nodes],
                     tags=["artifact", "summary", "retry"],
                     stage="package",
                 )
@@ -1801,6 +1885,7 @@ class TaskPlanner:
             "recipe_workflows": {name: selected_capabilities[name].workflow_name for name in recipe_contracts},
             "conditioning_contracts": {name: recipe_contracts[name].to_dict() for name in recipe_contracts},
             "review_policy": review_policy,
+            "stage_probe_auto_select": stage_probe_auto_select,
             "use_tts": use_tts,
             "review_loop_enabled": review_loop_enabled,
             "review_notes": review_notes,
@@ -1865,17 +1950,23 @@ class TaskPlanner:
 
     def _build_text2img2video_plan(self, goal: GoalRequest) -> ExecutionPlan:
         pre_video_review = self._pre_video_review_enabled(goal)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         image_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_IMAGE_WORKFLOWS,
             constraint_keys=("image_workflow_name", "workflow_name"),
             allowed_media_types={"image"},
         )
-        upscale_manifest = self._manifest_from_goal_constraints(
-            goal,
-            *self.DEFAULT_UPSCALE_WORKFLOWS,
-            constraint_keys=("upscale_workflow_name",),
-            allowed_media_types={"image_upscale"},
+        use_upscale_for_i2v = not bool(goal.constraints.get("skip_upscale_for_i2v", False))
+        upscale_manifest = (
+            self._manifest_from_goal_constraints(
+                goal,
+                *self.DEFAULT_UPSCALE_WORKFLOWS,
+                constraint_keys=("upscale_workflow_name",),
+                allowed_media_types={"image_upscale"},
+            )
+            if use_upscale_for_i2v
+            else None
         )
         video_manifest = self._manifest_from_goal_constraints(
             goal,
@@ -1927,34 +2018,41 @@ class TaskPlanner:
                 tool_name="comfy.workflow.text_to_image",
                 stage="render",
             ),
-            ExecutionNode(
-                node_id="upscale-asset-check",
-                skill_name="media.ensure_workflow",
-                inputs={"workflow_name": upscale_manifest.name, "auto_download": goal.auto_download_assets},
-                depends_on=["render-image"],
-                tags=["assets"],
-                tool_name="asset.ensure_workflow_ready",
-                stage="assets",
-            ),
-            ExecutionNode(
-                node_id="upscale-image",
-                skill_name="image.upscale",
-                inputs={},
-                depends_on=["render-image", "upscale-asset-check"],
-                tags=["render", "upscale"],
-                tool_name="comfy.workflow.image_upscale",
-                stage="render",
-            ),
+        ]
+        if use_upscale_for_i2v:
+            nodes.extend(
+                [
+                    ExecutionNode(
+                        node_id="upscale-asset-check",
+                        skill_name="media.ensure_workflow",
+                        inputs={"workflow_name": upscale_manifest.name, "auto_download": goal.auto_download_assets},
+                        depends_on=["render-image"],
+                        tags=["assets"],
+                        tool_name="asset.ensure_workflow_ready",
+                        stage="assets",
+                    ),
+                    ExecutionNode(
+                        node_id="upscale-image",
+                        skill_name="image.upscale",
+                        inputs={},
+                        depends_on=["render-image", "upscale-asset-check"],
+                        tags=["render", "upscale"],
+                        tool_name="comfy.workflow.image_upscale",
+                        stage="render",
+                    ),
+                ]
+            )
+        nodes.append(
             ExecutionNode(
                 node_id="video-asset-check",
                 skill_name="media.ensure_workflow",
                 inputs={"workflow_name": video_manifest.name, "auto_download": goal.auto_download_assets},
-                depends_on=["upscale-image"],
+                depends_on=["upscale-image" if use_upscale_for_i2v else "render-image"],
                 tags=["assets"],
                 tool_name="asset.ensure_workflow_ready",
                 stage="assets",
-            ),
-        ]
+            )
+        )
         if stage_review_enabled:
             nodes.append(
                 ExecutionNode(
@@ -1966,14 +2064,21 @@ class TaskPlanner:
                         "review_scope": "first_frame",
                         "review_phase": "opening_frame",
                         "require_human_review": self._pre_video_review_requires_human(goal),
+                        "auto_select_for_probe": stage_probe_auto_select,
                         "review_notes": review_notes,
                     },
-                    depends_on=["render-image" if pre_video_review else "upscale-image"],
+                    depends_on=[
+                        "render-image"
+                        if pre_video_review or not use_upscale_for_i2v
+                        else "upscale-image"
+                    ],
                     tags=["review", "stage"],
                     stage="review",
                 )
             )
-        animate_dependencies = ["idea-brief", "render-image", "upscale-image", "video-asset-check"]
+        animate_dependencies = ["idea-brief", "render-image", "video-asset-check"]
+        if use_upscale_for_i2v and not stage_review_enabled:
+            animate_dependencies.insert(2, "upscale-image")
         if stage_review_enabled:
             animate_dependencies = ["idea-brief", "render-image", "stage-review-select", "video-asset-check"]
         nodes.extend(
@@ -1999,6 +2104,15 @@ class TaskPlanner:
                 tags=["render", "video"],
                 tool_name="comfy.workflow.image_to_video",
                 stage="render",
+            ),
+            ExecutionNode(
+                node_id="video-qa",
+                skill_name="media.video.qa",
+                inputs=self._video_qa_inputs(goal, video_manifest),
+                depends_on=["animate-video"],
+                tags=["quality", "technical-qa", "video"],
+                tool_name="media.video_qa",
+                stage="quality",
             ),
             ExecutionNode(
                 node_id="gif-preview",
@@ -2094,7 +2208,9 @@ class TaskPlanner:
                     ),
                 ]
             )
-        summary_dependencies = ["render-image", "upscale-image", "animate-video", "gif-preview"]
+        summary_dependencies = ["render-image", "animate-video", "video-qa", "gif-preview"]
+        if use_upscale_for_i2v:
+            summary_dependencies.insert(1, "upscale-image")
         if review_loop_enabled:
             summary_dependencies.append("review-final-select")
         nodes.append(
@@ -2108,10 +2224,18 @@ class TaskPlanner:
             )
         )
         metadata = {
-            "selected_workflows": [image_manifest.name, upscale_manifest.name, video_manifest.name],
+            "selected_workflows": [
+                image_manifest.name,
+                *([upscale_manifest.name] if use_upscale_for_i2v else []),
+                video_manifest.name,
+            ],
             "required_assets": [
                 *[asset.to_dict() for asset in image_manifest.required_assets],
-                *[asset.to_dict() for asset in upscale_manifest.required_assets],
+                *(
+                    [asset.to_dict() for asset in upscale_manifest.required_assets]
+                    if use_upscale_for_i2v
+                    else []
+                ),
                 *[asset.to_dict() for asset in video_manifest.required_assets],
             ],
             "graph_overview": [node.node_id for node in nodes],
@@ -2195,6 +2319,7 @@ class TaskPlanner:
         width = workflow_manifest.recommended_defaults.get("width", 1024)
         height = workflow_manifest.recommended_defaults.get("height", 1024)
         image_count = self._constraint_int(goal, "image_count", 1)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         nodes = [
             ExecutionNode(
                 node_id="idea-brief",
@@ -2229,12 +2354,32 @@ class TaskPlanner:
                 tags=["render"],
             ),
         ]
+        if bool(goal.constraints.get("stage_probe_auto_select", False)):
+            nodes.append(
+                ExecutionNode(
+                    node_id="stage-preview-select",
+                    skill_name="review.assets.select",
+                    inputs={
+                        "limit": self._review_selection_limit(goal, default=1),
+                        "review_all_candidates": True,
+                        "review_scope": "reference",
+                        "review_phase": "reference_selection",
+                        "require_human_review": False,
+                        "auto_select_for_probe": True,
+                        "review_notes": "",
+                    },
+                    depends_on=["render-image"],
+                    tags=["review", "stage", "probe"],
+                    stage="review",
+                )
+            )
         metadata = {
             "selected_workflow": workflow_manifest.name,
             "required_assets": [asset.to_dict() for asset in workflow_manifest.required_assets],
             "graph_overview": [node.node_id for node in nodes],
             "width": width,
             "height": height,
+            "stage_probe_auto_select": bool(goal.constraints.get("stage_probe_auto_select", False)),
         }
         description = f"Image workflow '{workflow_manifest.name}' for goal '{goal.prompt}'"
         return ExecutionPlan(
@@ -2313,6 +2458,8 @@ class TaskPlanner:
                     inputs={
                         "image_path": input_image_path,
                         "prompt": constraints.get("text", "") or goal.prompt,
+                        "width": constraints.get("width"),
+                        "height": constraints.get("height"),
                     },
                     depends_on=["prompt-prepare", "asset-check"],
                     tags=["render", "video"],
@@ -2348,6 +2495,7 @@ class TaskPlanner:
             allowed_media_types={"image_refine"},
         )
         image_count = self._constraint_int(goal, "image_count", 1)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         nodes = [
             ExecutionNode(
                 node_id="idea-brief",
@@ -2398,6 +2546,28 @@ class TaskPlanner:
                 stage="render",
             ),
         ]
+        if stage_probe_auto_select:
+            nodes.insert(
+                3,
+                ExecutionNode(
+                    node_id="stage-preview-select",
+                    skill_name="review.assets.select",
+                    inputs={
+                        "limit": self._review_selection_limit(goal, default=1),
+                        "review_all_candidates": True,
+                        "review_scope": "reference",
+                        "review_phase": "reference_selection",
+                        "require_human_review": False,
+                        "auto_select_for_probe": True,
+                        "review_notes": "",
+                    },
+                    depends_on=["render-image"],
+                    tags=["review", "stage", "probe"],
+                    stage="review",
+                ),
+            )
+            refine_node = next(node for node in nodes if node.node_id == "refine-image")
+            refine_node.depends_on = ["idea-brief", "stage-preview-select", "refine-asset-check"]
         metadata = {
             "selected_workflows": [image_manifest.name, refine_manifest.name],
             "required_assets": [
@@ -2405,6 +2575,7 @@ class TaskPlanner:
                 *[asset.to_dict() for asset in refine_manifest.required_assets],
             ],
             "graph_overview": [node.node_id for node in nodes],
+            "stage_probe_auto_select": stage_probe_auto_select,
         }
         return ExecutionPlan(
             goal=goal,
@@ -2416,6 +2587,7 @@ class TaskPlanner:
 
     def _build_text2video_plan(self, goal: GoalRequest) -> ExecutionPlan:
         pre_video_review = self._pre_video_review_enabled(goal)
+        stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         image_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_IMAGE_WORKFLOWS,
@@ -2494,6 +2666,7 @@ class TaskPlanner:
                         "review_scope": "first_frame",
                         "review_phase": "opening_frame",
                         "require_human_review": self._pre_video_review_requires_human(goal),
+                        "auto_select_for_probe": stage_probe_auto_select,
                         "review_notes": review_notes,
                     },
                     depends_on=["render-image"],
@@ -2516,6 +2689,15 @@ class TaskPlanner:
                 depends_on=animate_dependencies,
                 tags=["render", "video"],
                 stage="render",
+            ),
+            ExecutionNode(
+                node_id="video-qa",
+                skill_name="media.video.qa",
+                inputs=self._video_qa_inputs(goal, video_manifest),
+                depends_on=["animate-video"],
+                tags=["quality", "technical-qa", "video"],
+                tool_name="media.video_qa",
+                stage="quality",
             ),
             ExecutionNode(
                 node_id="gif-preview",
@@ -2587,8 +2769,8 @@ class TaskPlanner:
                         stage="review",
                     ),
                 ]
-            )
-        summary_dependencies = ["render-image", "animate-video", "gif-preview"]
+        )
+        summary_dependencies = ["render-image", "animate-video", "video-qa", "gif-preview"]
         if review_loop_enabled:
             summary_dependencies.append("review-final-select")
         nodes.append(

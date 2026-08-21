@@ -47,11 +47,11 @@ powershell -ExecutionPolicy Bypass -File scripts/run_comfyui_h3_lowvram.ps1 -Com
 Kirby 的完整鏈路固定為：
 
 ```text
-kirby_keyframe_anima
+krea2_turbo
   -> Kirby input gate（pink/red silhouette + generic-example block）
   -> minimax_h3_lowvram_i2v
   -> extract last frame
-  -> kirby_continuity_img2img（denoise 0.18）
+  -> krea2_turbo_img2img（denoise 0.25）
   -> minimax_h3_lowvram_i2v
   -> ffmpeg concat
 ```
@@ -95,7 +95,7 @@ D:\ComfyUI_windows_portable\ComfyUI\user\default\workflows\
 2. 開啟 `http://127.0.0.1:8188/`。
 4. 先按畫布的 `適應視圖 (.)`，即可看到完整節點、連線與所有參數。
 
-第一張是 repo 的 `anima_anime` / Kirby keyframe 生成接 H3 I2V；第二張是 repo 的 img2img identity continuity 接 H3 I2V，對應 long-video 每段使用上一段尾幀延續角色。若要換首幀，修改畫布中的 Anima prompt 或 `Load Image`；H3 低配主參數集中在 `608×352`、`124 frames`、`20 steps`、`Spectrum history_storage=system_ram`、`24 fps`。
+第一張是 repo 的 `krea2_turbo` / Kirby keyframe 生成接 H3 I2V；第二張是 repo 的 Krea2 img2img identity continuity 接 H3 I2V，對應 long-video 每段使用上一段尾幀延續角色。若要換首幀，修改 Krea2 prompt 或 `Load Image`；H3 低配主參數集中在 `608×352`、`124 frames`、`20 steps`、`Spectrum history_storage=system_ram`、`24 fps`。
 
 這兩張畫布 workflow 是以 repo 現有結構擴增而成，不會取代原本給自動化程式使用的 API graph。
 

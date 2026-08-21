@@ -184,6 +184,43 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertIn("minimax_h3_fl2va_pruned_fp8_Q4_0.gguf", result.logs[0])
         self.assertIn("qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf", result.logs[0])
 
+    def test_agent_media_animate_forwards_portrait_dimensions(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            @staticmethod
+            def call(name: str, payload: dict[str, object]) -> dict[str, object]:
+                calls.append((name, payload))
+                return {"saved_files": []}
+
+        skills = AgentMediaSkills(FakeTools(), self.make_workspace_tempdir())
+        context = SkillContext(
+            plan=ExecutionPlan(
+                goal=GoalRequest(prompt="Qixi portrait video", media_type="image_to_video"),
+                workflow_name="minimax_h3_lowvram_i2v",
+                nodes=[],
+            ),
+            node=ExecutionNode(
+                node_id="i2v-render",
+                skill_name="media.image.animate",
+                inputs={
+                    "workflow_name": "minimax_h3_lowvram_i2v",
+                    "image_path": "C:/input/keyframe.png",
+                    "width": 576,
+                    "height": 1024,
+                },
+            ),
+            state={},
+        )
+
+        result = skills.animate_image(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "comfy.workflow.image_to_video")
+        self.assertEqual(calls[0][1]["width"], 576)
+        self.assertEqual(calls[0][1]["height"], 1024)
+
 
 if __name__ == "__main__":
     unittest.main()

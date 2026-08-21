@@ -69,6 +69,8 @@ class ComfyWorkflowSkills:
                 "workflow_name": str(context.node.inputs.get("workflow_name", "")),
                 "image_path": image_path,
                 "prompt": prompt,
+                "width": context.node.inputs.get("width"),
+                "height": context.node.inputs.get("height"),
                 "model_profile": str(
                     context.node.inputs.get("model_profile")
                     or context.plan.goal.constraints.get("native_h3_model_profile")

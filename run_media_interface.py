@@ -12,6 +12,16 @@ for candidate in (REPO_ROOT, AGENTIC_SRC):
 from agentic.app.character_workflow import dumps_result, run_character_workflow
 
 
+def _default_comfy_root() -> str:
+    configured = os.environ.get("COMFYUI_ROOT", "").strip()
+    if configured:
+        return configured
+    container_root = Path("/comfyui")
+    if container_root.is_dir():
+        return str(container_root)
+    return r"D:\ComfyUI_windows_portable"
+
+
 def _resolve_config_path(args: argparse.Namespace) -> Path:
     if args.config:
         return Path(args.config).resolve()
@@ -52,6 +62,7 @@ def main() -> None:
     )
     parser.add_argument("--no-publish", action="store_true", help="Skip publish stage after generation")
     parser.add_argument("--no-review", action="store_true", help="Disable human review for this run; auto Ref2VA keeps generated references without a Discord selection gate")
+    parser.add_argument("--stage-probe", action="store_true", help="Run the real multi-stage graph with six image candidates and vision-LLM auto-selection; never use this as publish approval")
     parser.add_argument("--news-driven", action="store_true", help="Require a fresh unseen news item for this run")
     parser.add_argument("--enable-review-loop", action="store_true", help="Enable retry/review branches where supported")
     parser.add_argument("--review-notes", type=str, default="", help="Review notes for planner retry branches")
@@ -61,7 +72,7 @@ def main() -> None:
     parser.add_argument(
         "--comfy-root",
         type=str,
-        default=os.environ.get("COMFYUI_ROOT", r"D:\ComfyUI_windows_portable"),
+        default=_default_comfy_root(),
         help="ComfyUI root for asset checks (default: COMFYUI_ROOT or D:\\ComfyUI_windows_portable)",
     )
     parser.add_argument("--auto-download-assets", action="store_true", help="Allow automatic workflow asset preparation")
@@ -80,6 +91,7 @@ def main() -> None:
         publish_platforms=args.publish_platforms,
         publish_after_generate=not args.no_publish,
         no_review=args.no_review,
+        stage_probe=args.stage_probe,
         news_driven=args.news_driven,
         output_dir=args.output_dir,
         enable_review_loop=args.enable_review_loop,

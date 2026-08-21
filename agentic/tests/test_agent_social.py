@@ -327,6 +327,66 @@ class AgentSocialSkillTests(unittest.TestCase):
             "discord review did not return a valid human decision",
         )
 
+    def test_pre_video_review_can_fallback_to_top_candidate_on_discord_failure(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="pick one opening Kirby frame",
+                media_type="text2img2video",
+                style="anime",
+                constraints={
+                    "enable_stage_review": True,
+                    "pre_video_review_failure_policy": "fallback_to_top",
+                },
+            ),
+            workflow_name="text2img2video_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="stage-review-select",
+            skill_name="review.assets.select",
+            depends_on=["render-image"],
+            inputs={
+                "limit": 1,
+                "review_all_candidates": True,
+                "review_scope": "first_frame",
+                "review_phase": "opening_frame",
+            },
+        )
+        state = RunState(
+            goal={"prompt": "pick one opening Kirby frame"},
+            metadata={},
+            node_outputs={
+                "render-image": {"saved_files": ["C:\\frame_a.png", "C:\\frame_b.png"]},
+            },
+        )
+
+        with patch.object(
+            skills.discord_review,
+            "review_candidates",
+            return_value=type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "failed",
+                    "selected_paths": [],
+                    "reviewer": "",
+                    "session_id": "sess-fallback",
+                    "session_path": "C:\\session-fallback.json",
+                    "edited_text": "",
+                    "fallback_reason": "discord review timed out before any decision was received",
+                },
+            )(),
+        ):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["selected_assets"], ["C:\\frame_a.png"])
+        self.assertTrue(result.outputs["review_fallback_used"])
+        self.assertIn("timed out", result.outputs["fallback_reason"])
+
     def test_first_frame_review_sends_all_six_candidates_and_never_auto_selects(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
@@ -397,11 +457,9 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.outputs["selected_assets"], [candidate_paths[3]])
         self.assertEqual(captured["media_paths"], candidate_paths)
-        self.assertIn("策略：native_h3_story", captured["text"])
-        self.assertIn("故事：Kirby and the Seed: Kirby protects one glowing seed", captured["text"])
-        self.assertIn("請選擇最適合的開場首幀：Asset 1-6", captured["text"])
-        self.assertIn("可愛爆擊", captured["text"])
-        self.assertIn("所有候選都不合格請按 Reject。", captured["text"])
+        self.assertEqual(captured["text"], "stage: preview")
+        self.assertNotIn("可愛爆擊", captured["text"])
+        self.assertNotIn("請選擇最適合的開場首幀", captured["text"])
         self.assertNotIn("Workflow:", captured["text"])
         self.assertNotIn("Stage:", captured["text"])
         self.assertNotIn("Prompt:", captured["text"])
@@ -411,11 +469,71 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(captured["selection_required"])
         self.assertEqual(captured["selection_limit"], 1)
         return
-        self.assertIn("故事：Kirby and the Seed: Kirby protects one glowing seed", captured["text"])
-        self.assertIn("請選擇最適合的開場首幀：Asset 1-6", captured["text"])
-        self.assertIn("所有候選都不合格請按 Reject。", captured["text"])
+        self.assertEqual(captured["text"], "stage: preview")
+        self.assertNotIn("可愛爆擊", captured["text"])
+        self.assertNotIn("請選擇最適合的開場首幀", captured["text"])
         self.assertNotIn("Candidates attached", captured["text"])
         self.assertNotIn("Choose one opening frame", captured["text"])
+
+    def test_stage_probe_uses_prompt_engine_for_automatic_candidate_selection(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        candidate_paths = [f"C:\\probe_frame_{index}.png" for index in range(1, 7)]
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="",
+                media_type="native_h3_story",
+                style="anime",
+                constraints={"character": "Kirby", "enable_stage_review": True},
+            ),
+            workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="native-opening-review",
+            skill_name="review.assets.select",
+            depends_on=["native-opening-keyframe"],
+            inputs={
+                "limit": 1,
+                "review_scope": "first_frame",
+                "auto_select_for_probe": True,
+            },
+        )
+        state = RunState(
+            goal={"prompt": ""},
+            metadata={},
+            node_outputs={
+                "native-story-prompt": {
+                    "opening_keyframe_prompt": "Kirby stretches toward the locked mint-green straw dispenser while a cart rolls downhill."
+                },
+                "native-opening-keyframe": {"saved_files": candidate_paths},
+            },
+        )
+        captured: dict[str, object] = {}
+
+        class FakePromptEngine:
+            def review_asset_candidates(self, goal, media_paths, review_notes, selection_limit):
+                captured.update(
+                    goal_prompt=goal.prompt,
+                    media_paths=media_paths,
+                    selection_limit=selection_limit,
+                )
+                return {
+                    "selected_assets": [candidate_paths[2]],
+                    "ranked_candidates": [{"media_path": candidate_paths[2], "score": 93, "rationale": "best prompt match"}],
+                    "selection_rationale": "vision ranking selected the strongest probe frame",
+                    "prompt_mode": "llm",
+                }
+
+        skills.prompt_engine = FakePromptEngine()
+        with patch.object(skills.discord_review, "review_candidates", side_effect=AssertionError("probe must not open Discord")):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["selected_assets"], [candidate_paths[2]])
+        self.assertEqual(captured["selection_limit"], 1)
+        self.assertIn("locked mint-green straw dispenser", captured["goal_prompt"])
+        self.assertTrue(result.outputs["auto_select_for_probe"])
 
     def test_final_video_review_filters_frames_and_disables_asset_picker(self) -> None:
         tool_registry = ToolRegistry()
@@ -615,8 +733,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(captured["media_paths"], [ending_path])
         self.assertTrue(captured["allow_asset_selection"])
         self.assertEqual(captured["review_scope"], "last_frame")
-        self.assertIn("故事：", captured["text"])
-        self.assertIn("請確認結尾畫面是否符合故事。符合請按 Accept，不符合請按 Reject。", captured["text"])
+        self.assertEqual(captured["text"], "stage: preview")
         self.assertNotIn("Strategy:", captured["text"])
         self.assertNotIn("Workflow:", captured["text"])
         self.assertNotIn("Stage:", captured["text"])
