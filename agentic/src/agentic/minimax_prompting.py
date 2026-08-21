@@ -4,8 +4,39 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
+SHORT_FORM_VIDEO_TYPES = frozenset(
+    {
+        "text2video",
+        "text2img2video",
+        "image_to_video",
+        "animated_sticker",
+    }
+)
+
+
 def clean_prompt_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip().rstrip(".")
+
+
+def short_action_contract(
+    duration_seconds: int | float,
+    *,
+    media_type: str | None = None,
+) -> str:
+    """Return the shared, topic-neutral contract for a short causal clip."""
+    duration = max(1, int(duration_seconds or 0))
+    if duration > 6:
+        return ""
+    if media_type and media_type not in SHORT_FORM_VIDEO_TYPES:
+        return ""
+    return (
+        f"Short-action contract for this {duration}-second clip: use one clear physical action only; keep one protagonist, one dominant physical "
+        "mechanism, and one clear objective. Show a readable start state immediately, then anticipation or an "
+        "attempt, one decisive cause-and-effect change, a visible reaction or deformation, and a completed end state "
+        "with payoff before the end. Tie each camera move to the physical change it reveals. End in a settled visual "
+        "state that echoes the opening enough to feel loopable, without hiding the payoff. Do not add a second "
+        "plot, unrelated prop, extra protagonist, static pose, abstract action, or montage."
+    )
 
 
 def subject_identity_lock(character: str) -> str:
@@ -122,9 +153,11 @@ def compose_minimax_h3_prompt(
     prompt_parts.extend(
         [
             f"overall_soundscape: {soundscape}.",
-            "non_diegetic_music: a restrained melodic motif that rises with the obstacle, tightens at the reversal, and resolves with the visible payoff.",
+            "non_diegetic_music: restrained motif rises with obstacle, tightens at reversal, resolves with payoff.",
             "Motion contract: visible motion starts in the first half-second; every shot changes composition, action, and mission state; preserve physical cause and effect.",
-            "Continuity contract: maintain one protagonist, one readable geography, consistent silhouette and palette, and a visible handoff between adjacent shots.",
+            short_action_contract(duration_seconds)
+            or "Cute gag: one prop causes reaction/payoff; causal deformation; loop the opening.",
+            "Continuity gate: keep one protagonist, world, dominant prop, and news mechanism across shots; show that mechanism causing the payoff; no new room, device, character, spectacle, or generic substitute.",
             "Visual guardrails: stylized cinematic animation, clear silhouette, readable foreground action, no readable text, logos, subtitles, watermark, duplicate protagonist, frozen pose, or unrelated spectacle.",
         ]
     )

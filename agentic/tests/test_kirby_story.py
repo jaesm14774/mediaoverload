@@ -4,7 +4,14 @@ import unittest
 from pathlib import Path
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.prompting import build_goal_brief, build_minimax_h3_prompt, build_story_segments
+from agentic.minimax_prompting import short_action_contract
+from agentic.runtime.prompting import (
+    build_goal_brief,
+    build_minimax_h3_prompt,
+    build_story_segments,
+    validate_story_anchor,
+    validate_story_segments,
+)
 from agentic.storyboard import StoryboardError, build_story_plan, build_storyboard_segments, format_native_h3_prompt, load_storyboard
 
 
@@ -106,6 +113,69 @@ class KirbyStoryboardTests(unittest.TestCase):
         brief = build_goal_brief(goal, goal.style, [])
         self.assertIn("one clear physical action only", brief["prompt"])
         self.assertIn("completed end state", brief["prompt"])
+
+    def test_short_action_contract_is_topic_neutral_and_not_aspect_specific(self) -> None:
+        contract = short_action_contract(6, media_type="image_to_video")
+
+        self.assertIn("one dominant physical mechanism", contract)
+        self.assertIn("completed end state", contract)
+        self.assertNotIn("Kirby", contract)
+        self.assertNotIn("Qixi", contract)
+        self.assertNotIn("9:16", contract)
+        self.assertNotIn("vertical", contract.lower())
+        self.assertEqual(short_action_contract(15, media_type="image_to_video"), "")
+        self.assertEqual(short_action_contract(6, media_type="text2img"), "")
+
+    def test_short_gag_brief_applies_reference_derived_style_contract(self) -> None:
+        goal = GoalRequest(
+            prompt="Kirby gets squashed by one giant mochi and bounces back",
+            media_type="text2img2video",
+            duration_seconds=6,
+            style="polished 2D anime",
+            constraints={
+                "character": "Kirby",
+                "visual_style_contract": (
+                    "small-versus-large scale contrast, tactile prop, readable reaction, and a loopable settled ending"
+                ),
+            },
+        )
+        brief = build_goal_brief(goal, goal.style, [])
+        self.assertIn("small-versus-large scale contrast", brief["prompt"])
+        self.assertIn("tactile prop", brief["prompt"])
+
+    def test_story_segment_contract_rejects_missing_physical_causality(self) -> None:
+        with self.assertRaisesRegex(ValueError, "missing: action, cause"):
+            validate_story_segments(
+                [
+                    {
+                        "segment_id": "segment-1",
+                        "visual": "Kirby looks at the prop",
+                        "narration": "A question appears",
+                        "action": "",
+                        "camera": "push in",
+                        "start_state": "prop is still",
+                        "end_state": "prop is still",
+                        "cause": "",
+                        "effect": "the next beat begins",
+                    }
+                ],
+                1,
+            )
+
+    def test_story_anchor_contract_rejects_unrelated_preset_story(self) -> None:
+        goal = GoalRequest(
+            prompt="a global bond auction triggers a financial storm in a living room",
+            media_type="long_video",
+            duration_seconds=10,
+            style="cinematic anime",
+            constraints={"character": "Kirby"},
+        )
+        segments = build_story_segments(goal, "financial brief", 2, "playful")
+        with self.assertRaisesRegex(ValueError, "no meaningful term"):
+            validate_story_anchor(goal, [
+                {**segment, "visual": "Kirby follows a glowing star seed through a meadow"}
+                for segment in segments
+            ])
 
 
 if __name__ == "__main__":

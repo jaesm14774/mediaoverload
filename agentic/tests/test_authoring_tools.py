@@ -25,8 +25,8 @@ class AuthoringToolTests(unittest.TestCase):
 
     def test_asset_plan_and_acquire_contracts_return_expected_shape(self) -> None:
         tool_registry = self.runner.tool_registry
-        acquisition_plan = tool_registry.call("asset.plan_acquisition", {"workflow_name": "nova_model_plus_z_image_anime"})
-        acquisition_result = tool_registry.call("asset.acquire_missing", {"workflow_name": "nova_model_plus_z_image_anime"})
+        acquisition_plan = tool_registry.call("asset.plan_acquisition", {"workflow_name": "krea2_turbo"})
+        acquisition_result = tool_registry.call("asset.acquire_missing", {"workflow_name": "krea2_turbo"})
 
         self.assertIn("missing_assets", acquisition_plan)
         self.assertIn("missing_count", acquisition_plan)
@@ -39,7 +39,7 @@ class AuthoringToolTests(unittest.TestCase):
             "workflow.recommend",
             {"media_type": "image", "style": "cinematic anime", "prompt": "robot chef", "limit": 1},
         )
-        validation = tool_registry.call("workflow.validate_manifest", {"workflow_name": "nova_model_plus_z_image_anime"})
+        validation = tool_registry.call("workflow.validate_manifest", {"workflow_name": "krea2_turbo"})
 
         self.assertEqual(recommendation["recommendation_count"], 1)
         self.assertIn("workflow_name", recommendation["recommendations"][0])
@@ -57,7 +57,7 @@ class AuthoringToolTests(unittest.TestCase):
         created = runner.tool_registry.call(
             "workflow.author.create_draft",
             {
-                "workflow_name": "nova_model_plus_z_image_anime",
+                "workflow_name": "krea2_turbo",
                 "variant_name": "legacy_image_test_draft",
                 "summary": "test draft",
             },

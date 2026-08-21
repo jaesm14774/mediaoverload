@@ -10,16 +10,39 @@ from typing import Any
 
 import yaml
 
+from agentic.assets.registry import AssetRegistry
 from agentic.app.main import _build_prompt_summary, build_runtime
 from agentic.h3_reference import normalize_reference_manifest
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.observability import RunRecorder
+from agentic.runtime.route_selection import select_weighted_route
 from agentic.runtime.step_logger import create_run_logger
 from agentic.tools.context_services import DiscordRunNotificationService, NewsContextService
 
 SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube"}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+IMAGE_ONLY_GENERATION_TYPES = {"text2img", "sticker_pack"}
+
+# A bare character invocation is the autonomous production mode. It must
+# exercise the complete news-to-media path instead of allowing the strategy
+# LLM to stop at an image-only strategy.
+NEWS_GROUNDED_GENERATION_TYPES = frozenset(
+    {
+        "native_h3_story",
+        "native_h3_t2v_story",
+        "native_h3_fl2va_story",
+        "native_h3_l2va_story",
+        "native_h3_ref2va",
+        "text2image2native_h3_ref2va",
+        "text2longvideo",
+    }
+)
+AUTONOMOUS_E2E_ROUTE_PREFERENCE = (
+    "native_h3_story",
+    "text2image2native_h3_ref2va",
+    "text2longvideo",
+)
 
 CONFIG_MEDIA_TYPE_MAP = {
     "text2img": "image",
@@ -128,8 +151,11 @@ def build_goal_payload_from_character_config(
     enable_review_loop: bool = False,
     review_notes: str = "",
     no_review: bool = False,
+    stage_probe: bool = False,
     news_driven: bool = False,
     news_history_path: str | None = None,
+    routing_history_path: str | None = None,
+    asset_root: Path | None = None,
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
     path = Path(config_path).resolve()
@@ -156,9 +182,20 @@ def build_goal_payload_from_character_config(
         prompt=prompt,
         preferred_generation_type=preferred_generation_type,
         requested_duration_seconds=requested_duration_seconds,
+        news_driven=news_driven,
         rng=rng,
+        routing_history_path=Path(routing_history_path).expanduser() if routing_history_path else None,
+        asset_root=asset_root,
     )
     config_generation_type = str(routing["generation_type"])
+    effective_news_driven = bool(
+        news_driven
+        or (
+            not str(prompt).strip()
+            and routing.get("selection_source") == "autonomous_e2e_default"
+            and config_generation_type in NEWS_GROUNDED_GENERATION_TYPES
+        )
+    )
     agentic_media_type = CONFIG_MEDIA_TYPE_MAP.get(config_generation_type, "long_video")
     native_recipe = dict(_native_recipe_for_generation(generation, config_generation_type))
     configured_reference_values = any(
@@ -175,6 +212,7 @@ def build_goal_payload_from_character_config(
     pre_video_review_enabled = bool(
         pre_video_review_config.get("enabled", False)
         and config_generation_type not in {"text2video", "native_h3_t2v_story"}
+        and not (no_review and config_generation_type == "text2image2video")
         and (
             config_generation_type != "native_h3_ref2va"
             or auto_reference_generation
@@ -192,6 +230,32 @@ def build_goal_payload_from_character_config(
             or (4 if config_generation_type == "text2image2native_h3_ref2va" else 1)
         ),
     )
+    if no_review and config_generation_type == "text2image2video":
+        # Without a review gate there is no consumer for the six-candidate
+        # selection contract. Keep the fast path to one keyframe so it can
+        # actually reach the I2V stage on a low-VRAM ComfyUI host.
+        routing["count_plan"]["image_count"] = 1
+        routing["count_plan"]["review_selection_limit"] = 1
+    if stage_probe:
+        # Stage probes must exercise the configured candidate contract for
+        # every image-producing strategy, not just Native H3. Use the policy
+        # maximum so the probe can evaluate alternatives without changing
+        # production defaults.
+        stage_probe_policy = dict(
+            routing.get("count_policies", {}).get(config_generation_type, {}) or {}
+        )
+        if config_generation_type in {"text2img", "text2image2image", "text2video"}:
+            image_policy = dict(stage_probe_policy.get("image_count", {}) or {})
+            if image_policy:
+                routing["count_plan"]["image_count"] = int(image_policy.get("max") or 1)
+            routing["count_plan"]["review_selection_limit"] = 1
+        elif config_generation_type == "sticker_pack":
+            expression_policy = dict(stage_probe_policy.get("sticker_expression_count", {}) or {})
+            images_policy = dict(stage_probe_policy.get("images_per_prompt", {}) or {})
+            if expression_policy:
+                routing["count_plan"]["sticker_expression_count"] = int(expression_policy.get("max") or 4)
+            if images_policy:
+                routing["count_plan"]["images_per_prompt"] = int(images_policy.get("max") or 1)
     autonomous_prompt = _resolve_autonomous_prompt(
         prompt=prompt,
         character_name=character_name,
@@ -199,10 +263,10 @@ def build_goal_payload_from_character_config(
         media_type=agentic_media_type,
         generation=generation,
         generation_type=config_generation_type,
-        news_driven=news_driven,
+        news_driven=effective_news_driven,
         news_history_path=news_history_path or _default_news_history_path(repo_root, character_name),
     )
-    if config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"} and (news_driven or not str(prompt).strip()):
+    if config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"} and (effective_news_driven or not str(prompt).strip()):
         # Native H3 owns the news-to-story prompt contract. Do not create a
         # second autonomous scene prompt here and then carry it through the
         # routing summary as if it were a user brief.
@@ -238,6 +302,9 @@ def build_goal_payload_from_character_config(
         platform_configs = {
             name: config for name, config in platform_configs.items() if name in selected_platforms
         }
+    if config_generation_type in IMAGE_ONLY_GENERATION_TYPES and "youtube" in platform_configs:
+        platform_configs.pop("youtube", None)
+        skipped_platforms.append("youtube:image_only_route")
     hashtags = [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag]
     longvideo_config = dict(routing.get("longvideo_config", {}) or {})
     longvideo_config.update(
@@ -253,7 +320,7 @@ def build_goal_payload_from_character_config(
             "native_h3_fl2va_story",
             "native_h3_l2va_story",
         }
-        and not no_review
+        and (not no_review or stage_probe)
     ):
         native_keyframe_candidate_count = pre_video_candidate_count
     native_reference_candidate_count = int(
@@ -263,7 +330,7 @@ def build_goal_payload_from_character_config(
     )
     if auto_reference_generation and pre_video_review_enabled:
         native_reference_candidate_count = pre_video_candidate_count
-    if no_review and config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
+    if no_review and not stage_probe and config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
         native_recipe["keyframe_candidate_count"] = 1
         native_keyframe_candidate_count = 1
         native_recipe["require_human_review"] = False
@@ -276,6 +343,13 @@ def build_goal_payload_from_character_config(
         native_recipe.get("creative_brief")
         or native_h3_quality.get("creative_brief")
         or generation.get("native_h3_creative_brief")
+        or ""
+    ).strip()
+    native_h3_visual_style_contract = str(
+        generation.get("visual_style_contract")
+        or native_recipe.get("visual_style_contract")
+        or native_h3_quality.get("visual_style_contract")
+        or generation.get("native_h3_visual_style_contract")
         or ""
     ).strip()
     native_h3_semantic_qa_blocking = bool(
@@ -331,18 +405,22 @@ def build_goal_payload_from_character_config(
         "dry_run": dry_run_publish,
         "publish_mode": str(publish_mode or "").strip().lower(),
         "selection_limit": routing.get("count_plan", {}).get("review_selection_limit"),
-        "enable_review_loop": enable_review_loop,
+        "enable_review_loop": bool(enable_review_loop and not no_review),
         "review_notes": review_notes,
-        "news_driven": news_driven,
+        "news_driven": effective_news_driven,
         "news_history_path": str(news_history_path or _default_news_history_path(repo_root, character_name)),
         "native_h3_keyframe_candidate_count": native_keyframe_candidate_count,
         "pre_video_review_enabled": pre_video_review_enabled,
         "pre_video_candidate_count": pre_video_candidate_count,
         "pre_video_selection_limit": pre_video_selection_limit,
-        "pre_video_review_require_human": bool(pre_video_review_enabled and not no_review),
+        "pre_video_review_require_human": bool(pre_video_review_enabled and not no_review and not stage_probe),
+        "stage_probe_auto_select": bool(stage_probe),
         "pre_video_review_reject_stops_workflow": bool(
             pre_video_review_config.get("reject_stops_workflow", True)
         ),
+        "pre_video_review_failure_policy": str(
+            pre_video_review_config.get("failure_policy", "block") or "block"
+        ).strip().lower(),
         "require_human_review": bool(
             (
                 native_recipe.get("require_human_review", True)
@@ -357,13 +435,19 @@ def build_goal_payload_from_character_config(
                 }
                 else False
             )
-            if not no_review
+            if not no_review and not stage_probe
             else False
         ),
         "native_h3_semantic_qa_required": bool(native_recipe.get("semantic_qa_required", False)),
         "native_h3_semantic_qa_blocking": native_h3_semantic_qa_blocking,
         "native_h3_creative_brief": native_h3_creative_brief,
+        "native_h3_visual_style_contract": native_h3_visual_style_contract,
+        "visual_style_contract": native_h3_visual_style_contract,
         "native_h3_use_last_frame": bool(native_recipe.get("use_last_frame", False)),
+        # The pre-video gate selects from the raw keyframes. Upscaling before
+        # that gate creates an artifact that the selected I2V input never
+        # consumes, so keep the route's authoritative input to one raw frame.
+        "skip_upscale_for_i2v": config_generation_type == "text2image2video",
         "output_dir": str(resolved_output_dir),
         "use_tts": use_tts if agentic_media_type == "long_video" else False,
         "source_temperature": temperature,
@@ -402,12 +486,11 @@ def build_goal_payload_from_character_config(
         "news_context": autonomous_prompt.get("news_context", {}),
         "fallback_reason": autonomous_prompt.get("fallback_reason", ""),
         "enable_stage_review": bool(
-            enable_review_loop
+            (enable_review_loop or stage_probe)
             and not no_review
             and
-            os.getenv("discord_review_bot_token")
-            and os.getenv("discord_review_channel_id")
-            and agentic_media_type in {"text2img2video", "long_video", "native_h3_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}
+            (stage_probe or (os.getenv("discord_review_bot_token") and os.getenv("discord_review_channel_id")))
+            and config_generation_type in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}
         ),
     }
     constraints.update(
@@ -522,14 +605,20 @@ def run_character_workflow(
     enable_review_loop: bool = False,
     review_notes: str = "",
     no_review: bool = False,
+    stage_probe: bool = False,
     news_driven: bool = False,
     news_history_path: str | None = None,
+    routing_history_path: str | None = None,
     comfy_host: str | None = None,
     comfy_port: int | None = None,
     comfy_root: str | None = None,
     auto_download_assets: bool = False,
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
+    effective_publish_after_generate = _effective_publish_after_generate(
+        requested=publish_after_generate,
+        stage_probe=stage_probe,
+    )
     run_id = uuid.uuid4().hex[:12]
     recorder = RunRecorder(repo_root / "agentic" / "logs" / "runs", run_id)
     logger, log_path = create_run_logger(repo_root / "agentic" / "logs" / "runs", run_id, recorder=recorder)
@@ -546,13 +635,16 @@ def run_character_workflow(
         dry_run_publish=dry_run_publish,
         publish_mode=publish_mode,
         publish_platforms=publish_platforms,
-        publish_after_generate=publish_after_generate,
+        publish_after_generate=effective_publish_after_generate,
         output_dir=output_dir,
         enable_review_loop=enable_review_loop,
         review_notes=review_notes,
         no_review=no_review,
+        stage_probe=stage_probe,
         news_driven=news_driven,
         news_history_path=news_history_path,
+        routing_history_path=routing_history_path,
+        asset_root=_resolve_routing_asset_root(repo_root, comfy_root),
         rng=rng,
     )
     logger.info(
@@ -587,11 +679,12 @@ def run_character_workflow(
     logger.info("plan.built | workflow=%s | node_count=%s", plan.workflow_name, len(plan.nodes))
     generation_result = runner.run(plan)
     generation_dict = generation_result.to_dict()
+    generation_media_paths = collect_media_paths_from_run_result(generation_dict)
     logger.info("generation.finished | status=%s", generation_result.status)
 
     publish_dict: dict[str, Any] | None = None
-    if publish_after_generate and generation_result.status == "success":
-        media_paths = collect_media_paths_from_run_result(generation_dict)
+    if effective_publish_after_generate and generation_result.status == "success":
+        media_paths = generation_media_paths
         platform_configs = payload["constraints"].get("platform_configs", {})
         if media_paths and isinstance(platform_configs, dict) and platform_configs:
             logger.info("publish.start | media_count=%s | platforms=%s", len(media_paths), list(platform_configs.keys()))
@@ -627,6 +720,14 @@ def run_character_workflow(
                     "review_all_candidates": _publish_review_scope(media_paths) == "final_media",
                     "publish_prompt_source": publish_prompt_source,
                     "visual_grounding": _extract_publish_visual_grounding(generation_dict),
+                    "news_context": dict(payload["constraints"].get("news_context") or {}),
+                    "news_grounding_required": bool(
+                        payload["constraints"].get("news_driven")
+                        or payload["source_generation_type"] in NEWS_GROUNDED_GENERATION_TYPES
+                    ),
+                    "news_trace_contract": (
+                        "source context -> active mechanism -> visible consequence"
+                    ),
                 },
             )
             publish_plan = planner.build_plan(publish_goal)
@@ -730,6 +831,14 @@ def run_character_workflow(
             str(discord_notification.get("message_id") or ""),
         )
 
+    review_status = _review_stage_status(generation_dict)
+    publish_status = _publish_stage_status(
+        publish_dict,
+        requested=effective_publish_after_generate,
+        generation_status=str(generation_result.status),
+        media_paths=generation_media_paths,
+        platform_configs=payload["constraints"].get("platform_configs", {}),
+    )
     result_payload = {
         "status": overall_status,
         "failure_reason": failure_details.get("failure_reason"),
@@ -750,6 +859,23 @@ def run_character_workflow(
         "routing": payload.get("routing", {}),
         "character_config_summary": payload.get("character_config_summary", {}),
         "publish": publish_dict,
+        "stage_status": {
+            "render": {
+                "status": str(generation_result.status),
+                "artifact_count": len(generation_media_paths),
+            },
+            "review": {"status": review_status},
+            "publish": {"status": publish_status},
+        },
+        "artifacts": {
+            "media_paths": generation_media_paths,
+            "video_paths": [
+                path for path in generation_media_paths if Path(path).suffix.lower() in VIDEO_EXTENSIONS
+            ],
+            "image_paths": [
+                path for path in generation_media_paths if Path(path).suffix.lower() not in VIDEO_EXTENSIONS
+            ],
+        },
         "discord_notification": discord_notification,
         "memory": run_memory.as_serializable(),
     }
@@ -830,6 +956,70 @@ def _publish_selection_limit(media_paths: list[str], configured_limit: Any) -> i
     except (TypeError, ValueError):
         limit = 0
     return max(1, min(len(media_paths), limit or len(media_paths)))
+
+
+def _review_stage_status(run_result: dict[str, Any]) -> str:
+    records = run_result.get("records") if isinstance(run_result, dict) else None
+    review_records = [
+        record
+        for record in (records if isinstance(records, list) else [])
+        if isinstance(record, dict)
+        and (
+            str(record.get("skill_name") or "").startswith("review.")
+            or "review" in str(record.get("node_id") or "").lower()
+        )
+    ]
+    if not review_records:
+        return "not_required"
+    if any(str(record.get("status") or "").lower() not in {"success", "skipped"} for record in review_records):
+        return "failed"
+    return "success"
+
+
+def _publish_stage_status(
+    publish_result: dict[str, Any] | None,
+    *,
+    requested: bool,
+    generation_status: str,
+    media_paths: list[str],
+    platform_configs: Any,
+) -> str:
+    if not requested:
+        return "not_requested"
+    if generation_status != "success":
+        return "not_run_generation_failed"
+    if not media_paths:
+        return "skipped_no_media"
+    if not isinstance(platform_configs, dict) or not platform_configs:
+        return "skipped_no_compatible_platform"
+    if not publish_result:
+        return "not_run"
+    result = publish_result.get("result") if isinstance(publish_result, dict) else None
+    if isinstance(result, dict):
+        if str(result.get("dispatch_status") or "").lower() == "skipped":
+            return "skipped_no_compatible_platform"
+        return str(result.get("status") or "unknown")
+    return "unknown"
+
+
+def _effective_publish_after_generate(*, requested: bool, stage_probe: bool) -> bool:
+    """Never publish an automatically selected stage-probe artifact."""
+    return bool(requested and not stage_probe)
+
+
+def _resolve_routing_asset_root(repo_root: Path, explicit_root: str | None) -> Path | None:
+    if explicit_root:
+        return Path(explicit_root).expanduser().resolve()
+    configured_root = os.environ.get("COMFYUI_ROOT", "").strip()
+    if configured_root:
+        return Path(configured_root).expanduser().resolve()
+    container_root = Path("/comfyui")
+    if container_root.is_dir():
+        return container_root.resolve()
+    portable_root = Path(r"D:\ComfyUI_windows_portable")
+    if portable_root.is_dir():
+        return portable_root.resolve()
+    return None
 
 
 def _resolve_publish_prompt(generation_result: dict[str, Any], *, fallback_prompt: str) -> tuple[str, str]:
@@ -939,6 +1129,8 @@ def _weighted_candidate_choice(
     *,
     aliases: dict[str, Any] | None = None,
     rng: random.Random | None = None,
+    state_path: Path | None = None,
+    diversity_config: dict[str, Any] | None = None,
 ) -> str:
     """Pick a configured strategy without selecting an unavailable route."""
     allowed = {str(candidate).strip() for candidate in candidates if str(candidate).strip()}
@@ -953,7 +1145,68 @@ def _weighted_candidate_choice(
             normalized_weights[normalized] = weight
     if not normalized_weights:
         normalized_weights = {candidate: 1.0 for candidate in candidates if str(candidate).strip()}
-    return _weighted_choice(normalized_weights, rng=rng)
+    return select_weighted_route(
+        normalized_weights,
+        list(normalized_weights),
+        rng=rng,
+        state_path=state_path,
+        diversity_config=diversity_config,
+    )
+
+
+def _select_workflow_candidate(
+    candidates: list[str],
+    *,
+    weights: dict[str, Any],
+    rng: random.Random | None,
+    asset_registry: AssetRegistry | None,
+) -> str:
+    if not candidates:
+        return ""
+    qualified = _asset_qualified_workflow_candidates(candidates, asset_registry)
+    if rng is None:
+        return qualified[0]
+    positive_weights: dict[str, Any] = {
+        candidate: weights.get(candidate, 1)
+        for candidate in qualified
+        if _positive_weight(weights.get(candidate, 1))
+    }
+    return _weighted_choice(positive_weights or {candidate: 1 for candidate in qualified}, rng=rng)
+
+
+def _positive_weight(value: Any) -> bool:
+    try:
+        return float(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _asset_qualified_workflow_candidates(
+    candidates: list[str],
+    asset_registry: AssetRegistry | None,
+) -> list[str]:
+    if asset_registry is None:
+        return candidates
+    qualified: list[str] = []
+    for candidate in candidates:
+        try:
+            statuses = asset_registry.ensure_workflow_ready(candidate, auto_download=False).get("asset_status", [])
+        except (KeyError, OSError, ValueError):
+            continue
+        # An empty asset manifest means "unverified", not "ready". Treating
+        # it as ready made stage weights select workflow JSONs whose model
+        # files are not installed on the active ComfyUI host.
+        if not isinstance(statuses, list) or not statuses:
+            continue
+        if all(
+            isinstance(item, dict) and str(item.get("status") or "").lower() == "ready"
+            for item in statuses
+        ):
+            qualified.append(candidate)
+    # If no candidate is verified, keep one deterministic fallback so the
+    # runtime asset-check node can emit the precise missing-asset diagnostic;
+    # do not let an unverified list re-enter weighted selection.
+    return qualified or candidates[:1]
 
 
 def _route_generation_from_character_config(
@@ -966,6 +1219,9 @@ def _route_generation_from_character_config(
     preferred_generation_type: str | None,
     requested_duration_seconds: int | None,
     rng: random.Random | None,
+    news_driven: bool = False,
+    routing_history_path: Path | None = None,
+    asset_root: Path | None = None,
 ) -> dict[str, Any]:
     generation = dict(config.get("generation", {}) or {})
     additional_params = dict(config.get("additional_params", {}) or {})
@@ -997,6 +1253,12 @@ def _route_generation_from_character_config(
         generation_type_candidates,
         workflow_stage_candidates=workflow_stage_candidates,
     )
+    asset_registry = (
+        AssetRegistry(repo_root / "agentic", asset_root=asset_root)
+        if asset_root is not None
+        else None
+    )
+    workflow_selection_weights = dict(merged_routing.get("workflow_selection_weights", {}) or {})
 
     def build_fixed_route(
         selected_generation_type: str,
@@ -1005,16 +1267,27 @@ def _route_generation_from_character_config(
         selection_source: str,
         prompt_mode: str,
     ) -> dict[str, Any]:
-        workflow_plan = {
-            stage_key: (workflow_stage_candidates.get(selected_generation_type, {}).get(stage_key, [""])[0] or "")
-            for stage_key in (
-                "image_workflow_name",
-                "video_workflow_name",
-                "refine_workflow_name",
-                "transition_workflow_name",
-                "upscale_workflow_name",
+        workflow_plan: dict[str, str] = {}
+        for stage_key in (
+            "image_workflow_name",
+            "video_workflow_name",
+            "refine_workflow_name",
+            "transition_workflow_name",
+            "upscale_workflow_name",
+        ):
+            candidates = list(
+                workflow_stage_candidates.get(selected_generation_type, {}).get(stage_key, [])
             )
-        }
+            workflow_plan[stage_key] = _select_workflow_candidate(
+                candidates,
+                weights=dict(workflow_selection_weights.get(stage_key, {}) or {}),
+                # An explicit generation-type override fixes only the route
+                # family. Keep stage workflow selection weighted when the
+                # scheduler supplied an RNG; otherwise every explicit I2V
+                # request silently falls back to the first candidate (Krea).
+                rng=rng,
+                asset_registry=asset_registry,
+            )
         count_plan = {
             count_key: _pick_policy_value(policy)
             for count_key, policy in dict(count_policies.get(selected_generation_type, {}) or {}).items()
@@ -1027,6 +1300,7 @@ def _route_generation_from_character_config(
             "reason": reason,
             "prompt_mode": prompt_mode,
             "selection_source": selection_source,
+            "workflow_selection_mode": "weighted_random" if rng is not None else "first_qualified",
             "llm_backend": {},
             "workflow_stage_candidates": workflow_stage_candidates,
             "generation_type_candidates": generation_type_candidates,
@@ -1057,12 +1331,39 @@ def _route_generation_from_character_config(
             prompt_mode="duration_policy",
         )
 
+    # The exact public command `python run_media_interface.py --character X`
+    # is intentionally deterministic: it is an autonomous E2E production run,
+    # not an invitation for the strategy LLM to choose a shortcut. Keep
+    # explicit prompts, generation types, and durations on their existing
+    # paths; only the empty bare invocation gets this policy.
+    if (
+        not str(prompt).strip()
+        and not news_driven
+        and requested_duration_seconds is None
+    ):
+        selected_generation_type = next(
+            (
+                candidate
+                for candidate in AUTONOMOUS_E2E_ROUTE_PREFERENCE
+                if candidate in generation_type_candidates
+            ),
+            generation_type_candidates[0],
+        )
+        return build_fixed_route(
+            selected_generation_type,
+            "bare character invocation requires the complete news-to-story-to-media workflow",
+            selection_source="autonomous_e2e_default",
+            prompt_mode="autonomous_e2e",
+        )
+
     if rng is not None:
         selected_generation_type = _weighted_candidate_choice(
             dict(generation.get("generation_type_weights", {}) or {}),
             generation_type_candidates,
             aliases=dict(routing_config.get("strategy_aliases", {}) or {}),
             rng=rng,
+            state_path=routing_history_path,
+            diversity_config=dict(routing_config.get("route_diversity", {}) or {}),
         )
         return build_fixed_route(
             selected_generation_type,
@@ -1682,6 +1983,12 @@ def _resolve_duration_seconds(
                 "use text2image2video for a 5-second clip."
             )
         return native_duration
+    if config_generation_type == "text2image2video":
+        # The default I2V workflow is a short 124-frame clip at 24 fps.
+        # Keep prompt planning aligned with that effective ~5-second render
+        # so the short-action contract is applied unless the caller opts in
+        # to a different duration explicitly.
+        return requested or 5
     if config_generation_type != "text2longvideo":
         return requested or 30
     longvideo = dict(strategies.get("text2longvideo", {}) or {})
@@ -1800,10 +2107,14 @@ def _select_fresh_news(news_service: NewsContextService, history_path: Path) -> 
             "News-driven generation requires an unseen news item, but no unseen usable news was available. "
             f"History: {history_path}"
         )
+    selected_dict = dict(selected.to_dict() or {})
     history.append(
         {
-            **selected.to_dict(),
-            "key": NewsContextService.selection_key(selected.title, selected.keyword),
+            **selected_dict,
+            "key": NewsContextService.selection_key(
+                selected_dict.get("title", ""),
+                selected_dict.get("keyword", ""),
+            ),
             "selected_at": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -1948,6 +2259,18 @@ def _resolve_repo_path(repo_root: Path, raw_path: str) -> Path:
     normalized = raw_path.strip()
     if not normalized:
         return repo_root / "agentic" / "output"
+    # Character configs are shared with the Windows host and may contain a
+    # drive-qualified path such as ``D:/MediaOverload/output``.  Inside the
+    # Linux container that string is not an absolute path; without this
+    # mapping it becomes ``/app/D:/MediaOverload/output`` and bypasses the
+    # mounted ``/app/output`` directory.
+    if (
+        len(normalized) >= 3
+        and normalized[1] == ":"
+        and normalized[2] in {"/", "\\"}
+        and Path("/comfyui").is_dir()
+    ):
+        return repo_root / "output"
     if normalized.startswith("/app/"):
         return repo_root / normalized.removeprefix("/app/")
     if normalized == "/app":

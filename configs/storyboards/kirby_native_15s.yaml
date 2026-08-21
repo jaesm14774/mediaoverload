@@ -44,8 +44,7 @@ world:
   # reusable plot. The resolved LLM story replaces these fields before render.
   setting: generated from the selected news item at runtime
   visual_language: >-
-    polished 2D anime, clean readable shapes, cinematic lighting, coherent
-    screen geography, controlled motion, stable Kirby identity
+    pastel anime, clean shapes, one prop, readable negative space and reaction
   continuity_rules:
     - Kirby remains the only protagonist and keeps the same identity, proportions, silhouette, and palette in every shot.
     - The resolved story must preserve one stable world geography across all three shots.

@@ -55,6 +55,49 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["negative_prompt"], "llm negative")
         self.assertEqual(result["prompt_mode"], "llm")
 
+    def test_expand_goal_injects_topic_neutral_short_action_contract(self) -> None:
+        manager = _FakeManager(
+            [
+                '{"creative_brief":"llm brief","prompt":"llm prompt","negative_prompt":"llm negative"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="a paper boat rides a sudden gust into a safe harbor",
+            media_type="image_to_video",
+            duration_seconds=6,
+            style="storybook animation",
+        )
+
+        engine.expand_goal(goal, "storybook animation", [])
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("Short-action contract", user_prompt)
+        self.assertIn("one dominant physical mechanism", user_prompt)
+        self.assertNotIn("9:16", user_prompt)
+        self.assertNotIn("vertical", user_prompt.lower())
+
+    def test_compose_prompt_injects_topic_neutral_short_action_contract(self) -> None:
+        manager = _FakeManager(
+            [
+                '{"prompt":"llm composed prompt","negative_prompt":"llm negative"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="a paper boat rides a sudden gust into a safe harbor",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="storybook animation",
+        )
+
+        engine.compose_prompt(goal, "a paper boat rides a sudden gust", "storybook animation")
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("Short-action contract", user_prompt)
+        self.assertIn("completed end state", user_prompt)
+        self.assertNotIn("Qixi", user_prompt)
+
     def test_segment_story_uses_llm_array_when_available(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
@@ -731,6 +774,115 @@ class LLMEngineTests(unittest.TestCase):
         self.assertNotIn(media_paths[10], result["selected_assets"])
         self.assertNotIn(media_paths[11], result["selected_assets"])
         self.assertEqual(result["selected_assets"][0], media_paths[0])
+
+    def test_review_asset_candidates_drops_vision_hard_failures_before_final_selection(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-hard-gate"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        rejected = temp_dir / "duplicate.png"
+        accepted = temp_dir / "single.png"
+        rejected.write_bytes(b"fake")
+        accepted.write_bytes(b"fake")
+        try:
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [
+                        json.dumps(
+                            {
+                                "selected_assets": [str(rejected)],
+                                "ranked_candidates": [
+                                    {"media_path": str(rejected), "score": 99, "rationale": "looks strongest"},
+                                    {"media_path": str(accepted), "score": 80, "rationale": "clean"},
+                                ],
+                                "selection_rationale": "highest score",
+                                "regeneration_notes": "none",
+                            }
+                        ),
+                    ],
+                    vision_responses=[
+                        '{"score": 75, "rationale": "three duplicate Kirbys; violates the single protagonist rule"}',
+                        '{"score": 80, "rationale": "one Kirby, no text, clean readable action"}',
+                    ],
+                ),
+            )
+            result = engine.review_asset_candidates(
+                GoalRequest(prompt="select one Kirby opening frame", media_type="image", style="anime"),
+                media_paths=[str(rejected), str(accepted)],
+                review_notes="one protagonist only",
+                selection_limit=1,
+            )
+        finally:
+            rejected.unlink(missing_ok=True)
+            accepted.unlink(missing_ok=True)
+
+        self.assertEqual(result["selected_assets"], [str(accepted)])
+
+    def test_stage_probe_rejects_a_vision_batch_when_all_candidates_are_weak(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-stage-min-score"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        candidates = [temp_dir / "weak_a.png", temp_dir / "weak_b.png"]
+        for path in candidates:
+            path.write_bytes(b"fake")
+        try:
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [],
+                    vision_responses=[
+                        '{"score": 35, "rationale": "correct character but the requested action is not visible"}',
+                        '{"score": 40, "rationale": "clean character but weak composition"}',
+                    ],
+                ),
+            )
+            goal = GoalRequest(
+                prompt="select a strong Kirby landing frame",
+                media_type="image",
+                style="anime",
+                constraints={"stage_probe_auto_select": True},
+            )
+            with self.assertRaisesRegex(PromptGenerationError, "stage_probe_quality_gate"):
+                engine.review_asset_candidates(
+                    goal,
+                    media_paths=[str(path) for path in candidates],
+                    review_notes="stage: preview",
+                    selection_limit=1,
+                )
+        finally:
+            for path in candidates:
+                path.unlink(missing_ok=True)
+
+    def test_review_rejects_a_batch_when_every_candidate_hits_a_hard_failure(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-all-hard-fail"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        candidates = [temp_dir / "duplicate_a.png", temp_dir / "duplicate_b.png"]
+        for path in candidates:
+            path.write_bytes(b"fake")
+        try:
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [],
+                    vision_responses=[
+                        '{"score": 90, "rationale": "duplicate Kirbys and readable text"}',
+                        '{"score": 88, "rationale": "multiple characters and watermark"}',
+                    ],
+                ),
+            )
+            with self.assertRaisesRegex(PromptGenerationError, "asset_review_hard_gate"):
+                engine.review_asset_candidates(
+                    GoalRequest(
+                        prompt="select a safe Kirby frame",
+                        media_type="image",
+                        style="anime",
+                        constraints={"stage_probe_auto_select": True},
+                    ),
+                    media_paths=[str(path) for path in candidates],
+                    review_notes="stage: preview",
+                    selection_limit=1,
+                )
+        finally:
+            for path in candidates:
+                path.unlink(missing_ok=True)
 
     def test_expand_goal_falls_back_when_manager_unavailable(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)

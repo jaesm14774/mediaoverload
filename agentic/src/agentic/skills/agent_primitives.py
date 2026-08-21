@@ -8,6 +8,8 @@ from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.prompting import (
     build_segment_prompt,
+    validate_story_anchor,
+    validate_story_segments,
 )
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import (
@@ -70,6 +72,7 @@ class AgentPlanningSkills:
         brief = str(brief_source.get("creative_brief", context.plan.goal.prompt))
         tone = str(context.node.inputs.get("tone", "coherent progression"))
         segments = self.prompt_engine.segment_story(context.plan.goal, brief, segment_count, tone)
+        validate_story_anchor(context.plan.goal, validate_story_segments(segments, segment_count))
         return SkillResult(
             status="success",
             outputs={"segments": segments, "segment_count": segment_count},
@@ -293,6 +296,30 @@ class AgentMediaSkills:
             prompt = self._resolve_prompt(context)
             negative_prompt = self._resolve_negative_prompt(context)
             if character == "kirby":
+                prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
+                if prompt_key == "opening_keyframe_prompt":
+                    story_output = context.state.node_outputs.get("native-story-prompt", {})
+                    generated_storyboard = (
+                        story_output.get("generated_storyboard")
+                        if isinstance(story_output, dict)
+                        else None
+                    )
+                    news_trace = (
+                        generated_storyboard.get("news_trace")
+                        if isinstance(generated_storyboard, dict)
+                        else None
+                    )
+                    mechanism = (
+                        str(news_trace.get("news_mechanism") or "").strip().rstrip(".")
+                        if isinstance(news_trace, dict)
+                        else ""
+                    )
+                    if mechanism:
+                        prompt = (
+                            f"{prompt}. FIRST-FRAME NEWS-MECHANISM LOCK: show {mechanism} visibly operating "
+                            "inside the opening composition now, not merely implied in the background; keep the "
+                            "same mechanism and its dominant anchor large and readable from frame one."
+                        )
                 prompt = (
                     f"{prompt}, single continuous animation frame, one composition, Kirby large and clearly visible "
                     "in the foreground or midground, full readable round pink body and bright red feet, "
@@ -531,6 +558,8 @@ class AgentMediaSkills:
                 or "q4"
             ),
             "video_count": int(context.node.inputs.get("video_count") or context.plan.goal.constraints.get("video_count") or 1),
+            "width": context.node.inputs.get("width"),
+            "height": context.node.inputs.get("height"),
         }
         if context.plan.goal.media_type == "long_video" and workflow_name.startswith("minimax_h3_"):
             constraints = context.plan.goal.constraints
@@ -681,6 +710,39 @@ class AgentMediaSkills:
             },
         )
         return SkillResult(status="success", outputs=result, logs=["Created a GIF preview for an agent step."])
+
+    def qa_video(self, context: SkillContext) -> SkillResult:
+        video_path = str(
+            context.node.inputs.get("video_path")
+            or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
+            or ""
+        )
+        if not video_path:
+            raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
+        qa_dir = self._build_run_dir(context.plan.goal.prompt, "video_qa")
+        payload = {
+            "video_path": video_path,
+            "target_duration": context.node.inputs.get("target_duration"),
+            "duration_tolerance": float(context.node.inputs.get("duration_tolerance", 0.6)),
+            "expected_width": context.node.inputs.get("expected_width"),
+            "expected_height": context.node.inputs.get("expected_height"),
+            "expected_fps": context.node.inputs.get("expected_fps"),
+            "require_audio": bool(context.node.inputs.get("require_audio", False)),
+            "require_stereo_audio": bool(context.node.inputs.get("require_stereo_audio", False)),
+            "analyze_audio": bool(context.node.inputs.get("analyze_audio", False)),
+            "contact_sheet_path": str(qa_dir / "contact_sheet.jpg"),
+            "frame_count": int(context.node.inputs.get("frame_count", 6)),
+            "columns": int(context.node.inputs.get("columns", 3)),
+            "scale_width": int(context.node.inputs.get("scale_width", 480)),
+        }
+        result = self.tools.call("media.video_qa", payload)
+        passed = bool(result.get("passed", False))
+        return SkillResult(
+            status="success" if passed else "failed",
+            outputs=result,
+            metrics={"passed": passed, "duration": result.get("duration", 0)},
+            logs=["Technical video QA passed." if passed else "Technical video QA failed."],
+        )
 
     def extract_last_frame(self, context: SkillContext) -> SkillResult:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "frame")
@@ -988,6 +1050,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
     skill_registry.register("media.video.merge_audio", media.merge_audio_video, "Mux audio and video as an agent media primitive")
     skill_registry.register("media.video.gif_preview", media.video_to_gif, "Create a GIF preview as an agent media primitive")
+    skill_registry.register("media.video.qa", media.qa_video, "Run technical video QA and create a contact sheet")
     skill_registry.register("media.video.extract_last_frame", media.extract_last_frame, "Extract the last frame as an agent media primitive")
     skill_registry.register("agent.sticker.package", media.package_sticker_outputs, "Package sticker artifacts for downstream agent use")
     skill_registry.register("agent.sticker.animate.package", media.package_animated_sticker_outputs, "Package animated sticker artifacts for downstream agent use")

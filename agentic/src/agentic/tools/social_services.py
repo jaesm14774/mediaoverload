@@ -7,6 +7,8 @@ from pathlib import Path
 from agentic.runtime.registry import ToolRegistry
 from agentic.tools.publishing_adapter import MediaPost, PublishingAdapter, build_dispatch_plan
 
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+
 
 class SocialServiceTools:
     def __init__(self, output_root: Path) -> None:
@@ -54,12 +56,18 @@ class SocialServiceTools:
         effective_platforms = platforms or list(dispatch_plan.keys())
         results: dict[str, bool] = {}
         errors: dict[str, str] = {}
+        skipped_platforms: dict[str, str] = {}
         publish_receipts: dict[str, dict[str, object]] = {}
         global_additional_params = dict(payload.get("additional_params", {}) or {})
         global_additional_params.update(self._safe_poc_params(publish_mode))
         for platform in effective_platforms:
             platform_plan = dispatch_plan.get(platform, {})
             platform_media_paths = [str(path) for path in platform_plan.get("media_paths", media_paths)]
+            if platform == "youtube" and not any(
+                Path(path).suffix.lower() in VIDEO_EXTENSIONS for path in platform_media_paths
+            ):
+                skipped_platforms[platform] = "requires_video_media"
+                continue
             platform_bundle_entry = platform_bundle.get(platform, {}) if isinstance(platform_bundle, dict) else {}
             platform_additional_params = {
                 **global_additional_params,
@@ -94,7 +102,7 @@ class SocialServiceTools:
                 receipt = receipts.get(platform) if isinstance(receipts, dict) else None
                 if isinstance(receipt, dict):
                     publish_receipts[platform] = dict(receipt)
-        effective_platforms = platforms or list(results.keys())
+        effective_platforms = [platform for platform in effective_platforms if platform not in skipped_platforms]
         publication_state, publicly_visible = self._publication_state(
             publish_mode=publish_mode,
             platforms=effective_platforms,
@@ -102,6 +110,8 @@ class SocialServiceTools:
             errors=errors,
             receipts=publish_receipts,
         )
+        status = "success" if not errors else "partial_failure"
+        dispatch_status = "skipped" if skipped_platforms and not effective_platforms and not errors else status
         manifest_path = self._write_publish_manifest(
             payload=payload,
             media_paths=media_paths,
@@ -112,13 +122,17 @@ class SocialServiceTools:
             receipts=publish_receipts,
             publication_state=publication_state,
             publicly_visible=publicly_visible,
+            skipped_platforms=skipped_platforms,
+            status=status,
         )
         return {
-            "status": "success" if not errors else "partial_failure",
+            "status": status,
+            "dispatch_status": dispatch_status,
             "publication_state": publication_state,
             "publicly_visible": publicly_visible,
             "results": results,
             "errors": errors,
+            "skipped_platforms": skipped_platforms,
             "publish_receipts": publish_receipts,
             "manifest_path": manifest_path,
             "media_paths": media_paths,
@@ -141,6 +155,8 @@ class SocialServiceTools:
         receipts: dict[str, dict[str, object]],
         publication_state: str,
         publicly_visible: bool,
+        skipped_platforms: dict[str, str],
+        status: str,
     ) -> str | None:
         manifest_dir = str(payload.get("manifest_dir") or "").strip()
         if not manifest_dir:
@@ -156,7 +172,8 @@ class SocialServiceTools:
             "results": results,
             "errors": errors,
             "publish_receipts": receipts,
-            "status": "success" if not errors else "partial_failure",
+            "status": status,
+            "skipped_platforms": skipped_platforms,
             "publication_state": publication_state,
             "publicly_visible": publicly_visible,
         }
@@ -186,7 +203,9 @@ class SocialServiceTools:
             if public_count:
                 return "partially_published", False
             return "failed", False
-        if not platforms or not all(results.get(platform, False) for platform in platforms):
+        if not platforms:
+            return "not_applicable", False
+        if not all(results.get(platform, False) for platform in platforms):
             return "failed", False
         if publish_mode == "safe_poc":
             return "staged", False

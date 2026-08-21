@@ -20,6 +20,7 @@ from agentic.storyboard import (
     format_native_h3_prompt,
     load_storyboard,
     merge_native_h3_storyboard,
+    repair_native_h3_story_quality,
     repair_native_h3_news_trace_integration,
     validate_native_h3_shot_timing,
 )
@@ -83,8 +84,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(opening.inputs["image_count"], 6)
         self.assertEqual(opening_review.inputs["review_all_candidates"], True)
         self.assertEqual(opening_review.inputs["review_scope"], "first_frame")
-        self.assertIn("可愛爆擊", opening_review.inputs["review_notes"])
-        self.assertIn("實際附件", opening_review.inputs["review_notes"])
+        self.assertEqual(opening_review.inputs["review_notes"], "stage: preview")
         self.assertEqual(opening_review.depends_on, ["native-opening-keyframe"])
         self.assertEqual(keyframe_gate.inputs["opening_node"], "native-opening-review")
         self.assertTrue(keyframe_gate.inputs["preserve_opening_frame"])
@@ -170,6 +170,40 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(opening.inputs["image_count"], 1)
         self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
         self.assertFalse(plan.metadata["native_h3"]["require_human_review"])
+
+    def test_stage_probe_keeps_six_candidates_and_adds_explicit_auto_selection_node(self) -> None:
+        payload = build_goal_payload_from_character_config(
+            self.repo_root,
+            self.config_path,
+            preferred_generation_type="native_h3_story",
+            publish_after_generate=False,
+            stage_probe=True,
+        )
+        planner, _runner, _memory = build_runtime(
+            self.repo_root / "agentic",
+            output_root=self.repo_root / ".tmp-tests" / "native-h3-stage-probe-plan",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        goal = planner.create_goal(
+            prompt=payload["prompt"],
+            media_type=payload["media_type"],
+            duration_seconds=payload["duration_seconds"],
+            style=payload["style"],
+            auto_download_assets=False,
+            constraints=payload["constraints"],
+        )
+        plan = planner.build_plan(goal)
+
+        opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
+        review = next(node for node in plan.nodes if node.node_id == "native-opening-review")
+        gate = next(node for node in plan.nodes if node.node_id == "native-keyframe-gate")
+        self.assertEqual(opening.inputs["image_count"], 6)
+        self.assertTrue(review.inputs["auto_select_for_probe"])
+        self.assertFalse(review.inputs["require_human_review"])
+        self.assertEqual(gate.inputs["opening_node"], "native-opening-review")
+        self.assertFalse(gate.inputs["preserve_opening_frame"])
+        self.assertTrue(plan.metadata["native_h3"]["stage_probe_auto_select"])
 
     def test_news_only_native_h3_does_not_validate_autonomous_brief_as_user_objective(self) -> None:
         captured: dict[str, object] = {}
@@ -283,6 +317,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("Hook", prompt)
         self.assertNotIn("??", prompt)
         self.assertIn("15-second", prompt)
+        self.assertIn("Cute gag:", prompt)
+        self.assertIn("loop the opening", prompt)
 
     def test_native_prompt_carries_the_single_visual_gag_contract(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
@@ -567,6 +603,75 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertTrue(quality["passed"], quality)
 
+    def test_native_h3_news_contract_requires_mechanism_and_consequence(self) -> None:
+        story = {
+            "name": "Kirby and the Lantern Outage",
+            "story_spine": {
+                "premise": "A city lantern system begins shutting down in sequence.",
+                "objective": "Kirby must reopen the canal path before the last light disappears.",
+                "obstacle": "A synchronized blackout closes the path and reverses Kirby's route.",
+                "stakes": "The canal becomes impassable when the final lantern goes dark.",
+                "climax": "Kirby redirects the last beam and reopens the canal path.",
+                "resolution": "Warm lantern light returns and the canal path is open again.",
+            },
+            "news_trace": {
+                "contract_version": 2,
+                "source_title": "city lantern outage",
+                "source_concepts": ["outage", "lantern"],
+                "visual_translation": "The outage becomes a synchronized lantern blackout that blocks a canal path and can be reversed by Kirby.",
+                "news_mechanism": "synchronized lantern blackout blocks the canal path",
+                "news_consequence": "the canal path reopens into warm light",
+                "visual_anchors": ["city lanterns", "synchronized lantern blackout", "canal path reopens"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
+                "integration": "The outage makes the canal path close, so Kirby must restore the lantern sequence before the route disappears.",
+            },
+            "native_shots": [
+                {"action": "Kirby runs beneath the city lanterns as every light flickers in sequence."},
+                {"action": "The synchronized lantern blackout blocks the canal path and forces Kirby to reverse."},
+                {"action": "Kirby redirects the last lantern beam and the canal path reopens into warm light."},
+            ],
+        }
+        quality = evaluate_native_h3_news_grounding(
+            story,
+            {"title": "city lantern outage", "keyword": "outage;lantern", "category": "city"},
+        )
+        self.assertTrue(quality["passed"], quality)
+        self.assertTrue(quality["checks"]["news_mechanism_reaches_story"])
+        self.assertTrue(quality["checks"]["news_consequence_reaches_payoff"])
+
+        collapsed = json.loads(json.dumps(story))
+        collapsed["news_trace"]["visual_anchors"] = ["glowing orb", "glowing orb", "glowing orb"]
+        collapsed["news_trace"]["anchor_roles"] = ["prop", "prop", "prop"]
+        collapsed["news_trace"]["news_mechanism"] = "the orb floats"
+        collapsed["news_trace"]["news_consequence"] = "the orb glows steadily"
+        collapsed["native_shots"] = [
+            {"action": "Kirby catches the glowing orb."},
+            {"action": "The glowing orb slips and Kirby catches it again."},
+            {"action": "The glowing orb glows steadily in Kirby's hands."},
+        ]
+        rejected = evaluate_native_h3_news_grounding(
+            collapsed,
+            {"title": "city lantern outage", "keyword": "outage;lantern", "category": "city"},
+        )
+        self.assertFalse(rejected["passed"])
+        self.assertFalse(rejected["checks"]["news_anchor_roles_complete"])
+        self.assertFalse(rejected["checks"]["news_anchor_diversity"])
+        self.assertFalse(rejected["checks"]["news_anchor_not_default_object_loop"])
+
+    def test_native_h3_render_prompt_carries_news_mechanism_contract(self) -> None:
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard["news_trace"] = {
+            "visual_translation": "A city blackout closes a canal path.",
+            "news_mechanism": "synchronized lights shut down and block the route",
+            "news_consequence": "the route reopens when Kirby redirects the final beam",
+            "visual_anchors": ["city lights", "blocked route", "warm exit"],
+            "anchor_roles": ["context", "mechanism", "consequence"],
+        }
+        prompt = format_native_h3_prompt(storyboard, duration_seconds=15)
+        self.assertIn("News mechanism contract", prompt)
+        self.assertIn("synchronized lights shut down", prompt)
+        self.assertIn("Do not replace the mechanism with a generic floating object", prompt)
+
     def test_native_h3_news_grounding_keeps_compound_anchor_in_payoff(self) -> None:
         story = {
             "name": "Kirby and the Shadow Agent",
@@ -633,6 +738,116 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             )["passed"]
         )
 
+    def test_native_h3_quality_repair_adds_middle_setback(self) -> None:
+        story = {
+            "opening_keyframe_prompt": "Kirby sits calmly beside the bridge.",
+            "story_spine": {"objective": "protect the bridge", "resolution": "the bridge is safe"},
+            "news_trace": {
+                "news_mechanism": "the bridge tiles collapse",
+                "visual_anchors": ["neon bridge tiles"],
+            },
+            "native_shots": [
+                {"action": "Kirby runs toward the bridge.", "state_change": "Kirby reaches the bridge."},
+                {"action": "Kirby keeps running.", "state_change": "Kirby advances."},
+                {"action": "Kirby reaches safety.", "state_change": "the bridge is safe."},
+            ],
+        }
+
+        repaired = repair_native_h3_story_quality(story)
+
+        self.assertIsNotNone(repaired)
+        self.assertIn("but", repaired["native_shots"][1]["action"])
+        self.assertIn("worsens", repaired["native_shots"][1]["action"])
+        self.assertIn("reverses", repaired["native_shots"][1]["state_change"])
+        self.assertIn("jolts", repaired["opening_keyframe_prompt"])
+
+    def test_native_h3_deterministic_repairs_compose_before_full_validation(self) -> None:
+        news = {
+            "title": "DDoS communication outage",
+            "keyword": "DDoS;communication;outage",
+            "category": "news",
+        }
+        brief = "Make this a highly shareable cute micro-gag with one readable setback and visible payoff."
+        story = {
+            "name": "Kirby's Jammed Tube",
+            "base_prompt": "Kirby in a polished 2D anime style with squash-and-stretch motion.",
+            "opening_keyframe_prompt": "Kirby rushes toward a brass tube as it jolts and erupts.",
+            "ending_keyframe_prompt": "Kirby bounces beside the clear brass tube after the route opens.",
+            "negative_prompt": "text, words, letters, numbers, logos, extra characters",
+            "news_trace": {
+                "contract_version": 2,
+                "source_title": "DDoS communication outage",
+                "source_concepts": ["DDoS", "communication"],
+                "visual_translation": "DDoS becomes a pressure surge in a brass communication tube.",
+                "news_mechanism": "A pressure surge blocks the tube intake.",
+                "news_consequence": "The blocked tube clears and communication resumes.",
+                "visual_anchors": ["brass communication tube", "pressure surge", "blocked intake"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
+                "integration": "Kirby carries one message through the brass communication tube.",
+            },
+            "gag_card": {
+                "hook_frame": "Kirby rushes toward the jolting brass tube.",
+                "character_desire": "Send one capsule through the tube.",
+                "prop_rule": "The tube accepts one capsule at a time.",
+                "setback": "The pressure surge pushes Kirby backward.",
+                "expressive_reaction": "Kirby's cheeks wobble in surprise.",
+                "payoff_reversal": "Kirby clears the tube with one elastic puff.",
+                "loop_reason": "The tube resets for another capsule.",
+            },
+            "story_spine": {
+                "premise": "Kirby tries to send one capsule through a brass tube.",
+                "objective": "Send one capsule through the tube.",
+                "obstacle": "The pressure surge blocks the intake.",
+                "stakes": "The capsule cannot reach the other side.",
+                "emotional_arc": "Curiosity becomes urgency.",
+                "climax": "Kirby redirects the pressure.",
+                "resolution": "The tube clears and the capsule arrives.",
+            },
+            "world": {"setting": "A pastel tube station", "visual_language": "Clean cel shading"},
+            "native_audio": "A soft hum, a sudden rumble, then a cheerful pop.",
+            "native_shots": [
+                {
+                    "time": "0-4s",
+                    "title": "The jolt",
+                    "action": "Kirby rushes toward the brass communication tube as it jolts.",
+                    "camera": "Push in.",
+                    "state_change": "Kirby is knocked backward from the tube.",
+                },
+                {
+                    "time": "4-10s",
+                    "title": "The struggle",
+                    "action": "Kirby keeps pushing toward the intake.",
+                    "camera": "Pull out.",
+                    "state_change": "Kirby reaches the intake.",
+                },
+                {
+                    "time": "10-15s",
+                    "title": "The payoff",
+                    "action": "Kirby puffs and the tube clears.",
+                    "camera": "Hold.",
+                    "state_change": "The tube opens and the capsule arrives.",
+                },
+            ],
+        }
+
+        repaired = repair_native_h3_story_quality(story)
+        self.assertIsNotNone(repaired)
+        repaired = repair_native_h3_news_trace_integration(
+            repaired,
+            news,
+            creative_brief=brief,
+            character="Kirby",
+        )
+        self.assertIsNotNone(repaired)
+        validated = LLMPromptEngine._validate_native_h3_story_payload(
+            {"story": repaired},
+            expected_times=("0-4s", "4-10s", "10-15s"),
+            duration_seconds=15,
+            news_context=news,
+            creative_brief=brief,
+        )
+        self.assertEqual(validated["native_shots"][1]["time"], "4-10s")
+
     def test_native_h3_trace_repair_adds_exact_anchor_when_story_visuals_are_grounded(self) -> None:
         story = {
             "name": "Kirby and the Typhoon Seed",
@@ -664,6 +879,44 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 {"title": "Typhoon warning", "keyword": "typhoon", "category": "weather"},
             )["passed"]
         )
+
+    def test_native_h3_trace_repair_carries_news_consequence_into_payoff(self) -> None:
+        story = {
+            "name": "Kirby and the Protected Order",
+            "story_spine": {
+                "objective": "Kirby must keep the public order safe.",
+                "resolution": "The order reaches the people safely.",
+            },
+            "news_trace": {
+                "contract_version": 2,
+                "source_title": "public order purchase appeal",
+                "source_concepts": ["public order", "purchase"],
+                "visual_translation": "The appeal becomes a guarded delivery route for a small public order.",
+                "news_mechanism": "A blocked budget interrupts the route and delays the order.",
+                "news_consequence": "The order reaches the people safely after the route opens.",
+                "visual_anchors": ["guarded delivery route", "sealed parcel", "open gate"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
+                "integration": "Kirby protects the guarded delivery route while the public order is delayed.",
+            },
+            "native_shots": [
+                {"action": "The sealed parcel waits at the guarded delivery route."},
+                {"action": "The route closes and Kirby is pushed back by the gate."},
+                {"action": "Kirby opens the gate and smiles at the clear path."},
+            ],
+        }
+
+        repaired = repair_native_h3_news_trace_integration(
+            story,
+            {"title": "public order purchase appeal", "keyword": "public order;purchase", "category": "social"},
+        )
+
+        self.assertIsNotNone(repaired)
+        self.assertIn("order reaches the people safely", repaired["native_shots"][-1]["state_change"])
+        quality = evaluate_native_h3_news_grounding(
+            repaired,
+            {"title": "public order purchase appeal", "keyword": "public order;purchase", "category": "social"},
+        )
+        self.assertTrue(quality["checks"]["news_consequence_reaches_payoff"], quality)
 
     def test_native_h3_trace_repair_bridges_source_concept_to_visual_anchor(self) -> None:
         story = {
@@ -1233,6 +1486,40 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(quality["passed"], quality["errors"])
         self.assertTrue(quality["checks"]["hook_visible_motion"])
 
+    def test_native_h3_quality_accepts_concrete_contamination_escalation(self) -> None:
+        quality = evaluate_native_h3_story_quality(
+            {
+                "story_spine": {
+                    "premise": "Kirby cooks a snack in clean oil.",
+                    "objective": "Kirby must fry the snack before the oil is ruined.",
+                    "obstacle": "A loose valve lets contaminated oil flood the pot.",
+                    "stakes": "The snack will be lost if the clean oil is ruined.",
+                    "climax": "Kirby inhales the contaminated sludge and purifies the pot.",
+                    "resolution": "The oil is clean again and the snack is crisp.",
+                },
+                "native_shots": [
+                    {
+                        "action": "Kirby catches the valve slipping while holding the raw snack over the pot.",
+                        "camera": "Push in with the slipping valve.",
+                        "state_change": "The clean oil begins to change.",
+                    },
+                    {
+                        "action": "Bubbling contaminated oil floods the pot and splashes the snack, turning it soggy.",
+                        "camera": "Tilt down to follow the flood.",
+                        "state_change": "The clean oil is replaced by murky sludge and the snack is ruined.",
+                    },
+                    {
+                        "action": "Kirby inhales the sludge and spits out a golden purifier that crisps the snack.",
+                        "camera": "Pull out to the settled cooking pose.",
+                        "state_change": "The oil is clean again and the snack is crisp.",
+                    },
+                ],
+            }
+        )
+
+        self.assertTrue(quality["passed"], quality["errors"])
+        self.assertTrue(quality["checks"]["escalation_or_reversal"])
+
     def test_native_h3_risky_creative_brief_is_sanitized(self) -> None:
         sanitized = LLMPromptEngine._sanitize_native_h3_creative_brief(
             "stock ticker 810.06, chart, report, and glowing symbols"
@@ -1246,6 +1533,17 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
         self.assertNotIn("810.06", repair_prompt)
         self.assertNotIn("stock ticker", repair_prompt.lower())
+
+    def test_native_h3_negative_visual_constraints_do_not_erase_creative_brief(self) -> None:
+        brief = (
+            "Make a cute micro-gag with one dominant mechanism and a readable payoff. "
+            "Do not show readable interfaces or abstract symbols."
+        )
+
+        sanitized = LLMPromptEngine._sanitize_native_h3_creative_brief(brief)
+
+        self.assertIn("cute micro-gag", sanitized)
+        self.assertIn("Do not show readable interfaces", sanitized)
 
     def test_shared_video_system_prompt_does_not_downgrade_news_grounding(self) -> None:
         self.assertIn("news-grounded", LONG_VIDEO_SYSTEM_PROMPT)

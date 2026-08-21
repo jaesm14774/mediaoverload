@@ -135,6 +135,9 @@ def _resolve_comfy_root(root: Path, explicit_root: Path | None) -> Path:
     configured_root = os.environ.get("COMFYUI_ROOT", "").strip()
     if configured_root:
         return Path(configured_root).expanduser().resolve()
+    container_root = Path("/comfyui")
+    if container_root.is_dir():
+        return container_root.resolve()
     portable_root = Path(r"D:\ComfyUI_windows_portable")
     if portable_root.is_dir():
         return portable_root.resolve()
@@ -150,6 +153,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--execute", action="store_true", help="Execute the generated plan")
     parser.add_argument("--auto-download-assets", action="store_true", help="Allow auto asset preparation")
     parser.add_argument("--output-dir", help="Optional output directory for artifact-producing workflows")
+    parser.add_argument("--width", type=int, help="Output video width in pixels for image-to-video workflows")
+    parser.add_argument("--height", type=int, help="Output video height in pixels for image-to-video workflows")
     parser.add_argument("--comfy-host", help="Override ComfyUI host")
     parser.add_argument("--comfy-port", type=int, help="Override ComfyUI port")
     parser.add_argument(
@@ -240,6 +245,8 @@ def main() -> None:
             "enable_review_loop": args.enable_review_loop,
             "dry_run": args.dry_run_publish,
             "output_dir": str(output_root) if output_root else None,
+            "width": args.width,
+            "height": args.height,
             "use_tts": args.use_tts,
         },
     )

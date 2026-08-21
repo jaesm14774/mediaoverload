@@ -214,7 +214,10 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_env": ("GROQ_API_KEY",),
-        "text_model": "llama-3.3-70b-versatile",
+        # Groq retired llama-3.3-70b-versatile in the current runtime window;
+        # keep the text default aligned with the supported qwen fallback that
+        # is already used by the vision route.
+        "text_model": "qwen/qwen3.6-27b",
         "vision_model": "qwen/qwen3.6-27b",
         "supports_vision": True,
         # llama-3.3-70b-versatile accepts JSON prompting but rejects the
@@ -228,7 +231,10 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
         "text_model": "mistral-small-latest",
         "vision_model": "",
         "supports_vision": False,
-        "supports_response_format": True,
+        # The shared OpenAI json_schema envelope is rejected by the current
+        # Mistral compatibility endpoint for several nested pipeline schemas.
+        # Keep strict JSON prompting and local validation as the portable path.
+        "supports_response_format": False,
     },
 }
 

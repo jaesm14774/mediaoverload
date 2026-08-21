@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import uuid
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ class AgenticComfyCommunicator:
         self.port = port or int(os.environ.get("COMFYUI_PORT", "8188"))
         self.client_id = str(uuid.uuid4())
         self.server_address = f"{self.host}:{self.port}"
-        configured_timeout = os.environ.get("COMFYUI_TIMEOUT_SECONDS", "1800")
+        configured_timeout = os.environ.get("COMFYUI_TIMEOUT_SECONDS", "3600")
         self.timeout = int(timeout if timeout is not None else configured_timeout)
         self.ws: websocket.WebSocket | None = None
 
@@ -121,6 +122,56 @@ class AgenticComfyCommunicator:
         except Exception:
             return
 
+    def cancel_prompt(self, prompt_id: str) -> None:
+        """Cancel only this communicator's queued/running Comfy prompt.
+
+        A client-side timeout does not stop ComfyUI by itself.  Leaving the
+        graph running can block every later strategy on the shared local GPU.
+        Inspect the queue first: delete a pending prompt by id, or interrupt
+        only when the exact id is currently running.  An unrelated user's
+        prompt is never interrupted.
+        """
+        target = str(prompt_id or "").strip()
+        if not target:
+            return
+        try:
+            with request.urlopen(f"http://{self.server_address}/queue", timeout=10) as response:
+                queue = json.loads(response.read())
+            running_ids = {
+                str(item[1])
+                for item in queue.get("queue_running", [])
+                if isinstance(item, (list, tuple)) and len(item) > 1
+            }
+            pending_ids = {
+                str(item[1])
+                for item in queue.get("queue_pending", [])
+                if isinstance(item, (list, tuple)) and len(item) > 1
+            }
+            if target in pending_ids:
+                payload = json.dumps({"delete": [target]}).encode("utf-8")
+                req = request.Request(
+                    f"http://{self.server_address}/queue",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="DELETE",
+                )
+                with request.urlopen(req, timeout=10) as response:
+                    response.read()
+            elif target in running_ids:
+                # ComfyUI's interrupt endpoint targets the current running
+                # prompt. Queue inspection above proves that it is ours.
+                req = request.Request(
+                    f"http://{self.server_address}/interrupt",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with request.urlopen(req, timeout=10) as response:
+                    response.read()
+        except Exception:
+            # Cleanup must never hide the original generation failure.
+            return
+
     def list_available_models(self) -> dict[str, list[str]]:
         """Query ComfyUI for installed models/LoRAs by inspecting loader node options."""
         loader_map = {
@@ -147,16 +198,26 @@ class AgenticComfyCommunicator:
     def wait_for_completion(self, prompt_id: str) -> None:
         import time
 
-        started = time.time()
+        deadline = time.monotonic() + max(0.1, float(self.timeout))
         while True:
-            if time.time() - started > self.timeout:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 raise TimeoutError(f"ComfyUI prompt timed out after {self.timeout} seconds: {prompt_id}")
             if not self.ws or not self.ws.connected:
                 raise RuntimeError("ComfyUI websocket disconnected")
             try:
-                self.ws.settimeout(5.0)
+                # websocket-client normally propagates settimeout() to the
+                # underlying socket, but some ComfyUI/proxy combinations keep
+                # an already-created socket's timeout unchanged. Set both
+                # layers so a stalled recv() can never outlive the job
+                # deadline.
+                read_timeout = min(5.0, max(0.1, remaining))
+                self.ws.settimeout(read_timeout)
+                raw_socket = getattr(self.ws, "sock", None)
+                if raw_socket is not None and hasattr(raw_socket, "settimeout"):
+                    raw_socket.settimeout(read_timeout)
                 raw_message = self.ws.recv()
-            except websocket.WebSocketTimeoutException:
+            except (websocket.WebSocketTimeoutException, socket.timeout):
                 continue
             if isinstance(raw_message, (bytes, bytearray)):
                 # ComfyUI may emit binary preview frames over the websocket before
@@ -224,6 +285,7 @@ class AgenticComfyCommunicator:
         file_name: str | None = None,
         auto_close: bool = False,
     ) -> tuple[bool, list[str]]:
+        prompt_id = ""
         try:
             if not self.ws or not self.ws.connected:
                 self.connect_websocket()
@@ -264,6 +326,8 @@ class AgenticComfyCommunicator:
             self.free_memory()
             return result
         except Exception as exc:
+            if prompt_id:
+                self.cancel_prompt(prompt_id)
             return False, [str(exc)]
         finally:
             if auto_close and self.ws and self.ws.connected:
@@ -469,7 +533,7 @@ class AgenticNodeManager:
             indices = cls.get_node_indices(workflow, node_type, **filters)
             if not indices and node_type == "PrimitiveString" and "value" in inputs:
                 # Fallback: workflow uses CLIPTextEncode directly instead of PrimitiveString
-                # (e.g. anima_anime.json). Reuse the same title/is_negative filters so
+                # (e.g. Krea2 workflows). Reuse the same title/is_negative filters so
                 # positive and negative nodes are matched correctly.
                 fallback_indices = cls.get_node_indices(workflow, "CLIPTextEncode", **filters)
                 if fallback_indices:

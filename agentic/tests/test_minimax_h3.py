@@ -118,16 +118,18 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         self.assertEqual(candidates["text2video"]["video_workflow_name"][0], "minimax_h3_lowvram_t2v")
         self.assertEqual(candidates["text2longvideo"]["video_workflow_name"][0], "minimax_h3_lowvram_i2v")
 
-    def test_kirby_keyframe_and_identity_workflows_are_registered(self) -> None:
+    def test_krea2_keyframe_and_identity_workflows_are_registered(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         registry = AssetRegistry(repo_root / "agentic", asset_root=repo_root)
-        for workflow_name in ("kirby_keyframe_anima", "kirby_identity_img2img", "kirby_continuity_img2img"):
+        for workflow_name in ("krea2_turbo", "krea2_turbo_img2img"):
             validation = registry.validate_workflow(workflow_name)
             self.assertTrue(validation["valid"], validation)
-        continuity = json.loads((repo_root / "configs" / "workflow" / "kirby_continuity_img2img.json").read_text(encoding="utf-8"))
-        self.assertEqual(continuity["10"]["inputs"]["denoise"], 0.18)
+        krea2 = json.loads((repo_root / "configs" / "workflow" / "krea2_turbo.json").read_text(encoding="utf-8"))
+        self.assertEqual(krea2["1"]["inputs"]["unet_name"], "krea2_turbo_bf16-Q4_0.gguf")
+        continuity = json.loads((repo_root / "configs" / "workflow" / "krea2_turbo_img2img.json").read_text(encoding="utf-8"))
+        self.assertEqual(continuity["9"]["inputs"]["denoise"], 0.25)
         h3_i2v = json.loads((repo_root / "configs" / "workflow" / "minimax_h3_lowvram_i2v.json").read_text(encoding="utf-8"))
-        self.assertEqual(h3_i2v["16"]["inputs"]["image"], "kirby_keyframe_seed.png")
+        self.assertEqual(h3_i2v["5"]["inputs"]["first_frame"], ["16", 0])
 
     def test_kirby_input_gate_rejects_generic_example_and_accepts_pink_red_keyframe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

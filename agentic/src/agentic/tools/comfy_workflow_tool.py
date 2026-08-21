@@ -58,8 +58,8 @@ class ComfyWorkflowSpec:
 
 
 class ComfyWorkflowToolset:
-    DEFAULT_IMAGE_WORKFLOWS = ("nova_model_plus_z_image_anime", "nova-anime-xl", "anima_anime")
-    DEFAULT_REFINE_WORKFLOWS = ("kirby_identity_img2img", "z_image_i2i_anime", "image_to_image")
+    DEFAULT_IMAGE_WORKFLOWS = ("krea2_turbo",)
+    DEFAULT_REFINE_WORKFLOWS = ("krea2_turbo_img2img",)
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
     DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v",)
 
