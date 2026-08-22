@@ -129,18 +129,7 @@ def _fallback_pairs(backend: dict[str, Any], modality: str) -> list[tuple[str, s
         )
         return []
 
-    # Preserve the original single-provider configuration as the first
-    # auxiliary candidate when it is still present in a user's env file.
-    legacy_provider = str(backend.get(f"{prefix}_fallback_provider", "") or "").strip()
-    legacy_model = str(backend.get(f"{prefix}_fallback_model", "") or "").strip()
     pairs: list[tuple[str, str]] = []
-    if legacy_provider:
-        try:
-            default_model = provider_default_model(legacy_provider, modality)
-        except ValueError:
-            default_model = ""
-        pairs.append((legacy_provider, legacy_model or default_model))
-
     for index, provider in enumerate(providers):
         if index < len(models):
             model = models[index]

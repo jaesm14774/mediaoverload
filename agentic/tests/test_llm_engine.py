@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
+from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
 from agentic.runtime.observability import RunRecorder
 from agentic.runtime.video_quality import normalize_video_semantic_qa
 
@@ -141,7 +142,7 @@ class LLMEngineTests(unittest.TestCase):
             ),
         )
 
-        result = engine.route_generation_strategy(
+        result = engine.route_generation_strategy(GenerationRoutingRequest(
             prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
             character="Kirby",
             style="LINE sticker",
@@ -165,7 +166,7 @@ class LLMEngineTests(unittest.TestCase):
                 },
             },
             routing_hints={"strategy_preferences": {"sticker_pack": ["sticker", "reaction"]}},
-        )
+        ))
 
         self.assertEqual(result["generation_type"], "sticker_pack")
         self.assertEqual(result["workflow_plan"]["image_workflow_name"], "nova-anime-xl")
@@ -181,7 +182,7 @@ class LLMEngineTests(unittest.TestCase):
         )
         engine = LLMPromptEngine(mode="llm", manager=manager)
 
-        engine.route_generation_strategy(
+        engine.route_generation_strategy(GenerationRoutingRequest(
             prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
             character="Kirby",
             style="LINE sticker",
@@ -204,7 +205,7 @@ class LLMEngineTests(unittest.TestCase):
                     "images_per_prompt": {"min": 1, "max": 4},
                 },
             },
-        )
+        ))
 
         schema = manager.text_model.calls[0]["kwargs"]["response_format"]["json_schema"]["schema"]
         sticker_branch = next(
@@ -234,7 +235,7 @@ class LLMEngineTests(unittest.TestCase):
             ),
         )
 
-        result = engine.route_generation_strategy(
+        result = engine.route_generation_strategy(GenerationRoutingRequest(
             prompt="Kirby makes a short animated clip",
             character="Kirby",
             style="anime",
@@ -251,11 +252,11 @@ class LLMEngineTests(unittest.TestCase):
                     "video_count": {"min": 1, "max": 4},
                 }
             },
-        )
+        ))
 
         self.assertEqual(result["count_plan"], {"image_count": 2, "video_count": 1})
 
-    def test_route_generation_strategy_ignores_legacy_irrelevant_counts(self) -> None:
+    def test_route_generation_strategy_ignores_irrelevant_counts(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
             manager=_FakeManager(
@@ -265,7 +266,7 @@ class LLMEngineTests(unittest.TestCase):
             ),
         )
 
-        result = engine.route_generation_strategy(
+        result = engine.route_generation_strategy(GenerationRoutingRequest(
             prompt="Kirby portrait",
             character="Kirby",
             style="anime",
@@ -283,7 +284,7 @@ class LLMEngineTests(unittest.TestCase):
                     "images_per_prompt": {"min": 1, "max": 1},
                 }
             },
-        )
+        ))
 
         self.assertEqual(result["count_plan"], {"image_count": 1, "review_selection_limit": 1})
 
@@ -293,7 +294,7 @@ class LLMEngineTests(unittest.TestCase):
         with patch.object(engine, "_manager_or_none", return_value=None):
             engine._manager_error = "ValueError: OpenRouter API key missing"
             with self.assertRaises(Exception):
-                engine.route_generation_strategy(
+                engine.route_generation_strategy(GenerationRoutingRequest(
                     prompt="Kirby sticker emotions",
                     character="Kirby",
                     style="LINE sticker",
@@ -309,7 +310,7 @@ class LLMEngineTests(unittest.TestCase):
                             "images_per_prompt": {"min": 1, "max": 4},
                         }
                     },
-                )
+                ))
 
     def test_generate_autonomous_scene_prompt_uses_llm_when_available(self) -> None:
         engine = LLMPromptEngine(
@@ -930,30 +931,73 @@ class LLMEngineTests(unittest.TestCase):
     def test_chat_json_repairs_invalid_json_with_stricter_prompt(self) -> None:
         fake_manager = _FakeManager(["not json", '```json\n{"ok":true}\n```'])
 
-        result = LLMPromptEngine._chat_json(
+        result = LLMPromptEngine._chat_json(JsonChatRequest(
             fake_manager,
             "You are a story planner.",
             "Return the plan.",
             "plan",
             {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
-        )
+        ))
 
         self.assertEqual(result, {"ok": True})
         self.assertEqual(len(fake_manager.text_model.calls), 2)
         self.assertIn("JSON REPAIR MODE", fake_manager.text_model.calls[1]["messages"][0]["content"])
         self.assertNotIn("response_format", fake_manager.text_model.calls[1]["kwargs"])
 
+    def test_chat_json_requires_english_for_generation_requests(self) -> None:
+        fake_manager = _FakeManager(['{"ok":true}'])
+
+        result = LLMPromptEngine._chat_json(JsonChatRequest(
+            fake_manager,
+            "You are a storyboard planner.",
+            "Return the storyboard.",
+            "storyboard",
+            {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+        ))
+
+        self.assertEqual(result, {"ok": True})
+        messages = fake_manager.text_model.calls[0]["messages"]
+        self.assertIn("Response in English only.", messages[0]["content"])
+        self.assertIn("Response in English only.", messages[1]["content"])
+        self.assertIn("Translate the meaning into fluent English rather than translating word for word.", messages[1]["content"])
+
+    def test_chat_json_keeps_final_media_posts_language_flexible(self) -> None:
+        for schema_name in ("publish_caption", "publish_caption_article_repair"):
+            fake_manager = _FakeManager(['{"ok":true}'])
+
+            result = LLMPromptEngine._chat_json(JsonChatRequest(
+                fake_manager,
+                "You are a social post writer.",
+                "Return the final post.",
+                schema_name,
+                {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            ))
+
+            self.assertEqual(result, {"ok": True})
+            messages = fake_manager.text_model.calls[0]["messages"]
+            self.assertNotIn("Response in English only.", messages[0]["content"])
+            self.assertNotIn("Response in English only.", messages[1]["content"])
+
+    def test_legacy_sticker_image_prompt_is_written_in_english(self) -> None:
+        prompt_source = (
+            Path(__file__).resolve().parents[2] / "configs" / "prompt" / "image_system_guide.py"
+        ).read_text(encoding="utf-8")
+        sticker_prompt = prompt_source.split('sticker_prompt_system_prompt = """', 1)[1].split('""".strip()', 1)[0]
+
+        self.assertNotRegex(sticker_prompt, r"[\u3400-\u9fff]")
+        self.assertIn("Response in English only.", sticker_prompt)
+
     def test_chat_json_uses_configurable_request_timeout(self) -> None:
         fake_manager = _FakeManager(['{"ok":true}'])
 
         with patch.dict(os.environ, {"AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS": "7.5"}):
-            result = LLMPromptEngine._chat_json(
+            result = LLMPromptEngine._chat_json(JsonChatRequest(
                 fake_manager,
                 "You are a story planner.",
                 "Return the plan.",
                 "plan",
                 {"type": "object", "properties": {"ok": {"type": "boolean"}}},
-            )
+            ))
 
         self.assertEqual(result, {"ok": True})
         self.assertEqual(fake_manager.text_model.calls[0]["kwargs"]["request_timeout"], 7.5)
@@ -965,13 +1009,13 @@ class LLMEngineTests(unittest.TestCase):
             engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
             engine._require_manager()
 
-            result = LLMPromptEngine._chat_json(
+            result = LLMPromptEngine._chat_json(JsonChatRequest(
                 manager,
                 "You are a story planner.",
                 "Return the plan.",
                 "plan",
                 {"type": "object", "properties": {"ok": {"type": "boolean"}}},
-            )
+            ))
 
             self.assertEqual(result, {"ok": True})
             call_files = sorted((Path(temp_dir) / "run-debug" / "llm").glob("*.json"))
@@ -1005,13 +1049,13 @@ class LLMEngineTests(unittest.TestCase):
     def test_chat_json_uses_array_contract_for_array_schema(self) -> None:
         fake_manager = _FakeManager(['[{"ok":true}]'])
 
-        result = LLMPromptEngine._chat_json(
+        result = LLMPromptEngine._chat_json(JsonChatRequest(
             fake_manager,
             "You are a story planner.",
             "Return the list.",
             "items",
             {"type": "array", "items": {"type": "object"}},
-        )
+        ))
 
         self.assertEqual(result, [{"ok": True}])
         self.assertIn("JSON array", fake_manager.text_model.calls[0]["messages"][0]["content"])
@@ -1053,8 +1097,6 @@ class LLMEngineTests(unittest.TestCase):
                 "AGENTIC_VISION_MODEL_PROVIDER": "",
                 "AGENTIC_VISION_MODEL": "",
                 "AGENTIC_RANDOM_MODELS": "false",
-                "AGENTIC_TEXT_FALLBACK_PROVIDER": "",
-                "AGENTIC_TEXT_FALLBACK_MODEL": "",
                 "AGENTIC_OPENROUTER_TEXT_MODEL_STRATEGY": "",
                 "AGENTIC_OPENROUTER_VISION_MODEL_STRATEGY": "",
             },
@@ -1072,7 +1114,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(backend["vision_model_raw"], "")
         self.assertTrue(backend["openrouter_vision_pool_mode"])
         self.assertFalse(backend["random_models"])
-        self.assertEqual(backend.get("text_fallback_provider"), "")
+        self.assertNotIn("text_fallback_provider", backend)
 
     def test_backend_info_openrouter_free_pool_when_text_model_empty(self) -> None:
         with patch.dict(
@@ -1090,6 +1132,25 @@ class LLMEngineTests(unittest.TestCase):
             backend = engine.backend_info()
         self.assertTrue(backend["openrouter_text_pool_mode"])
         self.assertEqual(backend["text_model"], "free_pool")
+
+    def test_backend_info_supports_explicit_ollama_models(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "AGENTIC_TEXT_MODEL_PROVIDER": "ollama",
+                "AGENTIC_TEXT_MODEL": "qwen3.8-27b-ud-q2xl-local",
+                "AGENTIC_VISION_MODEL_PROVIDER": "ollama",
+                "AGENTIC_VISION_MODEL": "qwen3.8-27b-ud-q2xl-local",
+                "AGENTIC_PROVIDER_FALLBACK_ENABLED": "false",
+            },
+            clear=False,
+        ):
+            backend = LLMPromptEngine(mode="llm").backend_info()
+
+        self.assertEqual(backend["text_provider"], "ollama")
+        self.assertEqual(backend["text_model"], "qwen3.8-27b-ud-q2xl-local")
+        self.assertEqual(backend["vision_provider"], "ollama")
+        self.assertEqual(backend["vision_model"], "qwen3.8-27b-ud-q2xl-local")
 
     def test_manager_creation_goes_through_agentic_adapter(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)
@@ -1195,7 +1256,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertEqual(result["status"], "fail")
 
-    def test_video_semantic_qa_maps_concrete_anchor_when_model_uses_legacy_news_anchor_false(self) -> None:
+    def test_video_semantic_qa_maps_concrete_anchor_when_news_anchor_is_false(self) -> None:
         result = normalize_video_semantic_qa(
             {
                 "status": "fail",

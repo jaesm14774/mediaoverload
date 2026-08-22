@@ -27,6 +27,7 @@ from agentic.app.character_workflow import (
     load_character_config,
     run_character_workflow,
 )
+from character_workflow_helpers import make_character_workflow_request
 from agentic.tools.context_services import NewsContextService, NewsSelection
 from agentic.app.main import _allow_runtime_output_for_visual_evidence
 
@@ -48,49 +49,49 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             self.assertIn(str(output_root.resolve()), os.environ["AGENTIC_ALLOWED_IMAGE_ROOTS"])
 
     def test_duration_policy_selects_single_action_or_native_story(self) -> None:
-        short = build_goal_payload_from_character_config(
+        short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby swats one glowing orb into a target",
             duration_seconds=5,
             publish_after_generate=False,
-        )
+        ))
         self.assertEqual(short["source_generation_type"], "text2image2video")
         self.assertEqual(short["media_type"], "text2img2video")
         self.assertEqual(short["duration_seconds"], 5)
         self.assertEqual(short["constraints"]["duration_profile"], "single_action")
         self.assertEqual(short["constraints"]["duration_override_seconds"], 5)
 
-        native = build_goal_payload_from_character_config(
+        native = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby protects one glowing orb from a sudden gust",
             duration_seconds=15,
             publish_after_generate=False,
-        )
+        ))
         self.assertEqual(native["source_generation_type"], "native_h3_story")
         self.assertEqual(native["duration_seconds"], 15)
         self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("kirby_native_15s.yaml"))
         self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
 
-        default_short = build_goal_payload_from_character_config(
+        default_short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby taps one glowing jelly cube",
             preferred_generation_type="text2image2video",
             publish_after_generate=False,
-        )
+        ))
         self.assertEqual(default_short["duration_seconds"], 5)
 
     def test_no_review_text2image2video_uses_one_keyframe_without_pre_video_gate(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby taps one glowing jelly cube and it wobbles back into place",
             preferred_generation_type="text2image2video",
             no_review=True,
             publish_after_generate=False,
-        )
+        ))
 
         self.assertEqual(payload["routing"]["count_plan"]["image_count"], 1)
         self.assertEqual(payload["constraints"]["image_count"], 1)
@@ -99,35 +100,35 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertTrue(payload["constraints"]["skip_upscale_for_i2v"])
 
     def test_reviewed_text2image2video_keeps_six_candidates_but_skips_unconsumed_upscale(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby taps one glowing jelly cube and it wobbles back into place",
             preferred_generation_type="text2image2video",
             publish_after_generate=False,
-        )
+        ))
 
         self.assertEqual(payload["routing"]["count_plan"]["image_count"], 6)
         self.assertTrue(payload["constraints"]["pre_video_review_enabled"])
         self.assertTrue(payload["constraints"]["skip_upscale_for_i2v"])
 
     def test_explicit_generation_override_still_randomizes_stage_workflow(self) -> None:
-        first = build_goal_payload_from_character_config(
+        first = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby taps one glowing jelly cube",
             preferred_generation_type="text2image2video",
             publish_after_generate=False,
             rng=random.Random(0),
-        )
-        second = build_goal_payload_from_character_config(
+        ))
+        second = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby taps one glowing jelly cube",
             preferred_generation_type="text2image2video",
             publish_after_generate=False,
             rng=random.Random(1),
-        )
+        ))
 
         self.assertEqual(first["constraints"]["routing_selection_source"], "explicit_override")
         self.assertEqual(first["routing"]["workflow_selection_mode"], "weighted_random")
@@ -150,13 +151,13 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
 
     def test_weighted_route_selects_strategy_before_content_prompt(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
             prompt="Kirby protects a glowing orb in a clear three-beat story",
             rng=random.Random(0),
             publish_after_generate=False,
-        )
+        ))
 
         self.assertEqual(payload["source_generation_type"], "sticker_pack")
         self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
@@ -204,14 +205,14 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_native_h3_rejects_unsupported_duration_override(self) -> None:
         with self.assertRaisesRegex(ValueError, "supports duration_seconds=15"):
-            build_goal_payload_from_character_config(
+            build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="Kirby swats one glowing orb into a target",
                 preferred_generation_type="native_h3_story",
                 duration_seconds=5,
                 publish_after_generate=False,
-            )
+            ))
 
     def test_extract_failure_details_promotes_node_log(self) -> None:
         details = _extract_failure_details(
@@ -330,7 +331,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "agentic.app.character_workflow.build_runtime",
                 return_value=(FakePlanner(), FakeRunner(), SimpleNamespace(as_serializable=lambda: {})),
             ):
-                result = run_character_workflow(root, root / "kirby.yaml", publish_after_generate=False)
+                result = run_character_workflow(make_character_workflow_request(root, root / "kirby.yaml", publish_after_generate=False))
 
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["failure_reason"], "PromptGenerationError: hook motion missing")
@@ -364,11 +365,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "prompt_mode": "llm",
             },
         ):
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
-            )
+            ))
 
         self.assertEqual(payload["source_generation_type"], "sticker_pack")
         self.assertEqual(payload["media_type"], "sticker_pack")
@@ -529,11 +530,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             side_effect=ValueError("invalid route"),
         ):
             with self.assertRaises(ValueError):
-                build_goal_payload_from_character_config(
+                build_goal_payload_from_character_config(make_character_workflow_request(
                     self.repo_root,
                     self.kirby_config,
                     prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
-                )
+                ))
 
     def test_build_goal_payload_generates_prompt_from_news_when_prompt_missing(self) -> None:
         with patch(
@@ -575,12 +576,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "news_context": {"title": "Taipei panda steals zongzi", "keyword": "panda"},
             },
         ):
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="",
                 preferred_generation_type="text2video",
-            )
+            ))
 
         self.assertEqual(
             payload["prompt"],
@@ -608,13 +609,13 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
             side_effect=AssertionError("native H3 must not create an autonomous scene prompt"),
         ):
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="",
                 preferred_generation_type="native_h3_story",
                 publish_after_generate=False,
-            )
+            ))
 
         self.assertEqual(payload["prompt"], "")
         self.assertEqual(payload["constraints"]["prompt_source"], "news")
@@ -644,7 +645,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             },
         ) as generate_prompt:
             history_path = Path(temp_dir) / "news-history.json"
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="隨機產生一個有角色動作的作品",
@@ -653,7 +654,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 news_history_path=str(history_path),
                 output_dir=str(Path(temp_dir) / "output"),
                 publish_after_generate=False,
-            )
+            ))
             history_payload = json.loads(history_path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["constraints"]["prompt_source"], "autonomous_llm")
@@ -680,7 +681,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "news_context": news.to_dict(),
             },
         ) as generate_prompt:
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="",
@@ -689,7 +690,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 rng=random.Random(3),
                 output_dir=str(Path(temp_dir) / "output"),
                 publish_after_generate=False,
-            )
+            ))
 
         self.assertEqual(payload["source_generation_type"], "text2longvideo")
         self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
@@ -719,7 +720,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(calls[1], {"first headline\u001ffirst"})
 
     def test_build_goal_payload_merges_global_social_config_and_surfaces_summary(self) -> None:
-        with patch(
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
             "agentic.app.character_workflow.load_global_social_config",
             return_value={
                 "social_media": {
@@ -736,6 +737,13 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     },
                 }
             },
+        ), patch(
+            "agentic.app.character_workflow.NewsContextService.get_random_news",
+            return_value=NewsSelection(
+                title="CI fixture headline",
+                keyword="fixture",
+                category="technology",
+            ),
         ), patch(
             "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
             return_value={
@@ -762,7 +770,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={"prompt": "kirby prompt", "source": "autonomous_llm", "prompt_mode": "llm", "news_context": {}},
         ):
-            payload = build_goal_payload_from_character_config(self.repo_root, self.kirby_config)
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
+                self.repo_root,
+                self.kirby_config,
+                news_history_path=str(Path(temp_dir) / "news-history.json"),
+            ))
 
         self.assertNotIn("twitter", payload["constraints"]["platforms"])
         self.assertIn("instagram_graph", payload["constraints"]["platforms"])
@@ -791,12 +803,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={"prompt": "Kirby portrait", "source": "template", "prompt_mode": "template", "news_context": {}},
         ):
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 preferred_generation_type="text2img",
                 publish_after_generate=True,
-            )
+            ))
 
         self.assertNotIn("youtube", payload["constraints"]["platforms"])
         self.assertIn("youtube:image_only_route", payload["constraints"]["skipped_platforms"])
@@ -866,11 +878,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "prompt_mode": "llm",
                 },
             ), patch("agentic.app.character_workflow.load_global_social_config", return_value={}):
-                payload = build_goal_payload_from_character_config(
+                payload = build_goal_payload_from_character_config(make_character_workflow_request(
                     self.repo_root,
                     config_path,
                     prompt="kirby social clip",
-                )
+                ))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -911,24 +923,24 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             {"discord_review_bot_token": "token", "discord_review_channel_id": "123"},
             clear=False,
         ):
-            automatic_payload = build_goal_payload_from_character_config(
+            automatic_payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="Kirby short rainy alley clip",
-            )
-            reviewed_payload = build_goal_payload_from_character_config(
+            ))
+            reviewed_payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="Kirby short rainy alley clip",
                 enable_review_loop=True,
-            )
-            probe_payload = build_goal_payload_from_character_config(
+            ))
+            probe_payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="Kirby text to video stage probe",
                 preferred_generation_type="text2video",
                 stage_probe=True,
-            )
+            ))
 
         self.assertEqual(automatic_payload["media_type"], "text2img2video")
         self.assertFalse(automatic_payload["constraints"]["enable_stage_review"])

@@ -259,7 +259,11 @@ def evaluate_native_h3_story_quality(
     return {"passed": not errors, "score": score, "checks": checks, "errors": errors}
 
 
-def repair_native_h3_story_quality(story: dict[str, Any]) -> dict[str, Any] | None:
+def repair_native_h3_story_quality(
+    story: dict[str, Any],
+    *,
+    character: str = "Kirby",
+) -> dict[str, Any] | None:
     """Add a concrete middle-beat setback when a provider returns a smooth montage.
 
     This bounded repair preserves the provider's premise and timing while making
@@ -285,23 +289,24 @@ def repair_native_h3_story_quality(story: dict[str, Any]) -> dict[str, Any] | No
     anchors = [str(item).strip() for item in trace.get("visual_anchors", []) if str(item).strip()]
     mechanism = str(trace.get("news_mechanism") or "the visible news mechanism").strip().rstrip(".")
     anchor = anchors[0] if anchors else "the visible anchor"
+    protagonist = str(character or "the protagonist").strip()
     if not checks.get("opening_keyframe_has_motion"):
         opening_prompt = str(repaired.get("opening_keyframe_prompt") or "").strip().rstrip(".")
         repaired["opening_keyframe_prompt"] = (
-            "Opening action already in progress: Kirby jolts forward while the active news mechanism "
-            f"is already acting; {opening_prompt}. Keep Kirby's body and reaction visibly moving from the first frame."
+            f"Opening action already in progress: {protagonist} jolts forward while the active news mechanism "
+            f"is already acting; {opening_prompt}. Keep {protagonist}'s body and reaction visibly moving from the first frame."
         )
 
     if not checks.get("escalation_or_reversal"):
         middle = repaired_shots[1]
-        action = str(middle.get("action") or "Kirby attempts the objective").strip().rstrip(".")
+        action = str(middle.get("action") or f"{protagonist} attempts the objective").strip().rstrip(".")
         state_change = str(middle.get("state_change") or "the plan changes").strip().rstrip(".")
         middle["action"] = (
-            f"{action}, but {mechanism} visibly worsens, changes the route around {anchor}, and blocks Kirby's advance; "
-            "Kirby is knocked backward, so the first plan fails and he loses ground."
+            f"{action}, but {mechanism} visibly worsens, changes the route around {anchor}, and blocks {protagonist}'s advance; "
+            f"{protagonist} is knocked backward, so the first plan fails and the protagonist loses ground."
         )
         middle["state_change"] = (
-            f"{state_change}; the route is blocked, the setback reverses the plan, Kirby is forced backward, and he is left farther from the objective."
+            f"{state_change}; the route is blocked, the setback reverses the plan, {protagonist} is forced backward, and the protagonist is left farther from the objective."
         )
 
     gag_card = repaired.get("gag_card")
@@ -309,7 +314,7 @@ def repair_native_h3_story_quality(story: dict[str, Any]) -> dict[str, Any] | No
         " ".join(str(gag_card.get(key) or "") for key in ("setback", "payoff_reversal"))
     ):
         gag_card["setback"] = (
-            f"{mechanism} worsens around {anchor}, so Kirby's first attempt fails and costs ground."
+            f"{mechanism} worsens around {anchor}, so {protagonist}'s first attempt fails and costs ground."
         )
     _sanitize_native_h3_unmarked_props(repaired)
     return repaired
@@ -468,10 +473,9 @@ def evaluate_native_h3_news_grounding(
     if not checks["visual_anchor_reaches_payoff"]:
         errors.append("the news-derived visual anchor must remain visible in the payoff beat")
 
-    # Version 2 makes the news mechanism and its consequence first-class
-    # story inputs. Keep legacy fixtures readable, but every newly generated
-    # native story must pass this stronger contract before rendering.
-    if trace.get("contract_version") == 2:
+    if trace.get("contract_version") != 2:
+        errors.append("news_trace.contract_version must be 2")
+    else:
         news_mechanism = str(trace.get("news_mechanism") or "").strip()
         news_consequence = str(trace.get("news_consequence") or "").strip()
         anchor_roles = {
@@ -846,28 +850,6 @@ def load_storyboard(path_or_name: str | Path) -> dict[str, Any]:
         raise StoryboardError(f"Storyboard root must be a mapping: {path}")
     payload["_path"] = str(path)
     return payload
-
-
-def resolve_native_h3_story(
-    base_storyboard: dict[str, Any],
-    *,
-    character: str,
-    style: str,
-    duration_seconds: int,
-    news_context: dict[str, Any] | None = None,
-    creative_brief: str = "",
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Compatibility entry point for callers using the pre-service API."""
-    from agentic.runtime.story_service import NativeH3StoryService
-
-    return NativeH3StoryService().resolve(
-        base_storyboard,
-        character=character,
-        style=style,
-        duration_seconds=duration_seconds,
-        news_context=news_context,
-        creative_brief=creative_brief,
-    )
 
 
 def merge_native_h3_storyboard(

@@ -5,6 +5,7 @@ from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.prompt_requests import GenerationRoutingRequest
 
 
 class PromptEngine:
@@ -16,25 +17,9 @@ class PromptEngine:
 
     def route_generation_strategy(
         self,
-        prompt: str,
-        character: str,
-        style: str,
-        generation_type_candidates: list[str],
-        workflow_stage_candidates: dict[str, dict[str, list[str]]],
-        count_policies: dict[str, dict[str, Any]],
-        routing_hints: dict[str, Any] | None = None,
-        preferred_generation_type: str | None = None,
+        request: GenerationRoutingRequest,
     ) -> dict[str, Any]:
-        return self.llm_engine.route_generation_strategy(
-            prompt=prompt,
-            character=character,
-            style=style,
-            generation_type_candidates=generation_type_candidates,
-            workflow_stage_candidates=workflow_stage_candidates,
-            count_policies=count_policies,
-            routing_hints=routing_hints,
-            preferred_generation_type=preferred_generation_type,
-        )
+        return self.llm_engine.route_generation_strategy(request)
 
     def expand_goal(self, goal: GoalRequest, selected_style: str, idea_variants: list[dict[str, Any]]) -> dict[str, Any]:
         return self.llm_engine.expand_goal(goal, selected_style, idea_variants)

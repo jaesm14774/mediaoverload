@@ -1,9 +1,10 @@
 version: 1
-snapshot_date: '2026-08-12'
+snapshot_date: '2026-08-22'
 discover_catalog_at_runtime: false
 randomize_each_request: true
 
-# These are the models that passed the MediaOverload JSON contract smoke tests.
+# This pool mirrors AGENTIC_OPENROUTER_TEXT_MODELS and
+# AGENTIC_OPENROUTER_VISION_MODELS in media_overload.env.
 # mode=structured sends response_format; prompt_only relies on the strict prompt
 # plus the shared fence/fragment JSON parser; reasoning_off disables hidden
 # reasoning where it otherwise consumes the answer budget.
@@ -12,25 +13,24 @@ text:
     mode: structured
   - id: nvidia/nemotron-3-super-120b-a12b:free
     mode: structured
-  - id: google/gemma-4-26b-a4b-it:free
+  - id: nvidia/nemotron-3.5-lightning:free
     mode: structured
-  - id: nvidia/nemotron-3-nano-30b-a3b:free
-    mode: reasoning_off
+  - id: google/gemma-4-31b-it:free
+    mode: structured
   - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     mode: reasoning_off
+  - id: z-ai/glm-5.2:free
+    mode: structured
 
 vision:
   - id: google/gemma-4-26b-a4b-it:free
     mode: structured
   - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     mode: reasoning_off
+  - id: nvidia/nemotron-nano-12b-v2-vl:free
+    mode: prompt_only
+  - id: google/gemma-4-31b-it:free
+    mode: structured
 
-# Explicit exclusions from the same snapshot:
-# - inclusionai/ling-3.0-tiny:free: repeated provider 429 during smoke tests.
-# - nvidia/nemotron-nano-9b-v2:free: empty content and no recoverable JSON answer.
-# - google/gemma-4-31b-it:free: repeated provider 429 in the current route.
-# - nvidia/nemotron-nano-12b-v2-vl:free: 0/2 caption runs; malformed response
-#   shape and a provider 502, so it is excluded from the production vision pool.
-# - openai/gpt-oss-20b:free: structured route returned non-JSON content; prompt-only
-#   and reasoning-off variants were also incompatible in follow-up tests.
-# - content-safety, Lyria/audio, openrouter/free: wrong product role or router semantics.
+# The pool intentionally follows the active env file, including models that were
+# previously excluded from an older smoke-test snapshot.

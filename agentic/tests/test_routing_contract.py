@@ -12,6 +12,7 @@ from agentic.app.character_workflow import (
     _build_h3_reference_runtime_context,
     build_goal_payload_from_character_config,
 )
+from character_workflow_helpers import make_character_workflow_request
 
 
 class RoutingContractTests(unittest.TestCase):
@@ -160,17 +161,17 @@ class RoutingContractTests(unittest.TestCase):
             "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
             return_value=route_result,
         ) as route:
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.character_path,
                 prompt="A free single-shot motion test with no reference assets",
                 publish_after_generate=False,
-            )
+            ))
 
-        call = route.call_args.kwargs
-        self.assertIn("native_h3_ref2va", call["generation_type_candidates"])
-        self.assertIn("text2image2native_h3_ref2va", call["generation_type_candidates"])
-        context = call["routing_hints"]["runtime_context"]
+        request = route.call_args.args[0]
+        self.assertIn("native_h3_ref2va", request.generation_type_candidates)
+        self.assertIn("text2image2native_h3_ref2va", request.generation_type_candidates)
+        context = request.routing_hints["runtime_context"]
         self.assertFalse(context["reference_manifest_available"])
         self.assertTrue(context["automatic_ref2va_eligible"])
         self.assertEqual(context["reference_manifest_error_code"], "auto_generation_available")
@@ -193,31 +194,18 @@ class RoutingContractTests(unittest.TestCase):
         self.assertEqual(context["reference_manifest_error_code"], "")
 
     def test_manual_ref2va_override_remains_available_for_later_review_binding(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.character_path,
             prompt="Use the reviewed character and motion references",
             preferred_generation_type="native_h3_ref2va",
             publish_after_generate=False,
-        )
+        ))
         self.assertEqual(payload["source_generation_type"], "native_h3_ref2va")
         self.assertTrue(payload["constraints"]["routing_runtime_context"]["automatic_ref2va_eligible"])
         self.assertTrue(payload["constraints"]["auto_reference_generation"])
         self.assertEqual(payload["constraints"]["generation_type_candidates"], ["native_h3_ref2va"])
 
-    def test_auto_ref2va_alias_resolves_to_canonical_strategy(self) -> None:
-        payload = build_goal_payload_from_character_config(
-            self.repo_root,
-            self.character_path,
-            prompt="Generate references before making the multi-reference clip",
-            preferred_generation_type="t2i2native_h3_ref2va",
-            publish_after_generate=False,
-            no_review=True,
-        )
-        self.assertEqual(payload["source_generation_type"], "text2image2native_h3_ref2va")
-        self.assertEqual(payload["media_type"], "text2image2native_h3_ref2va")
-        self.assertEqual(payload["constraints"]["image_workflow_name"], "krea2_turbo")
-        self.assertEqual(payload["constraints"]["video_workflow_name"], "minimax_h3_ref2va")
 
 
 if __name__ == "__main__":

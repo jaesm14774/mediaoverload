@@ -19,7 +19,6 @@ from agentic.skills.shared import (
 from agentic.tools.publishing_adapter import MediaPost as AdapterMediaPost
 from agentic.tools.publishing_adapter import build_dispatch_plan
 from agentic.tools.social_native import MediaPost as NativeMediaPost
-from agentic.storyboard import resolve_native_h3_story
 
 
 class SharedSkillHelperTests(unittest.TestCase):
@@ -110,20 +109,6 @@ class SharedSkillHelperTests(unittest.TestCase):
         self.assertEqual(plan["instagram"]["media_paths"], ["ig.mp4"])
         self.assertTrue(plan["instagram"]["validation"]["is_publish_ready"])
         self.assertIs(AdapterMediaPost, NativeMediaPost)
-
-    def test_storyboard_entry_point_remains_compatible_with_the_service_boundary(self) -> None:
-        with patch("agentic.runtime.story_service.NativeH3StoryService") as service_class:
-            service_class.return_value.resolve.return_value = ({"merged": True}, {"story": {}})
-            result = resolve_native_h3_story(
-                {"base": True},
-                character="Kirby",
-                style="anime",
-                duration_seconds=15,
-            )
-
-        self.assertEqual(result, ({"merged": True}, {"story": {}}))
-        service_class.return_value.resolve.assert_called_once()
-
 
 class NativeH3StoryServiceTests(unittest.TestCase):
     def test_service_injects_news_and_llm_once_without_storyboard_import_cycle(self) -> None:

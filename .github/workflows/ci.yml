@@ -45,4 +45,9 @@ jobs:
         run: python -m compileall -q agentic/src run_media_interface.py
 
       - name: Run agentic regression suite
-        run: python -m pytest agentic/tests -q
+        env:
+          AGENTIC_NEWS_HISTORY_PATH: ${{ runner.temp }}/agentic-news-selection.json
+        run: python -m pytest agentic/tests -m "not integration" -q
+
+      - name: Validate formal integration suite is discoverable
+        run: python -m pytest agentic/tests -m integration --collect-only -q

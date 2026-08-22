@@ -54,15 +54,15 @@ class SchedulerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         workflow_mock.assert_called_once()
-        args, kwargs = workflow_mock.call_args
-        self.assertEqual(args[0], REPO_ROOT)
-        self.assertEqual(args[1], Path(config.config_path))
-        self.assertEqual(kwargs["prompt"], "Kirby neon short")
-        self.assertTrue(kwargs["news_driven"])
-        self.assertEqual(kwargs["news_history_path"], "/tmp/kirby-news.json")
-        self.assertTrue(kwargs["dry_run_publish"])
-        self.assertFalse(kwargs["enable_review_loop"])
-        self.assertIsNotNone(kwargs["rng"])
+        request = workflow_mock.call_args.args[0]
+        self.assertEqual(request.repo_root, REPO_ROOT)
+        self.assertEqual(request.config_path, Path(config.config_path))
+        self.assertEqual(request.generation.prompt, "Kirby neon short")
+        self.assertTrue(request.generation.news_driven)
+        self.assertEqual(request.generation.news_history_path, "/tmp/kirby-news.json")
+        self.assertTrue(request.review.dry_run_publish)
+        self.assertFalse(request.review.enable_review_loop)
+        self.assertIsNotNone(request.generation.rng)
 
     def test_scheduled_job_is_skipped_during_quiet_hours(self) -> None:
         config = self._load_kirby_config()

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from agentic.app.character_workflow import build_goal_payload_from_character_config
+from character_workflow_helpers import make_character_workflow_request
 from agentic.app.main import build_runtime
 from agentic.runtime.contracts import RunState
 from agentic.skills.agent_primitives import AgentMediaSkills
@@ -22,14 +23,14 @@ class H3ModePlanTests(unittest.TestCase):
         cls.config_path = cls.repo_root / "configs" / "characters" / "kirby.yaml"
 
     def _plan(self, generation_type: str, *, no_review: bool = False):
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             prompt="Kirby protects a glowing seed while a storm crosses the meadow",
             preferred_generation_type=generation_type,
             publish_after_generate=False,
             no_review=no_review,
-        )
+        ))
         planner, _runner, _memory = build_runtime(
             self.repo_root / "agentic",
             output_root=self.repo_root / ".tmp-tests" / generation_type,
@@ -142,13 +143,13 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(gate.inputs["frame_node"], "native-l2va-ending-review")
 
     def test_auto_ref2va_enforces_routing_candidate_and_selection_bounds(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             prompt="Kirby protects a glowing seed",
             preferred_generation_type="text2image2native_h3_ref2va",
             publish_after_generate=False,
-        )
+        ))
         payload["constraints"]["image_count"] = 6
         payload["constraints"]["native_h3_reference_candidate_count"] = 1
         payload["constraints"]["native_h3_reference_selection_limit"] = 12
@@ -176,14 +177,14 @@ class H3ModePlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "identity.png"
             image.write_bytes(b"image")
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.config_path,
                 prompt="Use the reviewed character reference",
                 preferred_generation_type="native_h3_ref2va",
                 publish_after_generate=False,
                 no_review=True,
-            )
+            ))
             payload["constraints"]["media_paths"] = [str(image)]
             planner, _runner, _memory = build_runtime(
                 self.repo_root / "agentic",
@@ -222,13 +223,13 @@ class H3ModePlanTests(unittest.TestCase):
             video = root / "motion.mp4"
             image.write_bytes(b"image")
             video.write_bytes(b"video")
-            payload = build_goal_payload_from_character_config(
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.config_path,
                 prompt="Kirby protects a glowing seed",
                 preferred_generation_type="native_h3_ref2va",
                 publish_after_generate=False,
-            )
+            ))
             payload["constraints"]["media_paths"] = [str(image), str(video)]
             payload["constraints"]["native_h3_reference_selection_limit"] = 4
             planner, _runner, _memory = build_runtime(

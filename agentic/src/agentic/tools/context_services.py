@@ -205,6 +205,160 @@ class NewsContextService:
         )
 
 
+class CharacterGroupSelectionError(RuntimeError):
+    """Raised when a configured character group cannot produce a character."""
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterGroupCandidate:
+    name: str
+    role_description: str = ""
+    keywords: str = ""
+    status: int = 1
+    weight: float = 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "role_description": self.role_description,
+            "keywords": self.keywords,
+            "status": self.status,
+            "weight": self.weight,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterGroupSelection:
+    group_name: str
+    selected_character: str
+    candidates: tuple[CharacterGroupCandidate, ...]
+    selection_source: str = "group_weighted_random"
+
+    @property
+    def selected_profile(self) -> dict[str, str]:
+        for candidate in self.candidates:
+            if candidate.name == self.selected_character:
+                return {
+                    "role_description": candidate.role_description,
+                    "keywords": candidate.keywords,
+                }
+        return {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": "group",
+            "group_name": self.group_name,
+            "selected_character": self.selected_character,
+            "candidate_count": len(self.candidates),
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "selected_profile": self.selected_profile,
+            "selection_source": self.selection_source,
+        }
+
+
+class CharacterGroupSelectionService:
+    """Select one active, positively weighted role from ``anime.anime_roles``."""
+
+    _QUERY = """
+        SELECT role_name_en, role_description, keywords, status, weight
+        FROM anime.anime_roles
+        WHERE group_name = %s
+          AND status = 1
+          AND COALESCE(weight, 0) > 0
+          AND COALESCE(role_name_en, '') != ''
+        ORDER BY id
+    """
+
+    def __init__(self) -> None:
+        _load_env_once()
+
+    @staticmethod
+    def is_configured() -> bool:
+        return all(
+            os.getenv(key)
+            for key in ("mysql_host", "mysql_port", "mysql_user", "mysql_password", "mysql_db_name")
+        )
+
+    def get_candidates(self, group_name: str) -> tuple[CharacterGroupCandidate, ...]:
+        normalized_group = str(group_name or "").strip()
+        if not normalized_group:
+            raise CharacterGroupSelectionError("Character group_name cannot be empty")
+        if not self.is_configured():
+            raise CharacterGroupSelectionError(
+                f"Character group '{normalized_group}' requires configured MySQL connection settings"
+            )
+
+        import pymysql
+
+        connection = pymysql.connect(
+            host=os.getenv("mysql_host"),
+            port=int(os.getenv("mysql_port", "3306")),
+            user=os.getenv("mysql_user"),
+            password=os.getenv("mysql_password"),
+            database=os.getenv("mysql_db_name"),
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(self._QUERY, [normalized_group])
+                rows = list(cursor.fetchall() or [])
+        finally:
+            connection.close()
+
+        candidates: list[CharacterGroupCandidate] = []
+        for row in rows:
+            name = str(row.get("role_name_en") or "").strip()
+            try:
+                weight = float(row.get("weight") or 0)
+            except (TypeError, ValueError):
+                weight = 0.0
+            try:
+                status = int(row.get("status") or 0)
+            except (TypeError, ValueError):
+                status = 0
+            if not name or status != 1 or weight <= 0:
+                continue
+            candidates.append(
+                CharacterGroupCandidate(
+                    name=name,
+                    role_description=str(row.get("role_description") or "").strip()[:1200],
+                    keywords=str(row.get("keywords") or "").strip()[:500],
+                    status=status,
+                    weight=weight,
+                )
+            )
+        return tuple(candidates)
+
+    def select_random_character(
+        self,
+        group_name: str,
+        *,
+        rng: random.Random | None = None,
+    ) -> CharacterGroupSelection:
+        normalized_group = str(group_name or "").strip()
+        candidates = self.get_candidates(normalized_group)
+        if not candidates:
+            raise CharacterGroupSelectionError(
+                f"Character group '{normalized_group}' has no active role with weight > 0"
+            )
+        chooser = rng or random
+        total_weight = sum(candidate.weight for candidate in candidates)
+        threshold = chooser.uniform(0, total_weight)
+        cumulative = 0.0
+        selected = candidates[-1]
+        for candidate in candidates:
+            cumulative += candidate.weight
+            if threshold <= cumulative:
+                selected = candidate
+                break
+        return CharacterGroupSelection(
+            group_name=normalized_group,
+            selected_character=selected.name,
+            candidates=candidates,
+        )
+
+
 @dataclass(slots=True)
 class HumanReviewDecision:
     status: str
@@ -327,10 +481,9 @@ class DiscordHumanReviewService:
         except Exception as exc:
             _logger().exception("discord.review.error | error=%s", exc)
             decision = ("error", None, text, None, {"status": "error", "error": str(exc)})
-        # Keep compatibility with older test doubles and callers that return
-        # the original four-tuple, while persisting the new delivery receipt.
-        status, reviewer, edited_text, selected_indices = decision[:4]
-        delivery = dict(decision[4]) if len(decision) > 4 and isinstance(decision[4], dict) else {}
+        status, reviewer, edited_text, selected_indices, delivery = decision
+        if not isinstance(delivery, dict):
+            delivery = {}
         if edited_text is None:
             edited_text = text
         selected_paths = filtered_media_paths
@@ -564,11 +717,6 @@ async def _run_discord_file_feedback_process(
                 for item in str(os.getenv("discord_review_allowed_user_ids") or "").split(",")
                 if item.strip().isdigit()
             }
-            self.allowed_reviewers = {
-                item.strip().lower()
-                for item in str(os.getenv("discord_review_allowed_users") or "").split(",")
-                if item.strip() and not item.strip().isdigit()
-            }
 
             if not allow_text_edit:
                 edit_button = next(
@@ -617,13 +765,7 @@ async def _run_discord_file_feedback_process(
         async def authorize(self, interaction: discord.Interaction) -> bool:
             user = interaction.user
             user_id = str(getattr(user, "id", "")).strip()
-            user_name = str(getattr(user, "name", "")).strip().lower()
-            if self.allowed_reviewer_ids:
-                allowed = user_id in self.allowed_reviewer_ids
-            else:
-                # Legacy migration path. Prefer Discord user IDs because names
-                # can change; an empty allowlist fails closed.
-                allowed = bool(self.allowed_reviewers) and user_name in self.allowed_reviewers
+            allowed = user_id in self.allowed_reviewer_ids
             if not allowed:
                 await interaction.response.send_message("You are not authorized for this review.", ephemeral=True)
                 return False

@@ -106,9 +106,33 @@ SCHEDULER_COMFY_ROOT=D:/ComfyUI_windows_portable
 ```
 
 Leave `SCHEDULER_PREFERRED_GENERATION_TYPE` empty for the mixed content
-calendar. The scheduler passes an RNG into the character workflow, which then
-samples the configured Kirby weighted pool; the LLM writes the story for the
-already-selected strategy and does not select the strategy.
+calendar. The scheduler passes an RNG into the character workflow. The runtime
+first samples the configured `character.group_name` from the active weighted
+rows in `anime.anime_roles`, then samples the generation strategy; the LLM
+writes the story for the already-selected character and strategy.
+
+## Group character selection
+
+The checked-in `configs/characters/kirby.yaml` uses `group_name: Kirby`. The
+current CLI and scheduler both use this same configuration, so no separate
+group command is required:
+
+```powershell
+python run_media_interface.py --character kirby --generation-type text2img --no-review --no-publish
+```
+
+At the start of each run, `CharacterGroupSelectionService` queries
+`anime.anime_roles` with the current schema and keeps only rows where
+`group_name` matches, `status = 1`, `weight > 0`, and `role_name_en` is not
+empty. It performs one weighted random choice using the workflow RNG. The
+selected role name, role description, keywords, full eligible candidate list,
+weights, and selection source are passed into the prompt/storyboard contract.
+
+The evidence is available in both `run_manifest.json` as `character_selection`
+and `events.jsonl` as `character.group.selected`. A missing MySQL configuration
+or an empty eligible set is a hard selection failure recorded as
+`character.group.selection_failed`; the runtime does not silently fall back to
+the configured base name.
 
 ## OpenRouter free model pool
 

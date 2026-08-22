@@ -9,6 +9,12 @@ for candidate in (REPO_ROOT, AGENTIC_SRC):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
+from agentic.app.character_requests import (
+    CharacterGenerationOptions,
+    CharacterReviewOptions,
+    CharacterRuntimeOptions,
+    CharacterWorkflowRequest,
+)
 from agentic.app.character_workflow import dumps_result, run_character_workflow
 
 
@@ -79,28 +85,35 @@ def main() -> None:
     args = parser.parse_args()
 
     config_path = _resolve_config_path(args)
-    result = run_character_workflow(
-        REPO_ROOT,
-        config_path,
-        prompt=args.prompt,
-        temperature=args.temperature,
-        preferred_generation_type=args.generation_type,
-        duration_seconds=args.duration_seconds,
-        dry_run_publish=args.dry_run_publish,
-        publish_mode=args.publish_mode,
-        publish_platforms=args.publish_platforms,
-        publish_after_generate=not args.no_publish,
-        no_review=args.no_review,
-        stage_probe=args.stage_probe,
-        news_driven=args.news_driven,
-        output_dir=args.output_dir,
-        enable_review_loop=args.enable_review_loop,
-        review_notes=args.review_notes,
-        comfy_host=args.comfy_host,
-        comfy_port=args.comfy_port,
-        comfy_root=args.comfy_root,
-        auto_download_assets=args.auto_download_assets,
+    request = CharacterWorkflowRequest(
+        repo_root=REPO_ROOT,
+        config_path=config_path,
+        generation=CharacterGenerationOptions(
+            prompt=args.prompt,
+            temperature=args.temperature,
+            preferred_generation_type=args.generation_type,
+            duration_seconds=args.duration_seconds,
+            output_dir=args.output_dir,
+            news_driven=args.news_driven,
+        ),
+        review=CharacterReviewOptions(
+            dry_run_publish=args.dry_run_publish,
+            publish_mode=args.publish_mode,
+            publish_platforms=tuple(args.publish_platforms or ()),
+            publish_after_generate=not args.no_publish,
+            enable_review_loop=args.enable_review_loop,
+            review_notes=args.review_notes,
+            no_review=args.no_review,
+            stage_probe=args.stage_probe,
+        ),
+        runtime=CharacterRuntimeOptions(
+            comfy_host=args.comfy_host,
+            comfy_port=args.comfy_port,
+            comfy_root=args.comfy_root,
+            auto_download_assets=args.auto_download_assets,
+        ),
     )
+    result = run_character_workflow(request)
     print(dumps_result(result))
 
 

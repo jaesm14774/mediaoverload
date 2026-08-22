@@ -321,10 +321,8 @@ class FacebookPlatform(BaseConfigPlatform):
         has_video = any(Path(path).suffix.lower() in video_extensions for path in valid_paths)
         use_reels = _coerce_bool(
             additional.get("facebook_use_reels"),
-            # A short generated video is a Reel by default. The previous
-            # default routed it to the legacy Page video endpoint, which
-            # returned True without a receipt and was therefore correctly
-            # rejected by the verified-publication gate.
+            # A short generated video is a Reel by default; callers can still
+            # explicitly select the Page post path with facebook_use_reels.
             default=_coerce_bool(os.getenv("FB_USE_REELS"), default=has_video),
         )
         if use_reels:
