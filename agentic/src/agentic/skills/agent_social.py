@@ -353,25 +353,8 @@ class AgentSocialSkills:
                 ),
             )
         review_metadata = self._review_metadata(context)
-        if first_frame_review:
-            review_text = self._build_opening_frame_review_text(
-                story_summary=self._story_review_summary(context),
-                candidate_count=len(review_media_paths),
-                strategy=review_metadata["strategy"],
-            )
-        elif last_frame_review:
-            review_text = self._build_ending_frame_review_text(
-                story_summary=self._story_review_summary(context),
-            )
-        elif anchor_set_review:
-            review_text = self._build_ending_frame_review_text(
-                story_summary=self._story_review_summary(context),
-            )
-        elif reference_review:
-            review_text = self._build_reference_review_text(
-                story_summary=self._story_review_summary(context),
-                candidate_count=len(review_media_paths),
-            )
+        if first_frame_review or last_frame_review or anchor_set_review or reference_review:
+            review_text = self._build_stage_review_text()
         elif final_video_review or final_media_review:
             review_text = self._build_final_publish_review_text(
                 draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
@@ -729,45 +712,6 @@ class AgentSocialSkills:
         return True
 
     @staticmethod
-    def _legacy_build_frame_review_text(*, story_summary: str, review_scope: str, candidate_count: int) -> str:
-        """Keep the retired frame-review helper compatible without old copy."""
-        del story_summary, review_scope, candidate_count
-        return "stage: preview"
-
-    @staticmethod
-    def _legacy_build_review_text(
-        *,
-        prompt: str,
-        review_notes: str,
-        ranked_candidates: list[dict[str, object]],
-        selection_limit: int,
-        draft_caption: str,
-        draft_hashtags: str,
-        platforms: list[str],
-        candidate_paths: list[str] | None = None,
-        review_scope: str = "",
-    ) -> str:
-        lines: list[str] = []
-        if review_notes.strip():
-            lines.append(review_notes.strip())
-        if review_scope == "final_video":
-            lines.extend(["", "Final rendered video attached. Review the video directly; no still-image selection is required."])
-        elif candidate_paths:
-            lines.extend(["", "Candidates attached in this order:"])
-            lines.extend(
-                f"Asset {index}: {AgentSocialSkills._candidate_label(path)}"
-                for index, path in enumerate(candidate_paths, start=1)
-            )
-        review_body = AgentSocialSkills._format_review_post(
-            caption=str(draft_caption or prompt),
-            hashtags=str(draft_hashtags or ""),
-            platforms=platforms,
-        )
-        if review_body:
-            lines.extend(["", review_body])
-        return textwrap.shorten("\n".join(lines).strip(), width=1900, placeholder="...")
-
-    @staticmethod
     def _review_metadata(context: SkillContext) -> dict[str, str]:
         constraints = context.plan.goal.constraints
         strategy = str(
@@ -783,20 +727,7 @@ class AgentSocialSkills:
         return {"strategy": strategy or "unknown", "workflow": workflow or "unknown"}
 
     @staticmethod
-    def _build_opening_frame_review_text(
-        *, story_summary: str, candidate_count: int, strategy: str = "unknown"
-    ) -> str:
-        del story_summary, candidate_count, strategy
-        return "stage: preview"
-
-    @staticmethod
-    def _build_ending_frame_review_text(*, story_summary: str) -> str:
-        del story_summary
-        return "stage: preview"
-
-    @staticmethod
-    def _build_reference_review_text(*, story_summary: str, candidate_count: int) -> str:
-        del story_summary, candidate_count
+    def _build_stage_review_text() -> str:
         return "stage: preview"
 
     @staticmethod

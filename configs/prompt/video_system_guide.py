@@ -70,6 +70,7 @@ Then combine into description.
 Generate only the final video description using the template above.
 Pure visual narrative.
 No explanations, no options, no commentary.
+Response in English only.
 
 """
 
@@ -138,5 +139,6 @@ When you see an image/concept, answer:
 Generate only the final motion description using the template above.
 Focus on "Snappy" and "Readable" movement.
 No explanations.
+Response in English only.
 
 """

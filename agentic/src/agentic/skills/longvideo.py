@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+import re
 from pathlib import Path
+from typing import Any
 
 from agentic.h3_reference import build_reference_lineage, format_ref2va_prompt, normalize_reference_manifest
 from agentic.runtime.contracts import SkillContext, SkillResult
@@ -28,6 +31,64 @@ def _bounded_int(value: object, *, name: str, minimum: int, maximum: int) -> int
     return parsed
 
 
+def _apply_selected_character_to_storyboard(
+    storyboard: dict[str, Any],
+    *,
+    selected_character: str,
+    character_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base_character = str(storyboard.get("character") or "").strip()
+    selected = str(selected_character or base_character or "the protagonist").strip()
+
+    def replace_identity(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: replace_identity(child) for key, child in value.items()}
+        if isinstance(value, list):
+            return [replace_identity(child) for child in value]
+        if isinstance(value, str) and base_character and base_character.casefold() != selected.casefold():
+            return re.sub(
+                rf"(?<!\w){re.escape(base_character)}(?!\w)",
+                selected,
+                value,
+                flags=re.IGNORECASE,
+            )
+        return value
+
+    resolved = replace_identity(dict(storyboard))
+    resolved["character"] = selected
+    profile = dict(character_profile or {})
+    role_description = str(profile.get("role_description") or "").strip()
+    keywords = str(profile.get("keywords") or "").strip()
+    if role_description or keywords:
+        profile_text = "; ".join(
+            item
+            for item in (
+                f"{selected} role profile: {role_description}" if role_description else "",
+                f"keywords: {keywords}" if keywords else "",
+            )
+            if item
+        )
+        if base_character.casefold() != selected.casefold():
+            resolved["base_prompt"] = (
+                f"One {selected} is the only protagonist. {profile_text}. "
+                "Preserve this selected role's recognizable identity and proportions throughout the clip."
+            )
+        else:
+            resolved["base_prompt"] = f"{str(resolved.get('base_prompt') or '').strip()} {profile_text}".strip()
+    return resolved
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeH3Render:
+    """Mode-specific render data consumed by the shared H3 execution boundary."""
+
+    tool_name: str
+    payload: dict[str, Any]
+    outputs: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    log: str = ""
+
+
 class LongVideoSkills:
     def __init__(
         self,
@@ -39,8 +100,8 @@ class LongVideoSkills:
         self.tools = tools
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
-        # Direct construction remains compatible for tests and standalone callers;
-        # the application composition root injects the shared service instance.
+        # The application composition root injects shared services; defaults
+        # keep this skill usable in focused unit tests.
         self.story_service = story_service or NativeH3StoryService()
         self.prompt_engine = prompt_engine or PromptEngine()
 
@@ -101,6 +162,14 @@ class LongVideoSkills:
             or ""
         )
         storyboard = load_storyboard(storyboard_path)
+        selected_character = str(
+            context.plan.goal.constraints.get("character") or storyboard.get("character") or "the protagonist"
+        ).strip()
+        storyboard = _apply_selected_character_to_storyboard(
+            storyboard,
+            selected_character=selected_character,
+            character_profile=dict(context.plan.goal.constraints.get("character_profile") or {}),
+        )
         duration_seconds = int(
             context.node.inputs.get("duration_seconds")
             or context.plan.goal.constraints.get("native_h3_duration_seconds")
@@ -136,7 +205,7 @@ class LongVideoSkills:
             raise RuntimeError("Native H3 news_context must be a mapping")
         storyboard, story_payload = self.story_service.resolve(
             storyboard,
-            character=str(context.plan.goal.constraints.get("character") or "Kirby"),
+            character=selected_character,
             style=style,
             duration_seconds=duration_seconds,
             news_context=news_context,
@@ -580,26 +649,24 @@ class LongVideoSkills:
                 or "q4"
             ),
         }
-        result = self.tools.call("comfy.workflow.image_to_video", payload)
-        return SkillResult(
-            status="success",
-            outputs={
-                **result,
+        return self._run_native_h3_render(
+            _NativeH3Render(
+                tool_name="comfy.workflow.image_to_video",
+                payload=payload,
+                outputs={
                 "first_frame_path": "",
                 "last_frame_path": last_frame,
                 "use_first_frame": False,
                 "use_last_frame": True,
-                "native_h3_prompt": story["prompt"],
-                "story_source": story.get("story_source", "news_llm"),
-                "creative_seed": story.get("creative_seed", ""),
-                "news_context": story.get("news_context", {}),
-                "story_quality": dict(story.get("story_quality") or {}),
-                "news_grounding": dict(story.get("news_grounding") or {}),
-                "generated_storyboard": story.get("generated_storyboard", {}),
                 "render_mode": "last_frame_to_video",
-            },
-            metrics={"video_count": len(result.get("saved_files", [])), "length": payload["length"], "steps": payload["steps"]},
-            logs=["Rendered native H3 L2VA with an approved last frame and no first-frame connection."],
+                **self._native_h3_story_outputs(
+                    story,
+                    prompt=str(story["prompt"]),
+                    render_mode="last_frame_to_video",
+                ),
+                },
+                log="Rendered native H3 L2VA with an approved last frame and no first-frame connection.",
+            )
         )
 
     def render_native_h3_ref2va(self, context: SkillContext) -> SkillResult:
@@ -666,30 +733,22 @@ class LongVideoSkills:
             ),
             "video_count": _bounded_int(context.node.inputs.get("video_count") or 1, name="video_count", minimum=1, maximum=4),
         }
-        result = self.tools.call("comfy.workflow.reference_to_video", payload)
-        return SkillResult(
-            status="success",
-            outputs={
-                **result,
+        return self._run_native_h3_render(
+            _NativeH3Render(
+                tool_name="comfy.workflow.reference_to_video",
+                payload=payload,
+                outputs={
                 "reference_manifest": references,
                 "reference_lineage": list(validation.get("reference_lineage") or build_reference_lineage(references)),
                 "reference_audio_enabled": False,
-                "native_h3_prompt": prompt,
-                "story_source": story.get("story_source", "news_llm"),
-                "creative_seed": story.get("creative_seed", ""),
-                "news_context": story.get("news_context", {}),
-                "story_quality": dict(story.get("story_quality") or {}),
-                "news_grounding": dict(story.get("news_grounding") or {}),
-                "generated_storyboard": story.get("generated_storyboard", {}),
                 "render_mode": "reference_to_video",
-            },
-            metrics={
-                "video_count": len(result.get("saved_files", [])),
+                **self._native_h3_story_outputs(story, prompt=prompt, render_mode="reference_to_video"),
+                },
+                metrics={
                 "reference_count": len(references),
-                "length": payload["length"],
-                "steps": payload["steps"],
-            },
-            logs=[f"Rendered native H3 Ref2VA with {len(references)} image/video references and native generated audio only."],
+                },
+                log=f"Rendered native H3 Ref2VA with {len(references)} image/video references and native generated audio only.",
+            )
         )
 
     def render_native_h3_t2v(self, context: SkillContext) -> SkillResult:
@@ -755,22 +814,38 @@ class LongVideoSkills:
                 or ("q2" if lowvram_t2v else "q4")
             ),
         }
-        result = self.tools.call("comfy.workflow.text_to_video", payload)
-        return SkillResult(
-            status="success",
-            outputs={
-                **result,
-                "native_h3_prompt": story["prompt"],
-                "story_source": story.get("story_source", "news_llm"),
-                "creative_seed": story.get("creative_seed", ""),
-                "news_context": story.get("news_context", {}),
-                "story_quality": dict(story.get("story_quality") or {}),
-                "generated_storyboard": story.get("generated_storyboard", {}),
-                "render_mode": "text_to_video",
-            },
-            metrics={"video_count": len(result.get("saved_files", [])), "length": payload["length"], "steps": payload["steps"]},
-            logs=[f"Rendered one continuous native H3 text-to-video story with '{workflow_name}'."],
+        return self._run_native_h3_render(
+            _NativeH3Render(
+                tool_name="comfy.workflow.text_to_video",
+                payload=payload,
+                outputs=self._native_h3_story_outputs(story, prompt=str(story["prompt"]), render_mode="text_to_video"),
+                log=f"Rendered one continuous native H3 text-to-video story with '{workflow_name}'.",
+            )
         )
+
+    @staticmethod
+    def _native_h3_story_outputs(story: dict[str, Any], *, prompt: str, render_mode: str) -> dict[str, Any]:
+        return {
+            "native_h3_prompt": prompt,
+            "story_source": story.get("story_source", "news_llm"),
+            "creative_seed": story.get("creative_seed", ""),
+            "news_context": story.get("news_context", {}),
+            "story_quality": dict(story.get("story_quality") or {}),
+            "news_grounding": dict(story.get("news_grounding") or {}),
+            "generated_storyboard": story.get("generated_storyboard", {}),
+            "render_mode": render_mode,
+        }
+
+    def _run_native_h3_render(self, render: _NativeH3Render) -> SkillResult:
+        result = self.tools.call(render.tool_name, render.payload)
+        outputs = {**result, **render.outputs}
+        metrics = {
+            "video_count": len(result.get("saved_files", [])),
+            "length": render.payload["length"],
+            "steps": render.payload["steps"],
+            **render.metrics,
+        }
+        return SkillResult(status="success", outputs=outputs, metrics=metrics, logs=[render.log])
 
     def qa_native_h3(self, context: SkillContext) -> SkillResult:
         render = context.state["native-h3-render"]

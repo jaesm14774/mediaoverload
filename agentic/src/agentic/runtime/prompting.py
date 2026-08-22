@@ -39,6 +39,16 @@ Non-negotiable rules:
 """.strip()
 
 
+ENGLISH_GENERATION_RESPONSE_CONTRACT = """
+Language contract:
+- Write every creative field in natural, idiomatic English: storyboards, scene descriptions, image prompts, video prompts, actions, camera directions, audio directions, and visual QA prose.
+- Do not write Traditional Chinese, Simplified Chinese, Japanese, or mixed-language prose in those creative fields.
+- Preserve a source-language proper noun or exact source text only when the schema explicitly requires it as metadata; never copy it into a creative prompt field.
+- Translate the meaning into fluent English rather than translating word for word.
+Response in English only.
+""".strip()
+
+
 STICKER_SYSTEM_PROMPT = """
 You design high-performing messaging stickers.
 

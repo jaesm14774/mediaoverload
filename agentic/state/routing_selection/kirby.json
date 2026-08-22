@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "signature": [
+    "native_h3_fl2va_story=1",
+    "native_h3_l2va_story=1",
+    "native_h3_ref2va=1",
+    "native_h3_story=1",
+    "native_h3_t2v_story=1",
+    "sticker_pack=2",
+    "text2image2native_h3_ref2va=1",
+    "text2image2video=1",
+    "text2img=1",
+    "text2longvideo=2"
+  ],
+  "bag": [
+    "sticker_pack",
+    "text2longvideo",
+    "native_h3_fl2va_story",
+    "text2img",
+    "native_h3_story",
+    "text2image2native_h3_ref2va",
+    "native_h3_ref2va"
+  ],
+  "history": [
+    "native_h3_t2v_story",
+    "text2longvideo",
+    "sticker_pack",
+    "text2image2video",
+    "native_h3_l2va_story"
+  ]
+}

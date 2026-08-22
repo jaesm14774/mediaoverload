@@ -30,9 +30,9 @@ class Krea2WorkflowContractTests(unittest.TestCase):
         self.assertTrue(active & {"krea2_turbo", "krea2_turbo_img2img"})
         self.assertEqual(active & retired, set())
 
-    def test_text2img_route_is_active_and_t2i_alias_is_canonical(self) -> None:
+    def test_text2img_route_is_active_and_uses_canonical_names(self) -> None:
         self.assertIn("text2img", self.routing["strategy_candidates"])
-        self.assertEqual(self.routing["strategy_aliases"]["t2i"], "text2img")
+        self.assertNotIn("strategy_aliases", self.routing)
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2img"]["image_workflow_name"][0],
             "krea2_turbo",

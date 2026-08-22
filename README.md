@@ -2,9 +2,11 @@
 
 ## CI 與本機 E2E 的分工
 
-CI（Continuous Integration，持續整合）是每次 push 或 pull request 自動執行的基本品質防線。此專案的 CI 只驗證可重現的程式碼：安裝 `agentic`、編譯 Python source，並執行 `agentic/tests`；它不會啟動本機 ComfyUI、使用 GPU，也不會呼叫 Discord、Instagram、Facebook 或 YouTube 真實帳號。
+CI（Continuous Integration，持續整合）是每次 push 或 pull request 自動執行的基本品質防線。Hosted CI 執行可重現的 unit/contract tests 與 Python compile；需要真實 DB、LLM、ComfyUI 或 GPU 的測試會標記為 `integration`，不會在 hosted PR runner 上假裝通過。Hosted CI 會驗證 integration suite 可被發現，正式整合則由受保護的 Formal Integration workflow 執行。
 
-需要本機 GPU、ComfyUI 或真實平台帳號的流程，仍由 Windows 上的 `python run_media_interface.py` 做 E2E smoke test。這樣 CI 失敗代表程式碼或單元測試有問題；本機 E2E 失敗則代表模型、GPU、workflow、憑證或外部平台狀態有問題，兩者不能混為一談。
+需要真實 DB、LLM、GPU 或 ComfyUI 的流程，會在 Windows self-hosted runner 上透過同一個 `python run_media_interface.py` 做 Formal Integration smoke test；該 workflow 只在 `main`、schedule 或手動觸發，並使用 `mediaoverload-integration` Environment 的 `MEDIAOVERLOAD_ENV` secret。這樣 Hosted CI 仍能快速回饋，Formal Integration 則負責驗證 production-like runtime；兩者都不能被另一者取代。
+
+Formal Integration runner 必須具備 `self-hosted`, `windows`, `x64`, `mediaoverload-integration` labels、可用的 ComfyUI/GPU、FFmpeg 與資料庫連線。它會使用 `--stage-probe` 與 `--dry-run-publish`，產生並上傳 JSON/log evidence，但不執行 live publish。
 
 以 **Agentic 媒體執行階層**（`agentic/`）為核心的專案：依「目標＋約束」組出計畫，透過技能／工具鏈呼叫 ComfyUI、媒體處理與發佈。角色向的一鍵流程由 **`run_media_interface.py`** 讀取角色 YAML，並依 **`configs/routing.yaml`** 做 **生成策略（generation strategy）** 路由。
 
@@ -103,6 +105,24 @@ pip install -e .
 
 以下 **CLI** 假設在專案根目錄執行，並使用內建 `configs/characters/kirby.yaml`（可依需求複製改名）。
 
+### Group 角色選擇
+
+`configs/characters/kirby.yaml` 的 `character.group_name: Kirby` 已啟用群組選角。使用目前的角色入口即可觸發：
+
+```powershell
+python run_media_interface.py --character kirby --generation-type text2img --no-review --no-publish
+```
+
+每次 `run_character_workflow` 執行時，runtime 會從 `anime.anime_roles` 讀取同一 `group_name` 下 `status=1` 且 `weight>0` 的角色，依 `weight` 做一次加權隨機選擇。角色描述與 keywords 會一併注入 prompt/storyboard；`run_manifest.json` 和 `events.jsonl` 會記錄 `character_selection`、候選數、權重與選中角色。
+
+排程不需要新增參數，維持：
+
+```dotenv
+SCHEDULER_CHARACTER=kirby
+```
+
+若 MySQL 未設定、查不到可用角色，該 run 會在選角階段直接失敗並記錄 `character.group.selection_failed`，不會自動改用 Kirby。直接呼叫 `build_goal_payload_from_character_config` 只負責建立已選角色的 payload；要執行 group 選角請使用 CLI、scheduler 或 `run_character_workflow`。
+
 ### 1. `text2img` — 靜態圖
 
 **會用到的 `workflow_plan` 鍵**：主要是 `image_workflow_name`。
@@ -117,14 +137,19 @@ python run_media_interface.py --character kirby --prompt "霓虹夜市中的角�
 
 ```python
 from pathlib import Path
+from agentic.app.character_requests import CharacterGenerationOptions, CharacterWorkflowRequest
 from agentic.app.character_workflow import build_goal_payload_from_character_config
 
 repo_root = Path(__file__).resolve().parent
 payload = build_goal_payload_from_character_config(
-    repo_root,
-    repo_root / "configs" / "characters" / "kirby.yaml",
-    prompt="賽博龍與拉麵攤，海報構圖",
-    preferred_generation_type="text2img",
+    CharacterWorkflowRequest(
+        repo_root=repo_root,
+        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
+        generation=CharacterGenerationOptions(
+            prompt="賽博龍與拉麵攤，海報構圖",
+            preferred_generation_type="text2img",
+        ),
+    )
 )
 # payload["media_type"] == "image"
 # payload["constraints"]["image_workflow_name"] 等為路由結果
@@ -158,17 +183,21 @@ python run_media_interface.py --character kirby --prompt "角色在雨中緩步�
 
 ```python
 from pathlib import Path
+from agentic.app.character_requests import CharacterGenerationOptions, CharacterRuntimeOptions, CharacterReviewOptions, CharacterWorkflowRequest
 from agentic.app.character_workflow import run_character_workflow
 
 repo = Path(__file__).resolve().parent
 result = run_character_workflow(
-    repo,
-    repo / "configs" / "characters" / "kirby.yaml",
-    prompt="短動態展示，鏡頭固定",
-    preferred_generation_type="text2video",
-    comfy_host="127.0.0.1",
-    comfy_port=8188,
-    publish_after_generate=False,
+    CharacterWorkflowRequest(
+        repo_root=repo,
+        config_path=repo / "configs" / "characters" / "kirby.yaml",
+        generation=CharacterGenerationOptions(
+            prompt="短動態展示，鏡頭固定",
+            preferred_generation_type="text2video",
+        ),
+        review=CharacterReviewOptions(publish_after_generate=False),
+        runtime=CharacterRuntimeOptions(comfy_host="127.0.0.1", comfy_port=8188),
+    )
 )
 print(result["status"], result.get("routing_summary", {}))
 ```
@@ -198,14 +227,19 @@ python run_media_interface.py --character kirby --prompt "先鎖定角色再做�
 
 ```python
 from pathlib import Path
+from agentic.app.character_requests import CharacterGenerationOptions, CharacterWorkflowRequest
 from agentic.app.character_workflow import build_goal_payload_from_character_config
 
 repo_root = Path(__file__).resolve().parent
 payload = build_goal_payload_from_character_config(
-    repo_root,
-    repo_root / "configs" / "characters" / "kirby.yaml",
-    prompt="key visual 轉五秒動態",
-    preferred_generation_type="text2image2video",
+    CharacterWorkflowRequest(
+        repo_root=repo_root,
+        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
+        generation=CharacterGenerationOptions(
+            prompt="key visual 轉五秒動態",
+            preferred_generation_type="text2image2video",
+        ),
+    )
 )
 ```
 
@@ -242,16 +276,20 @@ python run_media_interface.py --character kirby --prompt "三段式小故事：�
 
 ```python
 from pathlib import Path
+from agentic.app.character_requests import CharacterGenerationOptions, CharacterRuntimeOptions, CharacterWorkflowRequest
 from agentic.app.character_workflow import run_character_workflow
 
 repo = Path(__file__).resolve().parent
 result = run_character_workflow(
-    repo,
-    repo / "configs" / "characters" / "kirby.yaml",
-    prompt="旁白式多場景故事",
-    preferred_generation_type="text2longvideo",
-    comfy_host="127.0.0.1",
-    comfy_port=8188,
+    CharacterWorkflowRequest(
+        repo_root=repo,
+        config_path=repo / "configs" / "characters" / "kirby.yaml",
+        generation=CharacterGenerationOptions(
+            prompt="旁白式多場景故事",
+            preferred_generation_type="text2longvideo",
+        ),
+        runtime=CharacterRuntimeOptions(comfy_host="127.0.0.1", comfy_port=8188),
+    )
 )
 ```
 
@@ -333,14 +371,19 @@ additional_params:
 
 ```python
 from pathlib import Path
+from agentic.app.character_requests import CharacterGenerationOptions, CharacterWorkflowRequest
 from agentic.app.character_workflow import build_goal_payload_from_character_config
 
 repo_root = Path(__file__).resolve().parent
 payload = build_goal_payload_from_character_config(
-    repo_root,
-    repo_root / "configs" / "characters" / "kirby.yaml",
-    prompt="在既有構圖上重做光影",
-    preferred_generation_type="image2image",
+    CharacterWorkflowRequest(
+        repo_root=repo_root,
+        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
+        generation=CharacterGenerationOptions(
+            prompt="在既有構圖上重做光影",
+            preferred_generation_type="image2image",
+        ),
+    )
 )
 ```
 
@@ -360,82 +403,68 @@ additional_params:
 
 以下是目前 repo 可由 `run_media_interface.py` 呼叫的完整策略清單。每一列都會走同一條角色流程：載入 YAML → 路由 → 建立 workflow plan → 執行 ComfyUI → 進入 publish/review stage。`--dry-run-publish` 會保留 publish stage 與 Discord 審核，但不把結果送到社群平台；因此適合逐條 E2E 驗證。不要把 `--no-publish` 加到這組測試，否則不會驗證 Discord publish gate。
 
-PowerShell 先設定共用參數：
-
-```powershell
-$e2e = @(
-  '--character', 'kirby',
-  '--comfy-host', '127.0.0.1',
-  '--comfy-port', '8188',
-  '--comfy-root', 'D:\ComfyUI_windows_portable',
-  '--publish-platform', 'facebook',
-  '--dry-run-publish',
-  '--enable-review-loop'
-)
-```
-
 逐一呼叫各策略（每個命令都要在 Discord 完成審核；若成果不合格，請在 Discord 選 reject/block）：
 
 ```powershell
 # 1. 靜態圖：krea2_turbo
-python run_media_interface.py @e2e --prompt '高完成度角色主視覺，霓虹夜市，清楚輪廓' --generation-type text2img
+python run_media_interface.py --character kirby --prompt '高完成度角色主視覺，霓虹夜市，清楚輪廓' --generation-type text2img
 
 # 2. 短影片／單鏡頭：minimax_h3_lowvram_t2v
-python run_media_interface.py @e2e --prompt '單鏡頭短動畫，角色在雨中奔跑，鏡頭跟拍' --generation-type text2video
+python run_media_interface.py --character kirby --prompt '單鏡頭短動畫，角色在雨中奔跑，鏡頭跟拍' --generation-type text2video
 
 # 3. 先圖後短片：krea2_turbo -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
-python run_media_interface.py @e2e --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
+python run_media_interface.py --character kirby --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
 
 # 4. 長片／多段故事：每段依 recipe 產生 anchor/reference -> I2V -> tail/transition -> concat
-python run_media_interface.py @e2e --prompt '三段式故事：相遇、追逐、收尾；每段要有狀態轉移' --generation-type text2longvideo
+python run_media_interface.py --character kirby --prompt '三段式故事：相遇、追逐、收尾；每段要有狀態轉移' --generation-type text2longvideo
 
 # 5. Native H3 I2VA：generated opening image -> minimax_h3_lowvram_15s_fl2va_i2v
-python run_media_interface.py @e2e --prompt 'Native H3 單一連續故事，開場動作要立即發生' --generation-type native_h3_story
+python run_media_interface.py --character kirby --prompt 'Native H3 單一連續故事，開場動作要立即發生' --generation-type native_h3_story
 
 # 6. Native H3 T2VA：prompt only -> minimax_h3_lowvram_t2v
-python run_media_interface.py @e2e --prompt 'Native H3 純文字生影片，角色從第一幀就開始行動' --generation-type native_h3_t2v_story
+python run_media_interface.py --character kirby --prompt 'Native H3 純文字生影片，角色從第一幀就開始行動' --generation-type native_h3_t2v_story
 
 # 7. Native H3 FL2VA：generated opening + generated landing -> minimax_h3_lowvram_15s_fl2va_i2v
-python run_media_interface.py @e2e --prompt 'Native H3 首尾幀故事，起點與結局都要由人工審核' --generation-type native_h3_fl2va_story
+python run_media_interface.py --character kirby --prompt 'Native H3 首尾幀故事，起點與結局都要由人工審核' --generation-type native_h3_fl2va_story
 
 # 8. Native H3 L2VA：generated landing only -> minimax_h3_lowvram_15s_fl2va_i2v
-python run_media_interface.py @e2e --prompt 'Native H3 以最後一幀作為故事落點，前段保持因果動作' --generation-type native_h3_l2va_story
+python run_media_interface.py --character kirby --prompt 'Native H3 以最後一幀作為故事落點，前段保持因果動作' --generation-type native_h3_l2va_story
 
 # 9. Native H3 Ref2VA：valid manifest 直用；空 manifest -> 六張候選圖 -> Discord 選擇 -> minimax_h3_ref2va
-python run_media_interface.py @e2e --prompt 'Native H3 參考圖與參考影片共同控制身份和運鏡' --generation-type native_h3_ref2va
+python run_media_interface.py --character kirby --prompt 'Native H3 參考圖與參考影片共同控制身份和運鏡' --generation-type native_h3_ref2va
 
 # 10. 先圖後 img2img refine：krea2_turbo -> krea2_turbo_img2img
-python run_media_interface.py @e2e --prompt '保留構圖與角色身份，只修正光影和細節' --generation-type text2image2image
+python run_media_interface.py --character kirby --prompt '保留構圖與角色身份，只修正光影和細節' --generation-type text2image2image
 
 # 11. 貼圖包：krea2_turbo -> minimax_h3_lowvram_i2v（動態貼圖階段）
-python run_media_interface.py @e2e --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
+python run_media_interface.py --character kirby --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
 ```
 
 ### 自動路由與加權隨機
 
-角色流程的策略選擇與內容生成要分開：scheduler 預設先讀取角色 YAML 的 `generation.generation_type_weights` 做 weighted selection，再把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不再決定 scheduler 要走哪一種 strategy。scheduler 會把候選 route 放進持久化 shuffle bag（狀態預設在 `agentic/state/routing_selection/<config>.json`），所以短窗口不會因隨機抽樣連續撞到同一路由，但整體仍遵守 YAML 權重。Kirby 目前的權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`。
+角色流程先選角色，再選策略，最後才生成內容：scheduler/runtime 先依 YAML 的 `character.group_name` 從 DB 做 group weighted selection，再讀取 `generation.generation_type_weights` 做 strategy weighted selection，並把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不決定角色或 scheduler 要走哪一種 strategy。scheduler 會把候選 route 放進持久化 shuffle bag（狀態預設在 `agentic/state/routing_selection/<config>.json`），所以短窗口不會因隨機抽樣連續撞到同一路由，但整體仍遵守 YAML 權重。Kirby 目前的 strategy 權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`。
 
 固定 route 的 image/refine/transition workflow 會先經過 `AssetRegistry` 的 required-asset readiness，再依 `configs/routing.yaml` 的 `workflow_selection_weights` 選擇；空的 required-asset manifest 只代表未驗證，不會被當成 ready。當前這台 ComfyUI 只有 Krea 的 image assets 被明確驗證，因此 Krea 集中是資產可用性結果，不是機率失效；先補齊並登錄其他 workflow assets，權重才會在它們之間生效。explicit generation-type override 只固定策略家族，若 scheduler 有 RNG，stage workflow 仍會依權重抽樣。若要指定 routing bag 檔案，可設定 `SCHEDULER_ROUTING_HISTORY_PATH`。
 
 `text2image2video` 的正常 review path 仍保留 6 張 raw keyframe 候選，但不再先跑未被 review 消費的 upscale。Discord 明確 Reject 仍會停止；若 review 發生 timeout、連線錯誤或沒有決策，`pre_video_review.failure_policy: fallback_to_top` 會選 deterministic top-ranked frame 繼續 I2V，並在 run manifest 留下 fallback evidence。
 
-直接呼叫 Python API 時若沒有傳入 `rng`，仍可保留 LLM strategy routing 作為低階相容模式；scheduler 會固定傳入 RNG，因此排程執行一定走 weighted/random。
+直接呼叫 `run_character_workflow` 時也會執行 group 選角；傳入 `rng` 可讓測試或受控實測重現同一組權重抽樣。`build_goal_payload_from_character_config` 是 payload builder，不是 group 選角入口。
 
 ```powershell
 # LLM 自動路由（不指定 --generation-type）
-python run_media_interface.py @e2e --prompt '幫我做一個有明確衝突與結局的 Kirby 媒體作品'
+python run_media_interface.py --character kirby --prompt '幫我做一個有明確衝突與結局的 Kirby 媒體作品'
 
 # 加權隨機：每次重新抽樣；抽樣後仍會完整走同一個 E2E + Discord gate
 $randomType = python -c "import random,sys; from pathlib import Path; sys.path.insert(0,'agentic/src'); from agentic.app.character_workflow import choose_media_type,load_character_config; print(choose_media_type(load_character_config(Path('configs/characters/kirby.yaml')), rng=random.Random())[0])"
 Write-Host "weighted random generation_type=$randomType"
 # news-driven 會抓取一則尚未使用的新聞；不要用舊 prompt 或舊 media path 代替
-python run_media_interface.py @e2e --generation-type $randomType --news-driven
+python run_media_interface.py --character kirby --generation-type $randomType --news-driven
 ```
 
 `image2image` 目前不是 `configs/routing.yaml` 的預設候選，只有在角色 YAML 的 `additional_params.strategies.image2image` 提供 workflow override 後才適合執行；不要把它和可直接 E2E 的 `text2image2image` 混用。它的 CLI 形式如下：
 
 ```powershell
-python run_media_interface.py @e2e --prompt '在既有構圖上重做光影' --generation-type image2image
+python run_media_interface.py --character kirby --prompt '在既有構圖上重做光影' --generation-type image2image
 ```
 
 ### MiniMax H3 五種 canonical mode 的獨立 ComfyUI E2E

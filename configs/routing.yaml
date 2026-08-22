@@ -18,10 +18,6 @@ routing:
     # - text2image2image
     - sticker_pack
 
-  strategy_aliases:
-    t2i: text2img
-    t2i2native_h3_ref2va: text2image2native_h3_ref2va
-
   # Image-conditioned routes use a human-reviewed image gate before video
   # render. Pure T2V routes remain prompt-only. Ref2VA may bind several
   # approved references; first-frame routes bind one approved frame.

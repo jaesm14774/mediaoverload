@@ -1145,25 +1145,6 @@ class TaskPlanner:
             "reference_bundle": 2,
         }
         configured_weights = goal.constraints.get("longvideo_mix_weights")
-        if not isinstance(configured_weights, dict):
-            configured_weights = goal.constraints.get("longvideo_h3_mix_weights")
-        if isinstance(configured_weights, dict) and configured_weights:
-            # Normalize provider-specific legacy labels at the config boundary;
-            # the planner and renderer continue to operate on shared recipes.
-            recipe_aliases = {
-                "i2va": "anchor_first",
-                "first_frame_to_video": "anchor_first",
-                "fl2va": "anchor_first_last",
-                "first_last_frame_to_video": "anchor_first_last",
-                "l2va": "anchor_last",
-                "last_frame_to_video": "anchor_last",
-                "ref2va": "reference_bundle",
-                "reference_to_video": "reference_bundle",
-            }
-            configured_weights = {
-                recipe_aliases.get(str(name).strip().lower(), str(name)): value
-                for name, value in configured_weights.items()
-            }
         weights = dict(configured_weights) if isinstance(configured_weights, dict) and configured_weights else {
             name: default_weights.get(name, 1) for name in candidates
         }

@@ -23,6 +23,12 @@ for candidate in (REPO_ROOT, AGENTIC_SRC):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
+from agentic.app.character_requests import (
+    CharacterGenerationOptions,
+    CharacterReviewOptions,
+    CharacterRuntimeOptions,
+    CharacterWorkflowRequest,
+)
 from agentic.app.character_workflow import run_character_workflow
 
 
@@ -153,32 +159,39 @@ def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = No
         "explicit_override" if config.preferred_generation_type else "weighted_random",
         config.preferred_generation_type or "<weighted>",
     )
-    result = run_character_workflow(
-        REPO_ROOT,
-        config.config_path,
-        prompt=config.prompt,
-        preferred_generation_type=config.preferred_generation_type,
-        duration_seconds=config.duration_seconds,
-        dry_run_publish=config.dry_run_publish,
-        publish_mode=config.publish_mode,
-        publish_platforms=config.publish_platforms,
-        publish_after_generate=config.publish_after_generate,
-        output_dir=config.output_dir,
-        enable_review_loop=config.enable_review_loop,
-        review_notes=config.review_notes,
-        no_review=config.no_review,
-        news_driven=config.news_driven,
-        news_history_path=config.news_history_path,
-        routing_history_path=(
-            config.routing_history_path
-            or str(REPO_ROOT / "agentic" / "state" / "routing_selection" / f"{config.config_path.stem}.json")
+    request = CharacterWorkflowRequest(
+        repo_root=REPO_ROOT,
+        config_path=config.config_path,
+        generation=CharacterGenerationOptions(
+            prompt=config.prompt,
+            preferred_generation_type=config.preferred_generation_type,
+            duration_seconds=config.duration_seconds,
+            output_dir=config.output_dir,
+            news_driven=config.news_driven,
+            news_history_path=config.news_history_path,
+            routing_history_path=(
+                config.routing_history_path
+                or str(REPO_ROOT / "agentic" / "state" / "routing_selection" / f"{config.config_path.stem}.json")
+            ),
+            rng=rng,
         ),
-        comfy_host=config.comfy_host,
-        comfy_port=config.comfy_port,
-        comfy_root=config.comfy_root,
-        auto_download_assets=config.auto_download_assets,
-        rng=rng,
+        review=CharacterReviewOptions(
+            dry_run_publish=config.dry_run_publish,
+            publish_mode=config.publish_mode,
+            publish_platforms=tuple(config.publish_platforms or ()),
+            publish_after_generate=config.publish_after_generate,
+            enable_review_loop=config.enable_review_loop,
+            review_notes=config.review_notes,
+            no_review=config.no_review,
+        ),
+        runtime=CharacterRuntimeOptions(
+            comfy_host=config.comfy_host,
+            comfy_port=config.comfy_port,
+            comfy_root=config.comfy_root,
+            auto_download_assets=config.auto_download_assets,
+        ),
     )
+    result = run_character_workflow(request)
     LOGGER.info(
         "scheduler.result | status=%s | strategy=%s | publish=%s",
         result.get("status"),

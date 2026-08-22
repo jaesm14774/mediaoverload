@@ -114,11 +114,9 @@ def normalize_video_semantic_qa(
     except (TypeError, ValueError):
         score = 0
     observed_story = str(data.get("observed_story") or "").strip()
-    # Vision models sometimes understand and describe the translated object
-    # correctly, but set the legacy ``news_anchor_visible`` field false because
-    # it sounds like a literal newsroom anchor. If the model's own observed
-    # story contains a concrete anchor declared by news_trace, normalize that
-    # schema mismatch without weakening protagonist/action/progression checks.
+    # Vision models sometimes describe the translated object correctly while
+    # under-reporting the canonical news-anchor check. Reconcile that result
+    # only when the observed story contains a declared concrete anchor.
     anchor_reconciled = False
     if not checks["news_anchor_visible"] and news_anchor_terms and observed_story:
         observed_tokens = set(re.findall(r"[a-z0-9]+", observed_story.lower()))

@@ -149,8 +149,6 @@ class FallbackChatModel:
         models.extend(additional)
         self._models = models
         self._primary = models[0]
-        # Keep the old attribute for callers that inspect the first fallback.
-        self._fallback = models[1] if len(models) > 1 else None
         self.last_success_model: str = ""
         self.last_attempt_model: str = ""
 
@@ -580,16 +578,9 @@ class OpenAICompatibleModel:
 
 class OllamaModel:
     def __init__(self, config: ModelConfig) -> None:
-        import ollama
-
         self.config = config
-        self._ollama = ollama
-        self.host = "http://127.0.0.1:11434"
+        self.host = os.environ.get("OLLAMA_API_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
         self.request_timeout = _configured_timeout("AGENTIC_OLLAMA_REQUEST_TIMEOUT_SECONDS", 30.0)
-        self.client = ollama.Client(
-            host=self.host,
-            timeout=self.request_timeout,
-        )
 
     def chat_completion(
         self,
@@ -599,18 +590,82 @@ class OllamaModel:
         **kwargs,
     ) -> str:
         remaining = _remaining_deadline(_deadline)
-        client = self.client
-        if remaining is not None and remaining < self.request_timeout:
-            client = self._ollama.Client(host=self.host, timeout=remaining)
         request_messages = [dict(message) for message in messages]
         if images:
-            request_messages[-1]["images"] = images
-        response = client.chat(
-            model=self.config.model_name,
-            messages=request_messages,
-            options={"temperature": self.config.temperature},
-        )
-        return str(response.message.content)
+            encoded_images: list[str] = []
+            for image_path in images:
+                data_url = OpenAICompatibleModel._encode_image_to_base64(image_path)
+                encoded_images.append(data_url.split(",", 1)[1] if data_url.startswith("data:") else data_url)
+            request_messages[-1]["images"] = encoded_images
+        options: dict[str, Any] = {"temperature": self.config.temperature}
+        for env_name, option_name in (
+            ("AGENTIC_OLLAMA_NUM_CTX", "num_ctx"),
+            ("AGENTIC_OLLAMA_NUM_PREDICT", "num_predict"),
+            ("AGENTIC_OLLAMA_TOP_P", "top_p"),
+            ("AGENTIC_OLLAMA_PRESENCE_PENALTY", "presence_penalty"),
+            ("AGENTIC_OLLAMA_REPEAT_PENALTY", "repeat_penalty"),
+        ):
+            raw_value = os.environ.get(env_name, "").strip()
+            if not raw_value:
+                continue
+            try:
+                options[option_name] = float(raw_value) if "." in raw_value else int(raw_value)
+            except ValueError:
+                continue
+
+        think_raw = os.environ.get("AGENTIC_OLLAMA_THINK", "false").strip().lower()
+        think: bool | str | None
+        if think_raw in {"true", "1", "yes", "on"}:
+            think = True
+        elif think_raw in {"false", "0", "no", "off"}:
+            think = False
+        elif think_raw in {"low", "medium", "high"}:
+            think = think_raw
+        elif think_raw == "none":
+            think = False
+        else:
+            think = None
+
+        request_payload: dict[str, Any] = {
+            "model": self.config.model_name,
+            "messages": request_messages,
+            "stream": False,
+            "options": options,
+        }
+        if think is not None:
+            request_payload["think"] = think
+        response_format = kwargs.get("response_format")
+        if isinstance(response_format, dict):
+            schema = (response_format.get("json_schema") or {}).get("schema")
+            request_payload["format"] = schema if isinstance(schema, dict) else "json"
+
+        request_timeout = self.request_timeout
+        raw_request_timeout = kwargs.get("request_timeout")
+        if raw_request_timeout is not None:
+            try:
+                request_timeout = max(0.1, float(raw_request_timeout))
+            except (TypeError, ValueError):
+                pass
+        timeout = min(request_timeout, remaining) if remaining is not None else request_timeout
+        try:
+            response = requests.post(
+                f"{self.host}/api/chat",
+                json=request_payload,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            response_payload = response.json()
+        except requests.RequestException as exc:
+            raise ProviderRequestError(f"Ollama request failed: {exc}") from exc
+        except ValueError as exc:
+            raise ProviderRequestError("Ollama returned invalid JSON") from exc
+
+        if isinstance(response_payload, dict) and response_payload.get("error"):
+            raise ProviderRequestError(f"Ollama error: {response_payload['error']}")
+        message = response_payload.get("message") if isinstance(response_payload, dict) else None
+        if not isinstance(message, dict):
+            raise ProviderRequestError("Ollama response did not contain a message object")
+        return str(message.get("content") or "")
 
 
 class GeminiModel(OpenAICompatibleModel):

@@ -56,6 +56,8 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
             [
                 "google/gemma-4-26b-a4b-it:free",
                 "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+                "nvidia/nemotron-nano-12b-v2-vl:free",
+                "google/gemma-4-31b-it:free",
             ],
         )
 
@@ -135,7 +137,7 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
         self.assertEqual(result, '{"ok":true}')
         self.assertEqual(calls, ["m1", "m2"])
 
-    def test_explicit_pool_drops_models_not_in_verified_static_pool(self) -> None:
+    def test_explicit_pool_keeps_models_in_verified_static_pool(self) -> None:
         backend = {
             "openrouter_discover_models": False,
             "openrouter_vision_pool_mode": True,
@@ -147,7 +149,13 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
 
         pool = _discover_pool(backend, "vision")
 
-        self.assertEqual(pool, ["google/gemma-4-26b-a4b-it:free"])
+        self.assertEqual(
+            pool,
+            [
+                "google/gemma-4-26b-a4b-it:free",
+                "nvidia/nemotron-nano-12b-v2-vl:free",
+            ],
+        )
         self.assertEqual(backend["openrouter_vision_pool_source"], "env_static_list_filtered")
 
     def test_single_model_retries_429_using_retry_after(self) -> None:

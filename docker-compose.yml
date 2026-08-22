@@ -16,6 +16,8 @@ services:
         max-file: "3"
     environment:
       - TZ=Asia/Taipei
+      # Ollama runs on the Windows host, not inside this scheduler container.
+      - OLLAMA_API_BASE_URL=http://host.docker.internal:11434
       # The MySQL container publishes its host port (8787 -> 3306); localhost
       # inside this container would point back to media-scheduler itself.
       - mysql_host=host.docker.internal

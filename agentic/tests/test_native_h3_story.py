@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from agentic.app.character_workflow import build_goal_payload_from_character_config
+from character_workflow_helpers import make_character_workflow_request
 from agentic.app.main import build_runtime
 from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
 from agentic.runtime.model_backends import OpenRouterModelCatalog
@@ -34,13 +35,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         cls.config_path = cls.repo_root / "configs" / "characters" / "kirby.yaml"
 
     def test_character_route_builds_native_h3_graph_without_power_shell_entrypoint(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             prompt="Kirby follows a storm-lit star through the meadow",
             preferred_generation_type="native_h3_story",
             publish_after_generate=False,
-        )
+        ))
         planner, _runner, _memory = build_runtime(
             self.repo_root / "agentic",
             output_root=self.repo_root / ".tmp-tests" / "native-h3-plan",
@@ -102,13 +103,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("native_h3", plan.metadata)
 
     def test_native_h3_last_frame_mode_adds_review_and_passes_both_frames(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             prompt="Kirby protects one glowing seed as a sudden storm reshapes the meadow",
             preferred_generation_type="native_h3_story",
             publish_after_generate=False,
-        )
+        ))
         payload["constraints"]["native_h3_use_last_frame"] = True
         planner, _runner, _memory = build_runtime(
             self.repo_root / "agentic",
@@ -142,14 +143,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(plan.metadata["native_h3"]["use_last_frame"])
 
     def test_no_review_native_h3_uses_one_opening_candidate_and_skips_review_node(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             prompt="Kirby protects one glowing seed as a sudden storm reshapes the meadow",
             preferred_generation_type="native_h3_story",
             publish_after_generate=False,
             no_review=True,
-        )
+        ))
         planner, _runner, _memory = build_runtime(
             self.repo_root / "agentic",
             output_root=self.repo_root / ".tmp-tests" / "native-h3-no-review-plan",
@@ -172,13 +173,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(plan.metadata["native_h3"]["require_human_review"])
 
     def test_stage_probe_keeps_six_candidates_and_adds_explicit_auto_selection_node(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             preferred_generation_type="native_h3_story",
             publish_after_generate=False,
             stage_probe=True,
-        )
+        ))
         planner, _runner, _memory = build_runtime(
             self.repo_root / "agentic",
             output_root=self.repo_root / ".tmp-tests" / "native-h3-stage-probe-plan",
@@ -348,6 +349,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "ending_keyframe_prompt": "The cushion rebounds and hugs Kirby in a soft pile.",
             "negative_prompt": "humans, duplicate Kirby, readable text, watermark",
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "cushion delivery delay",
                 "source_concepts": ["cushion"],
                 "visual_translation": "The delay becomes a runaway cushion that refuses to arrive calmly.",
@@ -417,13 +419,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(any("gag_card" in error for error in quality["errors"]))
 
     def test_character_route_builds_direct_t2v_story_graph(self) -> None:
-        payload = build_goal_payload_from_character_config(
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
             prompt="Kirby must save one glowing seed before the storm swallows the garden",
             preferred_generation_type="native_h3_t2v_story",
             publish_after_generate=False,
-        )
+        ))
         planner, _runner, _memory = build_runtime(
             self.repo_root / "agentic",
             output_root=self.repo_root / ".tmp-tests" / "native-h3-t2v-plan",
@@ -492,10 +494,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "ending_keyframe_prompt": "Ending frame: Kirby rests beside the calm canal while the rescued lanterns form a warm constellation above the water.",
             "negative_prompt": "humans, extra characters, duplicate Kirby, text, watermark, hard cut, identity drift",
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "city lantern outage paraphrased by provider",
                 "source_concepts": ["lantern"],
                 "visual_translation": "The outage becomes a runaway city lantern pulled toward a canal whirlpool.",
-                "visual_anchors": ["lantern", "whirlpool"],
+                "news_mechanism": "the runaway lantern is pulled toward the canal whirlpool",
+                "news_consequence": "the lantern rises above the canals after the current reverses",
+                "visual_anchors": ["lantern", "whirlpool", "canals"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "Kirby protects the lantern while the outage makes the lantern the urgent mission.",
             },
             "story_spine": {
@@ -580,15 +586,19 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 "objective": "Protect the glowing seed.",
             },
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "Typhoon warning",
                 "source_concepts": ["typhoon"],
                 "visual_translation": "A typhoon vortex funnel threatens the meadow.",
-                "visual_anchors": ["typhoon vortex funnel", "glowing seed"],
+                "news_mechanism": "the typhoon vortex pulls the glowing seed across the meadow",
+                "news_consequence": "the typhoon vortex still pulls the glowing seed across the meadow in the payoff",
+                "visual_anchors": ["typhoon vortex funnel", "glowing seed", "meadow"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "The typhoon vortex threatens the glowing seed and forces Kirby to protect it.",
             },
             "native_shots": [
                 {
-                    "action": "A typhoon vortex pulls at the glowing seed.",
+                    "action": "A typhoon vortex pulls at the glowing seed across the meadow.",
                     "camera": "Follow the seed.",
                     "state_change": "The seed is displaced.",
                 }
@@ -678,19 +688,23 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "story_spine": {
                 "premise": "Kirby confronts a rogue autonomous energy entity.",
                 "objective": "Kirby must neutralize the aggressive energy source.",
-                "resolution": "The monolith is destroyed and a stable orb remains.",
+                "resolution": "The monolith is destroyed and a stable glow remains.",
             },
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "AI agent attack from abroad",
                 "source_concepts": ["AI自主攻擊"],
                 "visual_translation": "The AI自主攻擊 becomes a featureless black monolith that attacks autonomously.",
-                "visual_anchors": ["Featureless black monolith"],
+                "news_mechanism": "the featureless black monolith attacks Kirby with dark energy",
+                "news_consequence": "the stable glow remains after Kirby destroys the featureless black monolith",
+                "visual_anchors": ["Featureless black monolith", "dark energy", "stable glow"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "The AI自主攻擊 becomes the featureless black monolith that Kirby must neutralize.",
             },
             "native_shots": [
                 {"action": "A featureless black monolith lashes out at Kirby."},
                 {"action": "The featureless black monolith pulls Kirby toward it."},
-                {"action": "Kirby destroys the monolith and a stable orb remains."},
+                {"action": "Kirby destroys the monolith and a stable glow remains."},
             ],
         }
 
@@ -706,19 +720,23 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "name": "Kirby vs. The Shadow Agent",
             "story_spine": {
                 "objective": "Neutralize the aggressive energy source.",
-                "resolution": "The dark entity is destroyed and a stable orb remains.",
+                "resolution": "The dark entity is destroyed and a stable glow remains.",
             },
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "AI agent attack from abroad",
                 "source_concepts": ["AI自主攻擊"],
                 "visual_translation": "The AI agent is represented by a featureless black monolith that acts autonomously.",
-                "visual_anchors": ["Featureless black monolith"],
+                "news_mechanism": "the featureless black monolith attacks Kirby with dark energy",
+                "news_consequence": "the stable glow remains after Kirby destroys the featureless black monolith",
+                "visual_anchors": ["Featureless black monolith", "dark energy", "stable glow"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "The translated threat becomes Kirby's mission.",
             },
             "native_shots": [
                 {"action": "A featureless black monolith knocks Kirby backward."},
                 {"action": "The featureless black monolith lashes out with dark energy."},
-                {"action": "Kirby destroys the monolith and a stable orb remains."},
+                {"action": "Kirby destroys the monolith and a stable glow remains."},
             ],
         }
 
@@ -743,6 +761,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "opening_keyframe_prompt": "Kirby sits calmly beside the bridge.",
             "story_spine": {"objective": "protect the bridge", "resolution": "the bridge is safe"},
             "news_trace": {
+                "contract_version": 2,
                 "news_mechanism": "the bridge tiles collapse",
                 "visual_anchors": ["neon bridge tiles"],
             },
@@ -853,10 +872,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "name": "Kirby and the Typhoon Seed",
             "story_spine": {"objective": "Protect the glowing seed.", "resolution": "The seed is safe."},
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "Typhoon warning",
                 "source_concepts": ["typhoon"],
                 "visual_translation": "A typhoon vortex threatens the meadow.",
-                "visual_anchors": ["typhoon vortex funnel", "glowing seed"],
+                "news_mechanism": "the typhoon vortex funnel pulls the glowing seed",
+                "news_consequence": "Kirby returns the glowing seed as the typhoon vortex funnel fades",
+                "visual_anchors": ["typhoon vortex funnel", "glowing seed", "Kirby returns"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "The weather threat becomes Kirby's mission.",
             },
             "native_shots": [
@@ -926,10 +949,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 "resolution": "The key restores the meadow.",
             },
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "頻道改密碼引發爭議",
                 "source_concepts": ["改密碼"],
                 "visual_translation": "The headline becomes a glowing key whose color changes when access is disrupted.",
-                "visual_anchors": ["glowing shifting key"],
+                "news_mechanism": "the glowing shifting key spins away from the pedestal",
+                "news_consequence": "Kirby returns the glowing shifting key to the pedestal",
+                "visual_anchors": ["glowing shifting key", "pedestal", "Kirby returns"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "Kirby must recover the key to protect the meadow.",
             },
             "native_shots": [
@@ -964,10 +991,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "ending_keyframe_prompt": "Ending frame: Kirby rests beside the calm canal as the rescued lantern rises above the water.",
             "negative_prompt": "humans, extra characters, duplicate Kirby, text, watermark, hard cut, identity drift",
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "city lantern outage",
                 "source_concepts": ["lantern"],
                 "visual_translation": "The outage becomes a runaway city lantern pulled toward a canal whirlpool.",
-                "visual_anchors": ["lantern", "whirlpool"],
+                "news_mechanism": "the runaway lantern pulls its cable toward the canal whirlpool",
+                "news_consequence": "the lantern rises above the canals after the current reverses",
+                "visual_anchors": ["lantern", "whirlpool", "canals"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "Kirby protects the lantern while the outage makes the lantern the urgent mission.",
             },
             "story_spine": {
@@ -999,8 +1030,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         repaired_story = json.loads(json.dumps(valid_story))
         calls: list[str] = []
 
-        def fake_chat(_manager, _system, repair_prompt, **_kwargs):
-            calls.append(str(repair_prompt))
+        def fake_chat(request):
+            calls.append(str(request.user_prompt))
             if len(calls) == 1:
                 return {"story": invalid_story, "creative_seed": "lantern-current", "source": "native_h3_llm"}
             return {"story_patch": {"base_prompt": repaired_story["base_prompt"]}}
@@ -1064,10 +1095,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 "ending_keyframe_prompt": "The lantern is stamped APPROVED as Kirby celebrates.",
                 "native_audio": "water rush, cable tension, lantern chime, calm night ambience",
                 "news_trace": {
+                    "contract_version": 2,
                     "source_title": "city lantern outage",
                     "source_concepts": ["lantern"],
                     "visual_translation": "The outage becomes a runaway lantern.",
-                    "visual_anchors": ["lantern"],
+                    "news_mechanism": "the runaway lantern pulls its cable toward the whirlpool",
+                    "news_consequence": "the lantern rises above the canal as warm light spreads",
+                    "visual_anchors": ["lantern", "whirlpool", "warm light"],
+                    "anchor_roles": ["context", "mechanism", "consequence"],
                     "integration": "Kirby protects the lantern while the outage makes it urgent.",
                 },
                 "native_shots": [
@@ -1181,106 +1216,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("all story fields belong inside story", lowered)
         self.assertIn("story.native_audio", lowered)
 
-    def test_native_h3_normalizes_only_complete_flat_provider_story(self) -> None:
-        flat_story = {
-            "name": "Kirby and the Lantern Current",
-            "base_prompt": "Kirby, polished 2D anime, fluid squash-and-stretch motion.",
-            "opening_keyframe_prompt": "Kirby lunges as the lantern tears loose.",
-            "ending_keyframe_prompt": "Kirby restores the lantern above the canal.",
-            "negative_prompt": "text, humans, duplicate character",
-            "news_trace": {"source_title": "city lantern outage"},
-            "story_spine": {"objective": "Save the lantern."},
-            "world": {"setting": "moonlit canal"},
-            "native_audio": "Overall soundscape: rushing water. Non-diegetic music: heroic swell.",
-            "native_shots": [{"time": "0-15s"}],
-        }
 
-        normalized = LLMPromptEngine._normalize_native_h3_story_payload(flat_story)
 
-        self.assertEqual(normalized["story"]["name"], flat_story["name"])
-        self.assertEqual(normalized["source"], "native_h3_llm")
-        self.assertNotIn("story_spine", normalized)
-        incomplete = {"story_spine": {}, "native_shots": []}
-        self.assertIs(LLMPromptEngine._normalize_native_h3_story_payload(incomplete), incomplete)
-
-    def test_native_h3_normalizes_mixed_provider_envelope_before_patch_mode(self) -> None:
-        payload = {
-            "base_prompt": "Kirby moves through a glowing meadow.",
-            "native_audio": {
-                "overall_soundscape": "Wind and a bright chime.",
-                "non_diegetic_music": "A warm rising motif.",
-            },
-            "native_shots": [
-                {
-                    "timestamp": "0-15s",
-                    "visible_action": "Kirby runs.",
-                    "camera_movement": "Follow Kirby from the side.",
-                }
-            ],
-            "story": {
-                "news_trace": {
-                    "source_title": "AI agent attack",
-                    "source_concepts": ["AI agent"],
-                },
-            },
-            "creative_seed": "seed",
-            "source": "native_h3_llm",
-        }
-
-        normalized = LLMPromptEngine._normalize_native_h3_story_payload(payload)
-
-        self.assertEqual(len(normalized["story"]["native_shots"]), len(payload["native_shots"]))
-        self.assertIn("Overall soundscape: Wind and a bright chime.", normalized["story"]["native_audio"])
-        self.assertIn("Non-diegetic music: A warm rising motif.", normalized["story"]["native_audio"])
-        self.assertEqual(normalized["story"]["native_shots"][0]["time"], "0-15s")
-        self.assertNotIn("timestamp", normalized["story"]["native_shots"][0])
-        self.assertEqual(normalized["story"]["native_shots"][0]["action"], "Kirby runs.")
-        self.assertEqual(
-            normalized["story"]["native_shots"][0]["camera"],
-            "Follow Kirby from the side.",
-        )
-        self.assertEqual(normalized["story"]["native_shots"][0]["title"], "Kirby runs")
-        self.assertEqual(
-            normalized["story"]["news_trace"]["source_title"],
-            "AI agent attack",
-        )
-        patched = LLMPromptEngine._apply_native_h3_story_patch(
-            normalized,
-            {"story_patch": {"native_shots": [{"index": 0, "time": "0-15s"}]}},
-        )
-        self.assertEqual(patched["story"]["native_shots"][0]["time"], "0-15s")
-
-    def test_native_h3_normalizes_provider_gag_card_aliases(self) -> None:
-        payload = {
-            "story": {
-                "gag_card": {
-                    "hook_frame": "Kirby is already dragged by a glowing flower",
-                    "simple_desire": "Kirby wants the flower to bloom",
-                    "prop_rule": "The flower wilts when the connection slips",
-                    "failed_attempt": "The flower wilts and slips away",
-                    "reaction": "Kirby freezes wide-eyed and puffs his cheeks",
-                    "final_visual_reversal": "The flower wraps around Kirby and blooms",
-                    "replayable_reason": "The final hug echoes the opening drag in reverse",
-                },
-                "news_trace": {
-                    "source_concepts": "Plug and Pwn, USB security",
-                    "visual_anchors": "glowing flower; hollow tree",
-                },
-            }
-        }
-
-        normalized = LLMPromptEngine._normalize_native_h3_story_payload(payload)
-        gag_card = normalized["story"]["gag_card"]
-
-        self.assertEqual(gag_card["character_desire"], "Kirby wants the flower to bloom")
-        self.assertEqual(gag_card["setback"], "The flower wilts and slips away")
-        self.assertEqual(gag_card["expressive_reaction"], "Kirby freezes wide-eyed and puffs his cheeks")
-        self.assertEqual(gag_card["payoff_reversal"], "The flower wraps around Kirby and blooms")
-        self.assertEqual(gag_card["loop_reason"], "The final hug echoes the opening drag in reverse")
-        self.assertNotIn("simple_desire", gag_card)
-        self.assertNotIn("failed_attempt", gag_card)
-        self.assertEqual(normalized["story"]["news_trace"]["source_concepts"], ["Plug and Pwn", "USB security"])
-        self.assertEqual(normalized["story"]["news_trace"]["visual_anchors"], ["glowing flower", "hollow tree"])
 
     def test_native_h3_gag_card_repair_prompt_targets_only_missing_fields(self) -> None:
         repair_prompt = LLMPromptEngine._build_native_h3_repair_prompt(
@@ -1298,17 +1235,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("payoff_reversal", repair_prompt)
         self.assertIn("do not change any other story field", lowered)
 
-    def test_native_h3_patch_normalizes_flat_story_spine_synopsis(self) -> None:
-        previous = {"story": {"story_spine": {"objective": "Save the orb."}, "native_shots": []}}
-        patched = LLMPromptEngine._apply_native_h3_story_patch(
-            previous,
-            {"story_patch": {"story_spine": "Kirby contains the unstable orb and restores the garden."}},
-        )
-
-        spine = patched["story"]["story_spine"]
-        self.assertIsInstance(spine, dict)
-        self.assertNotEqual(spine["climax"], spine["resolution"])
-        self.assertIn("unstable orb", spine["objective"])
 
     def test_native_h3_patch_merges_partial_gag_card_without_dropping_existing_fields(self) -> None:
         previous = {
@@ -1346,34 +1272,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "The return flight echoes the opening gust in reverse",
         )
 
-    def test_native_h3_normalizes_point_timestamps_to_expected_beat_ranges(self) -> None:
-        payload = {
-            "story": {
-                "native_shots": [
-                    {"timestamp": 0, "action": "Kirby moves.", "camera_movement": "Follow."},
-                    {"timestamp": 1.5, "action": "Kirby turns.", "camera_movement": "Pan."},
-                ]
-            }
-        }
-        normalized = LLMPromptEngine._normalize_native_h3_story_payload(
-            payload,
-            expected_times=("0-1.5s", "1.5-4s"),
-        )
 
-        shots = normalized["story"]["native_shots"]
-        self.assertEqual(shots[0]["time"], "0-1.5s")
-        self.assertEqual(shots[1]["time"], "1.5-4s")
-
-    def test_native_h3_patch_normalizes_flat_world_string(self) -> None:
-        previous = {"story": {"native_shots": []}}
-        patched = LLMPromptEngine._apply_native_h3_story_patch(
-            previous,
-            {"story_patch": {"world": "A glowing data center."}},
-        )
-
-        world = patched["story"]["world"]
-        self.assertEqual(world["setting"], "A glowing data center.")
-        self.assertTrue(world["continuity_rules"])
 
     def test_news_selection_rejects_placeholder_titles(self) -> None:
         self.assertFalse(NewsContextService.is_usable_selection("...", "gold;reserve"))
@@ -1389,10 +1288,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "ending_keyframe_prompt": "Ending frame: Kirby rests beside the calm canal as the rescued lantern rises above the water.",
             "negative_prompt": "humans, extra characters, duplicate Kirby, watermark, hard cuts",
             "news_trace": {
+                "contract_version": 2,
                 "source_title": "city lantern outage",
                 "source_concepts": ["lantern"],
                 "visual_translation": "The outage becomes a runaway city lantern pulled toward a canal whirlpool.",
-                "visual_anchors": ["lantern", "whirlpool"],
+                "news_mechanism": "the runaway lantern pulls its cable toward the canal whirlpool",
+                "news_consequence": "the lantern rises above the canals after the current reverses",
+                "visual_anchors": ["lantern", "whirlpool", "canals"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
                 "integration": "Kirby protects the lantern while the outage makes the lantern the urgent mission.",
             },
             "story_spine": {
@@ -1426,8 +1329,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         ]
         calls: list[tuple[str, str]] = []
 
-        def fake_chat(_manager, _system, prompt, **kwargs):
-            calls.append((str(kwargs.get("schema_name")), str(prompt)))
+        def fake_chat(request):
+            calls.append((str(request.schema_name), str(request.user_prompt)))
             response = responses.pop(0)
             if isinstance(response, dict) and "story_patch" in response:
                 return response

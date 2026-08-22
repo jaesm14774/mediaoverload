@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,13 +13,19 @@ from typing import Any
 import yaml
 
 from agentic.assets.registry import AssetRegistry
+from agentic.app.character_requests import CharacterWorkflowRequest
 from agentic.app.main import _build_prompt_summary, build_runtime
 from agentic.h3_reference import normalize_reference_manifest
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.observability import RunRecorder
+from agentic.runtime.prompt_requests import GenerationRoutingRequest
 from agentic.runtime.route_selection import select_weighted_route
 from agentic.runtime.step_logger import create_run_logger
-from agentic.tools.context_services import DiscordRunNotificationService, NewsContextService
+from agentic.tools.context_services import (
+    CharacterGroupSelectionService,
+    DiscordRunNotificationService,
+    NewsContextService,
+)
 
 SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube"}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
@@ -62,22 +70,54 @@ CONFIG_MEDIA_TYPE_MAP = {
 
 def _normalize_generation_type(
     value: str | None,
-    aliases: dict[str, Any] | None = None,
 ) -> str | None:
     normalized = str(value or "").strip()
-    if not normalized:
-        return None
-    alias_map = {
-        str(key).strip(): str(target).strip()
-        for key, target in dict(aliases or {}).items()
-        if str(key).strip() and str(target).strip()
-    }
-    return alias_map.get(normalized, normalized)
+    return normalized or None
 
 
 def load_character_config(config_path: str | Path) -> dict[str, Any]:
     path = Path(config_path).resolve()
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _replace_character_identity(text: str, *, configured_name: str, selected_name: str) -> str:
+    source = str(configured_name or "").strip()
+    target = str(selected_name or "").strip()
+    value = str(text or "")
+    if not source or not target or source.casefold() == target.casefold():
+        return value
+    return re.sub(rf"(?<!\w){re.escape(source)}(?!\w)", target, value, flags=re.IGNORECASE)
+
+
+def _fixed_character_selection(name: str, *, group_name: str = "") -> dict[str, Any]:
+    normalized_name = str(name or "").strip()
+    return {
+        "mode": "config",
+        "group_name": str(group_name or "").strip(),
+        "selected_character": normalized_name,
+        "candidate_count": 1,
+        "candidates": [{"name": normalized_name, "status": 1, "weight": 1.0}],
+        "selected_profile": {},
+        "selection_source": "fixed_config",
+    }
+
+
+def resolve_character_selection(
+    request: CharacterWorkflowRequest,
+    *,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    loaded_config = config if config is not None else load_character_config(request.config_path)
+    character = dict(loaded_config.get("character", {}) or {})
+    configured_name = str(character.get("name") or character.get("group_name") or Path(request.config_path).stem)
+    group_name = str(character.get("group_name") or "").strip()
+    if not group_name:
+        return _fixed_character_selection(configured_name)
+    selection = CharacterGroupSelectionService().select_random_character(
+        group_name,
+        rng=request.generation.rng,
+    )
+    return selection.to_dict()
 
 
 def load_global_social_config(repo_root: Path) -> dict[str, Any]:
@@ -135,29 +175,32 @@ def choose_media_type(
     return config_generation_type, agentic_media_type
 
 
-def build_goal_payload_from_character_config(
-    repo_root: Path,
-    config_path: str | Path,
-    *,
-    prompt: str = "",
-    temperature: float = 1.0,
-    preferred_generation_type: str | None = None,
-    duration_seconds: int | None = None,
-    dry_run_publish: bool = False,
-    publish_mode: str = "",
-    publish_platforms: list[str] | None = None,
-    publish_after_generate: bool = True,
-    output_dir: str | None = None,
-    enable_review_loop: bool = False,
-    review_notes: str = "",
-    no_review: bool = False,
-    stage_probe: bool = False,
-    news_driven: bool = False,
-    news_history_path: str | None = None,
-    routing_history_path: str | None = None,
-    asset_root: Path | None = None,
-    rng: random.Random | None = None,
-) -> dict[str, Any]:
+def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) -> dict[str, Any]:
+    generation = request.generation
+    review = request.review
+    runtime = request.runtime
+    repo_root = request.repo_root
+    config_path = request.config_path
+    prompt = generation.prompt
+    selected_character_name = str(generation.selected_character_name or "").strip()
+    character_selection = dict(generation.character_selection or {})
+    temperature = generation.temperature
+    preferred_generation_type = generation.preferred_generation_type
+    duration_seconds = generation.duration_seconds
+    output_dir = generation.output_dir
+    news_driven = generation.news_driven
+    news_history_path = generation.news_history_path
+    routing_history_path = generation.routing_history_path
+    rng = generation.rng
+    dry_run_publish = review.dry_run_publish
+    publish_mode = review.publish_mode
+    publish_platforms = list(review.publish_platforms)
+    publish_after_generate = review.publish_after_generate
+    enable_review_loop = review.enable_review_loop
+    review_notes = review.review_notes
+    no_review = review.no_review
+    stage_probe = review.stage_probe
+    asset_root = runtime.asset_root
     path = Path(config_path).resolve()
     config = load_character_config(path)
     character = dict(config.get("character", {}) or {})
@@ -173,7 +216,18 @@ def build_goal_payload_from_character_config(
     )
 
     style = _pick_primary_style(generation.get("style_weights"))
-    character_name = str(character.get("name") or character.get("group_name") or path.stem)
+    configured_character_name = str(character.get("name") or character.get("group_name") or path.stem)
+    character_name = selected_character_name or configured_character_name
+    if not character_selection:
+        character_selection = _fixed_character_selection(
+            character_name,
+            group_name=str(character.get("group_name") or ""),
+        )
+    prompt = _replace_character_identity(
+        prompt,
+        configured_name=configured_character_name,
+        selected_name=character_name,
+    )
     routing = _route_generation_from_character_config(
         repo_root,
         config,
@@ -339,19 +393,43 @@ def build_goal_payload_from_character_config(
     if config_generation_type != "native_h3_fl2va_story":
         native_recipe["use_last_frame"] = False
     native_h3_quality = dict(generation.get("native_h3_quality") or {})
-    native_h3_creative_brief = str(
+    native_h3_creative_brief = _replace_character_identity(
+        str(
         native_recipe.get("creative_brief")
         or native_h3_quality.get("creative_brief")
         or generation.get("native_h3_creative_brief")
         or ""
+        ).strip(),
+        configured_name=configured_character_name,
+        selected_name=character_name,
     ).strip()
-    native_h3_visual_style_contract = str(
+    native_h3_visual_style_contract = _replace_character_identity(
+        str(
         generation.get("visual_style_contract")
         or native_recipe.get("visual_style_contract")
         or native_h3_quality.get("visual_style_contract")
         or generation.get("native_h3_visual_style_contract")
         or ""
+        ).strip(),
+        configured_name=configured_character_name,
+        selected_name=character_name,
     ).strip()
+    selected_profile = dict(character_selection.get("selected_profile") or {})
+    role_description = str(selected_profile.get("role_description") or "").strip()
+    role_keywords = str(selected_profile.get("keywords") or "").strip()
+    if role_description or role_keywords:
+        profile_parts = [f"Selected character: {character_name}"]
+        if role_description:
+            profile_parts.append(f"Role profile: {role_description}")
+        if role_keywords:
+            profile_parts.append(f"Keywords: {role_keywords}")
+        profile_block = " ".join(profile_parts)
+        native_h3_creative_brief = "\n".join(
+            item for item in (native_h3_creative_brief, profile_block) if item
+        )
+        native_h3_visual_style_contract = "; ".join(
+            item for item in (native_h3_visual_style_contract, profile_block) if item
+        )
     native_h3_semantic_qa_blocking = bool(
         native_recipe.get(
             "semantic_qa_blocking",
@@ -360,6 +438,8 @@ def build_goal_payload_from_character_config(
     )
     constraints = {
         "character": character_name,
+        "character_selection": character_selection,
+        "character_profile": selected_profile,
         "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
         "keyframe_workflow_name": str(generation.get("keyframe_workflow_name") or ""),
@@ -529,9 +609,8 @@ def build_goal_payload_from_character_config(
         }
     )
     if agentic_media_type == "long_video":
-        # Keep long-video policy in the shared strategy config.  The planner
-        # consumes provider-neutral names; legacy H3 aliases are normalized at
-        # that boundary without creating an H3-only planner path.
+        # Keep long-video policy in the shared strategy config. The planner
+        # consumes provider-neutral recipe names.
         longvideo_config_keys = {
             "mix_weights": "longvideo_mix_weights",
             "mix_seed": "longvideo_mix_seed",
@@ -566,12 +645,15 @@ def build_goal_payload_from_character_config(
         "source_generation_type": config_generation_type,
         "selected_workflow_name": routing.get("workflow_name", ""),
         "character_name": character_name,
+        "character_selection": character_selection,
         "resolved_output_dir": str(resolved_output_dir),
         "routing": routing,
         "prompt_generation": autonomous_prompt,
         "character_config_summary": _summarize_character_config(
             path=path,
             character=character,
+            selected_character_name=character_name,
+            character_selection=character_selection,
             generation=generation,
             social_media=social_media,
             strategies=strategies,
@@ -589,35 +671,14 @@ def build_goal_payload_from_character_config(
     }
 
 
-def run_character_workflow(
-    repo_root: Path,
-    config_path: str | Path,
-    *,
-    prompt: str = "",
-    temperature: float = 1.0,
-    preferred_generation_type: str | None = None,
-    duration_seconds: int | None = None,
-    dry_run_publish: bool = False,
-    publish_mode: str = "",
-    publish_platforms: list[str] | None = None,
-    publish_after_generate: bool = True,
-    output_dir: str | None = None,
-    enable_review_loop: bool = False,
-    review_notes: str = "",
-    no_review: bool = False,
-    stage_probe: bool = False,
-    news_driven: bool = False,
-    news_history_path: str | None = None,
-    routing_history_path: str | None = None,
-    comfy_host: str | None = None,
-    comfy_port: int | None = None,
-    comfy_root: str | None = None,
-    auto_download_assets: bool = False,
-    rng: random.Random | None = None,
-) -> dict[str, Any]:
+def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
+    repo_root = request.repo_root
+    config_path = request.config_path
+    runtime = request.runtime
+    review = request.review
     effective_publish_after_generate = _effective_publish_after_generate(
-        requested=publish_after_generate,
-        stage_probe=stage_probe,
+        requested=review.publish_after_generate,
+        stage_probe=review.stage_probe,
     )
     run_id = uuid.uuid4().hex[:12]
     recorder = RunRecorder(repo_root / "agentic" / "logs" / "runs", run_id)
@@ -625,27 +686,57 @@ def run_character_workflow(
     os.environ["AGENTIC_RUN_LOGGER_NAME"] = logger.name
     logger.info("workflow.start | run_id=%s | config=%s", run_id, Path(config_path).resolve())
     logger.info("character.config.load | path=%s", Path(config_path).resolve())
+    selection_group_name = ""
+    if Path(config_path).exists():
+        try:
+            selection_config = load_character_config(config_path)
+            selection_character = dict(selection_config.get("character", {}) or {})
+            selection_group_name = str(selection_character.get("group_name") or "").strip()
+            character_selection = resolve_character_selection(request, config=selection_config)
+        except Exception as exc:
+            record_event = getattr(recorder, "record_event", None)
+            if callable(record_event):
+                record_event(
+                    "character.group.selection_failed",
+                    group_name=selection_group_name,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            logger.exception(
+                "character.group.selection_failed | group=%s | error=%s",
+                selection_group_name,
+                exc,
+            )
+            raise
+    else:
+        character_selection = _fixed_character_selection(Path(config_path).stem)
+    selected_character_name = str(character_selection.get("selected_character") or "").strip()
+    record_event = getattr(recorder, "record_event", None)
+    if str(character_selection.get("mode") or "") == "group":
+        if callable(record_event):
+            record_event("character.group.selected", **character_selection)
+        logger.info(
+            "character.group.selected | group=%s | selected=%s | candidate_count=%s",
+            character_selection.get("group_name", ""),
+            selected_character_name,
+            character_selection.get("candidate_count", 0),
+        )
+    else:
+        if callable(record_event):
+            record_event("character.config.selected", **character_selection)
     payload = build_goal_payload_from_character_config(
-        repo_root,
-        config_path,
-        prompt=prompt,
-        temperature=temperature,
-        preferred_generation_type=preferred_generation_type,
-        duration_seconds=duration_seconds,
-        dry_run_publish=dry_run_publish,
-        publish_mode=publish_mode,
-        publish_platforms=publish_platforms,
-        publish_after_generate=effective_publish_after_generate,
-        output_dir=output_dir,
-        enable_review_loop=enable_review_loop,
-        review_notes=review_notes,
-        no_review=no_review,
-        stage_probe=stage_probe,
-        news_driven=news_driven,
-        news_history_path=news_history_path,
-        routing_history_path=routing_history_path,
-        asset_root=_resolve_routing_asset_root(repo_root, comfy_root),
-        rng=rng,
+        replace(
+            request,
+            generation=replace(
+                request.generation,
+                selected_character_name=selected_character_name,
+                character_selection=character_selection,
+            ),
+            review=replace(review, publish_after_generate=effective_publish_after_generate),
+            runtime=replace(
+                runtime,
+                asset_root=runtime.asset_root or _resolve_routing_asset_root(repo_root, runtime.comfy_root),
+            ),
+        )
     )
     logger.info(
         "routing.selected | strategy=%s | media_type=%s | workflow=%s | prompt_source=%s",
@@ -660,9 +751,9 @@ def run_character_workflow(
     planner, runner, run_memory = build_runtime(
         repo_root / "agentic",
         output_root=Path(payload["resolved_output_dir"]),
-        comfy_host=comfy_host,
-        comfy_port=comfy_port,
-        comfy_root=Path(comfy_root).resolve() if comfy_root else None,
+        comfy_host=runtime.comfy_host,
+        comfy_port=runtime.comfy_port,
+        comfy_root=Path(runtime.comfy_root).resolve() if runtime.comfy_root else None,
         run_id=run_id,
         logger=logger,
         recorder=recorder,
@@ -672,7 +763,7 @@ def run_character_workflow(
         media_type=payload["media_type"],
         duration_seconds=int(payload["duration_seconds"]),
         style=str(payload["style"]),
-        auto_download_assets=auto_download_assets,
+        auto_download_assets=runtime.auto_download_assets,
         constraints=dict(payload["constraints"]),
     )
     plan = planner.build_plan(goal)
@@ -850,6 +941,7 @@ def run_character_workflow(
         "source_generation_type": payload["source_generation_type"],
         "agentic_media_type": payload["media_type"],
         "character": payload["character_name"],
+        "character_selection": payload.get("character_selection", {}),
         "routing_summary": payload.get("routing_summary", {}),
         "plan": plan.to_dict(),
         "generation": {
@@ -889,8 +981,8 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
     Generation nodes intentionally expose intermediate assets (opening/ending
     frames, segment clips, and previews) for downstream workflow steps. Those
     are not publish candidates. Prefer explicit package-node media paths and
-    only fall back to media artifacts when an older plan has no package node
-    output. Images and videos are both valid final media.
+    use package-node media when available, then collect the current route's
+    explicit media outputs. Images and videos are both valid final media.
     """
     state = dict(run_result.get("state", {}) or {})
     node_outputs = dict(state.get("node_outputs", {}) or {})
@@ -927,10 +1019,9 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             continue
         for key in ("video_path", "final_video_path", "saved_files", "media_paths"):
             append_media(outputs.get(key))
-    # Older plans do not have an explicit package node. Once a real video is
-    # present, opening frames and GIF previews are continuity artifacts, not
-    # publish candidates. If the workflow only produced a GIF, keep that as
-    # the final animated asset instead of mixing it with source frames.
+    # Once a real video is present, opening frames and GIF previews are
+    # continuity artifacts, not publish candidates. If the route only
+    # produced a GIF, keep that as the final animated asset.
     video_paths = [path for path in collected if Path(path).suffix.lower() in VIDEO_EXTENSIONS]
     if video_paths:
         return video_paths
@@ -1127,7 +1218,6 @@ def _weighted_candidate_choice(
     weights: dict[str, Any],
     candidates: list[str],
     *,
-    aliases: dict[str, Any] | None = None,
     rng: random.Random | None = None,
     state_path: Path | None = None,
     diversity_config: dict[str, Any] | None = None,
@@ -1136,7 +1226,7 @@ def _weighted_candidate_choice(
     allowed = {str(candidate).strip() for candidate in candidates if str(candidate).strip()}
     normalized_weights: dict[str, float] = {}
     for name, raw_weight in weights.items():
-        normalized = _normalize_generation_type(str(name), aliases)
+        normalized = str(name).strip()
         try:
             weight = float(raw_weight)
         except (TypeError, ValueError):
@@ -1227,10 +1317,7 @@ def _route_generation_from_character_config(
     additional_params = dict(config.get("additional_params", {}) or {})
     strategies = dict(additional_params.get("strategies", {}) or {})
     routing_config = _load_global_routing_config(repo_root)
-    preferred_generation_type = _normalize_generation_type(
-        preferred_generation_type,
-        dict(routing_config.get("strategy_aliases", {}) or {}),
-    )
+    preferred_generation_type = _normalize_generation_type(preferred_generation_type)
     routing_overrides = dict(generation.get("routing_overrides", {}) or {})
     merged_routing = _merge_routing_config(routing_config, routing_overrides)
     if merged_routing.get("enabled", True) is False:
@@ -1360,7 +1447,6 @@ def _route_generation_from_character_config(
         selected_generation_type = _weighted_candidate_choice(
             dict(generation.get("generation_type_weights", {}) or {}),
             generation_type_candidates,
-            aliases=dict(routing_config.get("strategy_aliases", {}) or {}),
             rng=rng,
             state_path=routing_history_path,
             diversity_config=dict(routing_config.get("route_diversity", {}) or {}),
@@ -1378,14 +1464,16 @@ def _route_generation_from_character_config(
     routing_hints = dict(raw_routing_hints) if isinstance(raw_routing_hints, dict) else {}
     routing_hints["runtime_context"] = routing_runtime_context
     result = engine.route_generation_strategy(
-        prompt=route_prompt,
-        character=character_name,
-        style=style,
-        generation_type_candidates=generation_type_candidates,
-        workflow_stage_candidates=workflow_stage_candidates,
-        count_policies=count_policies,
-        routing_hints=routing_hints if isinstance(routing_hints, dict) else {},
-        preferred_generation_type=preferred_generation_type,
+        GenerationRoutingRequest(
+            prompt=route_prompt,
+            character=character_name,
+            style=style,
+            generation_type_candidates=tuple(generation_type_candidates),
+            workflow_stage_candidates=workflow_stage_candidates,
+            count_policies=count_policies,
+            routing_hints=routing_hints if isinstance(routing_hints, dict) else {},
+            preferred_generation_type=preferred_generation_type,
+        )
     )
     selected_generation_type = str(result["generation_type"]).strip()
     workflow_plan = {str(key): str(value or "").strip() for key, value in dict(result["workflow_plan"]).items()}
@@ -2221,6 +2309,8 @@ def _summarize_character_config(
     *,
     path: Path,
     character: dict[str, Any],
+    selected_character_name: str,
+    character_selection: dict[str, Any],
     generation: dict[str, Any],
     social_media: dict[str, Any],
     strategies: dict[str, Any],
@@ -2230,8 +2320,9 @@ def _summarize_character_config(
     longvideo_config = dict(longvideo.get("longvideo_config", {}) or {})
     return {
         "config_path": str(path),
-        "character_name": str(character.get("name") or character.get("group_name") or path.stem),
+        "character_name": str(selected_character_name or character.get("name") or character.get("group_name") or path.stem),
         "group_name": str(character.get("group_name") or ""),
+        "character_selection": dict(character_selection or {}),
         "output_dir": str(generation.get("output_dir") or ""),
         "generation_type_weights": dict(generation.get("generation_type_weights", {}) or {}),
         "style_count": len(dict(generation.get("style_weights", {}) or {})),

@@ -999,7 +999,7 @@ class DiscordHumanReviewServiceTests(unittest.TestCase):
     def test_review_candidates_fails_closed_without_reviewer_allowlist(self) -> None:
         service = DiscordHumanReviewService(self.project_root / ".tmp-tests")
         with patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(service.is_configured() and bool(os.getenv("discord_review_allowed_users")))
+            self.assertFalse(service.is_configured() and bool(os.getenv("discord_review_allowed_user_ids")))
 
     def test_review_candidates_treats_missing_discord_decision_as_skipped(self) -> None:
         service = DiscordHumanReviewService(self.project_root / ".tmp-tests")
@@ -1010,7 +1010,7 @@ class DiscordHumanReviewServiceTests(unittest.TestCase):
 
         with patch.dict("os.environ", {"discord_review_channel_id": "123"}), patch.object(service, "is_configured", return_value=True), patch(
             "agentic.tools.context_services._run_discord_file_feedback_process",
-            return_value=("timeout", None, "review text", None),
+            return_value=("timeout", None, "review text", None, {"status": "timeout"}),
         ):
             decision = service.review_candidates(text="review text", media_paths=[str(temp_file)], timeout_seconds=30)
 
