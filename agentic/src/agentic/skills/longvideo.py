@@ -36,6 +36,7 @@ def _apply_selected_character_to_storyboard(
     *,
     selected_character: str,
     character_profile: dict[str, Any] | None = None,
+    subject_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     base_character = str(storyboard.get("character") or "").strip()
     selected = str(selected_character or base_character or "the protagonist").strip()
@@ -57,6 +58,52 @@ def _apply_selected_character_to_storyboard(
     resolved = replace_identity(dict(storyboard))
     resolved["character"] = selected
     profile = dict(character_profile or {})
+    context = dict(subject_context or {})
+    subjects = [item for item in (context.get("subjects") or []) if isinstance(item, dict)]
+    interaction_required = bool(context.get("interaction_contract", {}).get("required", False))
+    if interaction_required and len(subjects) == 2:
+        resolved["subject_context"] = context
+        resolved["characters"] = [str(item.get("name") or "").strip() for item in subjects]
+        subject_lines = []
+        for item in subjects:
+            name = str(item.get("name") or "").strip()
+            item_profile = dict(item.get("profile") or {})
+            details = "; ".join(
+                part
+                for part in (
+                    str(item_profile.get("role_description") or "").strip(),
+                    str(item_profile.get("keywords") or "").strip(),
+                )
+                if part
+            )
+            subject_lines.append(
+                f"{item.get('role', 'subject')}: {name}{f' ({details})' if details else ''}"
+            )
+        resolved["base_prompt"] = (
+            f"Two required subject slots share one readable scene: {'; '.join(subject_lines)}. "
+            "Preserve each subject's recognizable identity, proportions, silhouette, and palette; show a visible mutual interaction."
+        )
+        world = dict(resolved.get("world") or {})
+        rules = list(world.get("continuity_rules") or [])
+        world["continuity_rules"] = [
+            "Exactly the two declared subject slots remain visible when the story requires both; preserve each identity and role.",
+            *[
+                str(rule)
+                for rule in rules
+                if not ("only" in str(rule).lower() and "protagonist" in str(rule).lower())
+            ],
+        ]
+        resolved["world"] = world
+        negative_parts = [
+            part.strip()
+            for part in str(resolved.get("negative_prompt") or "").split(",")
+            if part.strip()
+            and part.strip().lower()
+            not in {"humans", "extra characters", "duplicate", "duplicate kirby"}
+        ]
+        negative_parts.extend(["identity swap", "unrequested third subject"])
+        resolved["negative_prompt"] = ", ".join(dict.fromkeys(negative_parts))
+        return resolved
     role_description = str(profile.get("role_description") or "").strip()
     keywords = str(profile.get("keywords") or "").strip()
     if role_description or keywords:
@@ -169,6 +216,7 @@ class LongVideoSkills:
             storyboard,
             selected_character=selected_character,
             character_profile=dict(context.plan.goal.constraints.get("character_profile") or {}),
+            subject_context=dict(context.plan.goal.constraints.get("subject_context") or {}),
         )
         duration_seconds = int(
             context.node.inputs.get("duration_seconds")
@@ -206,6 +254,7 @@ class LongVideoSkills:
         storyboard, story_payload = self.story_service.resolve(
             storyboard,
             character=selected_character,
+            subject_context=dict(context.plan.goal.constraints.get("subject_context") or {}),
             style=style,
             duration_seconds=duration_seconds,
             news_context=news_context,
@@ -427,6 +476,7 @@ class LongVideoSkills:
             "prompt": str(story["prompt"]),
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
+            "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
                 context.node.inputs.get("width") or context.plan.goal.constraints.get("native_h3_width") or 608,
                 name="width",
@@ -618,6 +668,7 @@ class LongVideoSkills:
             "prompt": str(story["prompt"]),
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
+            "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
                 context.node.inputs.get("width") or context.plan.goal.constraints.get("native_h3_width") or 608,
                 name="width",
@@ -696,6 +747,7 @@ class LongVideoSkills:
             "prompt": prompt,
             "h3_mode": "ref2va",
             "negative_prompt": str(story.get("negative_prompt") or ""),
+            "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "reference_manifest": references,
             "ref_image_size": str(
                 context.node.inputs.get("ref_image_size")
@@ -773,6 +825,7 @@ class LongVideoSkills:
             "prompt": str(story["prompt"]),
             "h3_mode": "t2va",
             "negative_prompt": str(story.get("negative_prompt") or ""),
+            "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
                 context.node.inputs.get("width")
                 or constraints.get("native_h3_t2v_width")
@@ -848,8 +901,11 @@ class LongVideoSkills:
         return SkillResult(status="success", outputs=outputs, metrics=metrics, logs=[render.log])
 
     def qa_native_h3(self, context: SkillContext) -> SkillResult:
-        render = context.state["native-h3-render"]
-        saved_files = [str(path) for path in render.get("saved_files", []) if path]
+        render = context.state[str(context.node.inputs.get("render_node") or "native-h3-render")]
+        video_node = context.state[str(context.node.inputs.get("video_node") or "native-h3-render")]
+        saved_files = [str(path) for path in video_node.get("saved_files", []) if path]
+        if not saved_files and video_node.get("video_path"):
+            saved_files = [str(video_node["video_path"])]
         if not saved_files:
             raise RuntimeError("Native H3 QA requires at least one generated video")
         video_path = saved_files[0]
@@ -942,6 +998,7 @@ class LongVideoSkills:
             semantic_qa = self.prompt_engine.evaluate_video_contact_sheet(
                 contact_sheet_path=str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
                 character=str(constraints.get("character") or "Kirby"),
+                subject_context=dict(constraints.get("subject_context") or {}),
                 story_spine=dict(story.get("story_spine") or storyboard.get("story_spine") or {}),
                 native_shots=[item for item in (storyboard.get("native_shots") or []) if isinstance(item, dict)],
                 news_context=dict(story.get("news_context") or {}),
@@ -993,10 +1050,13 @@ class LongVideoSkills:
 
     def package_native_h3(self, context: SkillContext) -> SkillResult:
         render = context.state[str(context.node.inputs.get("render_node") or "native-h3-render")]
+        video_node = context.state[str(context.node.inputs.get("video_node") or "native-h3-render")]
         qa = context.state[str(context.node.inputs.get("qa_node") or "native-h3-qa")]
         preview = context.state[str(context.node.inputs.get("preview_node") or "native-h3-preview")]
-        saved_files = [str(path) for path in render.get("saved_files", []) if path]
+        saved_files = [str(path) for path in video_node.get("saved_files", []) if path]
         video_path = str(qa.get("video_path") or (saved_files[0] if saved_files else ""))
+        if not saved_files and video_path:
+            saved_files = [video_path]
         if not video_path:
             raise RuntimeError("Native H3 package has no final video path")
         return SkillResult(

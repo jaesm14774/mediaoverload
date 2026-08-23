@@ -293,6 +293,15 @@ class AgentMediaSkills:
                 or context.node.inputs["workflow_name"]
             )
             character = str(context.plan.goal.constraints.get("character") or "").strip().lower()
+            subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
+            interaction_required = bool(
+                dict(subject_context.get("interaction_contract") or {}).get("required", False)
+            )
+            subject_names = [
+                str(item.get("name") or "").strip()
+                for item in (subject_context.get("subjects") or [])
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            ]
             prompt = self._resolve_prompt(context)
             negative_prompt = self._resolve_negative_prompt(context)
             if character == "kirby":
@@ -320,14 +329,23 @@ class AgentMediaSkills:
                             "inside the opening composition now, not merely implied in the background; keep the "
                             "same mechanism and its dominant anchor large and readable from frame one."
                         )
-                prompt = (
-                    f"{prompt}, single continuous animation frame, one composition, Kirby large and clearly visible "
-                    "in the foreground or midground, full readable round pink body and bright red feet, "
-                    "no storyboard, no sequence, no contact sheet, no split composition"
-                )
+                if interaction_required and len(subject_names) == 2:
+                    prompt = (
+                        f"{prompt}, single continuous animation frame, one composition, both declared subject slots "
+                        f"({'; '.join(subject_names)}) large and clearly visible in the foreground or midground, "
+                        "preserve both recognizable identities and show their visible mutual interaction, "
+                        "no storyboard, no sequence, no contact sheet, no split composition, no unrequested third subject"
+                    )
+                else:
+                    prompt = (
+                        f"{prompt}, single continuous animation frame, one composition, Kirby large and clearly visible "
+                        "in the foreground or midground, full readable round pink body and bright red feet, "
+                        "no storyboard, no sequence, no contact sheet, no split composition"
+                    )
                 negative_prompt = (
                     f"{negative_prompt}, storyboard, contact sheet, comic panels, multi-panel, split screen, collage, "
                     "tiny distant subject, cropped character, white or unrecognizable character"
+                    + (", identity swap, unrequested third subject" if interaction_required else "")
                 )
             attempts = 1 if character != "kirby" else max(1, int(context.node.inputs.get("max_regenerations", 2)) + 1)
             result: dict[str, object] = {}
@@ -356,7 +374,13 @@ class AgentMediaSkills:
                     break
                 candidate_paths = self._output_paths(result)
                 reports = [
-                    (path, inspect_kirby_input(path))
+                    (
+                        path,
+                        inspect_kirby_input(
+                            path,
+                            allow_declared_subject_pair=interaction_required,
+                        ),
+                    )
                     for path in candidate_paths
                 ]
                 final_reports = reports
@@ -418,6 +442,10 @@ class AgentMediaSkills:
             or (context.node.depends_on[1] if len(context.node.depends_on) > 1 else "")
         )
         character = str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or "").strip().lower()
+        subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
+        interaction_required = bool(
+            dict(subject_context.get("interaction_contract") or {}).get("required", False)
+        )
         story = context.state.node_outputs.get("native-story-prompt", {})
         frame_specs = [
             ("opening", opening_node, str(context.node.inputs.get("opening_prompt_key") or "opening_keyframe_prompt")),
@@ -450,7 +478,11 @@ class AgentMediaSkills:
                             "validation": "human_selected_immutable",
                         }
                     elif character == "kirby":
-                        report = assert_kirby_input(frame_path, allow_external=False).to_dict()
+                        report = assert_kirby_input(
+                            frame_path,
+                            allow_external=False,
+                            allow_declared_subject_pair=interaction_required,
+                        ).to_dict()
                     else:
                         report = {"path": frame_path, "passed": Path(frame_path).is_file()}
                         if not report["passed"]:
@@ -509,6 +541,10 @@ class AgentMediaSkills:
             or context.plan.goal.constraints.get("character")
             or ""
         ).strip().lower()
+        subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
+        interaction_required = bool(
+            dict(subject_context.get("interaction_contract") or {}).get("required", False)
+        )
         preserve = bool(context.node.inputs.get("preserve_last_frame", True))
         if preserve:
             report = {
@@ -517,7 +553,11 @@ class AgentMediaSkills:
                 "validation": "human_selected_immutable",
             }
         elif character == "kirby":
-            report = assert_kirby_input(frame_path, allow_external=False).to_dict()
+            report = assert_kirby_input(
+                frame_path,
+                allow_external=False,
+                allow_declared_subject_pair=interaction_required,
+            ).to_dict()
         else:
             report = {"path": frame_path, "passed": True, "validation": "file_exists"}
         return SkillResult(
@@ -681,6 +721,33 @@ class AgentMediaSkills:
             },
         )
         return SkillResult(status="success", outputs=result, logs=["Concatenated videos for an agent step."])
+
+    def change_video_speed(self, context: SkillContext) -> SkillResult:
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "video_speed")
+        video_dir = run_dir / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        video_path = str(
+            context.node.inputs.get("video_path")
+            or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
+            or ""
+        )
+        if not video_path:
+            raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
+        speed = float(context.node.inputs.get("speed", 1.0))
+        result = self.tools.call(
+            "media.change_video_speed",
+            {
+                "video_path": video_path,
+                "output_path": str(video_dir / f"{Path(video_path).stem}_{speed:g}x.mp4"),
+                "speed": speed,
+            },
+        )
+        return SkillResult(
+            status="success",
+            outputs=result,
+            metrics={"speed": speed},
+            logs=[f"Rendered final video at {speed:g}x playback speed."],
+        )
 
     def merge_audio_video(self, context: SkillContext) -> SkillResult:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "mux")
@@ -1048,6 +1115,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.audio.narrate", media.narrate_text, "Generate narration audio as an agent media primitive")
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
+    skill_registry.register("media.video.change_speed", media.change_video_speed, "Change final video playback speed")
     skill_registry.register("media.video.merge_audio", media.merge_audio_video, "Mux audio and video as an agent media primitive")
     skill_registry.register("media.video.gif_preview", media.video_to_gif, "Create a GIF preview as an agent media primitive")
     skill_registry.register("media.video.qa", media.qa_video, "Run technical video QA and create a contact sheet")

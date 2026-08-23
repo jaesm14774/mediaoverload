@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
@@ -120,6 +121,66 @@ class TaskPlanner:
         }
 
     @staticmethod
+    def _video_speed_config(goal: GoalRequest) -> dict[str, object]:
+        raw = goal.constraints.get("video_speed")
+        if raw is None:
+            config: dict[str, object] = {}
+        elif isinstance(raw, dict):
+            config = dict(raw)
+        else:
+            raise ValueError("video_speed must be a mapping")
+        enabled = bool(config.get("enabled", False))
+        try:
+            factor = float(config.get("factor", 2.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("video_speed.factor must be a number greater than zero") from exc
+        if not math.isfinite(factor) or factor <= 0:
+            raise ValueError("video_speed.factor must be a finite number greater than zero")
+        return {"enabled": enabled, "factor": factor}
+
+    @classmethod
+    def _scaled_video_qa_inputs(
+        cls,
+        goal: GoalRequest,
+        inputs: dict[str, object],
+    ) -> dict[str, object]:
+        result = dict(inputs)
+        speed = cls._video_speed_config(goal)
+        target_duration = result.get("target_duration")
+        if bool(speed["enabled"]):
+            source_duration = target_duration
+            if source_duration in {None, ""} and goal.duration_seconds > 0:
+                source_duration = goal.duration_seconds
+            if source_duration not in {None, ""}:
+                result["target_duration"] = float(source_duration) / float(speed["factor"])
+        return result
+
+    def _append_video_speed_node(
+        self,
+        goal: GoalRequest,
+        nodes: list[ExecutionNode],
+        *,
+        source_node: str,
+        node_id: str,
+        retry: bool = False,
+    ) -> str:
+        speed = self._video_speed_config(goal)
+        if not bool(speed["enabled"]):
+            return source_node
+        nodes.append(
+            ExecutionNode(
+                node_id=node_id,
+                skill_name="media.video.change_speed",
+                inputs={"speed": float(speed["factor"])},
+                depends_on=[source_node],
+                tags=["package", "video", "speed"] + (["retry"] if retry else []),
+                tool_name="media.change_video_speed",
+                stage="package",
+            )
+        )
+        return node_id
+
+    @staticmethod
     def _native_h3_storyboard_path(goal: GoalRequest, media_type: str) -> str:
         storyboard_path = str(
             goal.constraints.get("native_h3_storyboard_path")
@@ -130,49 +191,67 @@ class TaskPlanner:
             raise ValueError(f"{media_type} requires native_h3_storyboard_path or storyboard_path")
         return storyboard_path
 
-    @staticmethod
     def _native_h3_finalize_nodes(
+        self,
+        goal: GoalRequest,
         *,
         tags: list[str],
         include_keyframe_gate: bool,
         frame_gate_node_id: str = "native-keyframe-gate",
         qa_inputs: dict[str, object] | None = None,
     ) -> list[ExecutionNode]:
+        nodes: list[ExecutionNode] = []
+        video_node = self._append_video_speed_node(
+            goal,
+            nodes,
+            source_node="native-h3-render",
+            node_id="native-h3-speed",
+        )
+        final_qa_inputs = self._scaled_video_qa_inputs(goal, dict(qa_inputs or {}))
+        final_qa_inputs.update({"render_node": "native-h3-render", "video_node": video_node})
         qa_tags = ["technical-qa", "semantic-qa", "manual-review", *tags]
         preview_tags = ["preview", *tags]
         package_dependencies = ["native-h3-render", "native-h3-qa", "native-h3-preview"]
         if include_keyframe_gate:
             package_dependencies.append(frame_gate_node_id)
-        return [
-            ExecutionNode(
-                node_id="native-h3-qa",
-                skill_name="longvideo.qa_native_h3",
-                inputs={
-                    "mode": "technical_and_semantic_qa_before_optional_discord_review",
-                    **dict(qa_inputs or {}),
-                },
-                depends_on=["native-h3-render"],
-                tags=qa_tags,
-                stage="quality",
-            ),
-            ExecutionNode(
-                node_id="native-h3-preview",
-                skill_name="media.video.gif_preview",
-                inputs={"fps": 8, "scale_width": 512},
-                depends_on=["native-h3-render"],
-                tags=preview_tags,
-                tool_name="media.video_to_gif",
-                stage="package",
-            ),
-            ExecutionNode(
-                node_id="native-h3-package",
-                skill_name="longvideo.package_native_h3",
-                inputs={"render_node": "native-h3-render", "qa_node": "native-h3-qa", "preview_node": "native-h3-preview"},
-                depends_on=package_dependencies,
-                tags=["artifact", "summary", *tags],
-                stage="package",
-            ),
-        ]
+        nodes.extend(
+            [
+                ExecutionNode(
+                    node_id="native-h3-qa",
+                    skill_name="longvideo.qa_native_h3",
+                    inputs={
+                        "mode": "technical_and_semantic_qa_before_optional_discord_review",
+                        **final_qa_inputs,
+                    },
+                    depends_on=[video_node],
+                    tags=qa_tags,
+                    stage="quality",
+                ),
+                ExecutionNode(
+                    node_id="native-h3-preview",
+                    skill_name="media.video.gif_preview",
+                    inputs={"fps": 8, "scale_width": 512},
+                    depends_on=[video_node],
+                    tags=preview_tags,
+                    tool_name="media.video_to_gif",
+                    stage="package",
+                ),
+                ExecutionNode(
+                    node_id="native-h3-package",
+                    skill_name="longvideo.package_native_h3",
+                    inputs={
+                        "render_node": "native-h3-render",
+                        "video_node": video_node,
+                        "qa_node": "native-h3-qa",
+                        "preview_node": "native-h3-preview",
+                    },
+                    depends_on=package_dependencies,
+                    tags=["artifact", "summary", *tags],
+                    stage="package",
+                ),
+            ]
+        )
+        return nodes
 
     def create_goal(
         self,
@@ -458,6 +537,7 @@ class TaskPlanner:
                     stage="render",
                 ),
                 *self._native_h3_finalize_nodes(
+                    goal,
                     tags=["native-h3"],
                     include_keyframe_gate=True,
                     qa_inputs=(
@@ -577,6 +657,7 @@ class TaskPlanner:
                 stage="render",
             ),
             *self._native_h3_finalize_nodes(
+                goal,
                 tags=["native-h3", "t2v"],
                 include_keyframe_gate=False,
                 qa_inputs={
@@ -746,6 +827,7 @@ class TaskPlanner:
                     stage="render",
                 ),
                 *self._native_h3_finalize_nodes(
+                    goal,
                     tags=["native-h3", "l2va"],
                     include_keyframe_gate=True,
                     frame_gate_node_id="native-l2va-frame-gate",
@@ -1014,6 +1096,7 @@ class TaskPlanner:
         )
         nodes.extend(
             self._native_h3_finalize_nodes(
+                goal,
                 tags=["native-h3", "ref2va"],
                 include_keyframe_gate=False,
                 qa_inputs={"frame_count": 12, "columns": 4},
@@ -1682,7 +1765,14 @@ class TaskPlanner:
             )
             preview_dependency = "mux-final-video"
 
-        longvideo_qa_inputs = {
+        preview_dependency = self._append_video_speed_node(
+            goal,
+            nodes,
+            source_node=preview_dependency,
+            node_id="video-speed",
+        )
+
+        longvideo_qa_inputs = self._scaled_video_qa_inputs(goal, {
             "expected_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
             "expected_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
             "expected_fps": segment_frame_rate,
@@ -1694,7 +1784,7 @@ class TaskPlanner:
             "frame_count": 8,
             "columns": 4,
             "scale_width": 480,
-        }
+        })
         nodes.append(
             ExecutionNode(
                 node_id="longvideo-video-qa",
@@ -1795,6 +1885,13 @@ class TaskPlanner:
                     ]
                 )
                 retry_preview_dependency = "review-mux-final-video"
+            retry_preview_dependency = self._append_video_speed_node(
+                goal,
+                nodes,
+                source_node=retry_preview_dependency,
+                node_id="review-video-speed",
+                retry=True,
+            )
             nodes.append(
                 ExecutionNode(
                     node_id="review-longvideo-video-qa",
@@ -1868,6 +1965,7 @@ class TaskPlanner:
             "review_policy": review_policy,
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_tts": use_tts,
+            "video_speed": self._video_speed_config(goal),
             "review_loop_enabled": review_loop_enabled,
             "review_notes": review_notes,
         }
@@ -2106,6 +2204,17 @@ class TaskPlanner:
             ),
         ]
         )
+        video_output_node = self._append_video_speed_node(
+            goal,
+            nodes,
+            source_node="animate-video",
+            node_id="video-speed",
+        )
+        video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
+        video_qa_node.inputs = self._scaled_video_qa_inputs(goal, video_qa_node.inputs)
+        video_qa_node.depends_on = [video_output_node]
+        gif_preview_node = next(node for node in nodes if node.node_id == "gif-preview")
+        gif_preview_node.depends_on = [video_output_node]
         if review_loop_enabled:
             nodes.extend(
                 [
@@ -2113,7 +2222,7 @@ class TaskPlanner:
                         node_id="review-select",
                         skill_name="review.assets.select",
                         inputs={"limit": selection_limit, "review_notes": review_notes},
-                        depends_on=["render-image", "upscale-image", "animate-video", "gif-preview"],
+                        depends_on=["render-image", "upscale-image", video_output_node, "gif-preview"],
                         tags=["review", "retry"],
                         stage="review",
                     ),
@@ -2189,6 +2298,22 @@ class TaskPlanner:
                     ),
                 ]
             )
+            review_video_output_node = self._append_video_speed_node(
+                goal,
+                nodes,
+                source_node="review-animate-video",
+                node_id="review-video-speed",
+                retry=True,
+            )
+            review_gif_preview_node = next(node for node in nodes if node.node_id == "review-gif-preview")
+            review_gif_preview_node.depends_on = [review_video_output_node]
+            review_final_select_node = next(node for node in nodes if node.node_id == "review-final-select")
+            review_final_select_node.depends_on = [
+                "review-render-image",
+                "review-upscale-image",
+                review_video_output_node,
+                "review-gif-preview",
+            ]
         summary_dependencies = ["render-image", "animate-video", "video-qa", "gif-preview"]
         if use_upscale_for_i2v:
             summary_dependencies.insert(1, "upscale-image")
@@ -2221,6 +2346,7 @@ class TaskPlanner:
             ],
             "graph_overview": [node.node_id for node in nodes],
             "review_loop_enabled": review_loop_enabled,
+            "video_speed": self._video_speed_config(goal),
             "review_notes": review_notes,
         }
         return ExecutionPlan(
@@ -2690,6 +2816,17 @@ class TaskPlanner:
             ),
         ]
         )
+        video_output_node = self._append_video_speed_node(
+            goal,
+            nodes,
+            source_node="animate-video",
+            node_id="video-speed",
+        )
+        video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
+        video_qa_node.inputs = self._scaled_video_qa_inputs(goal, video_qa_node.inputs)
+        video_qa_node.depends_on = [video_output_node]
+        gif_preview_node = next(node for node in nodes if node.node_id == "gif-preview")
+        gif_preview_node.depends_on = [video_output_node]
         if review_loop_enabled:
             nodes.extend(
                 [
@@ -2697,7 +2834,7 @@ class TaskPlanner:
                         node_id="review-select",
                         skill_name="review.assets.select",
                         inputs={"limit": selection_limit, "review_notes": review_notes},
-                        depends_on=["render-image", "animate-video", "gif-preview"],
+                        depends_on=["render-image", video_output_node, "gif-preview"],
                         tags=["review", "retry"],
                         stage="review",
                     ),
@@ -2750,7 +2887,22 @@ class TaskPlanner:
                         stage="review",
                     ),
                 ]
-        )
+            )
+            review_video_output_node = self._append_video_speed_node(
+                goal,
+                nodes,
+                source_node="review-animate-video",
+                node_id="review-video-speed",
+                retry=True,
+            )
+            review_gif_preview_node = next(node for node in nodes if node.node_id == "review-gif-preview")
+            review_gif_preview_node.depends_on = [review_video_output_node]
+            review_final_select_node = next(node for node in nodes if node.node_id == "review-final-select")
+            review_final_select_node.depends_on = [
+                "review-render-image",
+                review_video_output_node,
+                "review-gif-preview",
+            ]
         summary_dependencies = ["render-image", "animate-video", "video-qa", "gif-preview"]
         if review_loop_enabled:
             summary_dependencies.append("review-final-select")
@@ -2772,6 +2924,7 @@ class TaskPlanner:
             ],
             "graph_overview": [node.node_id for node in nodes],
             "review_loop_enabled": review_loop_enabled,
+            "video_speed": self._video_speed_config(goal),
             "review_notes": review_notes,
         }
         return ExecutionPlan(

@@ -104,7 +104,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '[{"segment_id":"segment-1","visual":"shot one","narration":"line one"},{"segment_id":"segment-2","visual":"shot two","narration":"line two"}]',
+                    '{"segments":[{"segment_id":"segment-1","visual":"shot one","narration":"line one","action":"runs forward","camera":"tracks the run","start_state":"at the start","end_state":"near the obstacle","cause":"the path narrows","effect":"the subject changes direction"},{"segment_id":"segment-2","visual":"shot two","narration":"line two","action":"turns and finishes","camera":"pushes in","start_state":"near the obstacle","end_state":"at the finish","cause":"the subject changes direction","effect":"the subject reaches the finish"}]}',
                 ]
             ),
         )
@@ -574,6 +574,82 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["platform_captions"]["facebook"], result["caption"])
         self.assertEqual(len(engine._manager.text_model.calls), 2)
 
+    def test_prepare_publish_caption_rejects_array_hashtags(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"caption body","hashtags":["#one","#two"],"platform_captions":{"facebook":"caption body"}}',
+                ]
+            ),
+        )
+
+        with self.assertRaises(PromptGenerationError) as raised:
+            engine.prepare_publish_caption(
+                GoalRequest(prompt="publish Kirby", media_type="publish_review", style="anime"),
+                prefix="",
+                hashtags=[],
+                platforms=["facebook"],
+                media_paths=["C:\\kirby.mp4"],
+            )
+
+        self.assertIn("invalid type", str(raised.exception))
+
+    def test_publish_article_repair_rejects_array_hashtags(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"A short sentence.","hashtags":"#one #two","platform_captions":{"facebook":"A short sentence."}}',
+                    '{"caption":"A strong hook opens the story.\\n\\nThe visible action changes the outcome.\\n\\n1. The subject faces the obstacle.\\n2. The mechanism changes the scene.\\n3. The ending delivers a payoff.\\n\\nWhich beat stayed with you? Save this idea for later.","hashtags":["#one","#two"],"platform_captions":{"facebook":"A strong hook opens the story."}}',
+                ]
+            ),
+        )
+
+        with self.assertRaises(PromptGenerationError) as raised:
+            engine.prepare_publish_caption(
+                GoalRequest(
+                    prompt="publish Kirby story",
+                    media_type="publish_review",
+                    style="social promo",
+                    constraints={"social_post_format": True},
+                ),
+                prefix="",
+                hashtags=[],
+                platforms=["facebook"],
+                media_paths=["C:\\kirby.mp4"],
+            )
+
+        self.assertIn("article repair", str(raised.exception))
+        self.assertIn("one space-separated string", engine._manager.text_model.calls[1]["messages"][1]["content"])
+
+    def test_publish_article_repair_rejects_unformatted_caption(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"A short sentence.","hashtags":"#one #two","platform_captions":{"facebook":"A short sentence."}}',
+                    '{"caption":"A long hook explains the visible action and its consequence. 1. The subject faces the obstacle. 2. The mechanism changes the scene. 3. The ending delivers the payoff. Which beat stayed with you? Save this idea for later?","hashtags":"#one #two","platform_captions":{"facebook":"A long hook explains the visible action."}}',
+                ]
+            ),
+        )
+
+        with self.assertRaises(PromptGenerationError) as raised:
+            engine.prepare_publish_caption(
+                GoalRequest(
+                    prompt="publish Kirby story",
+                    media_type="publish_review",
+                    style="social promo",
+                    constraints={"social_post_format": True},
+                ),
+                prefix="",
+                hashtags=[],
+                platforms=["facebook"],
+                media_paths=["C:\\kirby.mp4"],
+            )
+
+        self.assertIn("did not satisfy the publish format", str(raised.exception))
+
     def test_prepare_publish_caption_fails_when_caption_provider_fails(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
@@ -668,6 +744,13 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertEqual(result, "#kirby #RainyNeon")
         self.assertNotIn("mediaoverload", result.casefold())
+
+    def test_normalize_hashtags_rejects_python_list_notation(self) -> None:
+        with self.assertRaises(ValueError):
+            LLMPromptEngine._normalize_hashtag_text(
+                "['#one' '#two']",
+                required_hashtags=[],
+            )
 
     def test_prepare_publish_caption_reuses_main_article_when_platform_caption_is_missing(self) -> None:
         engine = LLMPromptEngine(
@@ -1251,6 +1334,82 @@ class LLMEngineTests(unittest.TestCase):
             contact_sheet_path="contact_sheet.jpg",
             prompt_mode="llm",
             llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "fail")
+
+    def test_video_semantic_qa_requires_both_pair_slots_and_visible_interaction(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 96,
+                "checks": {
+                    "protagonist_clear": True,
+                    "required_subjects_clear": True,
+                    "primary_action_visible": True,
+                    "news_anchor_visible": True,
+                    "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
+                    "unwanted_extra_characters": False,
+                    "unexpected_extra_subjects": False,
+                    "interaction_visible": True,
+                },
+                "observed_story": "Two Kirby subject slots pull the glowing mechanism together and complete the rescue.",
+                "issues": [],
+            },
+            contact_sheet_path="pair_contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+            subject_context={
+                "subjects": [
+                    {"role": "primary", "name": "Kirby"},
+                    {"role": "secondary", "name": "Kirby"},
+                ],
+                "interaction_contract": {"required": True, "same_frame": True},
+            },
+        )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["subject_count"], 2)
+        self.assertTrue(result["checks"]["required_subjects_clear"])
+        self.assertTrue(result["checks"]["interaction_visible"])
+
+    def test_video_semantic_qa_rejects_pair_without_interaction(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 99,
+                "checks": {
+                    "protagonist_clear": True,
+                    "required_subjects_clear": True,
+                    "primary_action_visible": True,
+                    "news_anchor_visible": True,
+                    "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
+                    "unwanted_extra_characters": False,
+                    "unexpected_extra_subjects": False,
+                    "interaction_visible": False,
+                },
+                "issues": [],
+            },
+            contact_sheet_path="pair_contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+            subject_context={
+                "subjects": [{"name": "Alpha"}, {"name": "Beta"}],
+                "interaction_contract": {"required": True, "same_frame": True},
+            },
         )
 
         self.assertFalse(result["passed"])

@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from agentic.app.character_requests import CharacterGenerationOptions, CharacterReviewOptions, CharacterRuntimeOptions, CharacterWorkflowRequest
-from agentic.app.character_workflow import build_goal_payload_from_character_config
+from agentic.app.character_requests import (
+    CharacterGenerationOptions,
+    CharacterReviewOptions,
+    CharacterRuntimeOptions,
+    CharacterWorkflowRequest,
+)
+from agentic.app.character_workflow import build_goal_payload_from_character_config, resolve_character_selection
 
 
 pytestmark = pytest.mark.integration
@@ -20,20 +26,33 @@ def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[3]
     history_path = tmp_path / "news-selection" / "kirby.json"
     output_dir = tmp_path / "output"
-    payload = build_goal_payload_from_character_config(
-        CharacterWorkflowRequest(
-            repo_root=repo_root,
-            config_path=repo_root / "configs" / "characters" / "kirby.yaml",
-            generation=CharacterGenerationOptions(
-                preferred_generation_type="text2video",
-                news_driven=True,
-                news_history_path=str(history_path),
-                output_dir=str(output_dir),
-            ),
-            review=CharacterReviewOptions(publish_after_generate=False),
-            runtime=CharacterRuntimeOptions(),
-        )
+    request = CharacterWorkflowRequest(
+        repo_root=repo_root,
+        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
+        generation=CharacterGenerationOptions(
+            preferred_generation_type="text2video",
+            news_driven=True,
+            news_history_path=str(history_path),
+            output_dir=str(output_dir),
+        ),
+        review=CharacterReviewOptions(publish_after_generate=False),
+        runtime=CharacterRuntimeOptions(),
     )
+    selection = resolve_character_selection(request)
+    selected_name = str(selection.get("selected_character") or "").strip()
+    if not selected_name:
+        subjects = selection.get("subjects")
+        if isinstance(subjects, list) and subjects:
+            selected_name = str(subjects[0].get("name") or "").strip()
+    request = replace(
+        request,
+        generation=replace(
+            request.generation,
+            selected_character_name=selected_name,
+            character_selection=selection,
+        ),
+    )
+    payload = build_goal_payload_from_character_config(request)
 
     news_context = payload["constraints"]["news_context"]
     assert news_context["title"]

@@ -27,6 +27,18 @@ class MediaServiceTools:
         method = str(payload.get("method", "demuxer"))
         return {"video_path": service.concat_videos(video_paths=video_paths, output_path=output_path, method=method)}
 
+    def change_video_speed(self, payload: dict[str, object]) -> dict[str, object]:
+        service = self._ffmpeg_service()
+        speed = float(payload.get("speed", 1.0))
+        return {
+            "video_path": service.change_video_speed(
+                video_path=str(payload["video_path"]),
+                output_path=str(payload["output_path"]),
+                speed=speed,
+            ),
+            "speed": speed,
+        }
+
     def video_to_gif(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._ffmpeg_service()
         return {
@@ -226,6 +238,7 @@ def register_media_service_tools(tool_registry: ToolRegistry, output_root: Path)
     tools = MediaServiceTools(output_root=output_root)
     tool_registry.register("media.extract_last_frame", tools.extract_last_frame, "Extract the last frame from a video")
     tool_registry.register("media.concat_videos", tools.concat_videos, "Concatenate multiple videos")
+    tool_registry.register("media.change_video_speed", tools.change_video_speed, "Change video and audio playback speed")
     tool_registry.register("media.video_to_gif", tools.video_to_gif, "Convert a video to a GIF")
     tool_registry.register("media.video_qa", tools.video_qa, "Probe duration/streams and create a video contact sheet")
     tool_registry.register("media.merge_audio_video", tools.merge_audio_video, "Merge one audio track into a video")

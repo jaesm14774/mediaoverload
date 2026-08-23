@@ -216,6 +216,7 @@ class CharacterGroupCandidate:
     keywords: str = ""
     status: int = 1
     weight: float = 1.0
+    group_name: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +225,7 @@ class CharacterGroupCandidate:
             "keywords": self.keywords,
             "status": self.status,
             "weight": self.weight,
+            **({"group_name": self.group_name} if self.group_name else {}),
         }
 
 
@@ -247,6 +249,7 @@ class CharacterGroupSelection:
     def to_dict(self) -> dict[str, Any]:
         return {
             "mode": "group",
+            "subject_mode": "single",
             "group_name": self.group_name,
             "selected_character": self.selected_character,
             "candidate_count": len(self.candidates),
@@ -256,14 +259,67 @@ class CharacterGroupSelection:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CharacterPairSelection:
+    """Select two subject slots from one configured candidate pool.
+
+    Sampling is intentionally with replacement.  ``is_same_group`` controls
+    only the candidate scope; it does not impose a distinct-name constraint.
+    """
+
+    group_name: str
+    is_same_group: bool
+    selected_subjects: tuple[CharacterGroupCandidate, CharacterGroupCandidate]
+    candidates: tuple[CharacterGroupCandidate, ...]
+    selection_source: str = "pair_weighted_random_with_replacement"
+
+    @staticmethod
+    def _subject_payload(candidate: CharacterGroupCandidate, role: str, group_name: str) -> dict[str, Any]:
+        profile = {
+            "role_description": candidate.role_description,
+            "keywords": candidate.keywords,
+        }
+        return {
+            "role": role,
+            "name": candidate.name,
+            "group_name": candidate.group_name or group_name,
+            "status": candidate.status,
+            "weight": candidate.weight,
+            "profile": profile,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": "two_character_interaction",
+            "subject_mode": "two_character_interaction",
+            "group_name": self.group_name,
+            "is_same_group": self.is_same_group,
+            "candidate_count": len(self.candidates),
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "subjects": [
+                self._subject_payload(self.selected_subjects[0], "primary", self.group_name),
+                self._subject_payload(self.selected_subjects[1], "secondary", self.group_name),
+            ],
+            "selection_source": self.selection_source,
+        }
+
+
 class CharacterGroupSelectionService:
-    """Select one active, positively weighted role from ``anime.anime_roles``."""
+    """Select active, positively weighted roles from ``anime.anime_roles``."""
 
     _QUERY = """
         SELECT role_name_en, role_description, keywords, status, weight
         FROM anime.anime_roles
         WHERE group_name = %s
           AND status = 1
+          AND COALESCE(weight, 0) > 0
+          AND COALESCE(role_name_en, '') != ''
+        ORDER BY id
+    """
+    _GLOBAL_QUERY = """
+        SELECT group_name, role_name_en, role_description, keywords, status, weight
+        FROM anime.anime_roles
+        WHERE status = 1
           AND COALESCE(weight, 0) > 0
           AND COALESCE(role_name_en, '') != ''
         ORDER BY id
@@ -306,6 +362,10 @@ class CharacterGroupSelectionService:
         finally:
             connection.close()
 
+        return self._parse_candidates(rows)
+
+    @staticmethod
+    def _parse_candidates(rows: list[dict[str, Any]]) -> tuple[CharacterGroupCandidate, ...]:
         candidates: list[CharacterGroupCandidate] = []
         for row in rows:
             name = str(row.get("role_name_en") or "").strip()
@@ -326,9 +386,55 @@ class CharacterGroupSelectionService:
                     keywords=str(row.get("keywords") or "").strip()[:500],
                     status=status,
                     weight=weight,
+                    group_name=str(row.get("group_name") or "").strip(),
                 )
             )
         return tuple(candidates)
+
+    def get_all_candidates(self) -> tuple[CharacterGroupCandidate, ...]:
+        """Return every active, positively weighted role across all groups."""
+
+        if not self.is_configured():
+            raise CharacterGroupSelectionError(
+                "Global character selection requires configured MySQL connection settings"
+            )
+
+        import pymysql
+
+        connection = pymysql.connect(
+            host=os.getenv("mysql_host"),
+            port=int(os.getenv("mysql_port", "3306")),
+            user=os.getenv("mysql_user"),
+            password=os.getenv("mysql_password"),
+            database=os.getenv("mysql_db_name"),
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(self._GLOBAL_QUERY, [])
+                rows = list(cursor.fetchall() or [])
+        finally:
+            connection.close()
+        return self._parse_candidates(rows)
+
+    @staticmethod
+    def _weighted_choice(
+        candidates: tuple[CharacterGroupCandidate, ...],
+        *,
+        rng: random.Random | None = None,
+    ) -> CharacterGroupCandidate:
+        chooser = rng or random
+        total_weight = sum(candidate.weight for candidate in candidates)
+        threshold = chooser.uniform(0, total_weight)
+        cumulative = 0.0
+        selected = candidates[-1]
+        for candidate in candidates:
+            cumulative += candidate.weight
+            if threshold <= cumulative:
+                selected = candidate
+                break
+        return selected
 
     def select_random_character(
         self,
@@ -342,19 +448,44 @@ class CharacterGroupSelectionService:
             raise CharacterGroupSelectionError(
                 f"Character group '{normalized_group}' has no active role with weight > 0"
             )
-        chooser = rng or random
-        total_weight = sum(candidate.weight for candidate in candidates)
-        threshold = chooser.uniform(0, total_weight)
-        cumulative = 0.0
-        selected = candidates[-1]
-        for candidate in candidates:
-            cumulative += candidate.weight
-            if threshold <= cumulative:
-                selected = candidate
-                break
+        selected = self._weighted_choice(candidates, rng=rng)
         return CharacterGroupSelection(
             group_name=normalized_group,
             selected_character=selected.name,
+            candidates=candidates,
+        )
+
+    def select_pair(
+        self,
+        group_name: str | None,
+        *,
+        is_same_group: bool,
+        rng: random.Random | None = None,
+    ) -> CharacterPairSelection:
+        """Select two subject slots without imposing distinct character names."""
+
+        normalized_group = str(group_name or "").strip() if is_same_group else ""
+        if is_same_group:
+            if not normalized_group:
+                raise CharacterGroupSelectionError(
+                    "two_character_interaction with is_same_group=true requires group_name"
+                )
+            candidates = self.get_candidates(normalized_group)
+        else:
+            candidates = self.get_all_candidates()
+        if not candidates:
+            scope = f"group '{normalized_group}'" if normalized_group else "the global active pool"
+            raise CharacterGroupSelectionError(
+                f"two_character_interaction {scope} has no active role with weight > 0"
+            )
+        selected = (
+            self._weighted_choice(candidates, rng=rng),
+            self._weighted_choice(candidates, rng=rng),
+        )
+        return CharacterPairSelection(
+            group_name=normalized_group,
+            is_same_group=is_same_group,
+            selected_subjects=selected,
             candidates=candidates,
         )
 

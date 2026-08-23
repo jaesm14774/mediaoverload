@@ -24,6 +24,7 @@ class NativeH3StoryService:
         base_storyboard: dict[str, Any],
         *,
         character: str,
+        subject_context: dict[str, Any] | None = None,
         style: str,
         duration_seconds: int,
         news_context: dict[str, Any] | None = None,
@@ -49,6 +50,7 @@ class NativeH3StoryService:
 
         payload = self.llm_engine.generate_native_h3_storyboard(
             character=character,
+            subject_context=dict(subject_context or {}),
             style=style,
             duration_seconds=duration_seconds,
             base_storyboard=base_storyboard,

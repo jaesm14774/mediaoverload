@@ -4,7 +4,21 @@ character:
 
 generation:
   output_dir: D:/MediaOverload/output
+  # Apply the speed transform after the final video is rendered and before
+  # technical QA, Discord review, and social publishing.
+  video_speed:
+    enabled: true
+    factor: 2.0
   h3_profile: balanced-lowvram
+  # Use single, two_character_interaction, or random. random requires
+  # subject_mode_weights with positive weights for the concrete modes.
+  subject_mode: random
+  # Change subject_mode to random to use these proportional weights.
+  subject_mode_weights:
+    single: 2
+    two_character_interaction: 5
+  two_character_interaction:
+    is_same_group: true
   style_weights:
     polished 2D anime: 4
     cel-shaded animation: 2

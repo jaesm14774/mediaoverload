@@ -19,6 +19,16 @@ from agentic.tools.comfy_adapter import ComfyAdapter
 
 
 MAX_REFERENCE_IMAGE_SLOTS = 9
+
+
+def _payload_requires_declared_subject_pair(payload: dict[str, Any]) -> bool:
+    context = payload.get("subject_context")
+    if not isinstance(context, dict):
+        return False
+    contract = context.get("interaction_contract")
+    return bool(isinstance(contract, dict) and contract.get("required", False))
+
+
 MAX_REFERENCE_VIDEO_SLOTS = 3
 
 
@@ -277,6 +287,7 @@ class ComfyWorkflowToolset:
                     image_path,
                     allow_external=bool(payload.get("allow_external_reference", False)),
                     allow_multipanel=requested_workflow == "minimax_h3_ref2va" or normalized_h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
+                    allow_declared_subject_pair=_payload_requires_declared_subject_pair(payload),
                 )
         image_binding = spec.image_binding
         if image_path and requested_workflow.endswith("_15s_fl2va_i2v") and image_binding:
@@ -302,6 +313,7 @@ class ComfyWorkflowToolset:
                     last_image_path,
                     allow_external=bool(payload.get("allow_external_reference", False)),
                     allow_multipanel=requested_workflow == "minimax_h3_ref2va" or normalized_h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
+                    allow_declared_subject_pair=_payload_requires_declared_subject_pair(payload),
                 )
             last_image_filename = generator.upload_image(str(last_image_path))
             updates.append(self._binding_update(spec.last_image_binding, last_image_filename, str(workflow_path)))
@@ -625,8 +637,8 @@ class ComfyWorkflowToolset:
                 width_binding=NodeBinding(kind="width", node_type="MiniMaxH3ImageToVideo", input_key="width") if i2v_workflow.startswith("minimax_h3_") else None,
                 height_binding=NodeBinding(kind="height", node_type="MiniMaxH3ImageToVideo", input_key="height") if i2v_workflow.startswith("minimax_h3_") else None,
                 length_binding=NodeBinding(kind="length", node_type="MiniMaxH3ImageToVideo", input_key="length") if i2v_workflow.startswith("minimax_h3_") else None,
-                steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps") if i2v_workflow.startswith("minimax_h3_") else None,
-                image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
+                 steps_binding=NodeBinding(kind="steps", node_type="BasicScheduler", input_key="steps") if i2v_workflow.startswith("minimax_h3_") else None,
+                 image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
                 last_image_binding=NodeBinding(kind="last_image", node_type="LoadImage", title="native 15s last frame", input_key="image") if i2v_workflow.startswith("minimax_h3_") else None,
                 first_frame_binding=NodeBinding(kind="first_frame", node_type="MiniMaxH3ImageToVideo", input_key="first_frame") if i2v_workflow.startswith("minimax_h3_") else None,
                 last_frame_binding=NodeBinding(kind="last_frame", node_type="MiniMaxH3ImageToVideo", input_key="last_frame") if i2v_workflow.startswith("minimax_h3_") else None,

@@ -233,6 +233,10 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
             self.assertTrue(rejected.duplicate_protagonist_detected)
             self.assertTrue(any("duplicate Kirby" in reason for reason in rejected.reasons))
 
+            pair_allowed = inspect_kirby_input(path, allow_declared_subject_pair=True)
+            self.assertTrue(pair_allowed.passed, pair_allowed)
+            self.assertTrue(pair_allowed.duplicate_protagonist_detected)
+
 
 class MiniMaxH3PromptTests(unittest.TestCase):
     def test_local_h3_prompt_uses_context_ir_order_and_i2v_input_relation(self) -> None:
@@ -269,6 +273,33 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         )
         self.assertIn("first-frame image is authoritative", prompt)
         self.assertIn("supplied last-frame state", prompt)
+
+    def test_pair_prompt_keeps_same_name_slots_and_interaction_contract(self) -> None:
+        prompt = compose_minimax_h3_prompt(
+            duration_seconds=6,
+            character="Kirby",
+            style="polished 2D anime",
+            story_spine={"objective": "push the glowing mechanism together"},
+            shots=[
+                {
+                    "time": "0-6s",
+                    "action": "the two Kirby subject slots push the mechanism together",
+                    "state_change": "the mechanism opens",
+                }
+            ],
+            subject_context={
+                "subjects": [
+                    {"role": "primary", "name": "Kirby"},
+                    {"role": "secondary", "name": "Kirby"},
+                ],
+                "interaction_contract": {"required": True, "same_frame": True},
+            },
+        )
+
+        self.assertIn("Two required subject slots", prompt)
+        self.assertIn("slots may use the same name", prompt)
+        self.assertIn("unrequested third subject", prompt)
+        self.assertNotIn("duplicate protagonist", prompt)
 
     def test_visual_prompt_has_stable_subject_action_camera_order(self) -> None:
         prompt = structured_visual_prompt(
