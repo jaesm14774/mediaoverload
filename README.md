@@ -48,6 +48,21 @@ pip install -e .
 
 ---
 
+### 影片播放倍率
+
+角色 YAML 的 `generation.video_speed` 控制最終影片是否使用 FFmpeg 後製倍率。倍率節點會在最終合成後執行，並同步調整影片音訊；後續 technical QA、Discord review 與 social publishing 都使用調整後的 MP4。
+
+```yaml
+generation:
+  video_speed:
+    enabled: true
+    factor: 2.0
+```
+
+`enabled: false` 會保留原始速度；`factor: 1.5`、`2.0` 等值分別代表 1.5 倍、2 倍速。影片輸出時長會變成原始時長除以倍率，FPS 與畫布尺寸不變。
+
+---
+
 ## 生成策略總覽
 
 策略名稱對應 **`character_workflow.CONFIG_MEDIA_TYPE_MAP`**，決定送進 planner 的 `media_type`：
@@ -122,6 +137,35 @@ SCHEDULER_CHARACTER=kirby
 ```
 
 若 MySQL 未設定、查不到可用角色，該 run 會在選角階段直接失敗並記錄 `character.group.selection_failed`，不會自動改用 Kirby。直接呼叫 `build_goal_payload_from_character_config` 只負責建立已選角色的 payload；要執行 group 選角請使用 CLI、scheduler 或 `run_character_workflow`。
+
+### Two-character interaction
+
+在同一份角色 YAML 啟用兩個 subject slot：
+
+```yaml
+generation:
+  subject_mode: two_character_interaction
+  two_character_interaction:
+    is_same_group: true
+```
+
+`is_same_group: true` 只使用 `character.group_name`（或 interaction block 內明確指定的 `group_name`）；`false` 則忽略 group name，從所有 `status=1` 且 `weight>0` 的角色中抽取。兩個 slot 會各自依 weight 抽樣、允許抽到相同角色，不要求角色名稱不同。選角結果會以 `subject_context` 傳入 image prompt、storyboard/store prompt、video prompt 與共用 semantic QA；沒有 fallback，無法取得兩個 active slot 時 run 直接失敗。
+
+### Random subject mode
+
+若要讓每次 run 依模式權重選擇 single 或互動模式：
+
+```yaml
+generation:
+  subject_mode: random
+  subject_mode_weights:
+    single: 3
+    two_character_interaction: 1
+  two_character_interaction:
+    is_same_group: true
+```
+
+權重按比例抽樣，並且只在選角階段抽一次；後續 image prompt、storyboard/store prompt、video prompt 與共用 semantic QA 都使用同一個已解析的 concrete mode。`constraints.subject_mode` 與 `character_selection.subject_mode` 會記錄實際選到的 mode，`configured_subject_mode` 會保留原本的 `random`。`subject_mode_weights` 缺少、含未知 mode、負數或全部為零時會直接失敗，不會 fallback。
 
 ### 1. `text2img` — 靜態圖
 

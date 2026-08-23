@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -184,6 +185,55 @@ class FFmpegAdapter:
         if method == "filter":
             return self._concat_filter(video_paths, output_path)
         raise ValueError(f"Unknown method: {method}")
+
+    def change_video_speed(self, video_path: str, output_path: str, speed: float) -> str:
+        """Render a final video at a different playback speed, keeping audio synced."""
+
+        self._ensure_binaries()
+        speed_value = float(speed)
+        if not math.isfinite(speed_value) or speed_value <= 0:
+            raise ValueError("speed must be a finite number greater than zero")
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"Input video does not exist: {video_path}")
+        self._ensure_parent(output_path)
+        if os.path.abspath(video_path) == os.path.abspath(output_path):
+            raise ValueError("output_path must be different from video_path")
+
+        probe = self.probe_media(video_path)
+        video_pts = 1.0 / speed_value
+        video_filter = f"setpts={video_pts:.12g}*PTS"
+        command = ["ffmpeg", "-i", video_path]
+        if bool(probe.get("has_audio")):
+            audio_filter = ",".join(self._atempo_filters(speed_value))
+            command.extend(
+                [
+                    "-filter_complex",
+                    f"[0:v]{video_filter}[v];[0:a]{audio_filter}[a]",
+                    "-map",
+                    "[v]",
+                    "-map",
+                    "[a]",
+                ]
+            )
+        else:
+            command.extend(["-vf", video_filter, "-map", "0:v:0", "-an"])
+        command.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                "-shortest",
+                "-y",
+                output_path,
+            ]
+        )
+        self._run(command)
+        return output_path
 
     def video_to_gif(
         self,
@@ -420,6 +470,21 @@ class FFmpegAdapter:
             ]
         )
         return output_path
+
+    @staticmethod
+    def _atempo_filters(speed: float) -> list[str]:
+        """Build an atempo chain that also works outside FFmpeg's 0.5-2 range."""
+
+        remaining = speed
+        filters: list[str] = []
+        while remaining > 2.0:
+            filters.append("atempo=2.0")
+            remaining /= 2.0
+        while remaining < 0.5:
+            filters.append("atempo=0.5")
+            remaining /= 0.5
+        filters.append(f"atempo={remaining:.12g}")
+        return filters
 
     def _ensure_binaries(self) -> None:
         if self._checked:

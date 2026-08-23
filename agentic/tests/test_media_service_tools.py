@@ -42,6 +42,37 @@ class FFmpegAdapterTests(unittest.TestCase):
         self.assertIn("palettegen=max_colors=128", " ".join(palette_command))
         self.assertIn("paletteuse", " ".join(gif_command))
 
+    @patch.object(FFmpegAdapter, "_run")
+    @patch.object(
+        FFmpegAdapter,
+        "_run_capture",
+        return_value=json.dumps(
+            {
+                "streams": [
+                    {"codec_type": "video", "width": 608, "height": 352},
+                    {"codec_type": "audio", "channels": 2},
+                ],
+                "format": {"duration": "5.0"},
+            }
+        ),
+    )
+    def test_change_video_speed_synchronizes_audio_and_video(self, _capture_mock, run_mock) -> None:
+        adapter = FFmpegAdapter()
+        adapter._checked = True
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.mp4"
+            output_path = Path(directory) / "output_2x.mp4"
+            input_path.write_bytes(b"fixture")
+
+            result = adapter.change_video_speed(str(input_path), str(output_path), 2.0)
+
+        self.assertEqual(result, str(output_path))
+        command = run_mock.call_args.args[0]
+        command_text = " ".join(command)
+        self.assertIn("setpts=0.5*PTS", command_text)
+        self.assertIn("atempo=2", command_text)
+        self.assertIn("-map [v] -map [a]", command_text)
+
 
 class AgenticComfyCommunicatorTests(unittest.TestCase):
     def test_default_timeout_is_configurable_for_lowvram_generation(self) -> None:

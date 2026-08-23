@@ -930,23 +930,56 @@ def merge_native_h3_storyboard(
     if not isinstance(generated_rules, list):
         raise StoryboardError("Generated native H3 world.continuity_rules must be a list")
     character = str(base_storyboard.get("character") or "the protagonist").strip()
-    continuity_rules: list[str] = [
-        f"Only one {character} appears; preserve the same identity, proportions, silhouette, and palette throughout."
+    subject_context = dict(base_storyboard.get("subject_context") or {})
+    subject_items = [
+        item for item in (subject_context.get("subjects") or []) if isinstance(item, dict)
     ]
+    interaction_required = bool(
+        dict(subject_context.get("interaction_contract") or {}).get("required", False)
+    ) and len(subject_items) == 2
+    if interaction_required:
+        continuity_rules: list[str] = [
+            "Exactly the two declared subject slots remain visible when the story requires both; preserve each identity, role, proportions, silhouette, and palette throughout."
+        ]
+    else:
+        continuity_rules = [
+            f"Only one {character} appears; preserve the same identity, proportions, silhouette, and palette throughout."
+        ]
     for rule in generated_rules:
         value = str(rule or "").strip()
+        if interaction_required and "only" in value.lower() and "protagonist" in value.lower():
+            continue
         if value and value not in continuity_rules:
             continuity_rules.append(value)
     if not continuity_rules:
         raise StoryboardError("Native H3 story must preserve at least one continuity rule")
     merged = deepcopy(base_storyboard)
+    generated_base_prompt = str(generated_story["base_prompt"]).strip()
+    generated_negative_prompt = str(generated_story["negative_prompt"]).strip()
+    if interaction_required:
+        subject_names = [
+            str(item.get("name") or "").strip()
+            for item in subject_items
+            if str(item.get("name") or "").strip()
+        ]
+        generated_base_prompt = (
+            f"{generated_base_prompt} Required subject slots share one readable scene: {'; '.join(subject_names)}. "
+            "Preserve both identities and show their visible mutual interaction."
+        ).strip()
+        negative_parts = [
+            part.strip()
+            for part in generated_negative_prompt.split(",")
+            if part.strip() and part.strip().lower() not in {"humans", "extra characters", "duplicate", "duplicate kirby"}
+        ]
+        negative_parts.extend(["identity swap", "unrequested third subject"])
+        generated_negative_prompt = ", ".join(dict.fromkeys(negative_parts))
     merged.update(
         {
             "name": str(generated_story["name"]).strip(),
-            "base_prompt": str(generated_story["base_prompt"]).strip(),
+            "base_prompt": generated_base_prompt,
             "opening_keyframe_prompt": str(generated_story["opening_keyframe_prompt"]).strip(),
             "ending_keyframe_prompt": str(generated_story["ending_keyframe_prompt"]).strip(),
-            "negative_prompt": str(generated_story["negative_prompt"]).strip(),
+            "negative_prompt": generated_negative_prompt,
             "news_trace": deepcopy(news_trace),
             **({"gag_card": deepcopy(gag_card)} if isinstance(gag_card, dict) else {}),
             "story_spine": deepcopy(spine),
@@ -1216,6 +1249,7 @@ def format_native_h3_prompt(
         audio=audio,
         render_mode=render_mode,
         continuity_rules=continuity,
+        subject_context=dict(storyboard.get("subject_context") or {}),
     )
     prompt += "\nAudience story contract: the first beat creates a concrete question, the middle worsens the obstacle or reverses the plan, and the final beat answers the original question with visible payoff evidence."
     gag_card = storyboard.get("gag_card")

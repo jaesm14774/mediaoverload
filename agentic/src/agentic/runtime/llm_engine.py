@@ -62,6 +62,34 @@ BLOCKED_HASHTAG_KEYS = frozenset({"mediaoverload"})
 NATIVE_H3_MAX_REPAIR_ROUNDS = 2
 
 
+def _goal_subject_contract(goal: GoalRequest) -> tuple[dict[str, Any], list[str], bool]:
+    """Return the resolved subject contract used by vision and story prompts."""
+
+    raw_context = goal.constraints.get("subject_context")
+    context = dict(raw_context) if isinstance(raw_context, dict) else {}
+    subjects = [
+        str(item.get("name") or "").strip()
+        for item in (context.get("subjects") or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+    interaction_required = bool(
+        dict(context.get("interaction_contract") or {}).get("required", False)
+    )
+    return context, subjects, interaction_required
+
+
+def _goal_subject_instruction(goal: GoalRequest) -> str:
+    """Describe the resolved subject slots without imposing distinct names."""
+
+    _, subject_names, interaction_required = _goal_subject_contract(goal)
+    if interaction_required and len(subject_names) == 2:
+        return (
+            f"Required subject slots: {', '.join(subject_names)}. The slots may have the same name; "
+            "keep both visible in one frame and show a concrete mutual interaction. Do not add an unrequested third subject."
+        )
+    return f"Required protagonist: {str(goal.constraints.get('character') or '').strip()}. Do not add unrequested subjects."
+
+
 SOCIAL_CAPTION_SYSTEM_PROMPT = """
 You are a social content writer and strict visual-grounding editor for generated media.
 
@@ -91,6 +119,9 @@ Rules:
 - Use 2 to 5 hashtags chosen from the visible subject, visible action or setting,
   and the article's actual topic. Treat supplied hashtag hints as optional and
   omit any hint that is not supported by the media or post.
+- Return hashtags only in the `hashtags` field. The `caption` value must not
+  contain hashtag tokens. The `hashtags` field must be one space-separated
+  string such as "#one #two", never a JSON array or Python list notation.
 - Never use project, repository, campaign, or internal workflow names as hashtags.
   In particular, never use #mediaoverload.
 - Platform captions must preserve the same factual claim and the same article structure;
@@ -427,6 +458,7 @@ class LLMPromptEngine:
         self,
         *,
         character: str,
+        subject_context: dict[str, Any] | None = None,
         style: str,
         duration_seconds: int,
         base_storyboard: dict[str, Any],
@@ -440,6 +472,22 @@ class LLMPromptEngine:
         fail before any keyframe/video workflow is submitted.
         """
         manager = self._require_manager()
+        resolved_subject_context = dict(subject_context or {})
+        interaction_required = bool(
+            dict(resolved_subject_context.get("interaction_contract") or {}).get("required", False)
+        )
+        subject_names = [
+            str(item.get("name") or "").strip()
+            for item in (resolved_subject_context.get("subjects") or [])
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        ]
+        subject_contract = (
+            "Two required subject slots must remain visible and individually recognizable: "
+            + "; ".join(subject_names)
+            + ". They must share a concrete, readable interaction; an additional unrequested subject is forbidden."
+            if interaction_required and len(subject_names) == 2
+            else f"One required protagonist must remain individually recognizable: {character}. Do not add unrequested subjects."
+        )
         expected_times = native_h3_shot_times(base_storyboard)
         if int(duration_seconds) not in {15, 20}:
             raise PromptGenerationError("Native H3 storyboard generation currently supports duration_seconds=15 or 20.")
@@ -450,10 +498,10 @@ class LLMPromptEngine:
                 "Native H3 base storyboard must define non-empty world.continuity_rules."
             )
         for key, value in news_context.items():
-            if isinstance(value, str) and len(value) > 2000:
-                raise PromptGenerationError(f"Native H3 news_context.{key} exceeds 2000 characters.")
-        if len(str(creative_brief or "")) > 2000:
-            raise PromptGenerationError("Native H3 creative_brief exceeds 2000 characters.")
+            if isinstance(value, str) and len(value) > 5000:
+                raise PromptGenerationError(f"Native H3 news_context.{key} exceeds 5000 characters.")
+        if len(str(creative_brief or "")) > 5000:
+            raise PromptGenerationError("Native H3 creative_brief exceeds 5000 characters.")
         if int(duration_seconds) == 15 and len(expected_times) == 3:
             pacing_contract = (
                 "The 15-second contract uses three beats only: hook (0-4s) establishes the problem and commits the first action, "
@@ -633,7 +681,8 @@ class LLMPromptEngine:
         user_prompt = "\n".join(
             re.sub(r"(?<!\w)Kirby(?!\w)", str(character), line, flags=re.IGNORECASE)
             for line in [
-                f"Character: {character}",
+                 f"Character: {character}",
+                 f"Subject contract: {subject_contract}",
                 f"Style: {style}",
                 f"Duration seconds: {int(duration_seconds)}",
                 f"Creative brief: {safe_creative_brief}",
@@ -643,36 +692,36 @@ class LLMPromptEngine:
                 f"Generate a new, original, publishable short-form story for one continuous native H3 clip with {len(expected_times)} causal beats.",
                 "Treat the two inputs as different responsibilities: the user creative brief controls the requested character, tone, style, and any must-preserve objective; the selected news title and keywords control the concrete subject or event that makes this episode news-grounded.",
                 "Content comes before lore: before writing the story spine, design story.gag_card as one concrete visual joke that can be understood without dialogue, but make the gag subordinate to the news mechanism rather than replacing it. The gag card must name the exact hook frame, one simple character desire, the active news mechanism, the failed attempt/setback, the readable face or body reaction, the final visual reversal/payoff, and why the ending is replayable.",
-                "A good short opens in the middle of a physical action, not with a portal reveal, exposition, world-building, or a character standing and looking. The opening keyframe must show the hook_frame already happening. Keep the protagonist large and readable, but let the anchor be an environment, force, structure, relationship, sequence, or prop according to the news event; do not default to a floating object.",
-                "opening_keyframe_prompt is the actual first video frame, not a setup description: begin with an active verb already happening, such as 'Kirby leaps as the mechanism launches' or 'Kirby recoils while the barrier snaps shut'. Never start it with 'stands', 'sits', 'looks', 'waits', 'poses', or another calm pose unless the same sentence makes an immediate physical force visibly act on Kirby.",
-                "Use this rhythm: hook_frame immediately exposes the news mechanism; the middle beat makes that mechanism worsen or reverse the plan and causes one visible consequence; the final beat flips the situation into a clean cute payoff that resolves the same news-driven objective. Do not add a second quest, a second villain, a duplicate protagonist, combat lore, or an abstract technical explanation.",
+                 "A good short opens in the middle of a physical action, not with a portal reveal, exposition, world-building, or a character standing and looking. The opening keyframe must show the hook_frame already happening. Keep every required subject large and readable, but let the anchor be an environment, force, structure, relationship, sequence, or prop according to the news event; do not default to a floating object.",
+                 "opening_keyframe_prompt is the actual first video frame, not a setup description: begin with an active verb already happening, such as 'one subject reaches as the mechanism launches while the other reacts' or 'both subjects recoil while the barrier snaps shut'. Never start it with 'stands', 'sits', 'looks', 'waits', 'poses', or another calm pose unless the same sentence makes an immediate physical force visibly act on the required subjects.",
+                 "Use this rhythm: hook_frame immediately exposes the news mechanism; the middle beat makes that mechanism worsen or reverse the plan and causes one visible consequence; the final beat flips the situation into a clean cute payoff that resolves the same news-driven objective. Do not add a second quest, a second villain, an unrequested third subject, combat lore, or an abstract technical explanation.",
                 "The news is not optional atmosphere. It must become a recognizable event mechanism and a visible consequence inside the same causal chain as the user brief. Preserve three distinct visual anchors: source context, active mechanism, and consequence. Do not replace the news with a generic storm, seed, chase, rescue, or glowing object that could fit any headline.",
                 "Do not copy sensitive or explicit headline wording into visuals. Translate it into a safe but recognizable visual equivalent, such as an AI humanoid companion robot for an AI-robot headline, while preserving the source concept in the story's visible anchor.",
                 "Return story.news_trace with contract_version=2: source_title must copy the selected title exactly; source_concepts must copy concrete phrases from the title or keyword; visual_translation must explain the safe visible translation; news_mechanism must describe the event's active physical logic; news_consequence must describe what visibly changes because of that logic; visual_anchors must contain at least three distinct concrete anchors; anchor_roles must identify context, mechanism, and consequence; integration must explicitly explain how the user brief and news mechanism share one protagonist objective.",
                 "The context anchor must establish what kind of real-world situation this is, the mechanism anchor must actively change the plan in the middle beat, and the consequence anchor must be visible in the payoff. Anchors may be architecture, environmental change, spatial relationship, synchronized motion, or a prop. Every anchor must be traceable to a concrete source concept or source relationship; carry at least two source concepts into visual_translation or integration whenever the source provides two or more. Do not invent an unsupported projectile, monster, ball, orb, or other threat merely to manufacture conflict. For prevention, health, safety, or protection headlines, make the source-derived barrier, seal, shield, dose-like container, or route-to-safety itself the active mechanism and visible consequence. For vehicle, SUV, crossover, or car headlines, preserve a visible vehicle-specific physical cue such as a compact SUV cabin, wheel, seat, body shell, cargo space, or road maneuver; a generic room or cabin is insufficient. A trace that only says 'the news inspires the mood' or repeats one object three times is invalid.",
                 "Set news_trace.anchor_roles to exactly ['context', 'mechanism', 'consequence'] in that order. Do not substitute generic labels such as structure, force, environment, prop, or sequence.",
                 "Bad integration: an AI-robot headline followed by an unrelated storm-and-seed rescue. Good integration: preserve the user's seed objective, but make the news-derived AI/robot concept the concrete obstacle, prop, or consequence that Kirby must resolve.",
-                "The character must remain the clear protagonist and the story must be complete within the requested duration.",
+                 "The declared subject contract must remain clear and the story must be complete within the requested duration.",
                 "base_prompt is an identity-and-animation-style anchor only: keep it concise, do not describe a calm/peaceful opening, fixed camera, or a posed character, and do not let it conflict with the first shot's disruption.",
                 "Write the positive video description in MiniMax H3's integrated multimodal order: each shot has a timestamp, visible action, camera movement, and state change; put separate overall-soundscape and non-diegetic-music directions together inside story.native_audio, and do not add alternative audio keys.",
                 "Attach the camera instruction to the action it controls. Prefer one concrete camera movement per beat (follow, push in, pan, tilt, pull out, or a deliberate static hold after motion), and use a readable physical handoff between beats.",
                 f"Return exactly {len(expected_times)} causal native_shots. Use these recommended beat windows as a pacing guide: {', '.join(expected_times)}. {pacing_contract} The numeric ranges must be contiguous from 0s to {int(duration_seconds)}s with no gaps or overlap. For each shot.time, output a plain numeric range such as '0-4', '4-10', and '10-15' (an optional trailing s is allowed); never output clock syntax such as '00:00 - 00:04', colons, or words.",
                 "Story quality contract: the hook must show a striking disruption within the first second and create one concrete question; the protagonist must visibly want one thing and risk losing something specific. The first frame, gag_card.hook_frame, and native_shots[0].action must describe the same instant.",
-                "The middle must contain a visible setback or reversal that costs the protagonist something and changes the plan; do not describe a smooth journey with no price. Write at least one explicit reversal action (for example: the mechanism knocks Kirby back, closes the route, reverses direction, or blocks the attempted advance) and name the physical cost in state_change.",
-                "Middle-beat hard gate: native_shots[1].action must show the mechanism physically interrupting Kirby's original objective and Kirby visibly losing position, access, control, or a needed object. A sentence that only says gears spin, a key descends, lights change, or the camera follows is not a setback; use the causal form 'mechanism changes/blocks the route -> Kirby is knocked back or loses access -> the plan must change'.",
+                 "The middle must contain a visible setback or reversal that costs the required subject contract something and changes the plan; do not describe a smooth journey with no price. Write at least one explicit reversal action and name the physical cost in state_change.",
+                 "Middle-beat hard gate: native_shots[1].action must show the mechanism physically interrupting the declared objective and visibly changing a required subject's position, access, control, or needed object. A sentence that only says gears spin, a key descends, lights change, or the camera follows is not a setback; use a causal form where the mechanism changes the route or relationship, a required subject loses ground or access, and the plan must change.",
                 "The final beat must resolve the same objective introduced in the hook and show physical evidence of the resolution; do not introduce a new quest or end on an unexplained spectacle.",
                 "Short-video rhythm contract: every beat has one dominant physical action, one visible composition change, one visible state change, and one reason to keep watching; avoid an atmospheric opening with no problem. The three beats must be a single gag sequence, not three plot chapters.",
-                "Prefer one simple, readable news mechanism that can be seen in silhouette: a synchronized shutdown, a barrier closing, a route merging or splitting, a spreading consequence, a structural shift, a force changing direction, or a relationship becoming physically unbalanced. Avoid complex machines, distant facilities, extra characters, and background lore that the video model may ignore.",
-                "Write actions as visible cause-and-effect: the news mechanism must change the environment or spatial relationship, Kirby must visibly fail or lose ground, the plan must change, and the payoff must show the news consequence resolving. Do not let the character merely look at, hold, or pose with the same prop across multiple beats.",
+                 "Prefer one simple, readable news mechanism that can be seen in silhouette: a synchronized shutdown, a barrier closing, a route merging or splitting, a spreading consequence, a structural shift, a force changing direction, or a relationship becoming physically unbalanced. Avoid complex machines, distant facilities, unrequested third subjects, and background lore that the video model may ignore.",
+                 "Write actions as visible cause-and-effect: the news mechanism must change the environment or spatial relationship, the required subjects must visibly act and react, the plan must change, and the payoff must show the news consequence resolving. Do not let the subjects merely look at, hold, or pose with the same prop across multiple beats.",
                 "Use concrete verbs and consequences in state_change. Avoid vague phrases such as Kirby reacts, the mood shifts, the scene becomes exciting, or the story progresses.",
                 "Do not use readable words, letters, numbers, signs, labels, subtitles, headlines, or written symbols anywhere in the visuals; communicate the idea through shape, color, gesture, and physical props only.",
                 "Do not use writing-bearing props or marked surfaces such as documents, reports, newspapers, ledgers, charts, screens, interfaces, glyphs, runes, or financial symbols. Translate news into unmarked physical shapes, color, light, motion, and environmental change.",
                 "For software, web, AI-agent, or protocol news, never depict readable web-page text, app labels, dashboard text, button labels, menu text, or interface copy. Neutral physical panels and displays are allowed when they carry no letters, numbers, logos, or readable symbols; translate the concept through system behavior made physical: synchronized lights going dark, a route being rerouted, a gate refusing passage, a chain of modules separating, a structure bypassed by a shadow, or another event-specific mechanism. Do not automatically use a token, ribbon of light, gate, orb, or balloon.",
                 "The first shot must show visible character or camera motion within the first second and must not hold the opening pose; every beat must change composition and mission state rather than repeating a setup.",
                 "Do not reuse the base storyboard's plot, props, setting, or ending. The base storyboard only supplies character and continuity rules.",
-                f"Character identity rule: one {character} only; preserve its identity, proportions, silhouette, and palette in every shot.",
-                "Do not add humans, extra named characters, subtitles, logos, or written news text.",
-                "If the source news mentions children, families, residents, officials, or other people, keep them out of the rendered frame in this character-only clip. Translate their stakes into an empty shelter, displaced belongings, a threatened structure, or another unmarked physical consequence; never let a prose stake introduce extra on-screen characters.",
+                 f"Character identity rule: {subject_contract} Preserve every required subject's identity, proportions, silhouette, and palette in every shot.",
+                 "Do not add humans, extra named characters beyond the declared subject slots, subtitles, logos, or written news text.",
+                 "If the source news mentions children, families, residents, officials, or other people, keep them out of the rendered frame unless they are explicitly part of the declared subject contract. Translate their stakes into an empty shelter, displaced belongings, a threatened structure, or another unmarked physical consequence.",
             ]
         )
         payload = self._normalize_native_h3_story_payload(
@@ -1174,7 +1223,7 @@ class LLMPromptEngine:
             previous_story = (previous_payload or {}).get("story")
             if visual_repair:
                 forbidden_context_pattern = re.compile(
-                    r"\b(?:reads?|written|readable|words?|letters?|numbers?|labels?|stamps?|approved|"
+                    r"\b(?:reads?|written|readable|words?|letters?|numbers?|labels?|approved|"
                     r"signage|headlines?|tickers?|documents?|reports?|newspapers?|ledgers?|charts?|"
                     r"graphs?|glyphs?|runes?|symbols?)\b",
                     flags=re.IGNORECASE,
@@ -1540,7 +1589,6 @@ class LLMPromptEngine:
             ("letters", r"\bletters?\b"),
             ("numbers", r"\bnumbers?\b"),
             ("label", r"\blabel(?:ed|s|ing)?\b"),
-            ("stamp", r"\bstamp(?:ed|s|ing)?\b"),
             ("approved", r"\bapproved\b"),
             ("sign says", r"\bsign\s+says\b"),
             ("sign reads", r"\bsign\s+reads\b"),
@@ -1562,6 +1610,17 @@ class LLMPromptEngine:
             for label, pattern in forbidden_visual_patterns
             if re.search(pattern, visual_story_text)
         ]
+
+        stamp_readable_pattern = (
+            r"\b(?:stamp(?:ed|s|ing)?|stamper)\b[^.;\n]{0,60}"
+            r"\b(?:reads?|written|readable|text|words?|letters?|numbers?|labels?|"
+            r"headlines?|tickers?)\b|"
+            r"\b(?:reads?|written|readable|text|words?|letters?|numbers?|labels?|"
+            r"headlines?|tickers?)\b[^.;\n]{0,60}"
+            r"\b(?:stamp(?:ed|s|ing)?|stamper)\b"
+        )
+        if re.search(stamp_readable_pattern, visual_story_text):
+            violations.append("stamp with readable content")
 
         surface_pattern = (
             r"(?:\b(?:screens?|displays?|panels?|interfaces?|web\s*sites?|web\s*pages?|"
@@ -1611,6 +1670,7 @@ class LLMPromptEngine:
                     f"Media type: {goal.media_type}",
                     f"Style: {selected_style}",
                     f"Character: {goal.constraints.get('character', '')}",
+                    _goal_subject_instruction(goal),
                     f"Duration seconds: {goal.duration_seconds}",
                     f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                     "Return JSON with keys: creative_brief, prompt, negative_prompt.",
@@ -1675,6 +1735,7 @@ class LLMPromptEngine:
                 f"Prefix: {prefix}",
                 f"Suffix: {suffix}",
                 f"Character: {goal.constraints.get('character', '')}",
+                    _goal_subject_instruction(goal),
                     f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                     "Return JSON with keys: prompt, negative_prompt.",
                     "Create a concise generation-ready prompt using this order: Subject, Scene, Action, Environment, Camera, Style and lighting, Quality.",
@@ -1726,6 +1787,7 @@ class LLMPromptEngine:
                 f"Goal: {goal.prompt}",
                 f"Media type: {goal.media_type}",
                 f"Character: {goal.constraints.get('character', '')}",
+                _goal_subject_instruction(goal),
                 f"Style: {goal.style}",
                 f"Creative brief: {creative_brief}",
                 f"Tone: {tone}",
@@ -1962,6 +2024,7 @@ class LLMPromptEngine:
             f"Current segment narration: {segment.get('narration', '')}",
             f"Style: {goal.style}",
             f"Character: {goal.constraints.get('character', '')}",
+            _goal_subject_instruction(goal),
             f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                     f"Has prior frame path: {'yes' if prior_frame else 'no'}",
         ]
@@ -2305,16 +2368,13 @@ class LLMPromptEngine:
                 model="vision" if visual_paths else "text",
                 images=visual_paths or None,
             )
+            payload = self._validate_publish_caption_payload(payload, stage="initial")
             initial_hashtag_text = self._normalize_hashtag_text(
-                str(payload.get("hashtags") or "").strip(),
+                payload["hashtags"],
                 required_hashtags=normalized_hashtags,
             )
-            platform_captions = payload.get("platform_captions")
-            if platform_captions is None:
-                platform_captions = {}
-            if not isinstance(platform_captions, dict):
-                raise ValueError("Caption model returned invalid platform_captions.")
-            normalized_caption = self._clean_social_post_text(str(payload.get("caption") or ""))
+            platform_captions = payload["platform_captions"]
+            normalized_caption = self._clean_social_post_text(payload["caption"])
             if not normalized_caption or self._is_caption_placeholder(normalized_caption):
                 raise ValueError("Caption model returned an empty or placeholder caption.")
             article_format_required = bool(goal.constraints.get("social_post_format", False))
@@ -2327,9 +2387,9 @@ class LLMPromptEngine:
                             "Keep only claims visibly supported by the media.",
                             "Because news grounding is required, retain or add one short sentence explicitly connecting the visible gag to the real-world news mechanism as a visual metaphor (remote, no-verification access multiplying security openings); do not present invented incident details as facts.",
                             "Required shape: 3-5 short paragraphs, a clear hook, useful or emotional value,",
-                            "a compact 1️⃣/2️⃣/3️⃣ takeaway list when appropriate, one genuine question,",
+                            "a compact 1️⃣/2️⃣/3️⃣ takeaway list with each item on its own line, one genuine question,",
                             "and a natural like/save/share/follow call to action.",
-                            "Return 2 to 5 non-empty hashtags in the hashtags field. Preserve the current usable hashtags unless the attached media clearly does not support them.",
+                            "Use blank lines between paragraphs. Return hashtags as one space-separated string in the hashtags field, never as a JSON array or Python list. Keep hashtags out of caption.",
                             "Do not output Caption:, Hashtags:, Main Content:, Draft Post:, or any metadata label.",
                             f"Current draft: {normalized_caption}",
                             f"Format issues to fix: {', '.join(format_issues)}",
@@ -2355,24 +2415,30 @@ class LLMPromptEngine:
                         model="vision" if visual_paths else "text",
                         images=visual_paths or None,
                     )
-                    normalized_caption = self._clean_social_post_text(str(repaired_payload.get("caption") or ""))
+                    repaired_payload = self._validate_publish_caption_payload(
+                        repaired_payload,
+                        stage="article repair",
+                    )
+                    normalized_caption = self._clean_social_post_text(repaired_payload["caption"])
                     if not normalized_caption:
                         raise ValueError("Caption article repair returned an empty post.")
                     repaired_hashtag_text = self._normalize_hashtag_text(
-                        str(repaired_payload.get("hashtags") or "").strip(),
+                        repaired_payload["hashtags"],
                         required_hashtags=normalized_hashtags,
                     )
                     if not repaired_hashtag_text and initial_hashtag_text:
                         repaired_payload = dict(repaired_payload)
                         repaired_payload["hashtags"] = initial_hashtag_text
                     payload = repaired_payload
-                    platform_captions = payload.get("platform_captions")
-                    if platform_captions is None:
-                        platform_captions = {}
-                    if not isinstance(platform_captions, dict):
-                        raise ValueError("Caption article repair returned invalid platform_captions.")
+                    platform_captions = payload["platform_captions"]
+                    repaired_format_issues = self._social_post_format_issues(normalized_caption)
+                    if repaired_format_issues:
+                        raise ValueError(
+                            "Caption article repair did not satisfy the publish format: "
+                            + "; ".join(repaired_format_issues)
+                        )
             normalized_hashtag_text = self._normalize_hashtag_text(
-                str(payload.get("hashtags") or "").strip(),
+                payload["hashtags"],
                 required_hashtags=normalized_hashtags,
             )
             if not normalized_hashtag_text:
@@ -2405,15 +2471,45 @@ class LLMPromptEngine:
             raise self._generation_error("prepare_publish_caption", exc) from exc
 
     @staticmethod
+    def _validate_publish_caption_payload(payload: Any, *, stage: str) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError(f"Caption {stage} returned a non-object payload.")
+        if not isinstance(payload.get("caption"), str):
+            raise ValueError(f"Caption {stage} returned a non-string caption.")
+        if not isinstance(payload.get("hashtags"), str):
+            raise ValueError(
+                f"Caption {stage} returned hashtags with an invalid type; expected one space-separated string."
+            )
+        platform_captions = payload.get("platform_captions")
+        if not isinstance(platform_captions, dict):
+            raise ValueError(f"Caption {stage} returned invalid platform_captions.")
+        invalid_platform_values = [
+            str(platform)
+            for platform, caption in platform_captions.items()
+            if not isinstance(caption, str)
+        ]
+        if invalid_platform_values:
+            raise ValueError(
+                f"Caption {stage} returned non-string platform captions: {', '.join(invalid_platform_values)}."
+            )
+        return payload
+
+    @staticmethod
     def _normalize_hashtag_text(hashtags: str, *, required_hashtags: list[str]) -> str:
+        if not isinstance(hashtags, str):
+            raise ValueError("Caption model returned hashtags with an invalid type; expected a string.")
         seen: list[str] = []
         seen_keys: set[str] = set()
-        for token in str(hashtags or "").replace("\n", " ").split():
+        for token in hashtags.replace("\n", " ").split():
             cleaned = token.strip().rstrip(".,;")
             if not cleaned:
                 continue
+            if any(marker in cleaned for marker in ("[", "]", "'", '"', ",")):
+                raise ValueError("Caption model returned malformed hashtag list notation.")
             if not cleaned.startswith("#"):
                 cleaned = f"#{cleaned.lstrip('#')}"
+            if "#" in cleaned[1:]:
+                raise ValueError("Caption model returned malformed hashtag tokens.")
             key = cleaned[1:].casefold()
             if not key or key in BLOCKED_HASHTAG_KEYS:
                 continue
@@ -2473,6 +2569,8 @@ class LLMPromptEngine:
             issues.append("a genuine audience question is required")
         if not re.search(r"(?:^|\n)\s*(?:[1-3][.)]|[1-3]️⃣)", str(value or "")):
             issues.append("include a concise numbered takeaway list")
+        if re.search(r"(?<![\w#])#[^\s#]+", str(value or "")):
+            issues.append("hashtags must be returned only in the hashtags field")
         if len(str(value or "")) < 180:
             issues.append("the post is too short to provide article-level value")
         return issues
@@ -2551,12 +2649,27 @@ class LLMPromptEngine:
             for item in vision_evidence
             if isinstance(item, dict) and str(item.get("media_path") or "").strip()
         }
+        _, subject_names, interaction_required = _goal_subject_contract(goal)
         hard_failure_terms = (
-            "duplicate",
-            "extra character",
-            "multiple character",
-            "multiple kirby",
-            "crowd",
+            (
+                "unwanted third subject",
+                "third character",
+                "extra character beyond the declared pair",
+                "three characters",
+                "four characters",
+                "more than two characters",
+                "more than two subjects",
+                "crowd",
+            )
+            if interaction_required
+            else (
+                "duplicate",
+                "extra character",
+                "multiple character",
+                "multiple kirby",
+                "crowd",
+            )
+        ) + (
             "readable text",
             "watermark",
             "speech bubble",
@@ -2647,7 +2760,12 @@ class LLMPromptEngine:
                 "Return JSON with keys: selected_assets, ranked_candidates, selection_rationale, regeneration_notes.",
                 "Each ranked_candidates item must include: media_path, score, rationale.",
                 "Use the vision evidence, not filename order, to make the final choice. A lower-scoring candidate that passes all hard gates is better than a higher-scoring candidate with a hard failure.",
-                "Never select an asset whose vision evidence reports duplicate or extra characters, readable text, a watermark, a speech bubble, pseudo-text, or scribbles.",
+                (
+                    f"The declared subject slots are {', '.join(subject_names)}; both slots may have the same name. "
+                    "Allow exactly those two slots, require their visible interaction, and reject an unrequested third subject or identity swap."
+                    if interaction_required
+                    else "Never select an asset whose vision evidence reports duplicate or extra characters, readable text, a watermark, a speech bubble, pseudo-text, or scribbles."
+                ),
             ]
         )
         try:
@@ -2750,6 +2868,13 @@ class LLMPromptEngine:
         try:
             analyses: list[dict[str, Any]] = []
             character = str(goal.constraints.get("character", "") or "").strip()
+            _, subject_names, interaction_required = _goal_subject_contract(goal)
+            subject_contract = (
+                f"Required subject slots: {', '.join(subject_names)}. The two slots may have the same name; "
+                "judge them as two declared visual slots in one interacting scene."
+                if interaction_required
+                else f"Required protagonist: {character}. Do not add another subject."
+            )
             batch_enabled = os.environ.get("AGENTIC_REVIEW_VISION_BATCH", "true").strip().lower() not in {
                 "0",
                 "false",
@@ -2765,10 +2890,15 @@ class LLMPromptEngine:
                             f"Goal: {goal.prompt}",
                             f"Style: {goal.style}",
                             f"Character: {character}",
+                            subject_contract,
                             f"Candidate media paths in image order: {json.dumps(existing_paths, ensure_ascii=False)}",
-                            "Evaluate every attached candidate image independently against the goal and character identity.",
+                            "Evaluate every attached candidate image independently against the goal, declared subject slots, and identity continuity.",
                             "Return one analysis for each candidate path, preserving the exact media_path string.",
-                            "Penalize duplicate or extra characters, readable text, watermarks, speech bubbles, pseudo-text, or scribbles.",
+                            (
+                                "Require the two declared subjects to share a readable interaction; penalize an unrequested third subject or identity swap, but do not penalize two slots with the same name."
+                                if interaction_required
+                                else "Penalize duplicate or extra characters, readable text, watermarks, speech bubbles, pseudo-text, or scribbles."
+                            ),
                         ]
                     ),
                     schema_name="media_prompt_match_batch",
@@ -2831,10 +2961,15 @@ class LLMPromptEngine:
                             f"Goal: {goal.prompt}",
                             f"Style: {goal.style}",
                             f"Character: {character}",
-                            "Score how well this image matches the goal and character identity.",
+                            subject_contract,
+                            "Score how well this image matches the goal, declared subject slots, and identity continuity.",
                             "Return JSON with keys: score, rationale.",
                             "Score must be an integer from 0 to 100.",
-                            "Penalize images that clearly mismatch the requested subject, action, setting, or character.",
+                            (
+                                "Require visible interaction between both declared slots; penalize an unrequested third subject or identity swap, but allow the two slots to use the same name."
+                                if interaction_required
+                                else "Penalize images that clearly mismatch the requested subject, action, setting, or character."
+                            ),
                         ]
                     ),
                     schema_name="media_prompt_match",
@@ -2872,6 +3007,7 @@ class LLMPromptEngine:
         *,
         contact_sheet_path: str,
         character: str,
+        subject_context: dict[str, Any] | None = None,
         story_spine: dict[str, Any],
         native_shots: list[dict[str, Any]],
         news_context: dict[str, Any],
@@ -2912,19 +3048,31 @@ class LLMPromptEngine:
 
         user_prompt = build_video_semantic_qa_prompt(
             character=character,
+            subject_context=dict(subject_context or {}),
             story_spine=story_spine,
             native_shots=native_shots,
             news_context=news_context,
             rendered_prompt=rendered_prompt,
             duration_seconds=duration_seconds,
         )
+        qa_schema = VIDEO_SEMANTIC_QA_SCHEMA
+        interaction_required = bool(
+            dict(dict(subject_context or {}).get("interaction_contract") or {}).get("required", False)
+        )
+        if interaction_required:
+            qa_schema = deepcopy(VIDEO_SEMANTIC_QA_SCHEMA)
+            required_checks = qa_schema["properties"]["checks"]["required"]
+            required_checks.extend(
+                key for key in ("required_subjects_clear", "interaction_visible", "unexpected_extra_subjects")
+                if key not in required_checks
+            )
         try:
             payload = self._chat_json_with_recorder(
                 manager,
                 LONG_VIDEO_SYSTEM_PROMPT,
                 user_prompt,
                 schema_name="native_h3_video_semantic_qa",
-                schema=VIDEO_SEMANTIC_QA_SCHEMA,
+                schema=qa_schema,
                 model="vision",
                 images=[media_path],
             )
@@ -2940,6 +3088,7 @@ class LLMPromptEngine:
             prompt_mode="llm",
             llm_backend=self.backend_info(),
             news_anchor_terms=news_anchor_terms,
+            subject_context=dict(subject_context or {}),
         )
 
     def _template_fallback(

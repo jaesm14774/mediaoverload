@@ -143,6 +143,7 @@ def inspect_kirby_input(
     *,
     allow_external: bool = False,
     allow_multipanel: bool = False,
+    allow_declared_subject_pair: bool = False,
 ) -> KirbyInputReport:
     path = Path(image_path).expanduser().resolve()
     reasons: list[str] = []
@@ -189,7 +190,7 @@ def inspect_kirby_input(
         reasons.append("no red-foot color signal detected")
     if multi_panel_detected and not allow_multipanel:
         reasons.append("multi-panel/collage keyframe is blocked outside the ref2va reference-video route")
-    if duplicate_protagonist_detected and not allow_multipanel:
+    if duplicate_protagonist_detected and not allow_multipanel and not allow_declared_subject_pair:
         reasons.append("duplicate Kirby protagonist silhouettes are blocked in a single-character keyframe")
     return KirbyInputReport(
         str(path),
@@ -210,11 +211,13 @@ def assert_kirby_input(
     *,
     allow_external: bool = False,
     allow_multipanel: bool = False,
+    allow_declared_subject_pair: bool = False,
 ) -> KirbyInputReport:
     report = inspect_kirby_input(
         image_path,
         allow_external=allow_external,
         allow_multipanel=allow_multipanel,
+        allow_declared_subject_pair=allow_declared_subject_pair,
     )
     if not report.passed:
         details = "; ".join(report.reasons) or "unknown Kirby input validation failure"

@@ -64,8 +64,7 @@ Non-negotiable rules:
 
 
 def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list[dict[str, Any]]) -> dict[str, Any]:
-    character = str(goal.constraints.get("character", "") or "").strip()
-    subject_anchor = character or "main subject"
+    subject_anchor = _subject_anchor_clause(goal)
     news_context = _news_context(goal)
     action_directive = _action_directive(goal.media_type, goal.duration_seconds)
     continuity_directive = _continuity_directive(goal.media_type)
@@ -74,10 +73,10 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     if style_contract:
         style_direction = "; ".join(part for part in (style_direction, style_contract) if part)
     visual_prompt = structured_visual_prompt(
-        subject=_hero_subject_clause(subject_anchor),
+        subject=subject_anchor,
         scene=_core_scene_clause(goal.prompt, goal.media_type, news_context),
         action=action_directive,
-        environment=f"{_news_fusion_clause(news_context)}; {continuity_directive}",
+        environment=f"{_news_fusion_clause(news_context)}; {_interaction_clause(goal)}; {continuity_directive}",
         camera=_camera_beat(0, 2) if goal.media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "image_to_video"} else "clear focal composition",
         style=style_direction,
         quality=_quality_clause(goal.media_type),
@@ -89,7 +88,7 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
             "low quality",
             "bad anatomy",
             "deformed",
-            "duplicate subject",
+            "duplicate subject" if not _interaction_required(goal) else "identity swap",
             "identity drift",
             "inconsistent costume",
             "weak composition",
@@ -101,7 +100,7 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
             "pseudo-text",
             "scribbles",
             "interface",
-            "extra characters",
+            "extra characters" if not _interaction_required(goal) else "unwanted third subject",
             "crowd",
             "watermark",
             "text",
@@ -115,6 +114,7 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
         "negative_prompt": negative_prompt,
         "selected_style": selected_style,
         "idea_variants": idea_variants,
+        "subject_context": _subject_context(goal),
         "system_prompt": _system_prompt_for_media_type(goal.media_type),
     }
 
@@ -143,8 +143,7 @@ def build_story_segments(
             storyboard_segments,
             segment_count,
         )
-    character = str(goal.constraints.get("character", "") or "").strip()
-    subject_anchor = character or goal.prompt
+    subject_anchor = _subject_anchor_clause(goal) or goal.prompt
     news_context = _news_context(goal)
     motif_pool = _visual_motif_pool(news_context)
     segments: list[dict[str, Any]] = []
@@ -161,7 +160,7 @@ def build_story_segments(
         )
         end_state = f"{subject_anchor} has completed the {stage} movement and the primary visual state has changed"
         visual = structured_visual_prompt(
-            subject=_hero_subject_clause(subject_anchor),
+            subject=subject_anchor,
             scene=f"story stage: {stage}; tone: {tone}",
             action=motion,
             environment=f"{environment}; {motif_clause}" if motif_clause else environment,
@@ -239,15 +238,14 @@ def validate_story_anchor(goal: GoalRequest, segments: list[dict[str, Any]]) -> 
 
 
 def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame: str | None = None) -> dict[str, Any]:
-    character = str(goal.constraints.get("character", "") or "").strip()
-    subject_anchor = character or "same main subject"
+    subject_anchor = _subject_anchor_clause(goal) or "same main subject"
     news_context = _news_context(goal)
     prompt = structured_visual_prompt(
-        subject=_hero_subject_clause(subject_anchor),
+        subject=subject_anchor,
         scene=str(segment.get("visual", "")),
         action=str(segment.get("action") or "substantial action with visible start-to-end motion"),
         environment=(
-            f"{_news_fusion_clause(news_context)}; preserve facial features, costume, proportions, palette, and iconic character read"
+            f"{_news_fusion_clause(news_context)}; {_interaction_clause(goal)}; preserve facial features, costume, proportions, palette, and iconic character read"
         ),
         camera=str(segment.get("camera") or "coherent scene geography with camera continuity"),
         style=str(goal.style or "stylized cinematic animation"),
@@ -257,6 +255,7 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
         "segment_id": segment["segment_id"],
         "prompt": prompt,
         "narration": str(segment.get("narration", "")),
+        "subject_context": _subject_context(goal),
     }
     if prior_frame:
         outputs["prior_frame_path"] = prior_frame
@@ -266,7 +265,7 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
 def build_minimax_h3_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame: str | None = None) -> dict[str, Any]:
     """Build an H3-ready audiovisual prompt while preserving Kirby continuity."""
     base = build_segment_prompt(goal, segment, prior_frame=prior_frame)
-    character = str(goal.constraints.get("character", "") or "").strip() or "the main character"
+    character = _subject_names(goal) or "the main character"
     audio_direction = str(
         goal.constraints.get(
             "h3_audio_direction",
@@ -295,12 +294,17 @@ def build_minimax_h3_prompt(goal: GoalRequest, segment: dict[str, Any], prior_fr
         audio=audio_direction,
         render_mode="image_to_video" if prior_frame else "text_to_video",
         prior_frame=bool(prior_frame),
+        subject_context=_subject_context(goal),
     )
     prompt = "\n".join(
         [
             prompt,
             f"Story progression contract: {story_contract}" if story_contract else "",
-            "Character lock: preserve the same protagonist from the supplied identity anchor.",
+            (
+                "Character lock: preserve both declared subject slots from the supplied identity anchor and keep their interaction readable."
+                if _interaction_required(goal)
+                else "Character lock: preserve the same protagonist from the supplied identity anchor."
+            ),
             "Motion direction: advance from the declared start state to the declared end state with one continuous readable primary event.",
             f"Audio direction: {audio_direction}",
         ]
@@ -310,6 +314,7 @@ def build_minimax_h3_prompt(goal: GoalRequest, segment: dict[str, Any], prior_fr
         "prompt": prompt,
         "audio_direction": audio_direction,
         "prompt_format": "minimax_h3_context_ir_local",
+        "subject_context": _subject_context(goal),
     }
 
 
@@ -451,6 +456,68 @@ def _environment_beat(prompt: str, index: int, segment_count: int, motif_pool: l
 def _news_context(goal: GoalRequest) -> dict[str, Any]:
     raw = goal.constraints.get("news_context", {})
     return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _subject_context(goal: GoalRequest) -> dict[str, Any]:
+    raw = goal.constraints.get("subject_context", {})
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _interaction_required(goal: GoalRequest) -> bool:
+    return bool(_subject_context(goal).get("interaction_contract", {}).get("required", False))
+
+
+def _subject_names(goal: GoalRequest) -> str:
+    subjects = list(_subject_context(goal).get("subjects") or [])
+    names = [str(item.get("name") or "").strip() for item in subjects if isinstance(item, dict)]
+    names = [name for name in names if name]
+    if not names:
+        character = str(goal.constraints.get("character", "") or "").strip()
+        return character
+    return " and ".join(names)
+
+
+def _subject_anchor_clause(goal: GoalRequest) -> str:
+    context = _subject_context(goal)
+    subjects = list(context.get("subjects") or [])
+    if not subjects:
+        return _hero_subject_clause(str(goal.constraints.get("character", "") or "").strip() or "main subject")
+    clauses: list[str] = []
+    for item in subjects:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        profile = dict(item.get("profile") or {})
+        details = "; ".join(
+            part
+            for part in (
+                str(profile.get("role_description") or "").strip(),
+                str(profile.get("keywords") or "").strip(),
+            )
+            if part
+        )
+        clauses.append(f"{name}{f' ({details})' if details else ''}")
+    if _interaction_required(goal):
+        return (
+            "two distinct subject slots in one coherent frame: "
+            + "; ".join(clauses)
+            + "; both identities remain readable and visibly interact"
+        )
+    return _hero_subject_clause(clauses[0] if clauses else "main subject")
+
+
+def _interaction_clause(goal: GoalRequest) -> str:
+    if not _interaction_required(goal):
+        return "single-subject continuity; do not add unrequested subjects"
+    contract = dict(_subject_context(goal).get("interaction_contract") or {})
+    return (
+        "two required subjects share the same frame and a readable action relationship; "
+        "preserve each identity, spatial position, and role; do not add an unrequested third subject"
+        if contract.get("same_frame", True)
+        else "two required subjects maintain stable identity and a visible mutual action relationship"
+    )
 
 
 def _hero_subject_clause(subject_anchor: str) -> str:

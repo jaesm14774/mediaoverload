@@ -185,6 +185,7 @@ class PromptEngine:
         *,
         contact_sheet_path: str,
         character: str,
+        subject_context: dict[str, Any] | None = None,
         story_spine: dict[str, Any],
         native_shots: list[dict[str, Any]],
         news_context: dict[str, Any],
@@ -195,6 +196,7 @@ class PromptEngine:
         return self.llm_engine.evaluate_video_contact_sheet(
             contact_sheet_path=contact_sheet_path,
             character=character,
+            subject_context=dict(subject_context or {}),
             story_spine=story_spine,
             native_shots=native_shots,
             news_context=news_context,

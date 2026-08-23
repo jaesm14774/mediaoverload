@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import re
@@ -51,6 +52,11 @@ AUTONOMOUS_E2E_ROUTE_PREFERENCE = (
     "text2image2native_h3_ref2va",
     "text2longvideo",
 )
+SUBJECT_MODE_SINGLE = "single"
+SUBJECT_MODE_INTERACTION = "two_character_interaction"
+SUBJECT_MODE_RANDOM = "random"
+CONCRETE_SUBJECT_MODES = frozenset({SUBJECT_MODE_SINGLE, SUBJECT_MODE_INTERACTION})
+SUPPORTED_SUBJECT_MODES = frozenset({*CONCRETE_SUBJECT_MODES, SUBJECT_MODE_RANDOM})
 
 CONFIG_MEDIA_TYPE_MAP = {
     "text2img": "image",
@@ -67,6 +73,23 @@ CONFIG_MEDIA_TYPE_MAP = {
     "text2image2image": "text2img2img",
     "sticker_pack": "sticker_pack",
 }
+
+
+def _normalize_video_speed_config(value: object) -> dict[str, object]:
+    if value is None:
+        raw: dict[str, object] = {}
+    elif isinstance(value, dict):
+        raw = dict(value)
+    else:
+        raise ValueError("generation.video_speed must be a mapping")
+    enabled = bool(raw.get("enabled", False))
+    try:
+        factor = float(raw.get("factor", 2.0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("generation.video_speed.factor must be a number greater than zero") from exc
+    if not math.isfinite(factor) or factor <= 0:
+        raise ValueError("generation.video_speed.factor must be a finite number greater than zero")
+    return {"enabled": enabled, "factor": factor}
 
 def _normalize_generation_type(
     value: str | None,
@@ -93,6 +116,7 @@ def _fixed_character_selection(name: str, *, group_name: str = "") -> dict[str, 
     normalized_name = str(name or "").strip()
     return {
         "mode": "config",
+        "subject_mode": SUBJECT_MODE_SINGLE,
         "group_name": str(group_name or "").strip(),
         "selected_character": normalized_name,
         "candidate_count": 1,
@@ -100,6 +124,231 @@ def _fixed_character_selection(name: str, *, group_name: str = "") -> dict[str, 
         "selected_profile": {},
         "selection_source": "fixed_config",
     }
+
+
+def _subject_mode(config: dict[str, Any]) -> str:
+    generation = dict(config.get("generation", {}) or {})
+    mode = str(generation.get("subject_mode") or SUBJECT_MODE_SINGLE).strip().lower()
+    if mode not in SUPPORTED_SUBJECT_MODES:
+        raise ValueError(
+            "generation.subject_mode must be 'single', 'two_character_interaction', or 'random'"
+        )
+    return mode
+
+
+def _subject_mode_weights(config: dict[str, Any]) -> dict[str, float]:
+    generation = dict(config.get("generation", {}) or {})
+    raw_weights = generation.get("subject_mode_weights")
+    if not isinstance(raw_weights, dict) or not raw_weights:
+        raise ValueError(
+            "generation.subject_mode_weights is required when subject_mode is 'random'"
+        )
+
+    weights: dict[str, float] = {}
+    for raw_mode, raw_weight in raw_weights.items():
+        mode = str(raw_mode or "").strip().lower()
+        if mode not in CONCRETE_SUBJECT_MODES:
+            raise ValueError(
+                "generation.subject_mode_weights may contain only 'single' and "
+                "'two_character_interaction'"
+            )
+        if mode in weights:
+            raise ValueError(f"generation.subject_mode_weights contains duplicate mode '{mode}'")
+        if isinstance(raw_weight, bool):
+            raise ValueError(f"generation.subject_mode_weights['{mode}'] must be a finite non-negative number")
+        try:
+            weight = float(raw_weight)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"generation.subject_mode_weights['{mode}'] must be a finite non-negative number"
+            ) from exc
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError(
+                f"generation.subject_mode_weights['{mode}'] must be a finite non-negative number"
+            )
+        weights[mode] = weight
+
+    if not any(weight > 0 for weight in weights.values()):
+        raise ValueError(
+            "generation.subject_mode_weights must contain at least one positive weight"
+        )
+    return weights
+
+
+def _resolve_subject_mode(
+    config: dict[str, Any],
+    *,
+    rng: random.Random | None,
+) -> tuple[str, dict[str, float] | None]:
+    configured_mode = _subject_mode(config)
+    if configured_mode != SUBJECT_MODE_RANDOM:
+        return configured_mode, None
+    weights = _subject_mode_weights(config)
+    return _weighted_choice_required(weights, rng=rng), weights
+
+
+def _weighted_choice_required(
+    weights: dict[str, float],
+    *,
+    rng: random.Random | None,
+) -> str:
+    chooser = rng or random
+    total = sum(weights.values())
+    threshold = chooser.uniform(0, total)
+    cumulative = 0.0
+    for mode, weight in weights.items():
+        if weight <= 0:
+            continue
+        cumulative += weight
+        if threshold <= cumulative:
+            return mode
+    raise RuntimeError("subject mode weighted selection exhausted its validated weights")
+
+
+def _selection_subject_mode(
+    character_selection: dict[str, Any],
+    *,
+    configured_subject_mode: str,
+) -> str:
+    if configured_subject_mode != SUBJECT_MODE_RANDOM:
+        return configured_subject_mode
+    selected_mode = str(character_selection.get("subject_mode") or "").strip().lower()
+    if selected_mode in CONCRETE_SUBJECT_MODES:
+        return selected_mode
+    selection_mode = str(character_selection.get("mode") or "").strip().lower()
+    if selection_mode in {"config", "group"}:
+        return SUBJECT_MODE_SINGLE
+    if selection_mode == SUBJECT_MODE_INTERACTION:
+        return SUBJECT_MODE_INTERACTION
+    raise ValueError(
+        "random subject_mode requires a resolved selection with an effective subject mode"
+    )
+
+
+def _annotate_subject_selection(
+    selection: dict[str, Any],
+    *,
+    configured_subject_mode: str,
+    effective_subject_mode: str,
+    subject_mode_weights: dict[str, float] | None,
+) -> dict[str, Any]:
+    resolved = dict(selection)
+    resolved["subject_mode"] = effective_subject_mode
+    if configured_subject_mode == SUBJECT_MODE_RANDOM:
+        resolved["configured_subject_mode"] = configured_subject_mode
+        resolved["subject_mode_weights"] = dict(subject_mode_weights or {})
+        resolved["subject_mode_selection_source"] = "weighted_random"
+    return resolved
+
+
+def _subject_context_from_selection(
+    *,
+    subject_mode: str,
+    character_name: str,
+    character_selection: dict[str, Any],
+    configured_group_name: str,
+) -> dict[str, Any]:
+    if subject_mode == SUBJECT_MODE_INTERACTION:
+        raw_subjects = character_selection.get("subjects")
+        if not isinstance(raw_subjects, list) or len(raw_subjects) != 2:
+            raise ValueError(
+                "two_character_interaction selection must contain exactly two subject slots"
+            )
+        selection_is_same_group = bool(character_selection.get("is_same_group", False))
+        selection_group_name = str(
+            character_selection.get("group_name")
+            or (configured_group_name if selection_is_same_group else "")
+        ).strip()
+        subjects: list[dict[str, Any]] = []
+        for index, raw_subject in enumerate(raw_subjects):
+            if not isinstance(raw_subject, dict):
+                raise ValueError("two_character_interaction subjects must be mappings")
+            subject = dict(raw_subject)
+            name = str(subject.get("name") or "").strip()
+            if not name:
+                raise ValueError(f"two_character_interaction subject {index + 1} has no name")
+            subject["role"] = str(subject.get("role") or ("primary", "secondary")[index])
+            subject["name"] = name
+            subject["group_name"] = str(
+                subject.get("group_name")
+                or selection_group_name
+            ).strip()
+            subject["profile"] = dict(subject.get("profile") or {})
+            subjects.append(subject)
+        return {
+            "mode": subject_mode,
+            "subjects": subjects,
+            "selection": {
+                "is_same_group": selection_is_same_group,
+                "group_name": selection_group_name,
+                "candidate_count": int(character_selection.get("candidate_count") or 0),
+                "selection_source": str(character_selection.get("selection_source") or ""),
+            },
+            "interaction_contract": {
+                "required": True,
+                "same_frame": True,
+                "visible_relation": True,
+                "unexpected_extra_subjects": False,
+            },
+        }
+
+    selected_profile = dict(character_selection.get("selected_profile") or {})
+    return {
+        "mode": "single",
+        "subjects": [
+            {
+                "role": "primary",
+                "name": character_name,
+                "group_name": str(
+                    character_selection.get("group_name") or configured_group_name
+                ).strip(),
+                "status": 1,
+                "weight": 1.0,
+                "profile": selected_profile,
+            }
+        ],
+        "selection": {
+            "is_same_group": False,
+            "group_name": str(
+                character_selection.get("group_name") or configured_group_name
+            ).strip(),
+            "candidate_count": int(character_selection.get("candidate_count") or 1),
+            "selection_source": str(character_selection.get("selection_source") or ""),
+        },
+        "interaction_contract": {
+            "required": False,
+            "same_frame": False,
+            "visible_relation": False,
+            "unexpected_extra_subjects": True,
+        },
+    }
+
+
+def _subject_prompt_block(subject_context: dict[str, Any]) -> str:
+    subjects = list(subject_context.get("subjects") or [])
+    parts: list[str] = []
+    for subject in subjects:
+        name = str(subject.get("name") or "").strip()
+        role = str(subject.get("role") or "subject").strip()
+        profile = dict(subject.get("profile") or {})
+        details = "; ".join(
+            item
+            for item in (
+                str(profile.get("role_description") or "").strip(),
+                str(profile.get("keywords") or "").strip(),
+            )
+            if item
+        )
+        parts.append(f"{role}: {name}{f' ({details})' if details else ''}")
+    if not parts:
+        return "one main subject"
+    if bool(subject_context.get("interaction_contract", {}).get("required")):
+        return (
+            "Two required subjects in the same readable frame: "
+            + "; ".join(parts)
+            + ". Show a concrete mutual interaction and preserve each identity."
+        )
+    return "; ".join(parts)
 
 
 def resolve_character_selection(
@@ -111,13 +360,49 @@ def resolve_character_selection(
     character = dict(loaded_config.get("character", {}) or {})
     configured_name = str(character.get("name") or character.get("group_name") or Path(request.config_path).stem)
     group_name = str(character.get("group_name") or "").strip()
+    configured_subject_mode = _subject_mode(loaded_config)
+    subject_mode, subject_mode_weights = _resolve_subject_mode(
+        loaded_config,
+        rng=request.generation.rng,
+    )
+    if subject_mode == SUBJECT_MODE_INTERACTION:
+        generation = dict(loaded_config.get("generation", {}) or {})
+        interaction = dict(generation.get("two_character_interaction", {}) or {})
+        is_same_group = bool(interaction.get("is_same_group", True))
+        interaction_group_name = (
+            str(interaction.get("group_name") or group_name).strip()
+            if is_same_group
+            else ""
+        )
+        selection = CharacterGroupSelectionService().select_pair(
+            interaction_group_name or None,
+            is_same_group=is_same_group,
+            rng=request.generation.rng,
+        ).to_dict()
+        return _annotate_subject_selection(
+            selection,
+            configured_subject_mode=configured_subject_mode,
+            effective_subject_mode=subject_mode,
+            subject_mode_weights=subject_mode_weights,
+        )
     if not group_name:
-        return _fixed_character_selection(configured_name)
+        selection = _fixed_character_selection(configured_name)
+        return _annotate_subject_selection(
+            selection,
+            configured_subject_mode=configured_subject_mode,
+            effective_subject_mode=subject_mode,
+            subject_mode_weights=subject_mode_weights,
+        )
     selection = CharacterGroupSelectionService().select_random_character(
         group_name,
         rng=request.generation.rng,
     )
-    return selection.to_dict()
+    return _annotate_subject_selection(
+        selection.to_dict(),
+        configured_subject_mode=configured_subject_mode,
+        effective_subject_mode=subject_mode,
+        subject_mode_weights=subject_mode_weights,
+    )
 
 
 def load_global_social_config(repo_root: Path) -> dict[str, Any]:
@@ -214,15 +499,41 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         dict(load_global_social_config(repo_root).get("social_media", {}) or {}),
         dict(config.get("social_media", {}) or {}),
     )
+    video_speed = _normalize_video_speed_config(generation.get("video_speed"))
 
     style = _pick_primary_style(generation.get("style_weights"))
     configured_character_name = str(character.get("name") or character.get("group_name") or path.stem)
+    configured_subject_mode = _subject_mode(config)
+    if configured_subject_mode == SUBJECT_MODE_RANDOM:
+        _subject_mode_weights(config)
+    if not character_selection and configured_subject_mode == SUBJECT_MODE_RANDOM:
+        raise ValueError(
+            "random subject_mode requires a resolved selection before payload construction"
+        )
+    subject_mode = _selection_subject_mode(
+        character_selection,
+        configured_subject_mode=configured_subject_mode,
+    )
+    if subject_mode == SUBJECT_MODE_INTERACTION and not selected_character_name:
+        selected_subjects = character_selection.get("subjects")
+        if isinstance(selected_subjects, list) and selected_subjects:
+            selected_character_name = str(selected_subjects[0].get("name") or "").strip()
     character_name = selected_character_name or configured_character_name
     if not character_selection:
+        if subject_mode == SUBJECT_MODE_INTERACTION:
+            raise ValueError(
+                "two_character_interaction requires a resolved pair selection before payload construction"
+            )
         character_selection = _fixed_character_selection(
             character_name,
             group_name=str(character.get("group_name") or ""),
         )
+    subject_context = _subject_context_from_selection(
+        subject_mode=subject_mode,
+        character_name=character_name,
+        character_selection=character_selection,
+        configured_group_name=str(character.get("group_name") or "").strip(),
+    )
     prompt = _replace_character_identity(
         prompt,
         configured_name=configured_character_name,
@@ -417,13 +728,18 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     selected_profile = dict(character_selection.get("selected_profile") or {})
     role_description = str(selected_profile.get("role_description") or "").strip()
     role_keywords = str(selected_profile.get("keywords") or "").strip()
-    if role_description or role_keywords:
+    if subject_mode == SUBJECT_MODE_INTERACTION:
+        profile_block = f"Subject interaction contract: {_subject_prompt_block(subject_context)}"
+    elif role_description or role_keywords:
         profile_parts = [f"Selected character: {character_name}"]
         if role_description:
             profile_parts.append(f"Role profile: {role_description}")
         if role_keywords:
             profile_parts.append(f"Keywords: {role_keywords}")
         profile_block = " ".join(profile_parts)
+    else:
+        profile_block = ""
+    if profile_block:
         native_h3_creative_brief = "\n".join(
             item for item in (native_h3_creative_brief, profile_block) if item
         )
@@ -438,10 +754,16 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     )
     constraints = {
         "character": character_name,
+        "subject_mode": subject_mode,
+        "configured_subject_mode": configured_subject_mode,
+        "subject_context": subject_context,
+        "subjects": list(subject_context.get("subjects") or []),
+        "interaction_contract": dict(subject_context.get("interaction_contract") or {}),
         "character_selection": character_selection,
         "character_profile": selected_profile,
         "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
+        "video_speed": video_speed,
         "keyframe_workflow_name": str(generation.get("keyframe_workflow_name") or ""),
         "identity_refine_workflow_name": str(generation.get("identity_refine_workflow_name") or ""),
         "storyboard_path": str(generation.get("storyboard_path") or ""),
@@ -635,6 +957,17 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
                     if isinstance(value, list)
                     else value
                 )
+    character_config_summary = _summarize_character_config(
+        path=path,
+        character=character,
+        selected_character_name=character_name,
+        character_selection=character_selection,
+        generation=generation,
+        social_media=social_media,
+        strategies=strategies,
+        platform_configs=platform_configs,
+    )
+    character_config_summary["subject_context"] = subject_context
     return {
         "prompt": resolved_prompt,
         "media_type": agentic_media_type,
@@ -649,16 +982,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         "resolved_output_dir": str(resolved_output_dir),
         "routing": routing,
         "prompt_generation": autonomous_prompt,
-        "character_config_summary": _summarize_character_config(
-            path=path,
-            character=character,
-            selected_character_name=character_name,
-            character_selection=character_selection,
-            generation=generation,
-            social_media=social_media,
-            strategies=strategies,
-            platform_configs=platform_configs,
-        ),
+        "character_config_summary": character_config_summary,
         "routing_summary": _build_routing_summary(
             character_name=character_name,
             prompt=resolved_prompt,
@@ -676,6 +1000,8 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
     config_path = request.config_path
     runtime = request.runtime
     review = request.review
+    dry_run_publish = review.dry_run_publish
+    review_notes = review.review_notes
     effective_publish_after_generate = _effective_publish_after_generate(
         requested=review.publish_after_generate,
         stage_probe=review.stage_probe,
@@ -687,31 +1013,68 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
     logger.info("workflow.start | run_id=%s | config=%s", run_id, Path(config_path).resolve())
     logger.info("character.config.load | path=%s", Path(config_path).resolve())
     selection_group_name = ""
+    selection_subject_mode = "single"
     if Path(config_path).exists():
         try:
             selection_config = load_character_config(config_path)
             selection_character = dict(selection_config.get("character", {}) or {})
+            selection_subject_mode = _subject_mode(selection_config)
+            selection_generation = dict(selection_config.get("generation", {}) or {})
+            selection_interaction = dict(
+                selection_generation.get("two_character_interaction", {}) or {}
+            )
             selection_group_name = str(selection_character.get("group_name") or "").strip()
+            if selection_subject_mode == SUBJECT_MODE_INTERACTION:
+                selection_is_same_group = bool(selection_interaction.get("is_same_group", True))
+                selection_group_name = (
+                    str(selection_interaction.get("group_name") or selection_group_name).strip()
+                    if selection_is_same_group
+                    else ""
+                )
             character_selection = resolve_character_selection(request, config=selection_config)
+            selection_subject_mode = _selection_subject_mode(
+                character_selection,
+                configured_subject_mode=selection_subject_mode,
+            )
         except Exception as exc:
             record_event = getattr(recorder, "record_event", None)
             if callable(record_event):
                 record_event(
-                    "character.group.selection_failed",
+                    "character.subject.selection_failed"
+                    if selection_subject_mode in {SUBJECT_MODE_INTERACTION, SUBJECT_MODE_RANDOM}
+                    else "character.group.selection_failed",
                     group_name=selection_group_name,
+                    subject_mode=selection_subject_mode,
                     error=f"{type(exc).__name__}: {exc}",
                 )
             logger.exception(
-                "character.group.selection_failed | group=%s | error=%s",
+                "character.subject.selection_failed | mode=%s | group=%s | error=%s",
+                selection_subject_mode,
                 selection_group_name,
                 exc,
             )
             raise
     else:
         character_selection = _fixed_character_selection(Path(config_path).stem)
+        selection_subject_mode = SUBJECT_MODE_SINGLE
     selected_character_name = str(character_selection.get("selected_character") or "").strip()
+    if selection_subject_mode == SUBJECT_MODE_INTERACTION:
+        subjects = character_selection.get("subjects")
+        if not isinstance(subjects, list) or len(subjects) != 2:
+            raise ValueError("two_character_interaction selection did not return two subject slots")
+        selected_character_name = str(subjects[0].get("name") or "").strip()
     record_event = getattr(recorder, "record_event", None)
-    if str(character_selection.get("mode") or "") == "group":
+    if selection_subject_mode == SUBJECT_MODE_INTERACTION:
+        if callable(record_event):
+            record_event("character.subjects.selected", **character_selection)
+        logger.info(
+            "character.subjects.selected | mode=%s | group=%s | subjects=%s | candidate_count=%s",
+            selection_subject_mode,
+            character_selection.get("group_name", ""),
+            [subject.get("name", "") for subject in character_selection.get("subjects", [])],
+            character_selection.get("candidate_count", 0),
+        )
+    elif str(character_selection.get("mode") or "") == "group":
         if callable(record_event):
             record_event("character.group.selected", **character_selection)
         logger.info(
@@ -994,6 +1357,24 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             path = str(item or "")
             if Path(path).suffix.lower() in MEDIA_EXTENSIONS and path not in collected:
                 collected.append(path)
+
+    # A configured speed node is the authoritative final-video artifact. If a
+    # review loop produced both the first render and a retry, the last speed
+    # node is the publish candidate and the raw intermediate videos are not.
+    speed_candidates: list[str] = []
+    for outputs in node_outputs.values():
+        if not isinstance(outputs, dict) or outputs.get("speed") in {None, ""}:
+            continue
+        candidates = outputs.get("video_path") or outputs.get("saved_files") or []
+        if isinstance(candidates, str):
+            candidates = [candidates]
+        speed_candidates.extend(
+            path
+            for path in candidates
+            if isinstance(path, str) and Path(path).suffix.lower() in VIDEO_EXTENSIONS
+        )
+    if speed_candidates:
+        return [speed_candidates[-1]]
 
     preferred_package_nodes = (
         "native-h3-package",
@@ -2323,6 +2704,13 @@ def _summarize_character_config(
         "character_name": str(selected_character_name or character.get("name") or character.get("group_name") or path.stem),
         "group_name": str(character.get("group_name") or ""),
         "character_selection": dict(character_selection or {}),
+        "configured_subject_mode": str(generation.get("subject_mode") or SUBJECT_MODE_SINGLE).strip().lower(),
+        "subject_mode": str(
+            character_selection.get("subject_mode")
+            or generation.get("subject_mode")
+            or SUBJECT_MODE_SINGLE
+        ).strip().lower(),
+        "subject_mode_weights": dict(generation.get("subject_mode_weights", {}) or {}),
         "output_dir": str(generation.get("output_dir") or ""),
         "generation_type_weights": dict(generation.get("generation_type_weights", {}) or {}),
         "style_count": len(dict(generation.get("style_weights", {}) or {})),

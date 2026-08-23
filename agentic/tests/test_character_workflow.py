@@ -74,6 +74,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("kirby_native_15s.yaml"))
         self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
 
+        self.assertEqual(native["constraints"]["video_speed"], {"enabled": True, "factor": 2.0})
+
         default_short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
@@ -82,6 +84,22 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             publish_after_generate=False,
         ))
         self.assertEqual(default_short["duration_seconds"], 5)
+
+    def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
+        paths = collect_media_paths_from_run_result(
+            {
+                "state": {
+                    "node_outputs": {
+                        "animate-video": {"video_path": r"C:\raw.mp4"},
+                        "video-speed": {"video_path": r"C:\raw_2x.mp4", "speed": 2.0},
+                        "review-animate-video": {"video_path": r"C:\retry.mp4"},
+                        "review-video-speed": {"video_path": r"C:\retry_2x.mp4", "speed": 2.0},
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(paths, [r"C:\retry_2x.mp4"])
 
     def test_no_review_text2image2video_uses_one_keyframe_without_pre_video_gate(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -340,6 +358,120 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(result["stage_status"]["render"]["status"], "failed")
         self.assertEqual(result["stage_status"]["publish"]["status"], "not_requested")
         self.assertEqual(result["artifacts"]["media_paths"], [])
+
+    def test_publish_stage_reads_review_options_from_request(self) -> None:
+        payload = {
+            "prompt": "Kirby story",
+            "duration_seconds": 15,
+            "style": "polished 2D anime",
+            "source_generation_type": "native_h3_story",
+            "media_type": "native_h3_story",
+            "selected_workflow_name": "native-h3-test",
+            "character_name": "Kirby",
+            "resolved_output_dir": "output",
+            "constraints": {
+                "platform_configs": {"instagram_graph": {"enabled": True}},
+            },
+            "routing_summary": {},
+            "routing": {},
+            "character_config_summary": {},
+        }
+
+        class FakePlan:
+            workflow_name = "native-h3-test"
+            nodes: list[object] = []
+
+            def to_dict(self) -> dict[str, object]:
+                return {"workflow_name": self.workflow_name, "nodes": []}
+
+        class FakePlanner:
+            def __init__(self) -> None:
+                self.goals: list[dict[str, object]] = []
+
+            def create_goal(self, **kwargs: object) -> object:
+                self.goals.append(kwargs)
+                return object()
+
+            def build_plan(self, _goal: object) -> FakePlan:
+                return FakePlan()
+
+        class FakeRunner:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def run(self, _plan: FakePlan) -> SimpleNamespace:
+                self.calls += 1
+                if self.calls == 1:
+                    result = {
+                        "workflow_name": "native-h3-test",
+                        "status": "success",
+                        "records": [],
+                        "state": {
+                            "node_outputs": {
+                                "package-outputs": {"media_paths": [r"C:\temp\kirby.mp4"]},
+                            },
+                        },
+                    }
+                else:
+                    result = {
+                        "workflow_name": "publish-review",
+                        "status": "success",
+                        "records": [],
+                        "state": {
+                            "node_outputs": {
+                                "dispatch-publish": {
+                                    "status": "dry_run",
+                                    "publication_state": "dry_run",
+                                    "publicly_visible": False,
+                                    "results": {},
+                                    "errors": {},
+                                },
+                            },
+                        },
+                    }
+                return SimpleNamespace(status="success", to_dict=lambda: result)
+
+        class FakeRecorder:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                pass
+
+            def finalize(self, _result: dict[str, object]) -> None:
+                pass
+
+        planner = FakePlanner()
+        runner = FakeRunner()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch(
+                "agentic.app.character_workflow.build_goal_payload_from_character_config",
+                return_value=payload,
+            ), patch(
+                "agentic.app.character_workflow.RunRecorder",
+                FakeRecorder,
+            ), patch(
+                "agentic.app.character_workflow.create_run_logger",
+                return_value=(logging.getLogger("test-character-workflow-publish"), root / "lifecycle.log"),
+            ), patch(
+                "agentic.app.character_workflow.build_runtime",
+                return_value=(planner, runner, SimpleNamespace(as_serializable=lambda: {})),
+            ), patch(
+                "agentic.app.character_workflow.DiscordRunNotificationService",
+                return_value=SimpleNamespace(notify=lambda _message: {"status": "skipped"}),
+            ):
+                result = run_character_workflow(make_character_workflow_request(
+                    root,
+                    root / "kirby.yaml",
+                    dry_run_publish=True,
+                    publish_after_generate=True,
+                    review_notes="keep this run dry",
+                ))
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(planner.goals), 2)
+        publish_constraints = planner.goals[1]["constraints"]
+        self.assertIsInstance(publish_constraints, dict)
+        self.assertTrue(publish_constraints["dry_run"])
+        self.assertEqual(publish_constraints["review_notes"], "keep this run dry")
 
     def test_build_goal_payload_uses_llm_routed_strategy_and_workflow(self) -> None:
         with patch(

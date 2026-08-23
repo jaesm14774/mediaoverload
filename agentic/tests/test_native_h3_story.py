@@ -71,6 +71,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 "native-opening-review",
                 "native-keyframe-gate",
                 "native-h3-render",
+                "native-h3-speed",
                 "native-h3-qa",
                 "native-h3-preview",
                 "native-h3-package",
@@ -97,6 +98,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(render.inputs["use_last_frame"])
         self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
         self.assertEqual(qa.inputs["mode"], "technical_and_semantic_qa_before_optional_discord_review")
+        self.assertEqual(qa.inputs["video_node"], "native-h3-speed")
+        self.assertEqual(qa.inputs["target_duration"], 7.5)
         self.assertIsNone(qa.tool_name)
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
         self.assertFalse(plan.metadata["native_h3"]["use_last_frame"])
@@ -393,6 +396,22 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         prompt = format_native_h3_prompt(merged, duration_seconds=15)
         self.assertIn("runaway cushion", prompt)
         self.assertIn("cushion hugs back", prompt.lower())
+
+        pair_base = dict(base_storyboard)
+        pair_base["subject_context"] = {
+            "subjects": [
+                {"role": "primary", "name": "Kirby"},
+                {"role": "secondary", "name": "Kirby"},
+            ],
+            "interaction_contract": {"required": True, "same_frame": True},
+        }
+        pair_merged = merge_native_h3_storyboard(pair_base, generated_story)
+        self.assertTrue(
+            any("Exactly the two declared subject slots" in rule for rule in pair_merged["world"]["continuity_rules"])
+        )
+        self.assertFalse(any("Only one" in rule for rule in pair_merged["world"]["continuity_rules"]))
+        self.assertNotIn("duplicate Kirby", pair_merged["negative_prompt"])
+        self.assertIn("unrequested third subject", pair_merged["negative_prompt"])
 
     def test_native_gag_card_quality_rejects_missing_content(self) -> None:
         story = {
@@ -1079,11 +1098,21 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
         self.assertEqual(allowed, [])
 
+        physical_stamp = LLMPromptEngine._find_native_h3_forbidden_visual_cues(
+            "a giant unmarked golden stamp slams down, and the tracks are stamped by the physical coin"
+        )
+        self.assertEqual(physical_stamp, [])
+
         rejected = LLMPromptEngine._find_native_h3_forbidden_visual_cues(
             "a floor panel displays readable text beside a glowing button"
         )
         self.assertIn("readable text", rejected)
         self.assertIn("text-bearing surface", rejected)
+
+        stamped_text = LLMPromptEngine._find_native_h3_forbidden_visual_cues(
+            "a physical stamp presses readable words into the paper"
+        )
+        self.assertIn("stamp with readable content", stamped_text)
 
     def test_native_h3_rejects_text_cues_in_story_spine_and_keyframe_prompts(self) -> None:
         story = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
