@@ -149,7 +149,7 @@ generation:
     is_same_group: true
 ```
 
-`is_same_group: true` 只使用 `character.group_name`（或 interaction block 內明確指定的 `group_name`）；`false` 則忽略 group name，從所有 `status=1` 且 `weight>0` 的角色中抽取。兩個 slot 會各自依 weight 抽樣、允許抽到相同角色，不要求角色名稱不同。選角結果會以 `subject_context` 傳入 image prompt、storyboard/store prompt、video prompt 與共用 semantic QA；沒有 fallback，無法取得兩個 active slot 時 run 直接失敗。
+`is_same_group: true` 讓兩個 slot 都從 `character.group_name`（或 interaction block 內明確指定的 `group_name`）依 weight 抽樣；`false` 則由該主 group 抽 primary，再從所有 `status=1` 且 `weight>0` 的角色中隨機抽 secondary。global pool 仍可能包含主 group，因此兩個 slot 允許抽到相同角色，不要求角色名稱不同。選角結果會以 `subject_context` 傳入 image prompt、storyboard/store prompt、video prompt 與共用 semantic QA；沒有 fallback，無法取得主 group 或 global active pool 時 run 直接失敗。
 
 ### Random subject mode
 
@@ -540,6 +540,36 @@ H3 runner 的 canonical workflow 對應：`t2va → minimax_h3_lowvram_t2v`、`i
 建議順序是先跑 `text2img` 確認基礎 ComfyUI 與 Discord，再跑五種 native H3，接著跑一般影片／長片／貼圖，最後跑 Ref2VA 與隨機。每條命令都應保留 `run_id`、`log_path`、`review_session_path`、輸出媒體與 `publish_review_summary.json`。
 
 本機測試不會自動公開發佈：`--dry-run-publish` 只驗證 publish/review graph；即使 Discord 通過，也不會送出社群平台。若要做不公開的平台 adapter smoke test，使用 `--publish-mode safe_poc`（YouTube private、Facebook draft、Instagram container-only）；不要在未經人工確認前使用 `--publish-mode live`。
+
+#### Facebook 個人 Profile：手機 handoff
+
+Facebook 個人 Profile 不走 Graph API。若要合法、穩定地發到個人帳號，指定 `facebook_profile_handoff`：流程會先經 Discord 人工審核，接著把媒體附件、caption、hashtags 與操作說明推播到手機；你在 Facebook App 的個人 Profile 建立貼文後按一次發布。系統會留下 `facebook_profile_handoff.json`，狀態固定是 `awaiting_user_action`，不會把 handoff 當成已公開。
+
+```powershell
+python run_media_interface.py `
+  --character kirby `
+  --generation-type text2video `
+  --prompt '單鏡頭短動畫，角色在雨中奔跑' `
+  --publish-platform facebook_profile_handoff
+
+# 若已有可由手機開啟的公開媒體 URL，可額外產生 Facebook link-share 對話框連結；它分享的是 URL，不會代替 Profile 發文
+python run_media_interface.py `
+  --character kirby `
+  --generation-type text2video `
+  --prompt '單鏡頭短動畫，角色在雨中奔跑' `
+  --publish-platform facebook_profile_handoff `
+  --facebook-profile-share-url 'https://example.com/media/clip.mp4'
+```
+
+Discord 推播附檔是手機操作的主要交付物，完整 caption 也會附在 handoff JSON；分享對話框連結是可選項，且只分享你提供的公開 HTTPS URL。完成 Facebook App 的人工發布後，用實際貼文網址回填：
+
+```powershell
+python run_media_interface.py `
+  --complete-facebook-profile-handoff 'D:\path\to\facebook_profile_handoff.json' `
+  --facebook-profile-post-url 'https://www.facebook.com/share/p/your-post-id'
+```
+
+只有回填成功後，handoff artifact 才會轉成 `published` 並帶有可稽核的 Facebook receipt；Discord 推播失敗或未配置時，artifact 會保留未送達狀態。
 
 `--news-driven` 會把 `title + keyword` 寫入 `agentic/state/news_selection/<character>.json`，下一次隨機執行會排除已用新聞；沒有可用的新新聞時會直接 fail，不會用 generic prompt 或過去媒體充數。OpenRouter publish caption 預設會輪替已驗證 vision pool、每個模型最多 retry 2 次；可用 `AGENTIC_PUBLISH_CAPTION_MAX_RETRIES`、`AGENTIC_PUBLISH_CAPTION_MAX_MODELS_PER_CALL`（`0`/未設定代表整個 pool）、`AGENTIC_PUBLISH_CAPTION_TIMEOUT_SECONDS` 調整。所有 prompt/story LLM request 也可用 `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` 設定單次 request timeout（預設 30 秒）。
 

@@ -90,20 +90,6 @@ workflows:
           continuation: "none"
           render_tool: "comfy.workflow.image_to_video"
 
-  "minimax_h3_sop_lowvram_fl2va_i2v.json":
-    summary: "SOP 專用 MiniMax H3 低 VRAM FL2VA workflow：608x352、124 幀、first/last frame；negative constraints 由 runner 合併進 H3 prompt。"
-    conditioning:
-      provider: "minimax_h3"
-      recipes:
-        anchor_first_last:
-          anchors: [first, last]
-          continuation: "none"
-          render_tool: "comfy.workflow.image_to_video"
-        anchor_first:
-          anchors: [first]
-          continuation: "none"
-          render_tool: "comfy.workflow.image_to_video"
-
   "minimax_h3_ref2va.json":
     conditioning:
       provider: "minimax_h3"

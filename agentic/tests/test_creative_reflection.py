@@ -43,7 +43,7 @@ class CreativeReflectionTests(unittest.TestCase):
                 "run-a",
                 "2026-08-19T10:00:00+00:00",
                 prompt="Kirby escapes a financial storm in Tokyo using a backpack umbrella",
-                storyboard_path="configs/storyboards/kirby_meadow_adventure.yaml",
+                storyboard_path="configs/storyboards/retired_static_meadow.yaml",
                 segments=[
                     {"segment_id": "1", "visual": "Kirby stands in a meadow beside a star seed", "action": "", "start_state": "meadow", "end_state": "star seed"},
                     {"segment_id": "2", "visual": "Kirby carries the star seed", "action": "walks", "start_state": "living room", "end_state": "sky"},

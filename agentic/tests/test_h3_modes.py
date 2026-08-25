@@ -326,6 +326,43 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(inspect.call_count, 2)
 
+    def test_non_kirby_keyframe_payload_carries_role_description_identity_lock(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            def call(self, name, payload):
+                calls.append((name, payload))
+                return {"saved_files": ["magolor.png"]}
+
+        context = SimpleNamespace(
+            node=SimpleNamespace(
+                inputs={"workflow_name": "krea2_turbo", "prompt": "Magolor polishes a lantern"},
+                depends_on=[],
+            ),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Magolor polishes a lantern",
+                    style="anime",
+                    constraints={
+                        "character": "Magolor",
+                        "character_profile": {
+                            "role_description": "Magolor is a short brown alien with no feet and detached hands with cream mittens.",
+                            "keywords": "Magolor, no feet, detached hands, cream mittens",
+                        },
+                    },
+                )
+            ),
+            state=SimpleNamespace(node_outputs={}),
+        )
+
+        result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "role-profile-lock").generate_keyframe(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
+        self.assertIn("Magolor", calls[0][1]["prompt"])
+        self.assertIn("no feet", calls[0][1]["prompt"])
+        self.assertIn("detached hands with cream mittens", calls[0][1]["prompt"])
+
     def test_kirby_batch_keeps_valid_candidates_when_one_candidate_is_rejected(self) -> None:
         class FakeTools:
             def call(self, _name, _payload):

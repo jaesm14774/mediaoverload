@@ -320,6 +320,38 @@ def repair_native_h3_story_quality(
     return repaired
 
 
+def ground_native_h3_ending_keyframe_prompt(story: dict[str, Any]) -> str:
+    """Keep the ending keyframe visibly tied to the resolved news story."""
+    if not isinstance(story, dict):
+        return ""
+    prompt = str(story.get("ending_keyframe_prompt") or "").strip()
+    if not prompt:
+        return ""
+    world = story.get("world") if isinstance(story.get("world"), dict) else {}
+    trace = story.get("news_trace") if isinstance(story.get("news_trace"), dict) else {}
+    setting = str(world.get("setting") or "").strip().rstrip(".")
+    anchors = [
+        str(item).strip().rstrip(".")
+        for item in trace.get("visual_anchors", [])
+        if str(item).strip()
+    ]
+    mechanism = str(trace.get("news_mechanism") or "").strip().rstrip(".")
+    consequence = str(trace.get("news_consequence") or "").strip().rstrip(".")
+    locks: list[str] = []
+    if setting:
+        locks.append(f"Keep the ending in {setting}.")
+    if anchors:
+        locks.append("Keep these visible news anchors in the same ending composition: " + "; ".join(anchors) + ".")
+    if mechanism:
+        locks.append(f"Show the active news mechanism: {mechanism}.")
+    if consequence:
+        locks.append(f"Show the concrete news consequence: {consequence}.")
+    suffix = " ".join(locks)
+    if suffix and suffix.casefold() not in prompt.casefold():
+        return f"{prompt.rstrip('.')} {suffix}"
+    return prompt
+
+
 def _sanitize_native_h3_unmarked_props(story: dict[str, Any]) -> None:
     """Replace benign mail terminology that can imply hidden readable text.
 
@@ -589,17 +621,47 @@ def repair_native_h3_news_trace_integration(
 ) -> dict[str, Any] | None:
     """Repair a small news-grounding omission without changing the plot.
 
-    Some models use a valid synonym in ``news_trace.integration`` even though
-    the exact visual anchor is present in the opening, later beat, and payoff.
-    Keep the strict source/title checks intact, but deterministically carry an
-    already-declared visual anchor into the integration text and the missing
-    causal beats.  LLM repair is intentionally not required for this bounded
-    patch: a provider dropping one anchor from the payoff should not make an
-    otherwise usable native story fail before rendering.
+    Some models translate every source concept into English and omit the
+    application-owned source phrase. Restore concrete terms from the selected
+    keyword before applying the existing anchor repair. The source/title checks
+    stay strict; only the trace metadata is repaired, not the generated plot.
     """
     if not isinstance(story, dict):
         return None
-    quality = evaluate_native_h3_news_grounding(story, news_context, creative_brief=creative_brief)
+    trace = story.get("news_trace")
+    if not isinstance(trace, dict):
+        return None
+    source = news_context if isinstance(news_context, dict) else {}
+    repaired = deepcopy(story)
+    repaired_trace = dict(repaired.get("news_trace") or {})
+    source_concepts = [
+        str(item).strip()
+        for item in trace.get("source_concepts", [])
+        if str(item).strip()
+    ]
+    source_text = " ".join(
+        str(source.get(key) or "").strip()
+        for key in ("title", "keyword", "category")
+    ).casefold()
+    derived_source_concepts = [
+        raw_concept.strip()
+        for raw_concept in re.split(r"[;,，、|/]+", str(source.get("keyword") or ""))
+        if raw_concept.strip()
+        and len(raw_concept.strip()) >= 2
+        and raw_concept.strip().casefold() not in {"news", "top"}
+        and raw_concept.strip().casefold() in source_text
+    ][:5]
+    if not derived_source_concepts:
+        title = str(source.get("title") or "").strip()
+        if title:
+            derived_source_concepts = [title]
+    if not any(concept.casefold() in source_text for concept in source_concepts):
+        if not derived_source_concepts:
+            return None
+        source_concepts = derived_source_concepts
+        repaired_trace["source_concepts"] = source_concepts
+        repaired["news_trace"] = repaired_trace
+    quality = evaluate_native_h3_news_grounding(repaired, news_context, creative_brief=creative_brief)
     checks = quality.get("checks") if isinstance(quality, dict) else None
     if not isinstance(checks, dict):
         return None
@@ -611,20 +673,6 @@ def repair_native_h3_news_trace_integration(
     )
     if not all(bool(checks.get(key)) for key in required_checks):
         return None
-
-    trace = story.get("news_trace")
-    if not isinstance(trace, dict):
-        return None
-    source = news_context if isinstance(news_context, dict) else {}
-    source_concepts = [
-        str(item).strip()
-        for item in trace.get("source_concepts", [])
-        if str(item).strip()
-    ]
-    source_text = " ".join(
-        str(source.get(key) or "").strip()
-        for key in ("title", "keyword", "category")
-    ).casefold()
     source_concept = next(
         (concept for concept in source_concepts if concept.casefold() in source_text),
         "",
@@ -634,7 +682,6 @@ def repair_native_h3_news_trace_integration(
     anchors = [str(item).strip() for item in trace.get("visual_anchors", []) if str(item).strip()]
     if not anchors:
         return None
-    repaired = deepcopy(story)
     repaired_trace = dict(repaired.get("news_trace") or {})
     integration = str(repaired_trace.get("integration") or "").strip().rstrip(".")
     repaired_spine = repaired.get("story_spine") if isinstance(repaired.get("story_spine"), dict) else {}

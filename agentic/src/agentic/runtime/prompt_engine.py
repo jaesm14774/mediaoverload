@@ -164,16 +164,6 @@ class PromptEngine:
                     "is_publish_ready": bool(caption) and bool(media_paths),
                 },
             }
-            if str(platform).lower() == "youtube":
-                yt_title = str(bundle.get("youtube_title") or "").strip()
-                if not yt_title:
-                    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
-                    yt_title = first_line[:100]
-                yt_tags = list(bundle.get("youtube_tags") or [])
-                entry["additional_params"] = {
-                    "youtube_title": yt_title,
-                    "youtube_tags": yt_tags,
-                }
             platform_bundle[str(platform)] = entry
         bundle["platform_bundle"] = platform_bundle
         bundle["caption_strategy"] = "platform_adapted" if platform_bundle else "generic"

@@ -26,6 +26,7 @@ class CharacterReviewOptions:
     dry_run_publish: bool = False
     publish_mode: str = ""
     publish_platforms: tuple[str, ...] = ()
+    facebook_profile_share_url: str = ""
     publish_after_generate: bool = True
     enable_review_loop: bool = False
     review_notes: str = ""

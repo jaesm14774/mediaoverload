@@ -97,7 +97,7 @@ class PromptEngineTests(unittest.TestCase):
                 mode="llm",
                 manager=_FakeManager(
                     [
-                        '{"caption":"caption body","hashtags":"#one #two","platform_captions":{"instagram":"ig caption"}}',
+                        '{"caption":"caption body","hashtags":"#one #two","platform_captions":{"instagram":"ig caption","youtube":"yt caption"}}',
                     ]
                 ),
             )
@@ -108,7 +108,7 @@ class PromptEngineTests(unittest.TestCase):
             goal,
             prefix="launch",
             hashtags=["one", "two"],
-            platforms=["instagram"],
+            platforms=["instagram", "youtube"],
             media_paths=["C:\\asset.png"],
             review_notes="stronger hook",
         )
@@ -117,6 +117,8 @@ class PromptEngineTests(unittest.TestCase):
         self.assertTrue(result["dispatch_ready"])
         self.assertTrue(result["platform_bundle"]["instagram"]["validation"]["is_publish_ready"])
         self.assertEqual(result["platform_bundle"]["instagram"]["caption"], "ig caption")
+        self.assertEqual(result["platform_bundle"]["youtube"]["caption"], "yt caption")
+        self.assertNotIn("additional_params", result["platform_bundle"]["youtube"])
 
 
 if __name__ == "__main__":

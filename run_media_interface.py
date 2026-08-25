@@ -16,6 +16,7 @@ from agentic.app.character_requests import (
     CharacterWorkflowRequest,
 )
 from agentic.app.character_workflow import dumps_result, run_character_workflow
+from agentic.tools.social_services import complete_facebook_profile_handoff
 
 
 def _default_comfy_root() -> str:
@@ -66,6 +67,23 @@ def main() -> None:
         dest="publish_platforms",
         help="Restrict publishing to a platform; repeat for multiple platforms",
     )
+    parser.add_argument(
+        "--facebook-profile-share-url",
+        type=str,
+        default="",
+        help="Optional public HTTPS media URL used to create a Facebook Profile link-share dialog",
+    )
+    parser.add_argument(
+        "--complete-facebook-profile-handoff",
+        type=str,
+        help="Complete a Facebook Profile handoff artifact with the actual Facebook post URL",
+    )
+    parser.add_argument(
+        "--facebook-profile-post-url",
+        type=str,
+        default="",
+        help="Actual Facebook Profile post URL used with --complete-facebook-profile-handoff",
+    )
     parser.add_argument("--no-publish", action="store_true", help="Skip publish stage after generation")
     parser.add_argument("--no-review", action="store_true", help="Disable human review for this run; auto Ref2VA keeps generated references without a Discord selection gate")
     parser.add_argument("--stage-probe", action="store_true", help="Run the real multi-stage graph with six image candidates and vision-LLM auto-selection; never use this as publish approval")
@@ -84,6 +102,19 @@ def main() -> None:
     parser.add_argument("--auto-download-assets", action="store_true", help="Allow automatic workflow asset preparation")
     args = parser.parse_args()
 
+    if args.complete_facebook_profile_handoff:
+        if not args.facebook_profile_post_url:
+            parser.error("--facebook-profile-post-url is required with --complete-facebook-profile-handoff")
+        print(
+            dumps_result(
+                complete_facebook_profile_handoff(
+                    args.complete_facebook_profile_handoff,
+                    args.facebook_profile_post_url,
+                )
+            )
+        )
+        return
+
     config_path = _resolve_config_path(args)
     request = CharacterWorkflowRequest(
         repo_root=REPO_ROOT,
@@ -100,6 +131,7 @@ def main() -> None:
             dry_run_publish=args.dry_run_publish,
             publish_mode=args.publish_mode,
             publish_platforms=tuple(args.publish_platforms or ()),
+            facebook_profile_share_url=args.facebook_profile_share_url,
             publish_after_generate=not args.no_publish,
             enable_review_loop=args.enable_review_loop,
             review_notes=args.review_notes,

@@ -21,7 +21,7 @@ pytestmark = pytest.mark.integration
 
 def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
     if os.environ.get("AGENTIC_FORMAL_INTEGRATION") != "1":
-        pytest.fail("Formal integration tests require AGENTIC_FORMAL_INTEGRATION=1")
+        pytest.skip("Formal integration requires AGENTIC_FORMAL_INTEGRATION=1")
 
     repo_root = Path(__file__).resolve().parents[3]
     history_path = tmp_path / "news-selection" / "kirby.json"

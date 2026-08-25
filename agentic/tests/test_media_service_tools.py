@@ -14,7 +14,11 @@ from agentic.tools.comfy_backend import AgenticComfyCommunicator
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.media_services import MediaServiceTools
 from agentic.tools.social_native import FacebookPlatform, InstagramGraphPlatform, MediaPost, YouTubePlatform
-from agentic.tools.social_services import SocialServiceTools
+from agentic.tools.social_services import (
+    SocialServiceTools,
+    complete_facebook_profile_handoff,
+    record_facebook_profile_handoff_delivery,
+)
 from agentic.tools.tts_adapter import TTSAdapter
 
 
@@ -49,7 +53,7 @@ class FFmpegAdapterTests(unittest.TestCase):
         return_value=json.dumps(
             {
                 "streams": [
-                    {"codec_type": "video", "width": 608, "height": 352},
+                    {"codec_type": "video", "width": 608, "height": 352, "avg_frame_rate": "24/1"},
                     {"codec_type": "audio", "channels": 2},
                 ],
                 "format": {"duration": "5.0"},
@@ -70,6 +74,7 @@ class FFmpegAdapterTests(unittest.TestCase):
         command = run_mock.call_args.args[0]
         command_text = " ".join(command)
         self.assertIn("setpts=0.5*PTS", command_text)
+        self.assertIn("fps=24", command_text)
         self.assertIn("atempo=2", command_text)
         self.assertIn("-map [v] -map [a]", command_text)
 
@@ -289,6 +294,91 @@ class MediaServiceToolsTests(unittest.TestCase):
 
 
 class SocialServiceToolsTests(unittest.TestCase):
+    def test_facebook_profile_handoff_creates_mobile_package_without_graph_publisher(self) -> None:
+        output_dir = Path(tempfile.mkdtemp())
+        media_path = output_dir / "clip.mp4"
+        media_path.write_bytes(b"test media")
+        tools = SocialServiceTools(output_dir)
+
+        result = tools.publish_social(
+            {
+                "media_paths": [str(media_path)],
+                "caption": "Profile caption",
+                "hashtags": "#kirby",
+                "platforms": ["facebook_profile_handoff"],
+                "platform_configs": {},
+                "additional_params": {
+                    "facebook_profile_share_url": "https://cdn.example.test/clip.mp4"
+                },
+                "manifest_dir": str(output_dir),
+            }
+        )
+
+        self.assertEqual(result["status"], "awaiting_user_action")
+        self.assertEqual(result["publication_state"], "awaiting_user_action")
+        self.assertFalse(result["publicly_visible"])
+        self.assertEqual(result["handoff_media_paths"], [str(media_path.resolve())])
+        handoff = result["handoffs"]["facebook_profile_handoff"]
+        self.assertTrue(handoff["requires_human_confirmation"])
+        self.assertIn("sharer/sharer.php?u=", handoff["share_dialog_url"])
+        handoff_file = output_dir / "facebook_profile_handoff.json"
+        self.assertTrue(handoff_file.exists())
+        persisted_handoff = json.loads(handoff_file.read_text(encoding="utf-8"))
+        self.assertIn("receipt", persisted_handoff)
+        self.assertEqual(result["handoff_receipts"]["facebook_profile_handoff"]["verified"], False)
+        self.assertIn(str(handoff_file.resolve()), result["handoff_attachment_paths"])
+
+    def test_facebook_profile_handoff_records_delivery_and_manual_post_receipt(self) -> None:
+        output_dir = Path(tempfile.mkdtemp())
+        media_path = output_dir / "clip.mp4"
+        media_path.write_bytes(b"test media")
+        result = SocialServiceTools(output_dir).publish_social(
+            {
+                "media_paths": [str(media_path)],
+                "caption": "Profile caption",
+                "platforms": ["facebook_profile_handoff"],
+                "manifest_dir": str(output_dir),
+            }
+        )
+        handoff_path = str(output_dir / "facebook_profile_handoff.json")
+        delivery = record_facebook_profile_handoff_delivery(
+            handoff_path,
+            {
+                "status": "sent",
+                "message_id": "discord-message-1",
+                "attachment_count": len(result["handoff_attachment_paths"]),
+            },
+            expected_attachment_count=len(result["handoff_attachment_paths"]),
+        )
+        self.assertTrue(delivery["delivery"]["delivered"])
+        completed = complete_facebook_profile_handoff(
+            handoff_path,
+            "https://www.facebook.com/share/p/profile-post-1",
+        )
+        self.assertEqual(completed["publication_state"], "published")
+        manifest = json.loads((output_dir / "publish_manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["publicly_visible"])
+        self.assertEqual(
+            manifest["handoff_receipts"]["facebook_profile_handoff"]["external_id"],
+            "https://www.facebook.com/share/p/profile-post-1",
+        )
+
+    def test_facebook_profile_handoff_rejects_invalid_share_url(self) -> None:
+        output_dir = Path(tempfile.mkdtemp())
+        media_path = output_dir / "clip.mp4"
+        media_path.write_bytes(b"test media")
+
+        result = SocialServiceTools(output_dir).publish_social(
+            {
+                "media_paths": [str(media_path)],
+                "caption": "Profile caption",
+                "platforms": ["facebook_profile_handoff"],
+                "additional_params": {"facebook_profile_share_url": "local-file"},
+            }
+        )
+        self.assertEqual(result["status"], "partial_failure")
+        self.assertIn("https URL", result["errors"]["facebook_profile_handoff"])
+
     def test_publish_social_skips_youtube_for_image_only_media(self) -> None:
         tools = SocialServiceTools(Path.cwd())
 
@@ -580,24 +670,23 @@ class InstagramGraphPlatformTests(unittest.TestCase):
         platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
         long_caption = "a" * 2300
 
-        tmpdir = Path.cwd() / "agentic" / ".tmp-tests" / "ig-caption-limit"
-        tmpdir.mkdir(parents=True, exist_ok=True)
-        image_path = str(tmpdir / "frame.jpg")
-        Path(image_path).write_bytes(b"test")
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = str(Path(directory) / "frame.jpg")
+            Path(image_path).write_bytes(b"test")
 
-        captured: dict[str, str] = {}
+            captured: dict[str, str] = {}
 
-        def fake_publish_image(path: str, caption: str) -> bool:
-            captured["path"] = path
-            captured["caption"] = caption
-            return True
+            def fake_publish_image(path: str, caption: str) -> bool:
+                captured["path"] = path
+                captured["caption"] = caption
+                return True
 
-        platform._publish_image_url = fake_publish_image  # type: ignore[method-assign]
-        result = platform.upload_post(MediaPost(media_paths=[image_path], caption=long_caption))
+            platform._publish_image_url = fake_publish_image  # type: ignore[method-assign]
+            result = platform.upload_post(MediaPost(media_paths=[image_path], caption=long_caption))
 
-        self.assertTrue(result)
-        self.assertEqual(captured["path"], image_path)
-        self.assertEqual(len(captured["caption"]), platform.CAPTION_MAX)
+            self.assertTrue(result)
+            self.assertEqual(captured["path"], image_path)
+            self.assertEqual(len(captured["caption"]), platform.CAPTION_MAX)
 
 
 class SocialServiceToolsYouTubeTests(unittest.TestCase):

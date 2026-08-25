@@ -56,11 +56,13 @@ def subject_identity_lock(
         for item in subjects:
             name = clean_prompt_text(item.get("name")) or "the subject"
             profile = dict(item.get("profile") or {})
+            role_description = clean_prompt_text(profile.get("role_description"))
+            keywords = clean_prompt_text(profile.get("keywords"))
             details = "; ".join(
                 part
                 for part in (
-                    clean_prompt_text(profile.get("role_description")),
-                    clean_prompt_text(profile.get("keywords")),
+                    f"canonical role description: {role_description}" if role_description else "",
+                    f"supplemental visual keywords: {keywords}" if keywords else "",
                 )
                 if part
             )
@@ -71,6 +73,23 @@ def subject_identity_lock(
             + ". The slots may use the same name; preserve each slot separately with its own identity, proportions, costume, silhouette, palette, and readable spatial relationship"
         )
     subject = clean_prompt_text(character) or "the main subject"
+    profile = dict(context.get("character_profile") or {})
+    if not profile and subjects:
+        profile = dict(subjects[0].get("profile") or {})
+    role_description = clean_prompt_text(profile.get("role_description"))
+    keywords = clean_prompt_text(profile.get("keywords"))
+    if role_description:
+        supplemental = f" Supplemental visual keywords: {keywords}." if keywords else ""
+        return (
+            f"Canonical character identity: {subject} — {role_description}."
+            f" Preserve this role description's anatomy, silhouette, proportions, costume, and palette exactly;"
+            f" do not invent or add conflicting features.{supplemental}"
+        )
+    if keywords:
+        return (
+            f"Canonical character identity: {subject}. Supplemental visual keywords: {keywords}."
+            " Preserve stable identity, proportions, costume, silhouette, and palette."
+        )
     if subject.lower() == "kirby":
         return (
             "Kirby is the single unmistakable protagonist: a small round soft-pink hero, large expressive blue eyes, "

@@ -196,7 +196,7 @@ class AgentSocialSkills:
         outputs["dispatch_plan"] = dispatch_plan
         outputs["dispatch_ready"] = bool(caption_bundle.get("dispatch_ready", False)) and not blocked_platforms
         dispatch_status = str(outputs.get("status") or "").strip().lower()
-        skill_status = "success" if dispatch_status in {"success", "dry_run"} else "failed"
+        skill_status = "success" if dispatch_status in {"success", "dry_run", "awaiting_user_action"} else "failed"
         return SkillResult(status=skill_status, outputs=outputs, logs=["Dispatched a social publishing action."])
 
     def select_best_assets(self, context: SkillContext) -> SkillResult:

@@ -19,6 +19,7 @@ from agentic.storyboard import (
     evaluate_native_h3_news_grounding,
     evaluate_native_h3_story_quality,
     format_native_h3_prompt,
+    ground_native_h3_ending_keyframe_prompt,
     load_storyboard,
     merge_native_h3_storyboard,
     repair_native_h3_story_quality,
@@ -100,6 +101,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(qa.inputs["mode"], "technical_and_semantic_qa_before_optional_discord_review")
         self.assertEqual(qa.inputs["video_node"], "native-h3-speed")
         self.assertEqual(qa.inputs["target_duration"], 7.5)
+        self.assertEqual(qa.inputs["expected_fps"], 24.0)
         self.assertIsNone(qa.tool_name)
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
         self.assertFalse(plan.metadata["native_h3"]["use_last_frame"])
@@ -216,6 +218,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             {
                 "opening_keyframe_prompt": "Kirby reacts to a visible news-derived disruption in a clear meadow composition.",
                 "ending_keyframe_prompt": "Kirby resolves the news-derived disruption and restores the scene.",
+                "world": {"setting": "a high-tech semiconductor laboratory"},
+                "news_trace": {
+                    "visual_anchors": ["lab conveyor", "scanning arch", "sealed bubble"],
+                    "news_mechanism": "the scanning arch traps the subject inside the bubble",
+                    "news_consequence": "the sealed bubble leaves the lab route blocked",
+                },
             }
         )
 
@@ -246,7 +254,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             ),
             node=SimpleNamespace(
                 inputs={
-                    "storyboard_path": "configs/storyboards/kirby_native_15s_5beat.yaml",
+                    "storyboard_path": "configs/storyboards/kirby_native_15s.yaml",
                     "duration_seconds": 15,
                     "style": "polished 2D anime",
                 }
@@ -260,6 +268,10 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertEqual(captured["creative_brief"], "cute micro-gag with one prop and a visible payoff")
+        ending_prompt = str(result.outputs["ending_keyframe_prompt"])
+        self.assertIn("high-tech semiconductor laboratory", ending_prompt)
+        self.assertIn("scanning arch traps the subject", ending_prompt)
+        self.assertIn("sealed bubble leaves the lab route blocked", ending_prompt)
 
     def test_native_h3_workflow_manifest_has_runtime_prompt_placeholder(self) -> None:
         workflow_path = self.repo_root / "configs" / "workflow" / "minimax_h3_lowvram_15s_fl2va_i2v.json"
@@ -597,6 +609,26 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(quality["passed"])
         self.assertFalse(quality["checks"]["news_trace_present"])
 
+    def test_native_h3_ending_keyframe_prompt_locks_news_scene_and_payoff(self) -> None:
+        story = {
+            "ending_keyframe_prompt": "Magolor remains suspended in the foreground.",
+            "world": {"setting": "a high-tech semiconductor laboratory"},
+            "news_trace": {
+                "visual_anchors": ["lab conveyor", "scanning arch", "sealed bubble"],
+                "news_mechanism": "the scanning arch traps the subject inside the bubble",
+                "news_consequence": "the sealed bubble leaves the lab route blocked",
+            },
+        }
+
+        prompt = ground_native_h3_ending_keyframe_prompt(story)
+
+        self.assertIn("high-tech semiconductor laboratory", prompt)
+        self.assertIn("lab conveyor", prompt)
+        self.assertIn("scanning arch", prompt)
+        self.assertIn("sealed bubble", prompt)
+        self.assertIn("scanning arch traps the subject", prompt)
+        self.assertIn("sealed bubble leaves the lab route blocked", prompt)
+
     def test_native_h3_news_grounding_accepts_small_anchor_wording_variations(self) -> None:
         story = {
             "name": "Kirby and the Typhoon Seed",
@@ -774,6 +806,43 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 {"title": "AI agent attack from abroad", "keyword": "AI自主攻擊", "category": "news"},
             )["passed"]
         )
+
+    def test_native_h3_trace_repair_restores_source_keyword_when_model_translates_it(self) -> None:
+        story = {
+            "name": "Waddle Dee and the Locked Portal",
+            "story_spine": {
+                "objective": "Enter the safe toy house.",
+                "resolution": "The toy house is sealed and safe.",
+            },
+            "news_trace": {
+                "contract_version": 2,
+                "source_title": "591 website login bypass patched",
+                "source_concepts": ["bypassing login mechanism", "key rotation"],
+                "visual_translation": "A loose panel and a giant brass key turn the security incident into a physical toy-house gag.",
+                "news_mechanism": "The giant brass key rotates and closes the panel.",
+                "news_consequence": "The panel seals the toy house safely.",
+                "visual_anchors": ["toy house", "brass key", "sliding panel"],
+                "anchor_roles": ["context", "mechanism", "consequence"],
+                "integration": "Waddle Dee reaches the toy house while the brass key closes the panel.",
+            },
+            "native_shots": [
+                {"action": "Waddle Dee squeezes toward the toy house."},
+                {"action": "The brass key rotates and the sliding panel traps Waddle Dee."},
+                {"action": "The sliding panel seals the toy house and Waddle Dee is safe."},
+            ],
+        }
+
+        news = {
+            "title": "數字科技旗下591網站遭駭客繞過登入機制，已完成漏洞修補與密鑰輪替",
+            "keyword": "新聞;資安重訊;數字科技",
+            "category": "新聞",
+        }
+        story["news_trace"]["source_title"] = news["title"]
+        repaired = repair_native_h3_news_trace_integration(story, news)
+
+        self.assertIsNotNone(repaired)
+        self.assertIn("資安重訊", repaired["news_trace"]["source_concepts"])
+        self.assertTrue(evaluate_native_h3_news_grounding(repaired, news)["passed"])
 
     def test_native_h3_quality_repair_adds_middle_setback(self) -> None:
         story = {

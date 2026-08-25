@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from agentic.assets.kirby_input import assert_kirby_input, inspect_kirby_input
+from agentic.minimax_prompting import subject_identity_lock
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.prompting import (
@@ -241,7 +242,7 @@ class AgentMediaSkills:
         payload = {
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "img2img")),
             "image_path": self._resolve_image_path(context),
-            "prompt": prompt or self._resolve_prompt(context),
+            "prompt": self._resolve_prompt_with_identity_lock(context, prompt or self._resolve_prompt(context)),
             "negative_prompt": self._resolve_negative_prompt(context),
         }
         if workflow_name:
@@ -277,7 +278,7 @@ class AgentMediaSkills:
                     "workflow_name": workflow_name,
                     "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
                     "image_path": prior_frame_path,
-                    "prompt": self._resolve_prompt(context),
+                    "prompt": self._resolve_prompt_with_identity_lock(context, self._resolve_prompt(context)),
                     "negative_prompt": self._resolve_negative_prompt(context),
                     # Continuity refinement is also the source of auto-generated
                     # Ref2VA candidates. Preserve the requested bundle size
@@ -302,7 +303,7 @@ class AgentMediaSkills:
                 for item in (subject_context.get("subjects") or [])
                 if isinstance(item, dict) and str(item.get("name") or "").strip()
             ]
-            prompt = self._resolve_prompt(context)
+            prompt = self._resolve_prompt_with_identity_lock(context, self._resolve_prompt(context))
             negative_prompt = self._resolve_negative_prompt(context)
             if character == "kirby":
                 prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
@@ -494,7 +495,10 @@ class AgentMediaSkills:
                     last_error = str(exc)
                     if attempt >= int(context.node.inputs.get("max_regenerations", 0)):
                         raise ValueError(f"{label} character continuity gate failed after {attempt} regenerations: {last_error}") from exc
-                    prompt = str(story.get(prompt_key) or context.plan.goal.prompt)
+                    prompt = self._resolve_prompt_with_identity_lock(
+                        context,
+                        str(story.get(prompt_key) or context.plan.goal.prompt),
+                    )
                     result = self.tools.call(
                         "comfy.workflow.text_to_image",
                         {
@@ -652,7 +656,10 @@ class AgentMediaSkills:
                 "comfy.workflow.text_to_image",
                 {
                     "workflow_name": workflow_name,
-                    "prompt": str(prompt_set["prompt"]),
+                    "prompt": self._resolve_prompt_with_identity_lock(
+                        context,
+                        str(prompt_set["prompt"]),
+                    ),
                     "negative_prompt": negative_prompt,
                     "width": width,
                     "height": height,
@@ -998,6 +1005,24 @@ class AgentMediaSkills:
             if resolved is not None:
                 return resolved
         return resolve_dependency_prompt(context)
+
+    @staticmethod
+    def _resolve_prompt_with_identity_lock(context: SkillContext, prompt: str) -> str:
+        constraints = dict(getattr(context.plan.goal, "constraints", {}) or {})
+        character = str(constraints.get("character") or "").strip()
+        subject_context = dict(constraints.get("subject_context") or {})
+        profile = constraints.get("character_profile")
+        if isinstance(profile, dict) and profile:
+            subject_context.setdefault("character_profile", profile)
+        if not character and not subject_context:
+            return str(prompt or "").strip()
+        identity = subject_identity_lock(character, subject_context)
+        if not identity:
+            return str(prompt or "").strip()
+        base_prompt = str(prompt or "").strip().rstrip(".")
+        if base_prompt:
+            return f"{base_prompt}. Character identity lock: {identity}."
+        return f"Character identity lock: {identity}."
 
     @staticmethod
     def _first_output_path(outputs: dict[str, object]) -> str | None:
