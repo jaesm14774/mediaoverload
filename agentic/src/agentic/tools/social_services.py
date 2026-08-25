@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlparse
 
 from agentic.runtime.registry import ToolRegistry
-from agentic.tools.publishing_adapter import MediaPost, PublishingAdapter, build_dispatch_plan
+from agentic.tools.publishing_adapter import (
+    FACEBOOK_PROFILE_HANDOFF_PLATFORM,
+    MediaPost,
+    PublishingAdapter,
+    build_dispatch_plan,
+)
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+HANDOFF_MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", *VIDEO_EXTENSIONS}
+MAX_HANDOFF_FILE_BYTES = 200 * 1024 * 1024
 
 
 class SocialServiceTools:
@@ -58,6 +67,10 @@ class SocialServiceTools:
         errors: dict[str, str] = {}
         skipped_platforms: dict[str, str] = {}
         publish_receipts: dict[str, dict[str, object]] = {}
+        handoff_receipts: dict[str, dict[str, object]] = {}
+        handoffs: dict[str, dict[str, object]] = {}
+        handoff_media_paths: list[str] = []
+        handoff_attachment_paths: list[str] = []
         global_additional_params = dict(payload.get("additional_params", {}) or {})
         global_additional_params.update(self._safe_poc_params(publish_mode))
         for platform in effective_platforms:
@@ -74,13 +87,37 @@ class SocialServiceTools:
                 **dict(platform_bundle_entry.get("additional_params", {}) or {}),
             }
             platform_additional_params.update(self._safe_poc_params(publish_mode))
-            platform_post = MediaPost(
-                media_paths=platform_media_paths,
-                caption=str(platform_plan.get("caption") or caption),
-                hashtags=str(platform_plan.get("hashtags") or hashtags_str or ""),
-                additional_params=platform_additional_params,
-            )
             try:
+                if platform == FACEBOOK_PROFILE_HANDOFF_PLATFORM:
+                    handoff = self._create_facebook_profile_handoff(
+                        media_paths=platform_media_paths,
+                        caption=str(platform_plan.get("caption") or caption),
+                        hashtags=str(platform_plan.get("hashtags") or hashtags_str or ""),
+                        additional_params=platform_additional_params,
+                        manifest_dir=str(payload.get("manifest_dir") or "").strip(),
+                    )
+                    handoffs[platform] = handoff
+                    handoff_media_paths.extend(
+                        str(path) for path in handoff.get("media_paths", []) if path
+                    )
+                    handoff_attachment_paths.extend(
+                        str(path) for path in handoff.get("media_paths", []) if path
+                    )
+                    handoff_path = str(handoff.get("handoff_path") or "").strip()
+                    if handoff_path:
+                        handoff_attachment_paths.append(handoff_path)
+                    receipt = handoff.get("receipt")
+                    if not isinstance(receipt, dict):
+                        raise RuntimeError("Facebook Profile handoff did not create a receipt record")
+                    handoff_receipts[platform] = dict(receipt)
+                    results[platform] = True
+                    continue
+                platform_post = MediaPost(
+                    media_paths=platform_media_paths,
+                    caption=str(platform_plan.get("caption") or caption),
+                    hashtags=str(platform_plan.get("hashtags") or hashtags_str or ""),
+                    additional_params=platform_additional_params,
+                )
                 platform_config = platform_configs.get(platform)
                 if not isinstance(platform_config, dict):
                     raise RuntimeError(f"No configured publisher for platform: {platform}")
@@ -110,7 +147,10 @@ class SocialServiceTools:
             errors=errors,
             receipts=publish_receipts,
         )
-        status = "success" if not errors else "partial_failure"
+        if handoffs and not errors:
+            status = "awaiting_user_action"
+        else:
+            status = "success" if not errors else "partial_failure"
         dispatch_status = "skipped" if skipped_platforms and not effective_platforms and not errors else status
         manifest_path = self._write_publish_manifest(
             payload=payload,
@@ -124,6 +164,10 @@ class SocialServiceTools:
             publicly_visible=publicly_visible,
             skipped_platforms=skipped_platforms,
             status=status,
+            handoffs=handoffs,
+            handoff_receipts=handoff_receipts,
+            handoff_media_paths=list(dict.fromkeys(handoff_media_paths)),
+            handoff_attachment_paths=list(dict.fromkeys(handoff_attachment_paths)),
         )
         return {
             "status": status,
@@ -134,6 +178,7 @@ class SocialServiceTools:
             "errors": errors,
             "skipped_platforms": skipped_platforms,
             "publish_receipts": publish_receipts,
+            "handoff_receipts": handoff_receipts,
             "manifest_path": manifest_path,
             "media_paths": media_paths,
             "caption": caption,
@@ -141,7 +186,166 @@ class SocialServiceTools:
             "platforms": effective_platforms,
             "dispatch_plan": dispatch_plan,
             "publish_mode": publish_mode,
+            "handoffs": handoffs,
+            "handoff_media_paths": list(dict.fromkeys(handoff_media_paths)),
+            "handoff_attachment_paths": list(dict.fromkeys(handoff_attachment_paths)),
         }
+
+    def _create_facebook_profile_handoff(
+        self,
+        *,
+        media_paths: list[str],
+        caption: str,
+        hashtags: str,
+        additional_params: dict[str, object],
+        manifest_dir: str,
+    ) -> dict[str, object]:
+        output_root = self.output_root.expanduser().resolve()
+        resolved_media_paths: list[str] = []
+        rejected_paths: list[str] = []
+        for raw_path in media_paths:
+            try:
+                resolved = Path(raw_path).expanduser().resolve(strict=True)
+                resolved.relative_to(output_root)
+                if (
+                    not resolved.is_file()
+                    or resolved.suffix.lower() not in HANDOFF_MEDIA_EXTENSIONS
+                    or resolved.stat().st_size > MAX_HANDOFF_FILE_BYTES
+                ):
+                    raise ValueError("unsupported or oversized media")
+            except (OSError, RuntimeError, ValueError):
+                rejected_paths.append(str(raw_path))
+                continue
+            resolved_media_paths.append(str(resolved))
+        if rejected_paths:
+            raise FileNotFoundError(
+                "Facebook Profile handoff media must be a supported file under the runtime output root: "
+                + ", ".join(rejected_paths[:3])
+            )
+        if not resolved_media_paths:
+            raise ValueError("Facebook Profile handoff requires at least one media file")
+
+        share_url = str(additional_params.get("facebook_profile_share_url") or "").strip()
+        share_dialog_url = ""
+        if share_url:
+            self._validate_public_share_url(share_url)
+            share_dialog_url = (
+                "https://www.facebook.com/sharer/sharer.php?u="
+                + quote(share_url, safe="")
+            )
+
+        handoff_path = ""
+        if manifest_dir:
+            output_dir = Path(manifest_dir)
+            try:
+                output_dir = output_dir.expanduser().resolve()
+                output_dir.relative_to(output_root)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise ValueError("manifest_dir must be under the runtime output root") from exc
+            output_dir.mkdir(parents=True, exist_ok=True)
+            handoff_path = str(output_dir / "facebook_profile_handoff.json")
+        handoff = {
+            "platform": FACEBOOK_PROFILE_HANDOFF_PLATFORM,
+            "status": "awaiting_user_action",
+            "publication_state": "awaiting_user_action",
+            "publicly_visible": False,
+            "requires_human_confirmation": True,
+            "receipt_required": True,
+            "media_paths": resolved_media_paths,
+            "caption": caption,
+            "hashtags": hashtags,
+            "share_url": share_url,
+            "share_dialog_url": share_dialog_url,
+            "handoff_path": handoff_path,
+            "instructions": [
+                "在手機開啟這則 Discord 推播並下載附件。",
+                "在 Facebook App 開啟個人 Profile 的建立貼文畫面，附加媒體並貼上文案。",
+                "確認內容後按一次發布；完成後保留實際貼文網址作為 receipt。",
+            ],
+        }
+        handoff["notification_text"] = SocialServiceTools._facebook_profile_notification_text(handoff)
+        handoff["receipt"] = {
+            "platform": FACEBOOK_PROFILE_HANDOFF_PLATFORM,
+            "external_id": handoff_path,
+            "status": "awaiting_user_action",
+            "verified": False,
+            "visibility": "not_published",
+            "details": {
+                "handoff_prepared": True,
+                "handoff_delivered": False,
+                "delivery_status": "pending",
+                "receipt_required": True,
+                "share_dialog_url": share_dialog_url,
+            },
+        }
+        if handoff_path:
+            Path(handoff_path).write_text(
+                json.dumps(handoff, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        return handoff
+
+    @staticmethod
+    def _validate_public_share_url(share_url: str) -> None:
+        parsed = urlparse(share_url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("facebook_profile_share_url must be an https URL")
+        if parsed.username or parsed.password:
+            raise ValueError("facebook_profile_share_url must not contain credentials")
+        try:
+            hostname = str(parsed.hostname or "").strip().lower().rstrip(".")
+        except ValueError as exc:
+            raise ValueError("facebook_profile_share_url must use a valid hostname") from exc
+        try:
+            ip_address = ipaddress.ip_address(hostname)
+        except ValueError:
+            ip_address = None
+        if (
+            not hostname
+            or hostname in {"localhost", "localhost.localdomain"}
+            or hostname.endswith((".local", ".internal"))
+        ):
+            raise ValueError("facebook_profile_share_url must use a public hostname")
+        if ip_address is not None and (
+            ip_address.is_private
+            or ip_address.is_loopback
+            or ip_address.is_link_local
+            or ip_address.is_reserved
+            or ip_address.is_multicast
+            or ip_address.is_unspecified
+        ):
+            raise ValueError("facebook_profile_share_url must use a public host")
+        sensitive_query_keys = {
+            "access_token",
+            "api_key",
+            "client_secret",
+            "password",
+            "refresh_token",
+            "secret",
+            "token",
+        }
+        if any(
+            str(key).strip().lower() in sensitive_query_keys
+            for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+        ):
+            raise ValueError("facebook_profile_share_url must not contain credentials")
+
+    @staticmethod
+    def _facebook_profile_notification_text(handoff: dict[str, object]) -> str:
+        lines = [
+            "Facebook Profile handoff：等待一次人工確認，尚未發布。",
+            *[str(item) for item in handoff.get("instructions", [])],
+        ]
+        share_dialog_url = str(handoff.get("share_dialog_url") or "").strip()
+        if share_dialog_url:
+            lines.append(f"分享對話框：{share_dialog_url}")
+        caption = str(handoff.get("caption") or "").strip()
+        hashtags = str(handoff.get("hashtags") or "").strip()
+        if caption:
+            lines.append(f"Caption:\n{caption}")
+        if hashtags:
+            lines.append(hashtags)
+        return "\n".join(lines)
 
     @staticmethod
     def _write_publish_manifest(
@@ -157,6 +361,10 @@ class SocialServiceTools:
         publicly_visible: bool,
         skipped_platforms: dict[str, str],
         status: str,
+        handoffs: dict[str, dict[str, object]],
+        handoff_receipts: dict[str, dict[str, object]],
+        handoff_media_paths: list[str],
+        handoff_attachment_paths: list[str],
     ) -> str | None:
         manifest_dir = str(payload.get("manifest_dir") or "").strip()
         if not manifest_dir:
@@ -176,6 +384,10 @@ class SocialServiceTools:
             "skipped_platforms": skipped_platforms,
             "publication_state": publication_state,
             "publicly_visible": publicly_visible,
+            "handoffs": handoffs,
+            "handoff_receipts": handoff_receipts,
+            "handoff_media_paths": handoff_media_paths,
+            "handoff_attachment_paths": handoff_attachment_paths,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         return str(manifest_path)
@@ -199,6 +411,13 @@ class SocialServiceTools:
         public_count = sum(
             1 for platform in platforms if cls._receipt_is_public(receipts.get(platform))
         )
+        if FACEBOOK_PROFILE_HANDOFF_PLATFORM in platforms and not errors:
+            non_handoff_platforms = [
+                platform for platform in platforms if platform != FACEBOOK_PROFILE_HANDOFF_PLATFORM
+            ]
+            if public_count and non_handoff_platforms:
+                return "partially_published_awaiting_user_action", False
+            return "awaiting_user_action", False
         if errors:
             if public_count:
                 return "partially_published", False
@@ -266,6 +485,163 @@ class SocialServiceTools:
         if self._publishing is None:
             self._publishing = PublishingAdapter()
         return self._publishing
+
+
+def record_facebook_profile_handoff_delivery(
+    handoff_path: str,
+    notification: dict[str, object],
+    *,
+    expected_attachment_count: int,
+) -> dict[str, object]:
+    path = Path(handoff_path).expanduser().resolve(strict=True)
+    handoff = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(handoff, dict) or handoff.get("platform") != FACEBOOK_PROFILE_HANDOFF_PLATFORM:
+        raise ValueError("Not a Facebook Profile handoff artifact")
+    notification_status = str(notification.get("status") or "unknown").strip().lower()
+    message_id = str(notification.get("message_id") or "").strip()
+    attachment_count = int(notification.get("attachment_count") or 0)
+    delivered = bool(
+        notification_status == "sent"
+        and message_id
+        and attachment_count >= max(0, int(expected_attachment_count))
+    )
+    delivery = {
+        "status": "sent" if delivered else notification_status,
+        "delivered": delivered,
+        "message_id": message_id,
+        "attachment_count": attachment_count,
+        "expected_attachment_count": max(0, int(expected_attachment_count)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    handoff["delivery"] = delivery
+    receipt = handoff.get("receipt")
+    if isinstance(receipt, dict):
+        details = receipt.get("details")
+        if not isinstance(details, dict):
+            details = {}
+        details.update(
+            {
+                "handoff_delivered": delivered,
+                "delivery_status": delivery["status"],
+                "message_id": message_id,
+            }
+        )
+        receipt["details"] = details
+        handoff["receipt"] = receipt
+    path.write_text(json.dumps(handoff, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    publish_manifest_path = path.parent / "publish_manifest.json"
+    if publish_manifest_path.exists():
+        manifest = json.loads(publish_manifest_path.read_text(encoding="utf-8"))
+        if isinstance(manifest, dict):
+            handoffs = manifest.get("handoffs")
+            if not isinstance(handoffs, dict):
+                handoffs = {}
+            handoffs[FACEBOOK_PROFILE_HANDOFF_PLATFORM] = handoff
+            manifest["handoffs"] = handoffs
+            handoff_receipts = manifest.get("handoff_receipts")
+            if not isinstance(handoff_receipts, dict):
+                handoff_receipts = {}
+            if isinstance(receipt, dict):
+                handoff_receipts[FACEBOOK_PROFILE_HANDOFF_PLATFORM] = receipt
+            manifest["handoff_receipts"] = handoff_receipts
+            manifest["handoff_delivery"] = delivery
+            publish_manifest_path.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+    return {
+        "handoff": handoff,
+        "delivery": delivery,
+        "handoff_path": str(path),
+        "publish_manifest_path": str(publish_manifest_path) if publish_manifest_path.exists() else "",
+    }
+
+
+def complete_facebook_profile_handoff(handoff_path: str, post_url: str) -> dict[str, object]:
+    path = Path(handoff_path).expanduser().resolve(strict=True)
+    normalized_post_url = str(post_url or "").strip()
+    SocialServiceTools._validate_public_share_url(normalized_post_url)
+    parsed = urlparse(normalized_post_url)
+    hostname = str(parsed.hostname or "").lower().rstrip(".")
+    if hostname not in {"facebook.com", "fb.watch"} and not hostname.endswith(".facebook.com"):
+        raise ValueError("facebook_profile_post_url must be a Facebook URL")
+    handoff = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(handoff, dict) or handoff.get("platform") != FACEBOOK_PROFILE_HANDOFF_PLATFORM:
+        raise ValueError("Not a Facebook Profile handoff artifact")
+    completed_at = datetime.now(timezone.utc).isoformat()
+    handoff["status"] = "published"
+    handoff["publication_state"] = "published"
+    handoff["publicly_visible"] = True
+    handoff["post_url"] = normalized_post_url
+    handoff["completed_at"] = completed_at
+    handoff["receipt"] = {
+        "platform": FACEBOOK_PROFILE_HANDOFF_PLATFORM,
+        "external_id": normalized_post_url,
+        "status": "published",
+        "verified": True,
+        "visibility": "public",
+        "details": {
+            "source": "manual_profile_confirmation",
+            "confirmed_at": completed_at,
+        },
+    }
+    path.write_text(json.dumps(handoff, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    publish_manifest_path = path.parent / "publish_manifest.json"
+    if publish_manifest_path.exists():
+        manifest = json.loads(publish_manifest_path.read_text(encoding="utf-8"))
+        if isinstance(manifest, dict):
+            handoffs = manifest.get("handoffs")
+            if not isinstance(handoffs, dict):
+                handoffs = {}
+            handoffs[FACEBOOK_PROFILE_HANDOFF_PLATFORM] = handoff
+            manifest["handoffs"] = handoffs
+            handoff_receipts = manifest.get("handoff_receipts")
+            if not isinstance(handoff_receipts, dict):
+                handoff_receipts = {}
+            handoff_receipts[FACEBOOK_PROFILE_HANDOFF_PLATFORM] = handoff["receipt"]
+            manifest["handoff_receipts"] = handoff_receipts
+            platforms = [str(item) for item in manifest.get("platforms", [])]
+            non_handoff = [
+                platform for platform in platforms if platform != FACEBOOK_PROFILE_HANDOFF_PLATFORM
+            ]
+            publish_receipts = manifest.get("publish_receipts")
+            if not isinstance(publish_receipts, dict):
+                publish_receipts = {}
+            results = manifest.get("results")
+            if not isinstance(results, dict):
+                results = {}
+            all_public = all(
+                bool(results.get(platform, False))
+                and SocialServiceTools._receipt_is_public(
+                    publish_receipts.get(platform) if isinstance(publish_receipts, dict) else None
+                )
+                for platform in non_handoff
+            )
+            if not non_handoff or all_public:
+                manifest["status"] = "success"
+                manifest["dispatch_status"] = "success"
+                manifest["publication_state"] = "published"
+                manifest["publicly_visible"] = True
+            else:
+                manifest["status"] = "success"
+                manifest["dispatch_status"] = "success"
+                manifest["publication_state"] = "staged"
+                manifest["publicly_visible"] = False
+            publish_manifest_path.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+    return {
+        "status": "published",
+        "publication_state": "published",
+        "publicly_visible": True,
+        "handoff_path": str(path),
+        "publish_manifest_path": str(publish_manifest_path) if publish_manifest_path.exists() else "",
+        "post_url": normalized_post_url,
+    }
+
 
 def register_social_service_tools(tool_registry: ToolRegistry, output_root: Path) -> None:
     tools = SocialServiceTools(output_root=output_root)

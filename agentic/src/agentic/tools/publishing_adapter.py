@@ -4,6 +4,8 @@ from typing import Any
 
 from agentic.tools.social_native import MediaPost, PublishingService
 
+FACEBOOK_PROFILE_HANDOFF_PLATFORM = "facebook_profile_handoff"
+
 
 def build_dispatch_plan(
     media_paths: list[str],

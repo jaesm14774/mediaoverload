@@ -55,14 +55,19 @@ class OpenAICompatibleModelTests(unittest.TestCase):
         self.assertEqual(model.headers["X-Title"], "MediaOverload")
 
     def test_chat_completion_omits_incompatible_mistral_schema_parameter(self) -> None:
-        with patch.dict(os.environ, {"MISTRAL_API_KEY": "test-key"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"MISTRAL_API_KEY": "test-key"},
+            clear=False,
+        ):
             model = build_model("mistral", ModelConfig(model_name="model-a", temperature=0.2, max_tokens=64))
 
         with patch("agentic.runtime.model_backends.requests.post", return_value=self._response("hello")) as post:
-            result = model.chat_completion(
-                [{"role": "user", "content": "Say hello"}],
-                response_format={"type": "json_object"},
-            )
+            with patch.dict(os.environ, {"AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS": "30"}, clear=False):
+                result = model.chat_completion(
+                    [{"role": "user", "content": "Say hello"}],
+                    response_format={"type": "json_object"},
+                )
 
         self.assertEqual(result, "hello")
         payload = post.call_args.kwargs["json"]

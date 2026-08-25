@@ -18,7 +18,11 @@ from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
 from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
-from agentic.storyboard import format_native_h3_prompt, load_storyboard
+from agentic.storyboard import (
+    format_native_h3_prompt,
+    ground_native_h3_ending_keyframe_prompt,
+    load_storyboard,
+)
 
 
 def _bounded_int(value: object, *, name: str, minimum: int, maximum: int) -> int:
@@ -260,6 +264,7 @@ class LongVideoSkills:
             news_context=news_context,
             creative_brief=creative_brief,
         )
+        storyboard["ending_keyframe_prompt"] = ground_native_h3_ending_keyframe_prompt(storyboard)
         render_mode = str(context.node.inputs.get("render_mode") or "").strip()
         if render_mode:
             storyboard["render_mode"] = render_mode

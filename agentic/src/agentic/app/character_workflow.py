@@ -27,8 +27,10 @@ from agentic.tools.context_services import (
     DiscordRunNotificationService,
     NewsContextService,
 )
+from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
+from agentic.tools.social_services import record_facebook_profile_handoff_delivery
 
-SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube"}
+SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube", FACEBOOK_PROFILE_HANDOFF_PLATFORM}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_ONLY_GENERATION_TYPES = {"text2img", "sticker_pack"}
@@ -257,7 +259,7 @@ def _subject_context_from_selection(
         selection_is_same_group = bool(character_selection.get("is_same_group", False))
         selection_group_name = str(
             character_selection.get("group_name")
-            or (configured_group_name if selection_is_same_group else "")
+            or configured_group_name
         ).strip()
         subjects: list[dict[str, Any]] = []
         for index, raw_subject in enumerate(raw_subjects):
@@ -369,11 +371,7 @@ def resolve_character_selection(
         generation = dict(loaded_config.get("generation", {}) or {})
         interaction = dict(generation.get("two_character_interaction", {}) or {})
         is_same_group = bool(interaction.get("is_same_group", True))
-        interaction_group_name = (
-            str(interaction.get("group_name") or group_name).strip()
-            if is_same_group
-            else ""
-        )
+        interaction_group_name = str(interaction.get("group_name") or group_name).strip()
         selection = CharacterGroupSelectionService().select_pair(
             interaction_group_name or None,
             is_same_group=is_same_group,
@@ -480,6 +478,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     dry_run_publish = review.dry_run_publish
     publish_mode = review.publish_mode
     publish_platforms = list(review.publish_platforms)
+    facebook_profile_share_url = str(review.facebook_profile_share_url or "").strip()
     publish_after_generate = review.publish_after_generate
     enable_review_loop = review.enable_review_loop
     review_notes = review.review_notes
@@ -667,6 +666,11 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         platform_configs = {
             name: config for name, config in platform_configs.items() if name in selected_platforms
         }
+        if FACEBOOK_PROFILE_HANDOFF_PLATFORM in selected_platforms:
+            platform_configs.setdefault(
+                FACEBOOK_PROFILE_HANDOFF_PLATFORM,
+                {"enabled": True, "delivery": "discord"},
+            )
     if config_generation_type in IMAGE_ONLY_GENERATION_TYPES and "youtube" in platform_configs:
         platform_configs.pop("youtube", None)
         skipped_platforms.append("youtube:image_only_route")
@@ -728,6 +732,8 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     selected_profile = dict(character_selection.get("selected_profile") or {})
     role_description = str(selected_profile.get("role_description") or "").strip()
     role_keywords = str(selected_profile.get("keywords") or "").strip()
+    if selected_profile and subject_mode != SUBJECT_MODE_INTERACTION:
+        subject_context["character_profile"] = dict(selected_profile)
     if subject_mode == SUBJECT_MODE_INTERACTION:
         profile_block = f"Subject interaction contract: {_subject_prompt_block(subject_context)}"
     elif role_description or role_keywords:
@@ -806,6 +812,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         "platform_configs": platform_configs,
         "dry_run": dry_run_publish,
         "publish_mode": str(publish_mode or "").strip().lower(),
+        "facebook_profile_share_url": facebook_profile_share_url,
         "selection_limit": routing.get("count_plan", {}).get("review_selection_limit"),
         "enable_review_loop": bool(enable_review_loop and not no_review),
         "review_notes": review_notes,
@@ -1025,12 +1032,9 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
             )
             selection_group_name = str(selection_character.get("group_name") or "").strip()
             if selection_subject_mode == SUBJECT_MODE_INTERACTION:
-                selection_is_same_group = bool(selection_interaction.get("is_same_group", True))
-                selection_group_name = (
-                    str(selection_interaction.get("group_name") or selection_group_name).strip()
-                    if selection_is_same_group
-                    else ""
-                )
+                selection_group_name = str(
+                    selection_interaction.get("group_name") or selection_group_name
+                ).strip()
             character_selection = resolve_character_selection(request, config=selection_config)
             selection_subject_mode = _selection_subject_mode(
                 character_selection,
@@ -1161,6 +1165,11 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     "character": payload["character_name"],
                     "dry_run": dry_run_publish,
                     "publish_mode": str(payload["constraints"].get("publish_mode") or ""),
+                    "additional_params": {
+                        "facebook_profile_share_url": str(
+                            payload["constraints"].get("facebook_profile_share_url") or ""
+                        )
+                    },
                     "output_dir": str(Path(payload["resolved_output_dir"]) / "publish_ready"),
                     "selection_limit": _publish_selection_limit(
                         media_paths,
@@ -1244,6 +1253,26 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                 )
                 if dispatch_errors:
                     failure_details = {"failure_reason": f"Publish dispatch errors: {dispatch_errors}"}
+        publish_state_data = (
+            (publish_dict.get("result") or {}).get("state", {})
+            if isinstance(publish_dict.get("result"), dict)
+            else {}
+        )
+        publish_node_outputs = (
+            publish_state_data.get("node_outputs", {})
+            if isinstance(publish_state_data, dict)
+            else {}
+        )
+        dispatch_outputs = (
+            publish_node_outputs.get("dispatch-publish", {})
+            if isinstance(publish_node_outputs, dict)
+            else {}
+        )
+        if (
+            isinstance(dispatch_outputs, dict)
+            and str(dispatch_outputs.get("status") or "").strip().lower() == "awaiting_user_action"
+        ):
+            overall_status = "awaiting_user_action"
     logger.info(
         "workflow.end | run_id=%s | status=%s | log_path=%s | failure_reason=%s",
         run_id,
@@ -1277,8 +1306,57 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         ]
         if errors:
             discord_lines.append(f"Errors: {json.dumps(errors, ensure_ascii=False)[:700]}")
+        handoff_attachment_paths = [
+            str(path)
+            for path in (dispatch_outputs.get("handoff_attachment_paths", []) if isinstance(dispatch_outputs, dict) else [])
+            if path
+        ]
+        handoff_messages = [
+            str(handoff.get("notification_text") or "")
+            for handoff in (dispatch_outputs.get("handoffs", {}).values() if isinstance(dispatch_outputs.get("handoffs", {}), dict) else [])
+            if isinstance(handoff, dict) and str(handoff.get("notification_text") or "").strip()
+        ]
+        discord_lines.extend(handoff_messages)
         discord_lines.append(f"Log: {log_path}")
-        discord_notification = DiscordRunNotificationService().notify("\n".join(discord_lines))
+        if handoff_attachment_paths:
+            discord_notification = DiscordRunNotificationService().notify(
+                "\n".join(discord_lines),
+                media_paths=handoff_attachment_paths,
+                channel_env="discord_handoff_channel_id",
+            )
+        else:
+            discord_notification = DiscordRunNotificationService().notify("\n".join(discord_lines))
+        handoff_delivery_results: list[dict[str, object]] = []
+        for handoff_platform, handoff in (
+            dispatch_outputs.get("handoffs", {}).items()
+            if isinstance(dispatch_outputs, dict)
+            and isinstance(dispatch_outputs.get("handoffs", {}), dict)
+            else []
+        ):
+            if not isinstance(handoff, dict):
+                continue
+            handoff_path = str(handoff.get("handoff_path") or "").strip()
+            if not handoff_path:
+                continue
+            try:
+                delivery_result = record_facebook_profile_handoff_delivery(
+                    handoff_path,
+                    discord_notification,
+                    expected_attachment_count=len(handoff_attachment_paths),
+                )
+                handoff_delivery_results.append(delivery_result)
+                handoff["delivery"] = delivery_result.get("delivery", {})
+                receipt = delivery_result.get("handoff", {})
+                if isinstance(receipt, dict):
+                    handoff["receipt"] = receipt.get("receipt", handoff.get("receipt", {}))
+                    handoff_receipts = dispatch_outputs.get("handoff_receipts")
+                    if isinstance(handoff_receipts, dict):
+                        handoff_receipts[str(handoff_platform)] = handoff["receipt"]
+            except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                logger.exception("facebook.profile.handoff.delivery_record.error | error=%s", exc)
+                handoff_delivery_results.append({"handoff_path": handoff_path, "error": str(exc)})
+        if isinstance(dispatch_outputs, dict) and handoff_delivery_results:
+            dispatch_outputs["handoff_delivery"] = handoff_delivery_results
         logger.info(
             "discord.notification.end | status=%s | message_id=%s",
             str(discord_notification.get("status") or "unknown"),

@@ -50,7 +50,7 @@ manifest 會直接送入 Ref2VA；空 manifest 會自動產生六張 T2I candida
 
 ```yaml
   native_h3_ref2va:
-    storyboard_path: configs/storyboards/kirby_native_15s_5beat.yaml
+    storyboard_path: configs/storyboards/kirby_native_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_ref2va
     reference_image_size: match

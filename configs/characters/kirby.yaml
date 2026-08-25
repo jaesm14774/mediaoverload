@@ -18,7 +18,7 @@ generation:
     single: 2
     two_character_interaction: 5
   two_character_interaction:
-    is_same_group: true
+    is_same_group: false
   style_weights:
     polished 2D anime: 4
     cel-shaded animation: 2

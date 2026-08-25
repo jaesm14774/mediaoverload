@@ -29,11 +29,11 @@ reach the hook and later causal beats. Beat boundaries may move slightly, but
 they must remain contiguous from 0 to 15 seconds and the final beat must solve
 the original objective.
 
-There is also `configs/storyboards/kirby_native_20s.yaml` for experiments and
-future continuation workflows. Direct H3 rendering is intentionally capped at
-362 frames (~15 seconds): the local ComfyUI H3 node documents 124-362 frames as
-the trained range. A 20-second direct request is rejected before submission;
-the system does not silently shorten it or substitute a fallback.
+The production route uses `configs/storyboards/kirby_native_15s.yaml` as its
+identity and continuity contract. Direct H3 rendering is intentionally capped
+at 362 frames (~15 seconds): the local ComfyUI H3 node documents 124-362 frames
+as the trained range. A 20-second direct request is rejected before
+submission; the system does not silently shorten it or substitute a fallback.
 
 `native_h3_t2v_story` is the direct text-to-video route. It calls the existing
 `comfy.workflow.text_to_video` tool and has no keyframe/image nodes.

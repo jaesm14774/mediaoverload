@@ -30,6 +30,7 @@ _REVIEW_FIELDS = {
     "dry_run_publish",
     "publish_mode",
     "publish_platforms",
+    "facebook_profile_share_url",
     "publish_after_generate",
     "enable_review_loop",
     "review_notes",

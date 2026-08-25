@@ -261,16 +261,19 @@ class CharacterGroupSelection:
 
 @dataclass(frozen=True, slots=True)
 class CharacterPairSelection:
-    """Select two subject slots from one configured candidate pool.
+    """Select a primary subject from the configured group and a secondary subject.
 
-    Sampling is intentionally with replacement.  ``is_same_group`` controls
-    only the candidate scope; it does not impose a distinct-name constraint.
+    When ``is_same_group`` is true, both slots use the configured group.  When
+    it is false, only the secondary slot uses the global active pool.  Sampling
+    remains with replacement, so the two slots may still resolve to the same
+    character when the global pool includes the configured group.
     """
 
     group_name: str
     is_same_group: bool
     selected_subjects: tuple[CharacterGroupCandidate, CharacterGroupCandidate]
     candidates: tuple[CharacterGroupCandidate, ...]
+    secondary_candidates: tuple[CharacterGroupCandidate, ...]
     selection_source: str = "pair_weighted_random_with_replacement"
 
     @staticmethod
@@ -296,6 +299,10 @@ class CharacterPairSelection:
             "is_same_group": self.is_same_group,
             "candidate_count": len(self.candidates),
             "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "secondary_candidate_count": len(self.secondary_candidates),
+            "secondary_candidates": [
+                candidate.to_dict() for candidate in self.secondary_candidates
+            ],
             "subjects": [
                 self._subject_payload(self.selected_subjects[0], "primary", self.group_name),
                 self._subject_payload(self.selected_subjects[1], "secondary", self.group_name),
@@ -462,31 +469,40 @@ class CharacterGroupSelectionService:
         is_same_group: bool,
         rng: random.Random | None = None,
     ) -> CharacterPairSelection:
-        """Select two subject slots without imposing distinct character names."""
+        """Select the primary from ``group_name`` and the secondary by scope."""
 
-        normalized_group = str(group_name or "").strip() if is_same_group else ""
-        if is_same_group:
-            if not normalized_group:
-                raise CharacterGroupSelectionError(
-                    "two_character_interaction with is_same_group=true requires group_name"
-                )
-            candidates = self.get_candidates(normalized_group)
-        else:
-            candidates = self.get_all_candidates()
-        if not candidates:
-            scope = f"group '{normalized_group}'" if normalized_group else "the global active pool"
+        normalized_group = str(group_name or "").strip()
+        if not normalized_group:
             raise CharacterGroupSelectionError(
-                f"two_character_interaction {scope} has no active role with weight > 0"
+                "two_character_interaction requires group_name for the primary subject"
+            )
+        primary_candidates = self.get_candidates(normalized_group)
+        if not primary_candidates:
+            raise CharacterGroupSelectionError(
+                f"two_character_interaction group '{normalized_group}' has no active role with weight > 0"
+            )
+        secondary_candidates = (
+            primary_candidates if is_same_group else self.get_all_candidates()
+        )
+        if not secondary_candidates:
+            raise CharacterGroupSelectionError(
+                "two_character_interaction global active pool has no active role with weight > 0"
             )
         selected = (
-            self._weighted_choice(candidates, rng=rng),
-            self._weighted_choice(candidates, rng=rng),
+            self._weighted_choice(primary_candidates, rng=rng),
+            self._weighted_choice(secondary_candidates, rng=rng),
         )
         return CharacterPairSelection(
             group_name=normalized_group,
             is_same_group=is_same_group,
             selected_subjects=selected,
-            candidates=candidates,
+            candidates=primary_candidates,
+            secondary_candidates=secondary_candidates,
+            selection_source=(
+                "pair_weighted_random_with_replacement"
+                if is_same_group
+                else "pair_primary_group_plus_global_random"
+            ),
         )
 
 
@@ -685,17 +701,26 @@ class DiscordRunNotificationService:
     def __init__(self) -> None:
         _load_env_once()
 
-    def is_configured(self) -> bool:
-        return bool(os.getenv("discord_review_bot_token") and os.getenv("discord_review_channel_id"))
+    def is_configured(self, *, channel_env: str = "discord_review_channel_id") -> bool:
+        return bool(os.getenv("discord_review_bot_token") and os.getenv(channel_env))
 
-    def notify(self, text: str, media_paths: list[str] | None = None) -> dict[str, Any]:
-        if not self.is_configured():
-            return {"status": "skipped", "reason": "discord notification is not configured"}
+    def notify(
+        self,
+        text: str,
+        media_paths: list[str] | None = None,
+        *,
+        channel_env: str = "discord_review_channel_id",
+    ) -> dict[str, Any]:
+        if not self.is_configured(channel_env=channel_env):
+            return {
+                "status": "skipped",
+                "reason": f"discord notification channel is not configured: {channel_env}",
+            }
         try:
             return asyncio.run(
                 _run_discord_status_notification(
                     token=str(os.getenv("discord_review_bot_token")),
-                    channel_id=int(str(os.getenv("discord_review_channel_id"))),
+                    channel_id=int(str(os.getenv(channel_env))),
                     text=str(text or "").strip()[:1900],
                     media_paths=media_paths or [],
                 )

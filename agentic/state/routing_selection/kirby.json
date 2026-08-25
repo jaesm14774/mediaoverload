@@ -13,10 +13,10 @@
     "text2longvideo=2"
   ],
   "bag": [
-    "sticker_pack",
-    "text2longvideo",
-    "native_h3_fl2va_story",
-    "text2img"
+    "native_h3_t2v_story",
+    "native_h3_ref2va",
+    "text2image2video",
+    "sticker_pack"
   ],
   "history": [
     "native_h3_t2v_story",
@@ -26,6 +26,18 @@
     "native_h3_l2va_story",
     "native_h3_ref2va",
     "text2image2native_h3_ref2va",
-    "native_h3_story"
+    "native_h3_story",
+    "text2img",
+    "native_h3_fl2va_story",
+    "text2longvideo",
+    "sticker_pack",
+    "text2longvideo",
+    "text2image2native_h3_ref2va",
+    "native_h3_l2va_story",
+    "native_h3_fl2va_story",
+    "native_h3_story",
+    "text2longvideo",
+    "text2img",
+    "sticker_pack"
   ]
 }

@@ -11,7 +11,7 @@ from agentic.assets.kirby_input import inspect_kirby_input
 from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile, minimax_h3_model_overrides
 from agentic.assets.registry import AssetRegistry
 from agentic.app.character_workflow import _prioritize_h3_profile
-from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt
+from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt, subject_identity_lock
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.prompting import build_minimax_h3_prompt
 
@@ -239,6 +239,21 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
+    def test_single_subject_identity_lock_uses_canonical_role_description(self) -> None:
+        lock = subject_identity_lock(
+            "Waddle Dee",
+            {
+                "character_profile": {
+                    "role_description": "Waddle Dee has a tan pear-shaped face and no mouth.",
+                    "keywords": "Waddle Dee, tan, no mouth",
+                }
+            },
+        )
+        self.assertIn("Waddle Dee", lock)
+        self.assertIn("tan pear-shaped face and no mouth", lock)
+        self.assertIn("canonical character identity", lock.lower())
+        self.assertIn("do not invent or add conflicting features", lock)
+
     def test_local_h3_prompt_uses_context_ir_order_and_i2v_input_relation(self) -> None:
         prompt = compose_minimax_h3_prompt(
             duration_seconds=6,

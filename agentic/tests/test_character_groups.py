@@ -146,35 +146,74 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertTrue(data["is_same_group"])
         self.assertIn("pair_weighted_random_with_replacement", data["selection_source"])
 
-    def test_pair_selection_without_same_group_uses_global_active_pool(self) -> None:
+    def test_pair_selection_without_same_group_uses_group_for_primary_and_global_for_secondary(self) -> None:
         rows = [
             {"group_name": "GroupA", "role_name_en": "Alpha", "status": 1, "weight": 1.0},
             {"group_name": "GroupB", "role_name_en": "Beta", "status": 1, "weight": 1.0},
         ]
-        connection = _FakeConnection(rows)
         service = CharacterGroupSelectionService()
-        with patch.dict(
-            os.environ,
-            {
-                "mysql_host": "localhost",
-                "mysql_port": "3306",
-                "mysql_user": "user",
-                "mysql_password": "password",
-                "mysql_db_name": "anime",
-            },
-            clear=False,
-        ), patch("pymysql.connect", return_value=connection):
-            selection = service.select_pair("ignored-group", is_same_group=False, rng=random.Random(0))
+        group_candidates = service._parse_candidates([rows[0]])
+        global_candidates = service._parse_candidates(rows)
+        with patch.object(
+            service,
+            "get_candidates",
+            return_value=group_candidates,
+        ) as get_group_candidates, patch.object(
+            service,
+            "get_all_candidates",
+            return_value=global_candidates,
+        ) as get_global_candidates:
+            selection = service.select_pair("GroupA", is_same_group=False, rng=random.Random(0))
 
-        self.assertEqual(connection.cursor_instance.params, [])
-        self.assertEqual(selection.to_dict()["group_name"], "")
-        self.assertEqual(
-            len(selection.to_dict()["subjects"]),
-            2,
-        )
-        self.assertTrue(
-            all(item["name"] in {"Alpha", "Beta"} for item in selection.to_dict()["subjects"])
-        )
+        data = selection.to_dict()
+        self.assertEqual(get_group_candidates.call_args.args, ("GroupA",))
+        self.assertEqual(get_global_candidates.call_args.args, ())
+        self.assertEqual(data["group_name"], "GroupA")
+        self.assertEqual([item["name"] for item in data["subjects"]], ["Alpha", "Beta"])
+        self.assertEqual(data["candidate_count"], 1)
+        self.assertEqual(data["secondary_candidate_count"], 2)
+        self.assertEqual(data["selection_source"], "pair_primary_group_plus_global_random")
+
+    def test_resolve_pair_without_same_group_preserves_configured_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "mixed-pair.yaml"
+            config.write_text(
+                "character:\n"
+                "  name: Alpha\n"
+                "  group_name: GroupA\n"
+                "generation:\n"
+                "  subject_mode: two_character_interaction\n"
+                "  two_character_interaction:\n"
+                "    is_same_group: false\n",
+                encoding="utf-8",
+            )
+            pair_result = Mock()
+            pair_result.to_dict.return_value = {
+                "mode": "two_character_interaction",
+                "group_name": "GroupA",
+                "is_same_group": False,
+                "subjects": [
+                    {"role": "primary", "name": "Alpha", "profile": {}},
+                    {"role": "secondary", "name": "Beta", "profile": {}},
+                ],
+                "selection_source": "pair_primary_group_plus_global_random",
+            }
+            with patch.object(
+                CharacterGroupSelectionService,
+                "select_pair",
+                return_value=pair_result,
+            ) as select_pair:
+                resolve_character_selection(
+                    make_character_workflow_request(
+                        self.repo_root,
+                        config,
+                        rng=random.Random(0),
+                    )
+                )
+
+        pair_args, pair_kwargs = select_pair.call_args
+        self.assertEqual(pair_args, ("GroupA",))
+        self.assertFalse(pair_kwargs["is_same_group"])
 
     def test_random_subject_mode_uses_configured_weights_and_records_effective_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

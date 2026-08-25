@@ -481,12 +481,25 @@ class LLMPromptEngine:
             for item in (resolved_subject_context.get("subjects") or [])
             if isinstance(item, dict) and str(item.get("name") or "").strip()
         ]
+        character_profile = dict(resolved_subject_context.get("character_profile") or {})
+        role_description = " ".join(str(character_profile.get("role_description") or "").split()).strip()
+        role_keywords = " ".join(str(character_profile.get("keywords") or "").split()).strip()
+        canonical_identity = ""
+        if role_description:
+            canonical_identity = f"Canonical role description for {character}: {role_description}."
+            if role_keywords:
+                canonical_identity += f" Supplemental visual keywords: {role_keywords}."
         subject_contract = (
             "Two required subject slots must remain visible and individually recognizable: "
             + "; ".join(subject_names)
             + ". They must share a concrete, readable interaction; an additional unrequested subject is forbidden."
             if interaction_required and len(subject_names) == 2
-            else f"One required protagonist must remain individually recognizable: {character}. Do not add unrequested subjects."
+            else (
+                f"One required protagonist must remain individually recognizable: {character}. "
+                f"{canonical_identity} "
+                "Preserve the canonical anatomy, silhouette, proportions, costume, and palette exactly; "
+                "do not add conflicting features or unrequested subjects."
+            )
         )
         expected_times = native_h3_shot_times(base_storyboard)
         if int(duration_seconds) not in {15, 20}:
@@ -2280,7 +2293,6 @@ class LLMPromptEngine:
         character = str(goal.constraints.get("character", "") or "").strip()
         manager = self._require_manager()
 
-        include_youtube = "youtube" in [p.lower() for p in platforms]
         visual_grounding = goal.constraints.get("visual_grounding")
         news_context = goal.constraints.get("news_context")
         if not isinstance(news_context, dict):
@@ -2294,14 +2306,6 @@ class LLMPromptEngine:
                 "source context -> active mechanism -> visible consequence",
             )
         )
-        youtube_instructions = (
-            [
-                "For youtube: also return youtube_title (max 100 chars, catchy standalone video title) "
-                "and youtube_tags (list of short keyword strings without #).",
-            ]
-            if include_youtube
-            else []
-        )
         schema_properties: dict[str, Any] = {
             "caption": {"type": "string"},
             "hashtags": {"type": "string"},
@@ -2310,9 +2314,6 @@ class LLMPromptEngine:
                 "additionalProperties": {"type": "string"},
             },
         }
-        if include_youtube:
-            schema_properties["youtube_title"] = {"type": "string"}
-            schema_properties["youtube_tags"] = {"type": "array", "items": {"type": "string"}}
         visual_paths = [str(path) for path in (visual_paths or []) if str(path).strip()]
         user_prompt = "\n".join(
             [
@@ -2339,7 +2340,6 @@ class LLMPromptEngine:
                     "this bridge."
                 ),
                 f"Optional prefix context: {prefix}",
-                *youtube_instructions,
             ]
         )
         publish_retry_raw = os.environ.get("AGENTIC_PUBLISH_CAPTION_MAX_RETRIES", "2").strip()
@@ -2368,7 +2368,11 @@ class LLMPromptEngine:
                 model="vision" if visual_paths else "text",
                 images=visual_paths or None,
             )
-            payload = self._validate_publish_caption_payload(payload, stage="initial")
+            payload = self._validate_publish_caption_payload(
+                payload,
+                stage="initial",
+                platforms=platforms,
+            )
             initial_hashtag_text = self._normalize_hashtag_text(
                 payload["hashtags"],
                 required_hashtags=normalized_hashtags,
@@ -2389,7 +2393,7 @@ class LLMPromptEngine:
                             "Required shape: 3-5 short paragraphs, a clear hook, useful or emotional value,",
                             "a compact 1️⃣/2️⃣/3️⃣ takeaway list with each item on its own line, one genuine question,",
                             "and a natural like/save/share/follow call to action.",
-                            "Use blank lines between paragraphs. Return hashtags as one space-separated string in the hashtags field, never as a JSON array or Python list. Keep hashtags out of caption.",
+                            "The caption string must contain actual newline breaks: use blank lines between paragraphs and put each numbered takeaway on its own line. Return hashtags as one space-separated string in the hashtags field, never as a JSON array or Python list. Keep hashtags out of caption.",
                             "Do not output Caption:, Hashtags:, Main Content:, Draft Post:, or any metadata label.",
                             f"Current draft: {normalized_caption}",
                             f"Format issues to fix: {', '.join(format_issues)}",
@@ -2418,8 +2422,11 @@ class LLMPromptEngine:
                     repaired_payload = self._validate_publish_caption_payload(
                         repaired_payload,
                         stage="article repair",
+                        platforms=platforms,
                     )
-                    normalized_caption = self._clean_social_post_text(repaired_payload["caption"])
+                    normalized_caption = self._normalize_social_article_text(
+                        repaired_payload["caption"]
+                    )
                     if not normalized_caption:
                         raise ValueError("Caption article repair returned an empty post.")
                     repaired_hashtag_text = self._normalize_hashtag_text(
@@ -2446,10 +2453,8 @@ class LLMPromptEngine:
             result: dict[str, Any] = {
                 "caption": normalized_caption,
                 "hashtags": normalized_hashtag_text,
-                # LLMs occasionally place youtube_title/youtube_tags or nested
-                # metadata inside platform_captions after a repair. Keep the
-                # dispatch contract closed: only requested platform names may
-                # survive this boundary, and every value must be plain text.
+                # Keep the dispatch contract closed: only requested platform
+                # names may survive this boundary, and every value must be text.
                 "platform_captions": self._normalize_platform_captions(
                     {
                         str(platform): self._clean_social_post_text(str(caption))
@@ -2459,11 +2464,6 @@ class LLMPromptEngine:
                     fallback_caption=normalized_caption,
                 ),
             }
-            if include_youtube:
-                raw_yt_title = payload.get("youtube_title")
-                raw_yt_tags = payload.get("youtube_tags")
-                result["youtube_title"] = str(raw_yt_title or "").strip()
-                result["youtube_tags"] = self._normalize_youtube_tags(raw_yt_tags)
             return self._mark_llm_payload(result)
         except Exception as exc:
             # Never disguise a provider failure as a generated caption. The
@@ -2471,7 +2471,12 @@ class LLMPromptEngine:
             raise self._generation_error("prepare_publish_caption", exc) from exc
 
     @staticmethod
-    def _validate_publish_caption_payload(payload: Any, *, stage: str) -> dict[str, Any]:
+    def _validate_publish_caption_payload(
+        payload: Any,
+        *,
+        stage: str,
+        platforms: list[str] | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError(f"Caption {stage} returned a non-object payload.")
         if not isinstance(payload.get("caption"), str):
@@ -2483,10 +2488,16 @@ class LLMPromptEngine:
         platform_captions = payload.get("platform_captions")
         if not isinstance(platform_captions, dict):
             raise ValueError(f"Caption {stage} returned invalid platform_captions.")
+        expected_platforms = {
+            str(platform).strip().casefold()
+            for platform in (platforms or [])
+            if str(platform).strip()
+        }
         invalid_platform_values = [
             str(platform)
             for platform, caption in platform_captions.items()
-            if not isinstance(caption, str)
+            if (not expected_platforms or str(platform).strip().casefold() in expected_platforms)
+            and not isinstance(caption, str)
         ]
         if invalid_platform_values:
             raise ValueError(
@@ -2560,6 +2571,65 @@ class LLMPromptEngine:
         return "\n".join(cleaned_lines).strip()
 
     @staticmethod
+    def _normalize_social_article_text(value: str) -> str:
+        """Restore unambiguous article breaks that a model collapsed into one line."""
+        normalized = LLMPromptEngine._clean_social_post_text(value)
+        normalized = re.sub(
+            rf"\s+(?P<marker>[1-3]️⃣)\s+",
+            lambda match: f"\n{match.group('marker')} ",
+            normalized,
+        )
+        marker_matches = list(
+            re.finditer(
+                rf"(?:^|\n)\s*(?P<marker>[1-3]️⃣)\s+",
+                normalized,
+            )
+        )
+        sequence_start: int | None = None
+        for index in range(len(marker_matches) - 2):
+            labels = [
+                marker_matches[index + offset].group("marker")[0]
+                for offset in range(3)
+            ]
+            if labels == ["1", "2", "3"]:
+                sequence_start = index
+                break
+        if sequence_start is None:
+            return normalized
+
+        first_marker = marker_matches[sequence_start]
+        if normalized[: first_marker.start()].strip():
+            normalized = (
+                normalized[: first_marker.start()].rstrip()
+                + "\n\n"
+                + normalized[first_marker.start() :].lstrip()
+            )
+            marker_matches = list(
+                re.finditer(
+                    rf"(?:^|\n)\s*(?P<marker>[1-3]️⃣)\s+",
+                    normalized,
+                )
+            )
+        third_marker = marker_matches[sequence_start + 2]
+        tail_start = third_marker.end()
+        tail = normalized[tail_start:]
+        question_match = re.search(r"[?？]", tail)
+        if question_match:
+            question_mark = question_match.start()
+            sentence_breaks = [
+                tail.rfind(mark, 0, question_mark)
+                for mark in (".", "!", "。", "！")
+            ]
+            question_start = max(sentence_breaks) + 1
+            question_text_start = tail_start + question_start
+            normalized = (
+                normalized[:question_text_start].rstrip()
+                + "\n\n"
+                + normalized[question_text_start:].lstrip()
+            )
+        return normalized
+
+    @staticmethod
     def _social_post_format_issues(value: str) -> list[str]:
         paragraphs = [block.strip() for block in re.split(r"\n\s*\n", str(value or "")) if block.strip()]
         issues: list[str] = []
@@ -2611,21 +2681,6 @@ class LLMPromptEngine:
                 value = fallback_caption
             normalized[platform] = value.strip()
         return normalized
-
-    @staticmethod
-    def _normalize_youtube_tags(raw_tags: Any) -> list[str]:
-        if isinstance(raw_tags, list):
-            values = [str(tag).strip() for tag in raw_tags if str(tag).strip()]
-        elif isinstance(raw_tags, str):
-            values = [item.strip() for item in raw_tags.replace("\n", ",").split(",") if item.strip()]
-        else:
-            values = []
-        seen: list[str] = []
-        for value in values:
-            cleaned = value.lstrip("#").strip()
-            if cleaned and cleaned not in seen:
-                seen.append(cleaned)
-        return seen[:30]
 
     def review_asset_candidates(
         self,
@@ -2863,6 +2918,10 @@ class LLMPromptEngine:
         fallback_ranked = existing_paths + missing_paths
         manager = self._manager_or_none()
         if manager is None:
+            if bool(goal.constraints.get("stage_probe_auto_select", False)):
+                raise PromptGenerationError(
+                    "stage_probe_quality_gate: vision review is unavailable; automatic selection is unsafe"
+                )
             return (fallback_ranked, []) if include_evidence else fallback_ranked
 
         try:
@@ -2899,6 +2958,7 @@ class LLMPromptEngine:
                                 if interaction_required
                                 else "Penalize duplicate or extra characters, readable text, watermarks, speech bubbles, pseudo-text, or scribbles."
                             ),
+                            "Score must be an integer from 0 to 100; 100 means an excellent match and 0 means a complete mismatch. Do not use a binary 0/1 scale.",
                         ]
                     ),
                     schema_name="media_prompt_match_batch",
@@ -2938,10 +2998,14 @@ class LLMPromptEngine:
                 for item in batch_items:
                     if not isinstance(item, dict) or str(item.get("media_path") or "") not in valid_paths:
                         continue
+                    raw_score = item.get("score", 0)
+                    score = int(round(float(raw_score)))
+                    if not 0 <= score <= 100:
+                        raise ValueError(f"Vision batch score is outside 0-100: {raw_score!r}")
                     analyses.append(
                         {
                             "media_path": str(item["media_path"]),
-                            "score": int(item.get("score", 0)),
+                            "score": score,
                             "rationale": str(item.get("rationale", "")).strip(),
                         }
                     )
@@ -2964,7 +3028,7 @@ class LLMPromptEngine:
                             subject_contract,
                             "Score how well this image matches the goal, declared subject slots, and identity continuity.",
                             "Return JSON with keys: score, rationale.",
-                            "Score must be an integer from 0 to 100.",
+                            "Score must be an integer from 0 to 100; 100 means an excellent match and 0 means a complete mismatch. Do not use a binary 0/1 scale.",
                             (
                                 "Require visible interaction between both declared slots; penalize an unrequested third subject or identity swap, but allow the two slots to use the same name."
                                 if interaction_required
@@ -2989,17 +3053,26 @@ class LLMPromptEngine:
                     max_models_per_call=1,
                     repair_attempts=0,
                 )
+                raw_score = payload.get("score", 0)
+                score = int(round(float(raw_score)))
+                if not 0 <= score <= 100:
+                    raise ValueError(f"Vision score is outside 0-100: {raw_score!r}")
                 analyses.append(
                     {
                         "media_path": media_path,
-                        "score": int(payload.get("score", 0)),
+                        "score": score,
                         "rationale": str(payload.get("rationale", "")).strip(),
                     }
                 )
             analyses.sort(key=lambda item: (-int(item["score"]), str(item["media_path"])))
             ranked = [str(item["media_path"]) for item in analyses] + missing_paths
             return (ranked, analyses) if include_evidence else ranked
-        except Exception:
+        except Exception as exc:
+            if bool(goal.constraints.get("stage_probe_auto_select", False)):
+                raise PromptGenerationError(
+                    "stage_probe_quality_gate: vision review failed; automatic selection is unsafe: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
             return (fallback_ranked, []) if include_evidence else fallback_ranked
 
     def evaluate_video_contact_sheet(

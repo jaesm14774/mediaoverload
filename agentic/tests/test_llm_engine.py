@@ -650,6 +650,39 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertIn("did not satisfy the publish format", str(raised.exception))
 
+    def test_publish_article_repair_restores_collapsed_article_breaks(self) -> None:
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                [
+                    '{"caption":"A short sentence.","hashtags":"#one #two","platform_captions":{"facebook":"A short sentence."}}',
+                    '{"caption":"In a mossy garden, the hero catches the falling drop before it reaches the sacred stone. The curious bird stretches the bubble and the harmless helmet protects the monument. This playful scene shows how a small unchecked opening can threaten something precious. 1️⃣ The drop is caught in time. 2️⃣ The bird changes the danger into a bubble. 3️⃣ The bubble becomes a protective helmet. What would you protect from an unexpected drip? Like and save this story for later.","hashtags":"#one #two","platform_captions":{}}',
+                ]
+            ),
+        )
+
+        result = engine.prepare_publish_caption(
+            GoalRequest(
+                prompt="publish a visual story",
+                media_type="publish_review",
+                style="social promo",
+                constraints={"social_post_format": True},
+            ),
+            prefix="",
+            hashtags=[],
+            platforms=["facebook"],
+            media_paths=["C:\\story.mp4"],
+        )
+
+        paragraphs = [
+            block for block in result["caption"].split("\n\n") if block.strip()
+        ]
+        self.assertEqual(len(paragraphs), 3)
+        self.assertRegex(result["caption"], r"(?m)^1️⃣ .+$")
+        self.assertRegex(result["caption"], r"(?m)^2️⃣ .+$")
+        self.assertRegex(result["caption"], r"(?m)^3️⃣ .+$")
+        self.assertIn("What would you protect", result["caption"])
+
     def test_prepare_publish_caption_fails_when_caption_provider_fails(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
@@ -712,12 +745,12 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(engine._manager.vision_model.calls[0]["kwargs"]["images"], ["D:\\kirby.png"])
         self.assertEqual(engine._manager.text_model.calls, [])
 
-    def test_prepare_publish_caption_closes_platform_contract_and_normalizes_tags(self) -> None:
+    def test_prepare_publish_caption_uses_only_the_common_caption_contract(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"caption":"caption body","hashtags":"#one","platform_captions":{"instagram":"ig caption","youtube":"yt caption","youtube_title":"leaked metadata","youtube_tags":"leaked tags"},"youtube_title":"Kirby Clip","youtube_tags":"kirby, #anime, kirby"}',
+                    '{"caption":"caption body","hashtags":"#one","platform_captions":{"instagram":"ig caption","youtube":"yt caption","youtube_title":"leaked metadata","youtube_tags":["leaked", "metadata"]}}',
                 ]
             ),
         )
@@ -733,8 +766,11 @@ class LLMEngineTests(unittest.TestCase):
         )
 
         self.assertEqual(set(result["platform_captions"]), {"instagram", "youtube"})
-        self.assertEqual(result["youtube_title"], "Kirby Clip")
-        self.assertEqual(result["youtube_tags"], ["kirby", "anime"])
+        self.assertNotIn("youtube_title", result)
+        self.assertNotIn("youtube_tags", result)
+        user_prompt = engine._manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertNotIn("youtube_title", user_prompt)
+        self.assertNotIn("youtube_tags", user_prompt)
 
     def test_normalize_hashtags_blocks_internal_project_tag(self) -> None:
         result = LLMPromptEngine._normalize_hashtag_text(
@@ -935,6 +971,105 @@ class LLMEngineTests(unittest.TestCase):
             for path in candidates:
                 path.unlink(missing_ok=True)
 
+    def test_stage_probe_does_not_fallback_when_vision_batch_schema_is_invalid(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-invalid-batch"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        candidates = [temp_dir / f"candidate_{index}.png" for index in range(4)]
+        for path in candidates:
+            path.write_bytes(b"fake")
+        try:
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [],
+                    vision_responses=['{"analysis": [{"score": 1}]}'],
+                ),
+            )
+            goal = GoalRequest(
+                prompt="select a strong Kirby landing frame",
+                media_type="image",
+                style="anime",
+                constraints={"stage_probe_auto_select": True},
+            )
+            with self.assertRaisesRegex(PromptGenerationError, "stage_probe_quality_gate"):
+                engine.review_asset_candidates(
+                    goal,
+                    media_paths=[str(path) for path in candidates],
+                    review_notes="stage: preview",
+                    selection_limit=1,
+                )
+        finally:
+            for path in candidates:
+                path.unlink(missing_ok=True)
+
+    def test_stage_probe_keeps_binary_vision_scores_below_the_quality_gate(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-binary-score"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        candidates = [temp_dir / f"candidate_{index}.png" for index in range(4)]
+        for path in candidates:
+            path.write_bytes(b"fake")
+        try:
+            analyses = {
+                "analyses": [
+                    {"media_path": str(path), "score": 1, "rationale": "binary provider score"}
+                    for path in candidates
+                ]
+            }
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager([], vision_responses=[json.dumps(analyses)]),
+            )
+            goal = GoalRequest(
+                prompt="select a strong Kirby landing frame",
+                media_type="image",
+                style="anime",
+                constraints={"stage_probe_auto_select": True},
+            )
+            with self.assertRaisesRegex(PromptGenerationError, "highest=1"):
+                engine.review_asset_candidates(
+                    goal,
+                    media_paths=[str(path) for path in candidates],
+                    review_notes="stage: preview",
+                    selection_limit=1,
+                )
+        finally:
+            for path in candidates:
+                path.unlink(missing_ok=True)
+
+    def test_stage_probe_rejects_out_of_range_single_vision_scores(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-single-range"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        candidates = [temp_dir / "candidate_a.png", temp_dir / "candidate_b.png"]
+        for path in candidates:
+            path.write_bytes(b"fake")
+        try:
+            engine = LLMPromptEngine(
+                mode="llm",
+                manager=_FakeManager(
+                    [],
+                    vision_responses=[
+                        '{"score": 101, "rationale": "invalid range"}',
+                        '{"score": 90, "rationale": "strong match"}',
+                    ],
+                ),
+            )
+            goal = GoalRequest(
+                prompt="select a strong Kirby landing frame",
+                media_type="image",
+                style="anime",
+                constraints={"stage_probe_auto_select": True},
+            )
+            with self.assertRaisesRegex(PromptGenerationError, "stage_probe_quality_gate"):
+                engine.review_asset_candidates(
+                    goal,
+                    media_paths=[str(path) for path in candidates],
+                    review_notes="stage: preview",
+                    selection_limit=1,
+                )
+        finally:
+            for path in candidates:
+                path.unlink(missing_ok=True)
+
     def test_review_rejects_a_batch_when_every_candidate_hits_a_hard_failure(self) -> None:
         temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-all-hard-fail"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -1060,15 +1195,6 @@ class LLMEngineTests(unittest.TestCase):
             messages = fake_manager.text_model.calls[0]["messages"]
             self.assertNotIn("Response in English only.", messages[0]["content"])
             self.assertNotIn("Response in English only.", messages[1]["content"])
-
-    def test_legacy_sticker_image_prompt_is_written_in_english(self) -> None:
-        prompt_source = (
-            Path(__file__).resolve().parents[2] / "configs" / "prompt" / "image_system_guide.py"
-        ).read_text(encoding="utf-8")
-        sticker_prompt = prompt_source.split('sticker_prompt_system_prompt = """', 1)[1].split('""".strip()', 1)[0]
-
-        self.assertNotRegex(sticker_prompt, r"[\u3400-\u9fff]")
-        self.assertIn("Response in English only.", sticker_prompt)
 
     def test_chat_json_uses_configurable_request_timeout(self) -> None:
         fake_manager = _FakeManager(['{"ok":true}'])

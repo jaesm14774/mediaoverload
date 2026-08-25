@@ -201,7 +201,10 @@ class FFmpegAdapter:
 
         probe = self.probe_media(video_path)
         video_pts = 1.0 / speed_value
-        video_filter = f"setpts={video_pts:.12g}*PTS"
+        source_fps = float(probe.get("frame_rate") or 0.0)
+        if not math.isfinite(source_fps) or source_fps <= 0:
+            raise ValueError("input video frame rate must be available and greater than zero")
+        video_filter = f"setpts={video_pts:.12g}*PTS,fps={source_fps:.12g}"
         command = ["ffmpeg", "-i", video_path]
         if bool(probe.get("has_audio")):
             audio_filter = ",".join(self._atempo_filters(speed_value))

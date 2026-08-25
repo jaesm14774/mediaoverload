@@ -207,7 +207,12 @@ class TaskPlanner:
             source_node="native-h3-render",
             node_id="native-h3-speed",
         )
-        final_qa_inputs = self._scaled_video_qa_inputs(goal, dict(qa_inputs or {}))
+        final_qa_inputs = dict(qa_inputs or {})
+        if final_qa_inputs.get("expected_fps") in {None, ""}:
+            final_qa_inputs["expected_fps"] = float(
+                goal.constraints.get("native_h3_frame_rate") or 24
+            )
+        final_qa_inputs = self._scaled_video_qa_inputs(goal, final_qa_inputs)
         final_qa_inputs.update({"render_node": "native-h3-render", "video_node": video_node})
         qa_tags = ["technical-qa", "semantic-qa", "manual-review", *tags]
         preview_tags = ["preview", *tags]

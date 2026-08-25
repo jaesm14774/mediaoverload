@@ -123,7 +123,7 @@ production native H3 T2V/I2V recipes. A 20-second direct H3 request would be
 ComfyUI queue; this prevents a slow, unvalidated run from consuming the local
 machine.
 
-The reusable 20-second five-beat storyboard remains in
-`configs/storyboards/kirby_native_20s.yaml` as a contract for a future
-continuation workflow. It is not a hidden fallback and is not currently used
-by the production direct-H3 route.
+The production direct-H3 route uses
+`configs/storyboards/kirby_native_15s.yaml` as its identity and continuity
+contract. It generates the plot and beats from the current news item at
+runtime; there is no dormant 20-second preset or hidden fallback.
