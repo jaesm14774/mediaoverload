@@ -516,63 +516,29 @@ class LLMEngineTests(unittest.TestCase):
         self.assertNotIn("Hashtags:", result["caption"])
         self.assertNotIn("Caption:", result["platform_captions"]["facebook"])
 
-    def test_publish_article_format_retries_a_short_draft(self) -> None:
+    def test_prepare_publish_caption_does_not_run_content_format_repair(self) -> None:
         engine = LLMPromptEngine(
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"caption":"A short sentence.","hashtags":"#kirby #mediaoverload","platform_captions":{"facebook":"A short sentence."}}',
-                    '{"caption":"A strong hook opens the story.\\n\\nThe visible conflict gives the moment meaning.\\n\\n1. Kirby faces the orb.\\n2. The shard changes the outcome.\\n3. The crystal shows the payoff.\\n\\nWhich beat would you remember? Save this idea for later.","hashtags":"#kirby #mediaoverload","platform_captions":{"facebook":"A strong hook opens the story.\\n\\nThe visible conflict gives the moment meaning.\\n\\nWhich beat would you remember? Save this idea for later."}}',
+                    '{"caption":"A short sentence.","hashtags":"#kirby","platform_captions":{"facebook":"A short sentence."}}',
                 ]
             ),
         )
 
         result = engine.prepare_publish_caption(
-            GoalRequest(
-                prompt="publish Kirby story",
-                media_type="publish_review",
-                style="social promo",
-                constraints={"social_post_format": True},
-            ),
+            GoalRequest(prompt="publish Kirby story", media_type="publish_review", style="social promo"),
             prefix="",
-            hashtags=["kirby", "mediaoverload"],
+            hashtags=["kirby"],
             platforms=["facebook"],
             media_paths=["C:\\kirby.mp4"],
         )
 
-        self.assertIn("Which beat would you remember?", result["caption"])
-        self.assertIn("Which beat would you remember?", result["platform_captions"]["facebook"])
-        self.assertEqual(len(engine._manager.text_model.calls), 2)
+        self.assertEqual(result["caption"], "A short sentence.")
+        self.assertEqual(result["platform_captions"]["facebook"], "A short sentence.")
+        self.assertEqual(len(engine._manager.text_model.calls), 1)
         self.assertNotIn("Caption:", result["caption"])
         self.assertNotIn("Hashtags:", result["caption"])
-
-    def test_publish_article_repair_preserves_initial_hashtags_when_repair_omits_them(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"caption":"A short sentence.","hashtags":"#kirby #toolbox","platform_captions":{"facebook":"A short sentence."}}',
-                    '{"caption":"A strong hook opens the story.\\n\\nThe visible conflict gives the moment meaning.\\n\\n1. Kirby faces the toolbox.\\n2. The obstacle changes the outcome.\\n3. The repair creates the payoff.\\n\\nWhich beat would you remember? Save this idea for later.","hashtags":"","platform_captions":{}}',
-                ]
-            ),
-        )
-
-        result = engine.prepare_publish_caption(
-            GoalRequest(
-                prompt="publish Kirby toolbox story",
-                media_type="publish_review",
-                style="social promo",
-                constraints={"social_post_format": True},
-            ),
-            prefix="",
-            hashtags=[],
-            platforms=["facebook"],
-            media_paths=["C:\\kirby.mp4"],
-        )
-
-        self.assertEqual(result["hashtags"], "#kirby #toolbox")
-        self.assertEqual(result["platform_captions"]["facebook"], result["caption"])
-        self.assertEqual(len(engine._manager.text_model.calls), 2)
 
     def test_prepare_publish_caption_rejects_array_hashtags(self) -> None:
         engine = LLMPromptEngine(
@@ -594,94 +560,6 @@ class LLMEngineTests(unittest.TestCase):
             )
 
         self.assertIn("invalid type", str(raised.exception))
-
-    def test_publish_article_repair_rejects_array_hashtags(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"caption":"A short sentence.","hashtags":"#one #two","platform_captions":{"facebook":"A short sentence."}}',
-                    '{"caption":"A strong hook opens the story.\\n\\nThe visible action changes the outcome.\\n\\n1. The subject faces the obstacle.\\n2. The mechanism changes the scene.\\n3. The ending delivers a payoff.\\n\\nWhich beat stayed with you? Save this idea for later.","hashtags":["#one","#two"],"platform_captions":{"facebook":"A strong hook opens the story."}}',
-                ]
-            ),
-        )
-
-        with self.assertRaises(PromptGenerationError) as raised:
-            engine.prepare_publish_caption(
-                GoalRequest(
-                    prompt="publish Kirby story",
-                    media_type="publish_review",
-                    style="social promo",
-                    constraints={"social_post_format": True},
-                ),
-                prefix="",
-                hashtags=[],
-                platforms=["facebook"],
-                media_paths=["C:\\kirby.mp4"],
-            )
-
-        self.assertIn("article repair", str(raised.exception))
-        self.assertIn("one space-separated string", engine._manager.text_model.calls[1]["messages"][1]["content"])
-
-    def test_publish_article_repair_rejects_unformatted_caption(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"caption":"A short sentence.","hashtags":"#one #two","platform_captions":{"facebook":"A short sentence."}}',
-                    '{"caption":"A long hook explains the visible action and its consequence. 1. The subject faces the obstacle. 2. The mechanism changes the scene. 3. The ending delivers the payoff. Which beat stayed with you? Save this idea for later?","hashtags":"#one #two","platform_captions":{"facebook":"A long hook explains the visible action."}}',
-                ]
-            ),
-        )
-
-        with self.assertRaises(PromptGenerationError) as raised:
-            engine.prepare_publish_caption(
-                GoalRequest(
-                    prompt="publish Kirby story",
-                    media_type="publish_review",
-                    style="social promo",
-                    constraints={"social_post_format": True},
-                ),
-                prefix="",
-                hashtags=[],
-                platforms=["facebook"],
-                media_paths=["C:\\kirby.mp4"],
-            )
-
-        self.assertIn("did not satisfy the publish format", str(raised.exception))
-
-    def test_publish_article_repair_restores_collapsed_article_breaks(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"caption":"A short sentence.","hashtags":"#one #two","platform_captions":{"facebook":"A short sentence."}}',
-                    '{"caption":"In a mossy garden, the hero catches the falling drop before it reaches the sacred stone. The curious bird stretches the bubble and the harmless helmet protects the monument. This playful scene shows how a small unchecked opening can threaten something precious. 1️⃣ The drop is caught in time. 2️⃣ The bird changes the danger into a bubble. 3️⃣ The bubble becomes a protective helmet. What would you protect from an unexpected drip? Like and save this story for later.","hashtags":"#one #two","platform_captions":{}}',
-                ]
-            ),
-        )
-
-        result = engine.prepare_publish_caption(
-            GoalRequest(
-                prompt="publish a visual story",
-                media_type="publish_review",
-                style="social promo",
-                constraints={"social_post_format": True},
-            ),
-            prefix="",
-            hashtags=[],
-            platforms=["facebook"],
-            media_paths=["C:\\story.mp4"],
-        )
-
-        paragraphs = [
-            block for block in result["caption"].split("\n\n") if block.strip()
-        ]
-        self.assertEqual(len(paragraphs), 3)
-        self.assertRegex(result["caption"], r"(?m)^1️⃣ .+$")
-        self.assertRegex(result["caption"], r"(?m)^2️⃣ .+$")
-        self.assertRegex(result["caption"], r"(?m)^3️⃣ .+$")
-        self.assertIn("What would you protect", result["caption"])
 
     def test_prepare_publish_caption_fails_when_caption_provider_fails(self) -> None:
         engine = LLMPromptEngine(
@@ -1179,8 +1057,25 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("Response in English only.", messages[1]["content"])
         self.assertIn("Translate the meaning into fluent English rather than translating word for word.", messages[1]["content"])
 
+    def test_chat_json_can_skip_provider_response_schema_for_free_models(self) -> None:
+        fake_manager = _FakeManager(['{"native_shots":[{"time":"0-4s","action":"Kirby runs."}]}'])
+
+        result = LLMPromptEngine._chat_json(JsonChatRequest(
+            fake_manager,
+            "You are a storyboard planner.",
+            "Return the storyboard.",
+            "native_h3_storyboard",
+            {"type": "object", "description": "Native H3 story fields."},
+            use_response_format=False,
+        ))
+
+        self.assertEqual(result["native_shots"][0]["action"], "Kirby runs.")
+        kwargs = fake_manager.text_model.calls[0]["kwargs"]
+        self.assertNotIn("response_format", kwargs)
+        self.assertIn("optional fields may be omitted", fake_manager.text_model.calls[0]["messages"][0]["content"])
+
     def test_chat_json_keeps_final_media_posts_language_flexible(self) -> None:
-        for schema_name in ("publish_caption", "publish_caption_article_repair"):
+        for schema_name in ("publish_caption",):
             fake_manager = _FakeManager(['{"ok":true}'])
 
             result = LLMPromptEngine._chat_json(JsonChatRequest(

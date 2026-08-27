@@ -51,8 +51,17 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("last frame", descriptions["native_h3_l2va_story"]["summary"].lower())
         self.assertIn("T2V", descriptions["text2video"]["summary"])
         self.assertIn("video conditioning", " ".join(descriptions["text2video"]["hard_rules"]).lower())
+        self.assertEqual(
+            self.routing["workflow_stage_candidates"]["text2image2video"]["video_workflow_name"][0],
+            "minimax_h3_lowvram_i2v",
+        )
+        self.assertEqual(
+            self.routing["workflow_stage_candidates"]["text2longvideo"]["video_workflow_name"][0],
+            "minimax_h3_lowvram_t2v",
+        )
 
         stage_contracts = self.hints["workflow_stage_contracts"]
+        self.assertIn("prompt-only T2V", stage_contracts["text2longvideo"]["video_workflow_name"])
         for strategy in self.routing["strategy_candidates"]:
             self.assertIn(strategy, stage_contracts)
         self.assertIn("not connected as video conditioning", stage_contracts["text2video"]["image_workflow_name"])
@@ -61,6 +70,7 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("last_frame", stage_contracts["native_h3_fl2va_story"]["video_workflow_name"])
         self.assertIn("reference images/videos", stage_contracts["native_h3_ref2va"]["video_workflow_name"])
         self.assertIn("segment", stage_contracts["text2longvideo"]["video_workflow_name"])
+        self.assertEqual(self.routing["count_policies"]["text2longvideo"]["segment_count"], {"min": 4, "max": 8})
         auto_contract = stage_contracts["text2image2native_h3_ref2va"]
         self.assertIn("six", auto_contract["image_workflow_name"])
         self.assertIn("explicitly selected", auto_contract["video_workflow_name"])

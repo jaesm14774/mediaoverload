@@ -5,6 +5,7 @@ from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.platform_content import PLATFORM_STRATEGY_VERSION, build_platform_bundle
 from agentic.runtime.prompt_requests import GenerationRoutingRequest
 
 
@@ -151,22 +152,20 @@ class PromptEngine:
         if not isinstance(platform_captions, dict):
             platform_captions = {}
         effective_platforms = platforms or list(platform_captions.keys())
-        platform_bundle: dict[str, dict[str, Any]] = {}
-        for platform in effective_platforms:
-            caption = str(platform_captions.get(platform) or bundle.get("caption", "")).strip()
-            entry: dict[str, Any] = {
-                "caption": caption,
-                "hashtags": normalized_hashtags,
-                "character_count": len(caption),
-                "validation": {
-                    "has_caption": bool(caption),
-                    "has_media": bool(media_paths),
-                    "is_publish_ready": bool(caption) and bool(media_paths),
-                },
-            }
-            platform_bundle[str(platform)] = entry
+        platform_bundle = build_platform_bundle(
+            goal=goal,
+            caption=str(bundle.get("caption", "") or "").strip(),
+            hashtags=normalized_hashtags,
+            platform_captions={
+                str(platform): str(caption)
+                for platform, caption in platform_captions.items()
+            },
+            platforms=[str(platform) for platform in effective_platforms],
+            media_paths=media_paths,
+        )
         bundle["platform_bundle"] = platform_bundle
         bundle["caption_strategy"] = "platform_adapted" if platform_bundle else "generic"
+        bundle["platform_strategy_version"] = PLATFORM_STRATEGY_VERSION
         bundle["dispatch_ready"] = bool(media_paths) and bool(bundle.get("caption"))
         return bundle
 

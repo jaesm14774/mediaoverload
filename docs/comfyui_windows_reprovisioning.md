@@ -34,7 +34,7 @@
 
 截至 2026-08-23，本 repo 的 workflow inventory 還有以下重建缺口：
 
-1. `reiXL_NB11.safetensors` 只在 `configs/workflow/nova-anime-xl.json` 和 `scripts/evaluate_kirby_roles.py` 被引用；repo 沒有下載 URL、SHA256、版本、CivitAI model/version ID；目前 D: ComfyUI 也沒有這個檔案。
+1. `reiXL_NB11.safetensors` 只在 `configs/workflow/nova-anime-xl.json` 被引用；repo 沒有下載 URL、SHA256、版本、CivitAI model/version ID；目前 D: ComfyUI 也沒有這個檔案。
 2. `comfyui_controlnet_aux`、`comfyui-easy-use`、`comfyui-advanced-controlnet`、`comfyui-videohelpersuite` 等目前資料夾有些沒有保留自己的 Git commit，因此不能宣稱只有用 `git clone` 就能得到 byte-identical runtime。
 3. 多個舊 SDXL/Nova workflow 只在 JSON 寫了 model filename，沒有由 repo manifest 管理 model source、大小或 checksum。
 

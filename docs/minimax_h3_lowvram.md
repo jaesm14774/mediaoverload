@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run_comfyui_h3_lowvram.ps1 -Com
 
 ## Kirby 正確輸入與長片流程
 
-Kirby 的完整鏈路固定為：
+Kirby 的短片 I2V 鏈路固定為：
 
 ```text
 krea2_turbo
@@ -55,6 +55,11 @@ krea2_turbo
   -> minimax_h3_lowvram_i2v
   -> ffmpeg concat
 ```
+
+20 秒長片則使用同一套 segment/concat 機制，但預設改為 4 個約 5 秒的
+`minimax_h3_lowvram_t2v` 片段。每段由 prompt 中的具體 story state、physical
+action 與 payoff 驅動；需要 I2V/FL2VA/Ref2VA 時必須明確選擇對應 recipe，且不會把
+已渲染影片的 tail 當成下一段的 creative input。
 
 執行完整兩段流程：
 
@@ -76,7 +81,7 @@ GGUF / native H3 loader
   -> SaveVideo
 ```
 
-I2V 由 Kirby keyframe 鎖定角色外觀；T2V 可由 `comfy.render_text_to_video` 直接呼叫。long-video planner 已把 H3 prompt builder 接到每個 segment，加入角色 identity lock、動作方向、前一段 frame continuity 與 native stereo audio direction。現有 segment concat/preview pipeline 仍負責長片封裝。
+I2V 由 Kirby keyframe 鎖定角色外觀；T2V 可由 `comfy.render_text_to_video` 直接呼叫。long-video planner 已把 H3 prompt builder 接到每個 segment，加入角色 identity lock、具體 story-state、動作方向與 native stereo audio direction。若明確選擇 anchor recipe，才會使用規劃好的 image anchor；現有 segment concat/trim/preview pipeline 負責 20 秒長片封裝。
 
 ## 在 ComfyUI 畫布查看完整 workflow
 
@@ -95,7 +100,7 @@ D:\ComfyUI_windows_portable\ComfyUI\user\default\workflows\
 2. 開啟 `http://127.0.0.1:8188/`。
 4. 先按畫布的 `適應視圖 (.)`，即可看到完整節點、連線與所有參數。
 
-第一張是 repo 的 `krea2_turbo` / Kirby keyframe 生成接 H3 I2V；第二張是 repo 的 Krea2 img2img identity continuity 接 H3 I2V，對應 long-video 每段使用上一段尾幀延續角色。若要換首幀，修改 Krea2 prompt 或 `Load Image`；H3 低配主參數集中在 `608×352`、`124 frames`、`20 steps`、`Spectrum history_storage=system_ram`、`24 fps`。
+第一張是 repo 的 `krea2_turbo` / Kirby keyframe 生成接 H3 I2V；第二張是 repo 的 Krea2 img2img identity continuity 接 H3 I2V。長片預設使用 H3 T2V 分段；若明確選擇 anchor recipe，才用規劃好的 story-state image anchor 延續角色與事件，不把上一段已渲染影片的尾幀當成下一段輸入。若要換首幀，修改 Krea2 prompt 或 `Load Image`；H3 低配主參數集中在 `608×352`、`120 frames`、`16 steps`、`Spectrum history_storage=system_ram`、`24 fps`。
 
 這兩張畫布 workflow 是以 repo 現有結構擴增而成，不會取代原本給自動化程式使用的 API graph。
 

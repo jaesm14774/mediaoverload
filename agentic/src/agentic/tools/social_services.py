@@ -49,6 +49,7 @@ class SocialServiceTools:
             platforms=platforms,
             platform_bundle=platform_bundle if isinstance(platform_bundle, dict) else {},
         )
+        platform_content = self._platform_content_evidence(platform_bundle)
         if dry_run:
             return {
                 "status": "dry_run",
@@ -59,6 +60,7 @@ class SocialServiceTools:
                 "hashtags": hashtags_str,
                 "platforms": platforms,
                 "dispatch_plan": dispatch_plan,
+                "platform_content": platform_content,
             }
 
         service = self._publishing_service()
@@ -81,11 +83,47 @@ class SocialServiceTools:
             ):
                 skipped_platforms[platform] = "requires_video_media"
                 continue
+            platform_validation = platform_plan.get("validation", {})
+            if (
+                isinstance(platform_validation, dict)
+                and platform_validation.get("is_platform_publish_ready") is False
+            ):
+                validation_issues = platform_validation.get("issues", [])
+                issue_text = (
+                    ",".join(str(issue) for issue in validation_issues if str(issue).strip())
+                    if isinstance(validation_issues, list)
+                    else ""
+                )
+                skipped_platforms[platform] = (
+                    "platform_validation_failed"
+                    + (f":{issue_text}" if issue_text else "")
+                )
+                continue
             platform_bundle_entry = platform_bundle.get(platform, {}) if isinstance(platform_bundle, dict) else {}
-            platform_additional_params = {
-                **global_additional_params,
-                **dict(platform_bundle_entry.get("additional_params", {}) or {}),
-            }
+            bundle_additional_params = dict(
+                platform_bundle_entry.get("additional_params", {}) or {}
+            )
+            if platform_bundle_entry.get("metadata_source") == "derived":
+                # Explicit node parameters override generated defaults.
+                platform_additional_params = {
+                    **bundle_additional_params,
+                    **global_additional_params,
+                }
+            else:
+                # Preserve the existing explicit platform-bundle override path.
+                platform_additional_params = {
+                    **global_additional_params,
+                    **bundle_additional_params,
+                }
+            content_strategy = platform_bundle_entry.get("content_strategy", {})
+            if (
+                platform == "youtube"
+                and platform_bundle_entry.get("metadata_source") == "derived"
+                and isinstance(content_strategy, dict)
+                and content_strategy.get("synthetic_media_disclosed") is True
+            ):
+                # Generated-media disclosure is an intentional safety invariant.
+                platform_additional_params["youtube_contains_synthetic_media"] = True
             platform_additional_params.update(self._safe_poc_params(publish_mode))
             try:
                 if platform == FACEBOOK_PROFILE_HANDOFF_PLATFORM:
@@ -168,6 +206,7 @@ class SocialServiceTools:
             handoff_receipts=handoff_receipts,
             handoff_media_paths=list(dict.fromkeys(handoff_media_paths)),
             handoff_attachment_paths=list(dict.fromkeys(handoff_attachment_paths)),
+            platform_content=platform_content,
         )
         return {
             "status": status,
@@ -185,6 +224,7 @@ class SocialServiceTools:
             "hashtags": hashtags_str,
             "platforms": effective_platforms,
             "dispatch_plan": dispatch_plan,
+            "platform_content": platform_content,
             "publish_mode": publish_mode,
             "handoffs": handoffs,
             "handoff_media_paths": list(dict.fromkeys(handoff_media_paths)),
@@ -348,6 +388,44 @@ class SocialServiceTools:
         return "\n".join(lines)
 
     @staticmethod
+    def _platform_content_evidence(platform_bundle: object) -> dict[str, dict[str, object]]:
+        if not isinstance(platform_bundle, dict):
+            return {}
+        evidence: dict[str, dict[str, object]] = {}
+        for platform, raw_entry in platform_bundle.items():
+            if not isinstance(raw_entry, dict):
+                continue
+            strategy = raw_entry.get("content_strategy", {})
+            validation = raw_entry.get("validation", {})
+            additional_params = raw_entry.get("additional_params", {})
+            if not isinstance(strategy, dict):
+                strategy = {}
+            if not isinstance(validation, dict):
+                validation = {}
+            if not isinstance(additional_params, dict):
+                additional_params = {}
+            safe_metadata: dict[str, object] = {}
+            for key in (
+                "youtube_title",
+                "youtube_description",
+                "youtube_tags",
+                "youtube_contains_synthetic_media",
+                "facebook_use_reels",
+                "facebook_title",
+            ):
+                if key in additional_params:
+                    safe_metadata[key] = additional_params[key]
+            evidence[str(platform)] = {
+                "format": str(raw_entry.get("format") or ""),
+                "caption": str(raw_entry.get("caption") or ""),
+                "hashtags": str(raw_entry.get("hashtags") or ""),
+                "content_strategy": dict(strategy),
+                "validation": dict(validation),
+                "derived_metadata": safe_metadata,
+            }
+        return evidence
+
+    @staticmethod
     def _write_publish_manifest(
         *,
         payload: dict[str, object],
@@ -365,6 +443,7 @@ class SocialServiceTools:
         handoff_receipts: dict[str, dict[str, object]],
         handoff_media_paths: list[str],
         handoff_attachment_paths: list[str],
+        platform_content: dict[str, dict[str, object]],
     ) -> str | None:
         manifest_dir = str(payload.get("manifest_dir") or "").strip()
         if not manifest_dir:
@@ -388,6 +467,7 @@ class SocialServiceTools:
             "handoff_receipts": handoff_receipts,
             "handoff_media_paths": handoff_media_paths,
             "handoff_attachment_paths": handoff_attachment_paths,
+            "platform_content": platform_content,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         return str(manifest_path)

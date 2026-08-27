@@ -6,5 +6,13 @@
     "created_at": "2026-08-21 00:00:00",
     "key": "wordpress外掛w3 total cache傳出cvss滿分漏洞，逾90萬網站受影響\u001f新聞;w3 total cache;cve-2026-18051;wordpress",
     "selected_at": "2026-08-24T13:21:21.613871+00:00"
+  },
+  {
+    "title": "IBM公布首個能執行主機及Arm應用的雙架構晶片",
+    "keyword": "新聞;IBM;ARM;IBM Z;LinuxONE;大型主機;處理器",
+    "category": "新聞",
+    "created_at": "2026-08-25 00:00:00",
+    "key": "ibm公布首個能執行主機及arm應用的雙架構晶片\u001f新聞;ibm;arm;ibm z;linuxone;大型主機;處理器",
+    "selected_at": "2026-08-26T14:00:14.934771+00:00"
   }
 ]

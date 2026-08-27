@@ -52,7 +52,7 @@ def _test_resolved_selection(config_path: Path) -> tuple[str, dict[str, Any]] | 
         return None
     character = config.get("character", {})
     character = character if isinstance(character, dict) else {}
-    selected_name = str(character.get("name") or character.get("group_name") or config_path.stem).strip()
+    selected_name = str(character.get("name") or "Kirby").strip()
     group_name = str(character.get("group_name") or "").strip()
     return selected_name, {
         "mode": "config",

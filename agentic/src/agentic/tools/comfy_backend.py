@@ -86,8 +86,8 @@ class AgenticComfyCommunicator:
         with request.urlopen(f"http://{self.server_address}/view?{query}", timeout=60) as response:
             return response.read()
 
-    def get_history(self, prompt_id: str) -> dict[str, Any]:
-        with request.urlopen(f"http://{self.server_address}/history/{prompt_id}", timeout=30) as response:
+    def get_history(self, prompt_id: str, *, timeout: float = 30) -> dict[str, Any]:
+        with request.urlopen(f"http://{self.server_address}/history/{prompt_id}", timeout=timeout) as response:
             return json.loads(response.read())
 
     def get_object_info(self, node_type: str | None = None) -> dict[str, Any]:
@@ -218,6 +218,28 @@ class AgenticComfyCommunicator:
                     raw_socket.settimeout(read_timeout)
                 raw_message = self.ws.recv()
             except (websocket.WebSocketTimeoutException, socket.timeout):
+                # A completed prompt can occasionally lose its terminal
+                # websocket event while ComfyUI has already removed it from
+                # the queue. Consult the authoritative history endpoint so a
+                # long-video batch does not wait until the full generation
+                # timeout for an event that will never arrive.
+                try:
+                    history_response = self.get_history(prompt_id, timeout=min(5.0, max(0.1, remaining)))
+                    history = history_response.get(prompt_id, history_response)
+                    status = history.get("status", {}) if isinstance(history, dict) else {}
+                    if isinstance(status, dict) and status.get("completed"):
+                        status_str = str(status.get("status_str") or "").lower()
+                        if status_str == "success":
+                            return
+                        raise RuntimeError(
+                            f"ComfyUI execution failed for prompt {prompt_id}: {status_str or 'unknown status'}"
+                        )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    # A prompt still executing may not have a history record
+                    # yet; continue waiting for websocket progress.
+                    pass
                 continue
             if isinstance(raw_message, (bytes, bytearray)):
                 # ComfyUI may emit binary preview frames over the websocket before
@@ -361,7 +383,7 @@ class AgenticComfyCommunicator:
                         extension = Path(media["filename"]).suffix or default_extension
                         base = Path(media["filename"]).stem
                         final_name = media["filename"] if not file_name else f"{base}_{file_name}{extension}"
-                        save_path = str(Path(output_path) / final_name)
+                        save_path = self._safe_output_path(output_path, final_name)
                         Path(save_path).write_bytes(media_bytes)
                         saved_files.append(save_path)
             if not saved_files and preview_media:
@@ -377,7 +399,7 @@ class AgenticComfyCommunicator:
                     extension = Path(str(media["filename"])).suffix or default_extension
                     base = Path(str(media["filename"])).stem
                     final_name = str(media["filename"]) if not file_name else f"{base}_{file_name}{extension}"
-                    save_path = str(Path(output_path) / final_name)
+                    save_path = self._safe_output_path(output_path, final_name)
                     Path(save_path).write_bytes(media_bytes)
                     saved_files.append(save_path)
             if not saved_files:
@@ -385,6 +407,17 @@ class AgenticComfyCommunicator:
             return True, saved_files
         except Exception as exc:
             return False, [str(exc)]
+
+    @staticmethod
+    def _safe_output_path(output_path: str, file_name: str) -> str:
+        root = Path(output_path).resolve()
+        candidate = (root / file_name).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"ComfyUI media filename escapes the run output directory: {file_name}") from exc
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        return str(candidate)
 
 
 class AgenticMediaGenerator:

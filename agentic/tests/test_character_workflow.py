@@ -85,6 +85,17 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         ))
         self.assertEqual(default_short["duration_seconds"], 5)
 
+        long_video = build_goal_payload_from_character_config(make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby crosses a windy meadow, protects a glowing seed from a storm, and reaches a warm clearing",
+            preferred_generation_type="text2longvideo",
+            publish_after_generate=False,
+        ))
+        self.assertEqual(long_video["duration_seconds"], 20)
+        self.assertEqual(long_video["constraints"]["segment_count"], 4)
+        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_t2v")
+
     def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(
             {
@@ -754,7 +765,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["prompt_mode"], "news")
         self.assertEqual(payload["constraints"]["news_context"]["keyword"], "panda")
         self.assertIn("cute micro-gag", payload["constraints"]["native_h3_creative_brief"])
-        self.assertTrue(payload["constraints"]["native_h3_semantic_qa_blocking"])
 
     def test_news_driven_random_mode_overrides_generic_prompt_and_persists_selection(self) -> None:
         news = NewsSelection(

@@ -57,19 +57,8 @@ an auxiliary recovery.
 
 ## Verify before running workflows
 
-Text smoke test:
-
-```powershell
-python scripts/verify_openai_compatible_providers.py --json
-```
-
-Vision smoke test:
-
-```powershell
-python scripts/verify_openai_compatible_providers.py --modality vision --image D:\MediaOverload\caption_compare\inputs\kirby_generated_image.png --json
-```
-
-The script reports `ok`, `skip`, or `error` per provider and never prints API
-keys. A provider should remain disabled if its smoke test fails or if its model
-does not pass the same image/video evidence comparison used for the OpenRouter
-vision pool.
+Provider availability is verified by the runtime request path and recorded in
+the run logs. A provider remains disabled when its request fails; API keys are
+never included in the recorded request or response metadata. Use the normal
+workflow smoke tests for the selected text or vision route so the evidence is
+captured with the same configuration used by production runs.

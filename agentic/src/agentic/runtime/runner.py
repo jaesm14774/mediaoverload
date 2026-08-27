@@ -204,6 +204,7 @@ class WorkflowRunner:
             "reviewer",
             "review_session_id",
             "review_session_path",
+            "approved_review_text",
             "edited_review_text",
             "fallback_reason",
             "manager_error",

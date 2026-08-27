@@ -126,6 +126,64 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(result.outputs["dispatch_ready"])
         self.assertEqual(result.outputs["dispatch_plan"]["instagram"]["caption"], "IG launch")
 
+    def test_publish_social_marks_platform_ineligible_without_reporting_ready(self) -> None:
+        tool_registry = ToolRegistry()
+
+        def publish_social(payload: dict[str, object]) -> dict[str, object]:
+            return {
+                "status": "success",
+                "dispatch_status": "skipped",
+                "platforms": payload.get("platforms", []),
+            }
+
+        tool_registry.register("publish.social", publish_social, "publish")
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="publish kirby image",
+                media_type="publish_review",
+                constraints={"platforms": ["youtube"]},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="dispatch-publish",
+            skill_name="publish.social.dispatch",
+            depends_on=["process-media", "prepare-caption"],
+            inputs={"platforms": ["youtube"], "dry_run": False},
+        )
+        state = RunState(
+            goal={"prompt": "publish kirby image"},
+            metadata={},
+            node_outputs={
+                "process-media": {"media_paths": ["C:\\selected.png"]},
+                "prepare-caption": {
+                    "caption": "Image caption",
+                    "hashtags": "#kirby",
+                    "dispatch_ready": True,
+                    "platform_bundle": {
+                        "youtube": {
+                            "caption": "Image caption",
+                            "validation": {
+                                "has_caption": True,
+                                "has_media": True,
+                                "is_publish_ready": True,
+                                "is_platform_publish_ready": False,
+                                "issues": ["requires_video_media"],
+                            },
+                        }
+                    },
+                },
+            },
+        )
+
+        result = skills.publish_social(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["platform_ineligible"], ["youtube"])
+        self.assertFalse(result.outputs["dispatch_ready"])
+
     def test_review_select_uses_discord_decision_when_available(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
@@ -199,6 +257,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["selected_assets"], ["C:\\frame_b.png"])
         self.assertEqual(result.outputs["review_mode"], "discord")
         self.assertEqual(result.outputs["reviewer"], "tester#0001")
+        self.assertEqual(result.outputs["approved_review_text"], "keep frame b")
 
     def test_publish_review_requires_discord_approval_even_without_explicit_flag(self) -> None:
         tool_registry = ToolRegistry()
@@ -920,6 +979,125 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["caption"], "Edited caption body")
         self.assertEqual(result.outputs["hashtags"], "#edited #tags")
         self.assertEqual(result.outputs["platform_bundle"]["instagram"]["caption"], "Edited caption body")
+
+    def test_prepare_caption_uses_approved_review_text_without_second_llm_gate(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        approved_text = (
+            "KingDedede steers a wooden cart down a pastel toy track and meets a tiny racing cart on the same lane. "
+            "The bumpers compress with a springy boing, sending the smaller cart safely into the red hat.\n\n"
+            "The playful collision turns a wrong-way traffic warning into a visible, harmless cartoon consequence.\n\n"
+            "1️⃣ A single lane forces direct contact.\n"
+            "2️⃣ Spring-loaded bumpers absorb the shock.\n"
+            "3️⃣ A safety feature changes the outcome.\n\n"
+            "What would you do if your commute became a cartoon collision?\n\n"
+            "Like and save this for later.\n\n"
+            "#toycar #cartooncrash #safety"
+        )
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="publish the approved Kirby clip",
+                media_type="publish_review",
+                style="social promo",
+                constraints={"platforms": ["facebook", "youtube"]},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="prepare-caption",
+            skill_name="publish.caption.prepare",
+            depends_on=["review-select", "process-media"],
+            inputs={"platforms": ["facebook", "youtube"]},
+        )
+        state = RunState(
+            goal={"prompt": "publish the approved Kirby clip"},
+            metadata={},
+            node_outputs={
+                "review-select": {
+                    "review_mode": "discord",
+                    "approved_review_text": approved_text,
+                    "edited_review_text": "",
+                },
+                "process-media": {"media_paths": ["C:\\selected.mp4"]},
+            },
+        )
+
+        with patch.object(skills.prompt_engine, "prepare_publish_caption") as prepare_caption:
+            result = skills.prepare_caption(SkillContext(plan=plan, node=node, state=state))
+
+        prepare_caption.assert_not_called()
+        self.assertEqual(result.outputs["caption"].count("\n\n"), 4)
+        self.assertEqual(result.outputs["hashtags"], "#toycar #cartooncrash #safety")
+        self.assertEqual(result.outputs["platform_captions"], {
+            "facebook": result.outputs["caption"],
+            "youtube": result.outputs["caption"],
+        })
+        self.assertEqual(result.outputs["platform_bundle"]["facebook"]["format"], "reel")
+        self.assertTrue(result.outputs["platform_bundle"]["facebook"]["validation"]["is_platform_publish_ready"])
+        self.assertEqual(result.outputs["platform_bundle"]["youtube"]["format"], "video")
+        self.assertTrue(result.outputs["platform_bundle"]["youtube"]["validation"]["is_platform_publish_ready"])
+        self.assertIn("youtube_title", result.outputs["platform_bundle"]["youtube"]["additional_params"])
+        self.assertIn("youtube_description", result.outputs["platform_bundle"]["youtube"]["additional_params"])
+
+    def test_prepare_caption_rebuilds_platform_native_metadata_after_edit(self) -> None:
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="publish kirby clip",
+                media_type="publish_review",
+                style="social promo",
+                constraints={"platforms": ["youtube", "facebook"]},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="prepare-caption",
+            skill_name="publish.caption.prepare",
+            depends_on=["review-select", "process-media"],
+            inputs={"platforms": ["youtube", "facebook"]},
+        )
+        state = RunState(
+            goal={"prompt": "publish kirby clip"},
+            metadata={},
+            node_outputs={
+                "review-select": {"edited_review_text": "Edited caption body\n\n#edited #tags"},
+                "process-media": {"media_paths": ["C:\\selected.mp4"]},
+            },
+        )
+
+        with patch.object(
+            skills.prompt_engine,
+            "prepare_publish_caption",
+            return_value={
+                "caption": "Generated caption",
+                "hashtags": "#kirby",
+                "platform_captions": {
+                    "youtube": "Generated YouTube caption",
+                    "facebook": "Generated Facebook caption",
+                },
+                "platform_bundle": {},
+                "caption_strategy": "platform_adapted",
+                "dispatch_ready": True,
+                "prompt_mode": "llm",
+            },
+        ):
+            result = skills.prepare_caption(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(
+            result.outputs["platform_bundle"]["youtube"]["additional_params"]["youtube_title"],
+            "Edited caption body",
+        )
+        self.assertEqual(
+            result.outputs["platform_bundle"]["facebook"]["format"],
+            "reel",
+        )
+        self.assertEqual(
+            result.outputs["platform_bundle"]["facebook"]["hashtags"],
+            "#edited #tags",
+        )
 
     def test_prepare_caption_uses_contact_sheet_for_video_visual_evidence(self) -> None:
         tool_registry = ToolRegistry()

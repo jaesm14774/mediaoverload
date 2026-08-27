@@ -78,6 +78,24 @@ class FFmpegAdapterTests(unittest.TestCase):
         self.assertIn("atempo=2", command_text)
         self.assertIn("-map [v] -map [a]", command_text)
 
+    @patch.object(FFmpegAdapter, "_run")
+    def test_trim_video_keeps_video_and_optional_audio(self, run_mock) -> None:
+        adapter = FFmpegAdapter()
+        adapter._checked = True
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.mp4"
+            output_path = Path(directory) / "output_trimmed.mp4"
+            input_path.write_bytes(b"fixture")
+
+            result = adapter.trim_video(str(input_path), str(output_path), 20.0)
+
+        self.assertEqual(result, str(output_path))
+        command = run_mock.call_args.args[0]
+        command_text = " ".join(command)
+        self.assertIn("-t 20.000000", command_text)
+        self.assertIn("-map 0:v:0 -map 0:a?", command_text)
+        self.assertIn("-shortest", command_text)
+
 
 class AgenticComfyCommunicatorTests(unittest.TestCase):
     def test_default_timeout_is_configurable_for_lowvram_generation(self) -> None:
@@ -126,6 +144,33 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             communicator.wait_for_completion("prompt-timeout")
         self.assertTrue(fake_socket.timeout_values)
+
+    def test_wait_for_completion_recovers_when_terminal_websocket_event_is_lost(self) -> None:
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188, timeout=1)
+
+        class FakeSocket:
+            connected = True
+            sock = None
+
+            def settimeout(self, value: float) -> None:
+                del value
+
+            def recv(self):
+                raise socket.timeout()
+
+        communicator.ws = FakeSocket()  # type: ignore[assignment]
+        with patch.object(
+            communicator,
+            "get_history",
+            return_value={"prompt-history-success": {"status": {"completed": True, "status_str": "success"}}},
+        ):
+            communicator.wait_for_completion("prompt-history-success")
+
+    def test_comfy_media_filename_cannot_escape_run_output_directory(self) -> None:
+        output_dir = Path(tempfile.mkdtemp())
+
+        with self.assertRaises(ValueError):
+            AgenticComfyCommunicator._safe_output_path(str(output_dir), "..\\outside.mp4")
 
     def test_cancel_prompt_deletes_only_a_pending_prompt(self) -> None:
         communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
@@ -600,6 +645,23 @@ class SocialServiceToolsTests(unittest.TestCase):
                 "caption": "manifest test",
                 "platforms": ["facebook"],
                 "platform_configs": {"facebook": {"config_folder_path": "configs/fb"}},
+                "platform_bundle": {
+                    "facebook": {
+                        "caption": "manifest test",
+                        "hashtags": "#kirby",
+                        "format": "reel",
+                        "additional_params": {"facebook_use_reels": True},
+                        "content_strategy": {
+                            "strategy_version": "2026-08-25.v1",
+                            "platform": "facebook",
+                            "format": "reel",
+                        },
+                        "validation": {
+                            "is_publish_ready": True,
+                            "is_platform_publish_ready": True,
+                        },
+                    }
+                },
                 "manifest_dir": str(manifest_dir),
             }
         )
@@ -611,6 +673,11 @@ class SocialServiceToolsTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "success")
         self.assertEqual(manifest["publication_state"], "staged")
         self.assertFalse(manifest["publicly_visible"])
+        self.assertEqual(manifest["platform_content"]["facebook"]["format"], "reel")
+        self.assertEqual(
+            manifest["platform_content"]["facebook"]["derived_metadata"]["facebook_use_reels"],
+            True,
+        )
 
     def test_publish_social_reports_public_only_after_verified_public_receipts(self) -> None:
         tools = SocialServiceTools(Path(tempfile.mkdtemp()))
@@ -785,6 +852,56 @@ class SocialServiceToolsYouTubeTests(unittest.TestCase):
         yt_post = captured_posts["youtube"]
         self.assertEqual(yt_post.additional_params.get("youtube_title"), "Title Override")  # type: ignore[union-attr]
         self.assertFalse(yt_post.additional_params.get("youtube_made_for_kids"))  # type: ignore[union-attr]
+
+    def test_publish_social_explicit_params_override_derived_platform_defaults(self) -> None:
+        tools = SocialServiceTools(Path.cwd())
+        captured_posts: dict[str, object] = {}
+
+        class FakePublishing:
+            def register_platform(self, platform_name: str, platform_config: dict[str, object]) -> None:
+                del platform_name, platform_config
+
+            def publish(self, post: object, platforms: list[str] | None = None) -> dict[str, bool]:
+                platform_name = (platforms or ["youtube"])[0]
+                captured_posts[platform_name] = post
+                return {platform_name: True}
+
+        tools._publishing = FakePublishing()  # type: ignore[assignment]
+        tools.publish_social(
+            {
+                "media_paths": ["clip.mp4"],
+                "caption": "caption",
+                "platforms": ["youtube"],
+                "platform_configs": {"youtube": {"config_folder_path": "configs/yt"}},
+                "additional_params": {
+                    "youtube_title": "Explicit reviewed title",
+                    "youtube_contains_synthetic_media": False,
+                },
+                "platform_bundle": {
+                    "youtube": {
+                        "metadata_source": "derived",
+                        "content_strategy": {"synthetic_media_disclosed": True},
+                        "additional_params": {
+                            "youtube_title": "Derived fallback title",
+                            "youtube_contains_synthetic_media": True,
+                        },
+                        "validation": {
+                            "is_publish_ready": True,
+                            "is_platform_publish_ready": True,
+                        },
+                    }
+                },
+            }
+        )
+
+        yt_post = captured_posts["youtube"]
+        self.assertEqual(
+            yt_post.additional_params.get("youtube_title"),  # type: ignore[union-attr]
+            "Explicit reviewed title",
+        )
+        self.assertTrue(
+            yt_post.additional_params.get("youtube_contains_synthetic_media")  # type: ignore[union-attr]
+        )
 
     def test_safe_poc_overrides_platform_metadata_and_does_not_enable_x(self) -> None:
         tools = SocialServiceTools(Path.cwd())

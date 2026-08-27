@@ -360,7 +360,7 @@ def resolve_character_selection(
 ) -> dict[str, Any]:
     loaded_config = config if config is not None else load_character_config(request.config_path)
     character = dict(loaded_config.get("character", {}) or {})
-    configured_name = str(character.get("name") or character.get("group_name") or Path(request.config_path).stem)
+    configured_name = str(character.get("name") or Path(request.config_path).stem)
     group_name = str(character.get("group_name") or "").strip()
     configured_subject_mode = _subject_mode(loaded_config)
     subject_mode, subject_mode_weights = _resolve_subject_mode(
@@ -501,10 +501,16 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     video_speed = _normalize_video_speed_config(generation.get("video_speed"))
 
     style = _pick_primary_style(generation.get("style_weights"))
-    configured_character_name = str(character.get("name") or character.get("group_name") or path.stem)
+    configured_character_name = str(character.get("name") or "").strip()
+    configured_group_name = str(character.get("group_name") or "").strip()
+    configured_prompt_identity = configured_character_name or configured_group_name
     configured_subject_mode = _subject_mode(config)
     if configured_subject_mode == SUBJECT_MODE_RANDOM:
         _subject_mode_weights(config)
+    if configured_group_name and not character_selection:
+        raise ValueError(
+            "group_name requires a resolved character selection before payload construction"
+        )
     if not character_selection and configured_subject_mode == SUBJECT_MODE_RANDOM:
         raise ValueError(
             "random subject_mode requires a resolved selection before payload construction"
@@ -517,7 +523,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         selected_subjects = character_selection.get("subjects")
         if isinstance(selected_subjects, list) and selected_subjects:
             selected_character_name = str(selected_subjects[0].get("name") or "").strip()
-    character_name = selected_character_name or configured_character_name
+    character_name = selected_character_name or configured_character_name or path.stem
     if not character_selection:
         if subject_mode == SUBJECT_MODE_INTERACTION:
             raise ValueError(
@@ -535,7 +541,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     )
     prompt = _replace_character_identity(
         prompt,
-        configured_name=configured_character_name,
+        configured_name=configured_prompt_identity,
         selected_name=character_name,
     )
     routing = _route_generation_from_character_config(
@@ -715,7 +721,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         or generation.get("native_h3_creative_brief")
         or ""
         ).strip(),
-        configured_name=configured_character_name,
+        configured_name=configured_prompt_identity,
         selected_name=character_name,
     ).strip()
     native_h3_visual_style_contract = _replace_character_identity(
@@ -726,7 +732,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         or generation.get("native_h3_visual_style_contract")
         or ""
         ).strip(),
-        configured_name=configured_character_name,
+        configured_name=configured_prompt_identity,
         selected_name=character_name,
     ).strip()
     selected_profile = dict(character_selection.get("selected_profile") or {})
@@ -752,12 +758,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         native_h3_visual_style_contract = "; ".join(
             item for item in (native_h3_visual_style_contract, profile_block) if item
         )
-    native_h3_semantic_qa_blocking = bool(
-        native_recipe.get(
-            "semantic_qa_blocking",
-            native_h3_quality.get("semantic_qa_blocking", False),
-        )
-    )
     constraints = {
         "character": character_name,
         "subject_mode": subject_mode,
@@ -806,7 +806,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
                 )
             )
         ),
-        "input_gate": str(generation.get("input_gate") or ""),
         "hashtags": hashtags,
         "platforms": list(platform_configs.keys()),
         "platform_configs": platform_configs,
@@ -848,7 +847,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             else False
         ),
         "native_h3_semantic_qa_required": bool(native_recipe.get("semantic_qa_required", False)),
-        "native_h3_semantic_qa_blocking": native_h3_semantic_qa_blocking,
         "native_h3_creative_brief": native_h3_creative_brief,
         "native_h3_visual_style_contract": native_h3_visual_style_contract,
         "visual_style_contract": native_h3_visual_style_contract,
@@ -944,6 +942,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             "mix_weights": "longvideo_mix_weights",
             "mix_seed": "longvideo_mix_seed",
             "review_policy": "longvideo_review_policy",
+            "continuity_mode": "longvideo_continuity_mode",
             "workflow_names": "longvideo_workflow_names",
             "frame_candidate_count": "longvideo_frame_candidate_count",
             "reference_candidate_count": "longvideo_reference_candidate_count",
@@ -1161,7 +1160,6 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     "platforms": list(platform_configs.keys()),
                     "platform_configs": dict(platform_configs),
                     "hashtags": list(payload["constraints"].get("hashtags", [])),
-                    "social_post_format": True,
                     "character": payload["character_name"],
                     "dry_run": dry_run_publish,
                     "publish_mode": str(payload["constraints"].get("publish_mode") or ""),
@@ -1805,7 +1803,6 @@ def _route_generation_from_character_config(
         else None
     )
     workflow_selection_weights = dict(merged_routing.get("workflow_selection_weights", {}) or {})
-
     def build_fixed_route(
         selected_generation_type: str,
         reason: str,
@@ -2304,6 +2301,8 @@ def _prioritize_h3_profile(
             suffix = "15s_fl2va_i2v"
         elif generation_type in {"native_h3_ref2va", "text2image2native_h3_ref2va"}:
             continue
+        elif generation_type == "text2longvideo":
+            suffix = "t2v"
         else:
             suffix = "i2v"
         preferred = f"minimax_h3_{slug}_{suffix}"
@@ -2779,7 +2778,7 @@ def _summarize_character_config(
     longvideo_config = dict(longvideo.get("longvideo_config", {}) or {})
     return {
         "config_path": str(path),
-        "character_name": str(selected_character_name or character.get("name") or character.get("group_name") or path.stem),
+        "character_name": str(selected_character_name or character.get("name") or path.stem),
         "group_name": str(character.get("group_name") or ""),
         "character_selection": dict(character_selection or {}),
         "configured_subject_mode": str(generation.get("subject_mode") or SUBJECT_MODE_SINGLE).strip().lower(),

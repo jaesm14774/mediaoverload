@@ -74,8 +74,24 @@ workflows:
       recipes:
         anchor_first:
           anchors: [first]
-          continuation: "previous_tail_as_first"
+          continuation: "none"
           render_tool: "comfy.workflow.image_to_video"
+
+  "minimax_h3_lowvram_t2v.json":
+    conditioning:
+      provider: "minimax_h3"
+      recipes:
+        t2v:
+          continuation: "none"
+          render_tool: "comfy.workflow.text_to_video"
+
+  "minimax_h3_native_t2v.json":
+    conditioning:
+      provider: "minimax_h3"
+      recipes:
+        t2v:
+          continuation: "none"
+          render_tool: "comfy.workflow.text_to_video"
 
   "minimax_h3_lowvram_15s_fl2va_i2v.json":
     conditioning:
@@ -83,7 +99,7 @@ workflows:
       recipes:
         anchor_first_last:
           anchors: [first, last]
-          continuation: "previous_tail_as_first"
+          continuation: "planned_anchor"
           render_tool: "comfy.workflow.image_to_video"
         anchor_last:
           anchors: [last]

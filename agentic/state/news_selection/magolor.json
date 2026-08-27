@@ -22,5 +22,29 @@
     "created_at": "2026-08-24 00:00:00",
     "key": "cisa將zimbra命令注入漏洞列入kev\u001f新聞;cisa;kev;zimbra;cve-2026-73570",
     "selected_at": "2026-08-24T23:31:16.392470+00:00"
+  },
+  {
+    "title": "美國司法部與TikTok、ByteDance兒童隱私訴訟以4億美元和解",
+    "keyword": "新聞;TikTok;ByteDance;COPPA;兒童隱私;美國司法部",
+    "category": "新聞",
+    "created_at": "2026-08-25 00:00:00",
+    "key": "美國司法部與tiktok、bytedance兒童隱私訴訟以4億美元和解\u001f新聞;tiktok;bytedance;coppa;兒童隱私;美國司法部",
+    "selected_at": "2026-08-25T23:24:35.981035+00:00"
+  },
+  {
+    "title": "Nvidia升級Jetson Orin Nano 2，推論效能最高2倍、同效能功耗降40%",
+    "keyword": "新聞;Nvidia;Jetson Orin Nano 2;邊緣AI;機器人;AI推論",
+    "category": "新聞",
+    "created_at": "2026-08-26 00:00:00",
+    "key": "nvidia升級jetson orin nano 2，推論效能最高2倍、同效能功耗降40%\u001f新聞;nvidia;jetson orin nano 2;邊緣ai;機器人;ai推論",
+    "selected_at": "2026-08-26T12:15:27.531615+00:00"
+  },
+  {
+    "title": "WhatsApp強化兩階段驗證機制",
+    "keyword": "新聞;WhatsApp;MFA",
+    "category": "新聞",
+    "created_at": "2026-08-27 00:00:00",
+    "key": "whatsapp強化兩階段驗證機制\u001f新聞;whatsapp;mfa",
+    "selected_at": "2026-08-27T22:54:33.598229+00:00"
   }
 ]

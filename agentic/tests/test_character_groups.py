@@ -114,6 +114,19 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertNotIn("Kirby", payload["constraints"]["native_h3_creative_brief"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "MetaKnight")
 
+    def test_group_name_cannot_be_used_as_prompt_identity_without_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "group-only.yaml"
+            config.write_text(
+                "character:\n  group_name: Kirby\ngeneration:\n"
+                "  generation_type_weights:\n    text2img: 1\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "group_name requires a resolved character selection"):
+                build_goal_payload_from_character_config(
+                    make_character_workflow_request(self.repo_root, config, publish_after_generate=False)
+                )
+
     def test_pair_selection_allows_same_name_with_replacement(self) -> None:
         rows = [
             {
