@@ -6,6 +6,10 @@ from pathlib import Path
 import textwrap
 
 from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.platform_content import (
+    build_platform_bundle,
+    sanitize_hashtags,
+)
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.tools.context_services import DiscordHumanReviewService
@@ -28,52 +32,48 @@ class AgentSocialSkills:
         hashtags = context.node.inputs.get("hashtags") or context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or context.node.inputs.get("platforms") or [])]
         selected_media = self._collect_media_from_dependencies(context)
-        bundle = self.prompt_engine.prepare_publish_caption(
-            context.plan.goal,
-            prefix=prefix,
-            hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
-            platforms=platforms,
-            media_paths=selected_media,
-            review_notes=str(context.plan.goal.constraints.get("review_notes", "") or ""),
-            visual_paths=self._visual_evidence_paths(
-                selected_media,
-                visual_grounding=context.plan.goal.constraints.get("visual_grounding"),
-            ),
-        )
         review_select = context.state[context.node.depends_on[0]] if context.node.depends_on else {}
+        approved_review_text = str(review_select.get("approved_review_text") or "").strip()
         edited_review_text = str(review_select.get("edited_review_text") or "").strip()
-        if edited_review_text:
-            caption_override, hashtags_override = self._split_review_caption_and_hashtags(edited_review_text)
-            if caption_override:
-                bundle["caption"] = caption_override
-            if hashtags_override:
-                bundle["hashtags"] = hashtags_override
-            platform_captions = bundle.get("platform_captions", {})
-            if not isinstance(platform_captions, dict):
-                platform_captions = {}
-            effective_platforms = platforms or list(platform_captions.keys())
-            for platform in effective_platforms:
-                platform_captions[str(platform)] = caption_override or str(platform_captions.get(platform) or bundle["caption"])
-            bundle["platform_captions"] = platform_captions
-            platform_bundle = bundle.get("platform_bundle", {})
-            if isinstance(platform_bundle, dict):
-                for platform in effective_platforms:
-                    payload = platform_bundle.get(str(platform), {})
-                    if not isinstance(payload, dict):
-                        payload = {}
-                    payload["caption"] = caption_override or str(payload.get("caption") or bundle["caption"])
-                    payload["hashtags"] = hashtags_override or str(payload.get("hashtags") or bundle.get("hashtags", ""))
-                    payload["character_count"] = len(str(payload["caption"]))
-                    validation = payload.get("validation", {})
-                    if not isinstance(validation, dict):
-                        validation = {}
-                    validation["has_caption"] = bool(payload["caption"])
-                    validation["has_media"] = bool(selected_media)
-                    validation["is_publish_ready"] = bool(payload["caption"]) and bool(selected_media)
-                    payload["validation"] = validation
-                    platform_bundle[str(platform)] = payload
-                bundle["platform_bundle"] = platform_bundle
-            bundle["dispatch_ready"] = bool(selected_media) and bool(bundle.get("caption"))
+        review_text = approved_review_text or edited_review_text
+        if review_text:
+            caption_override, hashtags_override = self._split_review_caption_and_hashtags(review_text)
+            if not caption_override:
+                raise ValueError("Approved review text did not contain a caption body.")
+            normalized_hashtags = sanitize_hashtags(hashtags_override)
+            platform_captions = {
+                str(platform): caption_override
+                for platform in platforms
+            }
+            bundle = {
+                "caption": caption_override,
+                "hashtags": normalized_hashtags,
+                "platform_captions": platform_captions,
+                "platform_bundle": build_platform_bundle(
+                    goal=context.plan.goal,
+                    caption=caption_override,
+                    hashtags=normalized_hashtags,
+                    platform_captions=platform_captions,
+                    platforms=platforms,
+                    media_paths=selected_media,
+                ),
+                "caption_strategy": "human_approved_review",
+                "prompt_mode": "human_approved_review",
+                "dispatch_ready": bool(selected_media),
+            }
+        else:
+            bundle = self.prompt_engine.prepare_publish_caption(
+                context.plan.goal,
+                prefix=prefix,
+                hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
+                platforms=platforms,
+                media_paths=selected_media,
+                review_notes=str(context.plan.goal.constraints.get("review_notes", "") or ""),
+                visual_paths=self._visual_evidence_paths(
+                    selected_media,
+                    visual_grounding=context.plan.goal.constraints.get("visual_grounding"),
+                ),
+            )
         return SkillResult(
             status="success",
             outputs={
@@ -85,6 +85,7 @@ class AgentSocialSkills:
                 "dispatch_ready": bool(bundle.get("dispatch_ready", False)),
                 "prompt_mode": str(bundle.get("prompt_mode", "template")),
                 "selected_assets": selected_media,
+                "approved_review_text": approved_review_text,
                 "edited_review_text": edited_review_text,
             },
             logs=["Prepared a reusable social caption bundle."],
@@ -158,6 +159,21 @@ class AgentSocialSkills:
             for platform, payload in dispatch_plan.items()
             if not bool(payload.get("validation", {}).get("is_publish_ready", False))
         ]
+        platform_ineligible = [
+            platform
+            for platform, payload in dispatch_plan.items()
+            if not bool(payload.get("validation", {}).get("is_platform_publish_ready", True))
+        ]
+        platform_validation_failures = [
+            platform
+            for platform in platform_ineligible
+            if not (
+                isinstance(dispatch_plan.get(platform, {}).get("validation", {}), dict)
+                and "requires_video_media"
+                in dispatch_plan.get(platform, {}).get("validation", {}).get("issues", [])
+            )
+        ]
+        blocked_platforms = list(dict.fromkeys([*blocked_platforms, *platform_validation_failures]))
         if blocked_platforms and not dry_run:
             return SkillResult(
                 status="blocked",
@@ -171,6 +187,7 @@ class AgentSocialSkills:
                     "dispatch_plan": dispatch_plan,
                     "dispatch_ready": False,
                     "blocked_platforms": blocked_platforms,
+                    "platform_ineligible": platform_ineligible,
                     "blocked_reason": "publish bundle is not dispatch-ready for every requested platform",
                 },
                 logs=["Blocked social dispatch because one or more platforms failed publish-readiness validation."],
@@ -194,7 +211,12 @@ class AgentSocialSkills:
         outputs = dict(result)
         outputs["platform_bundle"] = platform_bundle if isinstance(platform_bundle, dict) else {}
         outputs["dispatch_plan"] = dispatch_plan
-        outputs["dispatch_ready"] = bool(caption_bundle.get("dispatch_ready", False)) and not blocked_platforms
+        outputs["platform_ineligible"] = platform_ineligible
+        outputs["dispatch_ready"] = (
+            bool(caption_bundle.get("dispatch_ready", False))
+            and not blocked_platforms
+            and not platform_ineligible
+        )
         dispatch_status = str(outputs.get("status") or "").strip().lower()
         skill_status = "success" if dispatch_status in {"success", "dry_run", "awaiting_user_action"} else "failed"
         return SkillResult(status=skill_status, outputs=outputs, logs=["Dispatched a social publishing action."])
@@ -561,6 +583,11 @@ class AgentSocialSkills:
             if bool(getattr(decision, "edit_requested", False))
             else ""
         )
+        approved_review_text = (
+            str(getattr(decision, "edited_text", ""))
+            if review_mode == "discord" and str(getattr(decision, "status", "")).strip().lower() == "approved"
+            else ""
+        )
         fallback_reason = str(getattr(decision, "fallback_reason", ""))
         review_delivery = dict(getattr(decision, "delivery", {}) or {})
         rejected = [path for path in ranked if path not in selected]
@@ -595,6 +622,7 @@ class AgentSocialSkills:
                 "review_session_id": review_session_id,
                 "review_session_path": review_session_path,
                 "review_delivery": review_delivery,
+                "approved_review_text": approved_review_text,
                 "edited_review_text": edited_review_text,
                 "fallback_reason": fallback_reason,
                 "auto_select_for_probe": auto_select_for_probe,
@@ -799,6 +827,8 @@ class AgentSocialSkills:
         for line in lines:
             stripped = line.strip()
             if not stripped:
+                if content_lines and content_lines[-1] != "":
+                    content_lines.append("")
                 continue
             if stripped.lower().startswith("draft post:") or stripped.lower().startswith("platforms:"):
                 continue
@@ -815,6 +845,8 @@ class AgentSocialSkills:
             if stripped.lower().startswith("accept to publish with these assets"):
                 continue
             content_lines.append(stripped)
+        while content_lines and content_lines[-1] == "":
+            content_lines.pop()
         return "\n".join(content_lines).strip(), "\n".join(hashtag_lines).strip()
 
     @staticmethod

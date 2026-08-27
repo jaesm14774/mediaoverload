@@ -20,7 +20,7 @@ class GenerationRoutingRequest:
 
 @dataclass(frozen=True, slots=True)
 class JsonChatRequest:
-    """One structured request for a schema-constrained LLM call."""
+    """One JSON-producing request for an LLM call."""
 
     manager: Any
     system_prompt: str
@@ -34,3 +34,4 @@ class JsonChatRequest:
     request_timeout: float | None = None
     max_models_per_call: int | None = None
     repair_attempts: int = 2
+    use_response_format: bool = True

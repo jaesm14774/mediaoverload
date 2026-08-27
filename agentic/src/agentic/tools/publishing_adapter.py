@@ -29,16 +29,49 @@ def build_dispatch_plan(
         validation = bundle.get("validation", {})
         if not isinstance(validation, dict):
             validation = {}
+        additional_params = bundle.get("additional_params", {})
+        if not isinstance(additional_params, dict):
+            additional_params = {}
+        content_strategy = bundle.get("content_strategy", {})
+        if not isinstance(content_strategy, dict):
+            content_strategy = {}
         dispatch_plan[platform] = {
             "caption": platform_caption,
             "hashtags": platform_hashtags,
             "media_paths": platform_media_paths,
+            "format": str(bundle.get("format") or ""),
+            "metadata_source": str(bundle.get("metadata_source") or ""),
+            "additional_params": dict(additional_params),
+            "content_strategy": dict(content_strategy),
             "validation": {
                 "has_caption": bool(validation.get("has_caption", platform_caption)),
                 "has_media": bool(validation.get("has_media", platform_media_paths)),
                 "is_publish_ready": bool(
                     validation.get("is_publish_ready", bool(platform_caption) and bool(platform_media_paths))
                 ),
+                "is_platform_eligible": bool(
+                    validation.get("is_platform_eligible", bool(platform_media_paths))
+                ),
+                "is_platform_publish_ready": bool(
+                    validation.get(
+                        "is_platform_publish_ready",
+                        validation.get("is_publish_ready", bool(platform_caption) and bool(platform_media_paths)),
+                    )
+                ),
+                "issues": [
+                    str(issue)
+                    for issue in validation.get("issues", [])
+                    if str(issue).strip()
+                ]
+                if isinstance(validation.get("issues", []), list)
+                else [],
+                "warnings": [
+                    str(warning)
+                    for warning in validation.get("warnings", [])
+                    if str(warning).strip()
+                ]
+                if isinstance(validation.get("warnings", []), list)
+                else [],
             },
         }
     return dispatch_plan

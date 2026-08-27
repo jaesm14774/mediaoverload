@@ -88,6 +88,19 @@ class TaskPlanner:
         return max(1, int(value))
 
     @staticmethod
+    def _longvideo_int(goal: GoalRequest, key: str, default: int, maximum: int) -> int:
+        value = goal.constraints.get(key)
+        if value in {None, ""}:
+            return default
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} must be an integer between 1 and {maximum}") from exc
+        if parsed < 1 or parsed > maximum:
+            raise ValueError(f"{key} must be an integer between 1 and {maximum}")
+        return parsed
+
+    @staticmethod
     def _native_h3_render_config(goal: GoalRequest, manifest: WorkflowManifest, *, default_steps: int = 16) -> dict[str, int]:
         defaults = dict(manifest.recommended_defaults or {})
         return {
@@ -1186,7 +1199,7 @@ class TaskPlanner:
         return max(1, int(value or default))
 
     def _build_long_video_plan(self, goal: GoalRequest, workflow_manifest: WorkflowManifest) -> ExecutionPlan:
-        segment_count = self._constraint_int(goal, "segment_count", max(2, goal.duration_seconds // 10))
+        segment_count = self._constraint_int(goal, "segment_count", max(2, (goal.duration_seconds + 4) // 5))
         use_tts = bool(goal.constraints.get("use_tts", False))
         review_loop_enabled = self._review_loop_enabled(goal)
         pre_video_review = self._pre_video_review_enabled(goal)
@@ -1200,19 +1213,9 @@ class TaskPlanner:
         ).strip().lower()
         if review_policy not in {"opening_only", "anchors", "every_segment"}:
             raise ValueError("longvideo_review_policy must be 'opening_only', 'anchors', or 'every_segment'")
-
-        image_manifest = self._manifest_from_goal_constraints(
-            goal,
-            *self.DEFAULT_IMAGE_WORKFLOWS,
-            constraint_keys=("image_workflow_name", "workflow_name"),
-            allowed_media_types={"image"},
-        )
-        transition_manifest = self._manifest_from_goal_constraints(
-            goal,
-            *self.DEFAULT_REFINE_WORKFLOWS,
-            constraint_keys=("transition_workflow_name", "refine_workflow_name"),
-            allowed_media_types={"image_refine"},
-        )
+        continuity_mode = str(goal.constraints.get("longvideo_continuity_mode") or "planned_anchor").strip().lower()
+        if continuity_mode not in {"planned_anchor", "independent"}:
+            raise ValueError("longvideo_continuity_mode must be 'planned_anchor' or 'independent'")
 
         from agentic.runtime.video_conditioning import (
             ConditioningPlan,
@@ -1227,15 +1230,14 @@ class TaskPlanner:
             preferred_workflows = [preferred_workflows]
         candidates = recipe_candidates(capabilities, preferred_workflows=preferred_workflows)
         default_weights = {
-            "anchor_first": 1,
-            "anchor_first_last": 3,
-            "anchor_last": 2,
-            "reference_bundle": 2,
+            "t2v": 1,
         }
         configured_weights = goal.constraints.get("longvideo_mix_weights")
-        weights = dict(configured_weights) if isinstance(configured_weights, dict) and configured_weights else {
-            name: default_weights.get(name, 1) for name in candidates
-        }
+        weights = (
+            dict(configured_weights)
+            if isinstance(configured_weights, dict) and configured_weights
+            else dict(default_weights)
+        )
         mix_seed, recipe_sequence = sample_recipe_sequence(
             weights,
             segment_count,
@@ -1254,8 +1256,32 @@ class TaskPlanner:
             recipe_name: selected_capabilities[recipe_name].recipes[recipe_name]
             for recipe_name in selected_capabilities
         }
+        requires_image_conditioning = any(
+            recipe.requires_first or recipe.requires_last or recipe.requires_references
+            for recipe in recipe_contracts.values()
+        )
+        image_manifest = (
+            self._manifest_from_goal_constraints(
+                goal,
+                *self.DEFAULT_IMAGE_WORKFLOWS,
+                constraint_keys=("image_workflow_name", "workflow_name"),
+                allowed_media_types={"image"},
+            )
+            if requires_image_conditioning
+            else None
+        )
+        transition_manifest = (
+            self._manifest_from_goal_constraints(
+                goal,
+                *self.DEFAULT_REFINE_WORKFLOWS,
+                constraint_keys=("transition_workflow_name", "refine_workflow_name"),
+                allowed_media_types={"image_refine"},
+            )
+            if requires_image_conditioning
+            else None
+        )
 
-        image_defaults = image_manifest.recommended_defaults or {}
+        image_defaults = image_manifest.recommended_defaults if image_manifest else {}
         frame_width = int(goal.constraints.get("longvideo_frame_width") or image_defaults.get("width", 1024))
         frame_height = int(goal.constraints.get("longvideo_frame_height") or image_defaults.get("height", 1024))
         frame_candidate_count = max(
@@ -1354,25 +1380,32 @@ class TaskPlanner:
                 depends_on=["idea-brief"],
                 tags=["story"],
             ),
-            ExecutionNode(
-                node_id="image-asset-check",
-                skill_name="media.ensure_workflow",
-                inputs={"workflow_name": image_manifest.name, "auto_download": goal.auto_download_assets},
-                depends_on=["script-plan"],
-                tags=["assets", "image"],
-                tool_name="asset.ensure_workflow_ready",
-                stage="assets",
-            ),
-            ExecutionNode(
-                node_id="transition-asset-check",
-                skill_name="media.ensure_workflow",
-                inputs={"workflow_name": transition_manifest.name, "auto_download": goal.auto_download_assets},
-                depends_on=["script-plan"],
-                tags=["assets", "transition"],
-                tool_name="asset.ensure_workflow_ready",
-                stage="assets",
-            ),
         ]
+        if requires_image_conditioning:
+            assert image_manifest is not None
+            assert transition_manifest is not None
+            nodes.extend(
+                [
+                    ExecutionNode(
+                        node_id="image-asset-check",
+                        skill_name="media.ensure_workflow",
+                        inputs={"workflow_name": image_manifest.name, "auto_download": goal.auto_download_assets},
+                        depends_on=["script-plan"],
+                        tags=["assets", "image"],
+                        tool_name="asset.ensure_workflow_ready",
+                        stage="assets",
+                    ),
+                    ExecutionNode(
+                        node_id="transition-asset-check",
+                        skill_name="media.ensure_workflow",
+                        inputs={"workflow_name": transition_manifest.name, "auto_download": goal.auto_download_assets},
+                        depends_on=["script-plan"],
+                        tags=["assets", "transition"],
+                        tool_name="asset.ensure_workflow_ready",
+                        stage="assets",
+                    ),
+                ]
+            )
 
         def video_asset_check_for(workflow_name: str) -> str:
             node_id = f"video-asset-check-{workflow_name}"
@@ -1396,21 +1429,23 @@ class TaskPlanner:
 
         segment_video_nodes: list[str] = []
         tts_nodes: list[str] = []
-        segment_specs: list[dict[str, object]] = []
 
-        def append_segment(prefix: str, index: int, previous_tail_node: str | None, *, retry: bool = False) -> tuple[str, str, str, str | None]:
+        def append_segment(
+            prefix: str,
+            index: int,
+            previous_planned_anchor_node: str | None,
+            *,
+            retry: bool = False,
+        ) -> tuple[str, str, str | None, str | None]:
             suffix = f"{index + 1:02d}"
             prompt_node = f"{prefix}-prompt-{suffix}"
             video_node = f"{prefix}-video-{suffix}"
-            tail_node = f"{prefix}-tail-{suffix}"
             recipe_name = recipe_sequence[index]
             capability = selected_capabilities[recipe_name]
             recipe = recipe_contracts[recipe_name]
             prompt_dependencies = ["script-plan", "idea-brief"]
             if retry:
                 prompt_dependencies.append("review-refine-prompt")
-            if previous_tail_node:
-                prompt_dependencies.append(previous_tail_node)
             nodes.append(
                 ExecutionNode(
                     node_id=prompt_node,
@@ -1427,22 +1462,22 @@ class TaskPlanner:
             anchor_review_nodes: list[str] = []
 
             if recipe.requires_first:
-                # Normal continuation uses the previous segment tail directly.
-                # Anchor-review policies intentionally materialize a continuity
-                # candidate set from that tail so every reviewed segment can
-                # still receive multiple first-anchor choices.
-                review_continuity_anchor = previous_tail_node and human_anchor_review
-                if previous_tail_node and recipe.continuation == "previous_tail_as_first" and not review_continuity_anchor:
-                    anchor_nodes["first"] = previous_tail_node
-                    input_dependencies.append(previous_tail_node)
+                # A segment may continue only from a planned story-state anchor
+                # generated before video rendering.  A rendered video tail is a
+                # QA artifact, not a creative input for the next segment.
+                if (
+                    continuity_mode == "planned_anchor"
+                    and previous_planned_anchor_node
+                    and recipe.continuation == "planned_anchor"
+                ):
+                    anchor_nodes["first"] = previous_planned_anchor_node
+                    input_dependencies.append(previous_planned_anchor_node)
                 else:
                     # Keep the original segment-frame id stable for callers and
                     # persisted plans while the payload now carries a generic
                     # anchor contract.
                     first_candidate = f"{prefix}-frame-{suffix}"
                     first_dependencies = [prompt_node, "image-asset-check", "transition-asset-check"]
-                    if previous_tail_node:
-                        first_dependencies.append(previous_tail_node)
                     first_count = frame_candidate_count if (
                         (index == 0 and pre_video_review) or human_anchor_review
                     ) else 1
@@ -1504,8 +1539,11 @@ class TaskPlanner:
             if recipe.requires_last:
                 last_candidate = f"{prefix}-anchor-last-candidates-{suffix}"
                 last_dependencies = [prompt_node, "image-asset-check", "transition-asset-check"]
-                if previous_tail_node:
-                    last_dependencies.append(previous_tail_node)
+                # FL2VA/L2VA landing anchors are planned from the segment's
+                # opening anchor when one exists.  This preserves an explicit
+                # state transition without copying any rendered video frame.
+                if recipe.requires_first and anchor_nodes.get("first"):
+                    last_dependencies.append(anchor_nodes["first"])
                 nodes.append(
                     ExecutionNode(
                         node_id=last_candidate,
@@ -1579,8 +1617,6 @@ class TaskPlanner:
                 else:
                     reference_candidate = f"{prefix}-reference-candidates-{suffix}"
                     reference_dependencies = [prompt_node, "image-asset-check", "transition-asset-check"]
-                    if previous_tail_node:
-                        reference_dependencies.append(previous_tail_node)
                     nodes.append(
                         ExecutionNode(
                             node_id=reference_candidate,
@@ -1649,26 +1685,30 @@ class TaskPlanner:
                 workflow_name=capability.workflow_name,
                 anchor_nodes=anchor_nodes,
                 reference_node=reference_node,
-                continuation_node=(previous_tail_node or "") if recipe.continuation != "none" else "",
+                continuation_node=(previous_planned_anchor_node or "")
+                if continuity_mode == "planned_anchor" and recipe.continuation == "planned_anchor"
+                else "",
             )
             render_inputs = {
                 "recipe": recipe_name,
                 "workflow_name": capability.workflow_name,
                 "render_tool": recipe.render_tool,
                 "segment_index": index,
-                "video_count": self._constraint_int(goal, "video_count", 1),
+                "video_count": self._longvideo_int(goal, "video_count", 1, 8),
                 "conditioning_plan": conditioning_plan.to_dict(),
                 "anchor_nodes": dict(anchor_nodes),
                 "reference_node": reference_node,
                 "continuation": recipe.continuation,
-                "width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
-                "height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
-                "length": int(
-                    goal.constraints.get("longvideo_length")
-                    or goal.constraints.get("longvideo_h3_length")
-                    or segment_default_length
+                "continuity_mode": continuity_mode,
+                "width": self._longvideo_int(goal, "longvideo_width", int(goal.constraints.get("longvideo_h3_width") or 512), 2048),
+                "height": self._longvideo_int(goal, "longvideo_height", int(goal.constraints.get("longvideo_h3_height") or 288), 2048),
+                "length": self._longvideo_int(
+                    goal,
+                    "longvideo_length",
+                    int(goal.constraints.get("longvideo_h3_length") or segment_default_length),
+                    1000,
                 ),
-                "steps": int(goal.constraints.get("longvideo_steps") or goal.constraints.get("longvideo_h3_steps") or 16),
+                "steps": self._longvideo_int(goal, "longvideo_steps", int(goal.constraints.get("longvideo_h3_steps") or 16), 100),
                 "model_profile": str(
                     goal.constraints.get("longvideo_model_profile")
                     or goal.constraints.get("native_h3_model_profile")
@@ -1687,28 +1727,6 @@ class TaskPlanner:
                     stage="render",
                 )
             )
-            nodes.append(
-                ExecutionNode(
-                    node_id=tail_node,
-                    skill_name="media.video.extract_last_frame",
-                    inputs={"segment_index": index},
-                    depends_on=[video_node],
-                    tags=["frame", "segment"] + (["retry"] if retry else []),
-                    tool_name="media.extract_last_frame",
-                    stage="package",
-                )
-            )
-            segment_specs.append(
-                {
-                    "index": index,
-                    "recipe": recipe_name,
-                    "workflow_name": capability.workflow_name,
-                    "conditioning": conditioning_plan.to_dict(),
-                    "video_node": video_node,
-                    "tail_node": tail_node,
-                    "review_nodes": anchor_review_nodes,
-                }
-            )
             tts_node: str | None = None
             if use_tts:
                 tts_node = f"{prefix}-tts-audio-{suffix}"
@@ -1723,11 +1741,16 @@ class TaskPlanner:
                         stage="audio",
                     )
                 )
-            return video_node, tail_node, prompt_node, tts_node
+            planned_anchor_node = anchor_nodes.get("last") if recipe.requires_last else None
+            return video_node, prompt_node, tts_node, planned_anchor_node
 
-        previous_tail_node: str | None = None
+        previous_planned_anchor_node: str | None = None
         for index in range(segment_count):
-            video_node, previous_tail_node, _, tts_node = append_segment("segment", index, previous_tail_node)
+            video_node, _, tts_node, previous_planned_anchor_node = append_segment(
+                "segment",
+                index,
+                previous_planned_anchor_node,
+            )
             segment_video_nodes.append(video_node)
             if tts_node:
                 tts_nodes.append(tts_node)
@@ -1776,6 +1799,28 @@ class TaskPlanner:
             source_node=preview_dependency,
             node_id="video-speed",
         )
+        final_video_duration = float(goal.duration_seconds)
+        if goal.duration_seconds > 0:
+            scaled_duration = self._scaled_video_qa_inputs(
+                goal,
+                {"target_duration": float(goal.duration_seconds)},
+            ).get("target_duration")
+            if scaled_duration not in {None, ""}:
+                final_video_duration = float(scaled_duration)
+        if goal.duration_seconds > 0:
+            nodes.append(
+                ExecutionNode(
+                    node_id="video-trim",
+                    skill_name="media.video.trim",
+                    inputs={"duration_seconds": final_video_duration},
+                    depends_on=[preview_dependency],
+                    tags=["package", "video", "duration"],
+                    tool_name="media.trim_video",
+                    stage="package",
+                )
+            )
+            preview_dependency = "video-trim"
+        final_video_node = preview_dependency
 
         longvideo_qa_inputs = self._scaled_video_qa_inputs(goal, {
             "expected_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
@@ -1848,9 +1893,14 @@ class TaskPlanner:
             )
             retry_video_nodes: list[str] = []
             retry_tts_nodes: list[str] = []
-            retry_tail: str | None = None
+            retry_planned_anchor: str | None = None
             for index in range(segment_count):
-                retry_video, retry_tail, _, retry_tts = append_segment("review-segment", index, retry_tail, retry=True)
+                retry_video, _, retry_tts, retry_planned_anchor = append_segment(
+                    "review-segment",
+                    index,
+                    retry_planned_anchor,
+                    retry=True,
+                )
                 retry_video_nodes.append(retry_video)
                 if retry_tts:
                     retry_tts_nodes.append(retry_tts)
@@ -1897,6 +1947,19 @@ class TaskPlanner:
                 node_id="review-video-speed",
                 retry=True,
             )
+            if goal.duration_seconds > 0:
+                nodes.append(
+                    ExecutionNode(
+                        node_id="review-video-trim",
+                        skill_name="media.video.trim",
+                        inputs={"duration_seconds": final_video_duration},
+                        depends_on=[retry_preview_dependency],
+                        tags=["package", "video", "duration", "retry"],
+                        tool_name="media.trim_video",
+                        stage="package",
+                    )
+                )
+                retry_preview_dependency = "review-video-trim"
             nodes.append(
                 ExecutionNode(
                     node_id="review-longvideo-video-qa",
@@ -1931,6 +1994,7 @@ class TaskPlanner:
                 )
             )
             review_final_node = "review-final-select"
+            final_video_node = retry_preview_dependency
             nodes.append(
                 ExecutionNode(
                     node_id=review_final_node,
@@ -1955,10 +2019,11 @@ class TaskPlanner:
         )
         metadata = {
             "segment_count": segment_count,
+            "continuity_mode": continuity_mode,
             "selected_workflow": workflow_manifest.name,
             "required_assets": [
-                *[asset.to_dict() for asset in image_manifest.required_assets],
-                *[asset.to_dict() for asset in transition_manifest.required_assets],
+                *([asset.to_dict() for asset in image_manifest.required_assets] if image_manifest else []),
+                *([asset.to_dict() for asset in transition_manifest.required_assets] if transition_manifest else []),
             ],
             "graph_overview": [node.node_id for node in nodes],
             "idea_variants": idea_variants,
@@ -1971,6 +2036,7 @@ class TaskPlanner:
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_tts": use_tts,
             "video_speed": self._video_speed_config(goal),
+            "final_video_node": final_video_node,
             "review_loop_enabled": review_loop_enabled,
             "review_notes": review_notes,
         }

@@ -9,7 +9,6 @@ from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.prompting import (
     build_segment_prompt,
-    validate_story_anchor,
     validate_story_segments,
 )
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
@@ -73,7 +72,7 @@ class AgentPlanningSkills:
         brief = str(brief_source.get("creative_brief", context.plan.goal.prompt))
         tone = str(context.node.inputs.get("tone", "coherent progression"))
         segments = self.prompt_engine.segment_story(context.plan.goal, brief, segment_count, tone)
-        validate_story_anchor(context.plan.goal, validate_story_segments(segments, segment_count))
+        validate_story_segments(segments, segment_count)
         return SkillResult(
             status="success",
             outputs={"segments": segments, "segment_count": segment_count},
@@ -261,12 +260,10 @@ class AgentMediaSkills:
     def generate_keyframe(self, context: SkillContext) -> SkillResult:
         prior_frame_path = context.node.inputs.get("prior_frame_path")
         if not prior_frame_path:
-            for dependency in reversed(context.node.depends_on):
-                dependency_output = context.state[dependency]
-                candidate = dependency_output.get("prior_frame_path") or dependency_output.get("frame_path")
-                if isinstance(candidate, str) and candidate:
-                    prior_frame_path = candidate
-                    break
+            prior_frame_path = resolve_dependency_value(
+                context,
+                ("prior_frame_path", "frame_path", "selected_frame_path", "selected_assets", "saved_files"),
+            )
         if isinstance(prior_frame_path, str) and prior_frame_path:
             workflow_name = str(
                 context.plan.goal.constraints.get("identity_refine_workflow_name")
@@ -282,7 +279,7 @@ class AgentMediaSkills:
                     "negative_prompt": self._resolve_negative_prompt(context),
                     # Continuity refinement is also the source of auto-generated
                     # Ref2VA candidates. Preserve the requested bundle size
-                    # instead of collapsing every prior-tail refinement to one
+                    # instead of collapsing every planned-anchor refinement to one
                     # image before reference validation.
                     "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
                 },
@@ -306,6 +303,20 @@ class AgentMediaSkills:
             prompt = self._resolve_prompt_with_identity_lock(context, self._resolve_prompt(context))
             negative_prompt = self._resolve_negative_prompt(context)
             if character == "kirby":
+                anchor_position = str(context.node.inputs.get("anchor_position") or "").strip().lower()
+                if anchor_position in {"first", "last"}:
+                    script_output = context.state.node_outputs.get("script-plan", {})
+                    segments = script_output.get("segments", []) if isinstance(script_output, dict) else []
+                    segment_index = int(context.node.inputs.get("segment_index") or 0)
+                    segment = segments[segment_index] if segment_index < len(segments) else {}
+                    state_key = "start_state" if anchor_position == "first" else "end_state"
+                    planned_state = str(segment.get(state_key) or "").strip()
+                    if planned_state:
+                        prompt = (
+                            f"{'Opening' if anchor_position == 'first' else 'Landing'} keyframe only: {planned_state}. "
+                            f"Freeze one single moment {'immediately before the physical action begins' if anchor_position == 'first' else 'immediately after the decisive outcome'}; "
+                            "do not depict a sequence, a storyboard, or multiple copies of the character."
+                        )
                 prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
                 if prompt_key == "opening_keyframe_prompt":
                     story_output = context.state.node_outputs.get("native-story-prompt", {})
@@ -339,13 +350,15 @@ class AgentMediaSkills:
                     )
                 else:
                     prompt = (
-                        f"{prompt}, single continuous animation frame, one composition, Kirby large and clearly visible "
+                        f"{prompt}, single continuous animation frame, one single Kirby only, one composition, "
+                        "Kirby large and clearly visible "
                         "in the foreground or midground, full readable round pink body and bright red feet, "
                         "no storyboard, no sequence, no contact sheet, no split composition"
                     )
                 negative_prompt = (
                     f"{negative_prompt}, storyboard, contact sheet, comic panels, multi-panel, split screen, collage, "
-                    "tiny distant subject, cropped character, white or unrecognizable character"
+                    "tiny distant subject, cropped character, white or unrecognizable character, duplicate Kirby, "
+                    "second Kirby, cloned subject"
                     + (", identity swap, unrequested third subject" if interaction_required else "")
                 )
             attempts = 1 if character != "kirby" else max(1, int(context.node.inputs.get("max_regenerations", 2)) + 1)
@@ -756,6 +769,36 @@ class AgentMediaSkills:
             logs=[f"Rendered final video at {speed:g}x playback speed."],
         )
 
+    def trim_video(self, context: SkillContext) -> SkillResult:
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "video_trim")
+        video_dir = run_dir / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        video_path = str(
+            context.node.inputs.get("video_path")
+            or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
+            or ""
+        )
+        if not video_path:
+            raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
+        duration_seconds = float(
+            context.node.inputs.get("duration_seconds")
+            or context.plan.goal.duration_seconds
+        )
+        result = self.tools.call(
+            "media.trim_video",
+            {
+                "video_path": video_path,
+                "output_path": str(video_dir / f"{Path(video_path).stem}_trimmed.mp4"),
+                "duration_seconds": duration_seconds,
+            },
+        )
+        return SkillResult(
+            status="success",
+            outputs=result,
+            metrics={"duration_seconds": duration_seconds},
+            logs=[f"Trimmed final video to {duration_seconds:g} seconds."],
+        )
+
     def merge_audio_video(self, context: SkillContext) -> SkillResult:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "mux")
         video_dir = run_dir / "video"
@@ -1141,6 +1184,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
     skill_registry.register("media.video.change_speed", media.change_video_speed, "Change final video playback speed")
+    skill_registry.register("media.video.trim", media.trim_video, "Trim final video to the requested duration")
     skill_registry.register("media.video.merge_audio", media.merge_audio_video, "Mux audio and video as an agent media primitive")
     skill_registry.register("media.video.gif_preview", media.video_to_gif, "Create a GIF preview as an agent media primitive")
     skill_registry.register("media.video.qa", media.qa_video, "Run technical video QA and create a contact sheet")

@@ -112,11 +112,11 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[2]
         candidates = {
             "text2video": {"video_workflow_name": ["minimax_h3_lowvram_t2v", "minimax_h3_native_t2v"]},
-            "text2longvideo": {"video_workflow_name": ["minimax_h3_lowvram_i2v"]},
+            "text2longvideo": {"video_workflow_name": ["minimax_h3_lowvram_t2v", "minimax_h3_lowvram_i2v"]},
         }
         _prioritize_h3_profile(repo_root, {"h3_profile": "ultra-lowvram"}, candidates, list(candidates))
         self.assertEqual(candidates["text2video"]["video_workflow_name"][0], "minimax_h3_lowvram_t2v")
-        self.assertEqual(candidates["text2longvideo"]["video_workflow_name"][0], "minimax_h3_lowvram_i2v")
+        self.assertEqual(candidates["text2longvideo"]["video_workflow_name"][0], "minimax_h3_lowvram_t2v")
 
     def test_krea2_keyframe_and_identity_workflows_are_registered(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]

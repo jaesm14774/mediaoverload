@@ -33,11 +33,9 @@ routing:
 
   longvideo_config:
     mix_weights:
-      anchor_first: 1
-      anchor_first_last: 3
-      anchor_last: 2
-      reference_bundle: 2
+      t2v: 1
     review_policy: opening_only
+    continuity_mode: independent
 
   # Scheduler runs use a persisted shuffle bag so a short run window cannot
   # accidentally repeat the same strategy while still respecting weights.
@@ -114,7 +112,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_i2v
+        - minimax_h3_lowvram_t2v
       transition_workflow_name:
         - krea2_turbo_img2img
         - image_to_image
@@ -262,7 +260,7 @@ routing:
         min: 1
         max: 1
       segment_count:
-        min: 2
+        min: 4
         max: 8
       review_selection_limit:
         min: 1
@@ -429,9 +427,9 @@ routing:
         image_workflow_name: "Required source-image stage for the refine chain."
         refine_workflow_name: "Required img2img refine stage. It must preserve the selected source image contract while applying the requested changes."
       text2longvideo:
-        image_workflow_name: "Required per-segment T2I anchor/reference stage selected by the segment recipe mix."
-        video_workflow_name: "Required multi-segment I2V stage. Each segment receives recipe-specific anchors or continuation frames."
-        transition_workflow_name: "Required tail-frame/transition stage before segment concatenation."
+        image_workflow_name: "Optional per-segment T2I anchor/reference stage used only by an explicit non-T2V recipe."
+        video_workflow_name: "Required multi-segment H3 stage; the default is prompt-only T2V. Explicit anchor recipes use planned story-state images, never a rendered video tail."
+        transition_workflow_name: "Optional planned story-state anchor/transition stage used only by an explicit anchor recipe."
       native_h3_story:
         image_workflow_name: "Opening keyframe candidate; review selects one first frame."
         video_workflow_name: "Native H3 I2VA stage. It receives first_frame and leaves the ending unconstrained."
@@ -610,7 +608,7 @@ routing:
           - "只要純靜態圖。"
           - "需要長篇故事、多段轉場與段落銜接，應改選 text2longvideo。"
       text2longvideo:
-        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡，會同時考慮首圖、片段與轉場。"
+        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡；預設以 4 個約 5 秒的 H3 T2V 片段組成 20 秒，只有明確選擇時才使用規劃好的圖像 anchor。"
         best_for:
           - "需求有起承轉合、腳本段落、章節、旁白、storyboard 或多個 scene beat。"
           - "使用者提到 story、episode、narration、multi-scene 這類語意。"

@@ -1,5 +1,4 @@
 character:
-  name: Kirby
   group_name: Kirby
 
 generation:
@@ -27,10 +26,8 @@ generation:
   identity_refine_workflow_name: krea2_turbo_img2img
   # Longvideo stories are generated from the current brief/news context. A
   # static meadow preset here silently replaced unrelated news prompts.
-  storyboard_path: ""
-  input_gate: kirby-pink-red-silhouette
   visual_style_contract: >-
-    Tactile pastel 2D anime gag animation: keep one small Kirby readable inside
+    Tactile pastel 2D anime gag animation: keep one selected character readable inside
     one dominant news mechanism or oversized physical environment, with a clear
     focal silhouette, generous negative space, one dominant palette, and a close
     readable reaction.
@@ -41,10 +38,9 @@ generation:
     sticker, warm tabletop food comedy, cozy container scale contrast, or a
     saturated sky/firework spectacle; do not stack them all together.
   native_h3_quality:
-    semantic_qa_blocking: true
     creative_brief: >-
       Make this a highly shareable cute micro-gag, not an action-film lore scene:
-      one Kirby, one dominant news mechanism, one readable setback, and one
+      one selected character, one dominant news mechanism, one readable setback, and one
       visible reversal/payoff. The first second must already contain motion and
       a clear expressive reaction. Prefer a close readable face or body
       reaction, exaggerated but charming timing, a small absurd surprise, a
@@ -58,8 +54,8 @@ generation:
       that shape. End with a concrete settled result that can echo the opening
       for a loop.
       Do not show
-      Kirby fighting a duplicate, multiple characters, readable interfaces,
-      GitHub/web text, abstract symbols, or Kirby standing still while looking
+      the selected character fighting a duplicate, multiple characters, readable interfaces,
+      GitHub/web text, abstract symbols, or the selected character standing still while looking
       at a portal.
   native_h3_story:
     storyboard_path: configs/storyboards/kirby_native_15s.yaml
@@ -83,7 +79,6 @@ generation:
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_t2v
     semantic_qa_required: true
-    semantic_qa_blocking: true
     width: 608
     height: 352
     length: 362

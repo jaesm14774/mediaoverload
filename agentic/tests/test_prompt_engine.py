@@ -118,7 +118,17 @@ class PromptEngineTests(unittest.TestCase):
         self.assertTrue(result["platform_bundle"]["instagram"]["validation"]["is_publish_ready"])
         self.assertEqual(result["platform_bundle"]["instagram"]["caption"], "ig caption")
         self.assertEqual(result["platform_bundle"]["youtube"]["caption"], "yt caption")
-        self.assertNotIn("additional_params", result["platform_bundle"]["youtube"])
+        self.assertEqual(result["platform_bundle"]["youtube"]["format"], "video")
+        self.assertEqual(
+            result["platform_bundle"]["youtube"]["additional_params"]["youtube_title"],
+            "yt caption",
+        )
+        self.assertTrue(
+            result["platform_bundle"]["youtube"]["content_strategy"]["answer_first"]
+        )
+        self.assertFalse(
+            result["platform_bundle"]["youtube"]["validation"]["is_platform_eligible"]
+        )
 
 
 if __name__ == "__main__":

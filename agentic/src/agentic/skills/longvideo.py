@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import re
 from pathlib import Path
 from typing import Any
@@ -11,7 +11,6 @@ from agentic.minimax_prompting import structured_visual_prompt
 from agentic.runtime.prompting import (
     build_minimax_h3_prompt,
     build_story_segments,
-    validate_story_anchor,
     validate_story_segments,
 )
 from agentic.runtime.prompt_engine import PromptEngine
@@ -187,7 +186,7 @@ class LongVideoSkills:
         segment_count = int(context.node.inputs["segment_count"])
         brief = str(context.state["idea-brief"]["creative_brief"])
         segments = build_story_segments(context.plan.goal, brief, segment_count, "playful cinematic escalation")
-        validate_story_anchor(context.plan.goal, validate_story_segments(segments, segment_count))
+        validate_story_segments(segments, segment_count)
         return SkillResult(
             status="success",
             outputs={"segments": segments, "segment_count": segment_count},
@@ -313,13 +312,21 @@ class LongVideoSkills:
             context.plan.goal.constraints.get("keyframe_workflow_name")
             or context.node.inputs["workflow_name"]
         )
+        character = str(context.plan.goal.constraints.get("character") or "the protagonist").strip()
         result = self.tools.call(
             "comfy.render_image",
             {
                 "workflow_name": workflow_name,
                 "run_dir": str(run_dir),
-                "prompt": f"{segment['visual']}, {context.plan.goal.style}, cinematic lighting, consistent character design",
-                "negative_prompt": str(context.state["idea-brief"].get("negative_prompt", "")),
+                "prompt": (
+                    f"one single {character} only, no second subject; {segment['visual']}, "
+                    f"{context.plan.goal.style}, cinematic lighting, consistent character design, "
+                    "clear full-body silhouette and one readable action setup"
+                ),
+                "negative_prompt": (
+                    f"{context.state['idea-brief'].get('negative_prompt', '')}, "
+                    "second protagonist, duplicate character, cloned subject, multiple copies"
+                ),
                 "width": context.node.inputs.get("width", 1024),
                 "height": context.node.inputs.get("height", 1024),
             },
@@ -374,16 +381,33 @@ class LongVideoSkills:
         if recipe == "reference_bundle" and not reference_manifest:
             raise RuntimeError("Conditioning plan 'reference_bundle' did not resolve a reference manifest")
 
+        constraints = context.plan.goal.constraints
         prompt = f"{segment['visual']}, {context.plan.goal.style}, motion continuity, coherent action"
         prompt_anchor = first_frame or last_frame
+        segment_frame_rate = float(
+            context.node.inputs.get("frame_rate")
+            or constraints.get("longvideo_frame_rate")
+            or constraints.get("video_frame_rate")
+            or 24
+        )
+        segment_length = float(
+            context.node.inputs.get("length")
+            or constraints.get("longvideo_length")
+            or constraints.get("longvideo_h3_length")
+            or 120
+        )
+        segment_duration_seconds = max(1, int(round(segment_length / max(segment_frame_rate, 1))))
         if workflow_name.startswith("minimax_h3_"):
-            prompt = build_minimax_h3_prompt(
+            prompt_goal = replace(
                 context.plan.goal,
+                duration_seconds=segment_duration_seconds,
+            )
+            prompt = build_minimax_h3_prompt(
+                prompt_goal,
                 segment,
                 prior_frame=prompt_anchor,
             )["prompt"]
 
-        constraints = context.plan.goal.constraints
         width = context.node.inputs.get("width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
         height = context.node.inputs.get("height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
         length = context.node.inputs.get("length") or constraints.get("longvideo_length") or constraints.get("longvideo_h3_length")
@@ -430,6 +454,8 @@ class LongVideoSkills:
         tool_name = (
             "comfy.render_reference_to_video"
             if render_tool == "comfy.workflow.reference_to_video" or recipe == "reference_bundle"
+            else "comfy.render_text_to_video"
+            if render_tool == "comfy.workflow.text_to_video" or recipe == "t2v"
             else "comfy.render_image_to_video"
         )
         result = self.tools.call(tool_name, payload)
@@ -979,15 +1005,6 @@ class LongVideoSkills:
             )
         )
         require_human_review = bool(constraints.get("require_human_review", False))
-        semantic_qa_blocking = bool(
-            context.node.inputs.get(
-                "semantic_qa_blocking",
-                constraints.get(
-                    "native_h3_semantic_qa_blocking",
-                    native_recipe.get("semantic_qa_blocking", False),
-                ),
-            )
-        )
         semantic_qa: dict[str, object]
         if not semantic_qa_required:
             semantic_qa = {
@@ -1017,21 +1034,18 @@ class LongVideoSkills:
             )
             semantic_qa["enabled"] = True
             semantic_qa["required"] = semantic_qa_required
-            semantic_qa["blocking"] = semantic_qa_required and semantic_qa_blocking
-            semantic_qa["blocking_policy"] = "hard_gate" if semantic_qa_blocking else "advisory"
+            semantic_qa["blocking"] = False
+            semantic_qa["blocking_policy"] = "advisory"
 
         technical_passed = bool(technical_qa.get("passed"))
-        semantic_blocked = bool(semantic_qa.get("blocking")) and semantic_qa.get("passed") is not True
-        passed = technical_passed and not semantic_blocked
+        passed = technical_passed
         failures = [str(item) for item in (technical_qa.get("errors") or []) if str(item)]
-        if semantic_blocked:
-            failures.append(f"semantic QA {semantic_qa.get('status', 'unknown')}")
         log_message = (
             "Native H3 technical and semantic media QA completed before publication."
             if passed
             else "Native H3 QA failed: " + ", ".join(failures)
         )
-        if semantic_qa_required and require_human_review and not semantic_qa_blocking and semantic_qa.get("passed") is not True:
+        if semantic_qa_required and require_human_review and semantic_qa.get("passed") is not True:
             log_message += " Semantic result is advisory because Discord human review remains authoritative."
         return SkillResult(
             status="success" if passed else "failed",

@@ -26,11 +26,21 @@ class VideoConditioningTests(unittest.TestCase):
         candidates = recipe_candidates(capabilities)
 
         self.assertIn("anchor_first", candidates)
+        self.assertIn("t2v", candidates)
         self.assertIn("anchor_first_last", candidates)
         self.assertIn("anchor_last", candidates)
         self.assertIn("reference_bundle", candidates)
         self.assertEqual(candidates["anchor_first"][0].workflow_name, "minimax_h3_lowvram_i2v")
         self.assertEqual(candidates["reference_bundle"][0].recipes["reference_bundle"].reference_maximum, 4)
+
+    def test_t2v_recipe_has_no_frame_conditioning(self) -> None:
+        capabilities = capabilities_from_manifests(self.registry.all_manifests())
+        recipe = recipe_candidates(capabilities)["t2v"][0].recipes["t2v"]
+
+        self.assertFalse(recipe.requires_first)
+        self.assertFalse(recipe.requires_last)
+        self.assertFalse(recipe.requires_references)
+        self.assertEqual(recipe.render_tool, "comfy.workflow.text_to_video")
 
     def test_positive_weight_for_unsupported_recipe_fails_before_render(self) -> None:
         capabilities = capabilities_from_manifests(self.registry.all_manifests())
@@ -126,4 +136,6 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertTrue(captured["use_last_frame"])
         self.assertNotIn("image_path", captured)
         self.assertEqual(captured["last_image_path"], "C:/tmp/ending.png")
+        self.assertIn("Duration: 3 seconds", str(captured["prompt"]))
+        self.assertNotIn("Duration: 20 seconds", str(captured["prompt"]))
         self.assertIn("segment-01-opening_video", str(captured["run_dir"]))

@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Literal
 
 
+FFMPEG_COMMAND_TIMEOUT_SECONDS = 600
+
+
 class FFmpegAdapter:
     """Agentic-native wrapper for the FFmpeg operations used by the runtime."""
 
@@ -107,12 +110,15 @@ class FFmpegAdapter:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=True,
+                timeout=FFMPEG_COMMAND_TIMEOUT_SECONDS,
             )
         except FileNotFoundError as exc:
             raise RuntimeError("ffmpeg is not installed or not available in PATH.") from exc
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()
             raise RuntimeError(f"Audio analysis failed: {stderr}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Audio analysis exceeded the ffmpeg command timeout.") from exc
 
         log = completed.stderr or ""
         mean_match = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", log)
@@ -236,6 +242,44 @@ class FFmpegAdapter:
             ]
         )
         self._run(command)
+        return output_path
+
+    def trim_video(self, video_path: str, output_path: str, duration_seconds: float) -> str:
+        """Trim a packaged video to an explicit duration while keeping its streams."""
+
+        self._ensure_binaries()
+        duration = float(duration_seconds)
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("duration_seconds must be a finite number greater than zero")
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"Input video does not exist: {video_path}")
+        self._ensure_parent(output_path)
+        if os.path.abspath(video_path) == os.path.abspath(output_path):
+            raise ValueError("output_path must be different from video_path")
+        self._run(
+            [
+                "ffmpeg",
+                "-i",
+                video_path,
+                "-t",
+                f"{duration:.6f}",
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                "-shortest",
+                "-y",
+                output_path,
+            ]
+        )
         return output_path
 
     def video_to_gif(
@@ -525,6 +569,7 @@ class FFmpegAdapter:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=True,
+                timeout=FFMPEG_COMMAND_TIMEOUT_SECONDS,
             )
         except FileNotFoundError as exc:
             binary = command[0] if command else "ffmpeg"
@@ -533,6 +578,9 @@ class FFmpegAdapter:
             stderr = (exc.stderr or "").strip()
             joined = " ".join(command)
             raise RuntimeError(f"Command failed: {joined}\n{stderr}") from exc
+        except subprocess.TimeoutExpired as exc:
+            joined = " ".join(command)
+            raise RuntimeError(f"Command timed out after {FFMPEG_COMMAND_TIMEOUT_SECONDS} seconds: {joined}") from exc
 
     @staticmethod
     def _run_capture(command: list[str]) -> str:
@@ -543,6 +591,7 @@ class FFmpegAdapter:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=True,
+                timeout=FFMPEG_COMMAND_TIMEOUT_SECONDS,
             )
             return completed.stdout
         except FileNotFoundError as exc:
@@ -552,3 +601,6 @@ class FFmpegAdapter:
             stderr = (exc.stderr or "").strip()
             joined = " ".join(command)
             raise RuntimeError(f"Command failed: {joined}\n{stderr}") from exc
+        except subprocess.TimeoutExpired as exc:
+            joined = " ".join(command)
+            raise RuntimeError(f"Command timed out after {FFMPEG_COMMAND_TIMEOUT_SECONDS} seconds: {joined}") from exc

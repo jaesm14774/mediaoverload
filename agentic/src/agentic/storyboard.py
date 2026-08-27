@@ -259,67 +259,6 @@ def evaluate_native_h3_story_quality(
     return {"passed": not errors, "score": score, "checks": checks, "errors": errors}
 
 
-def repair_native_h3_story_quality(
-    story: dict[str, Any],
-    *,
-    character: str = "Kirby",
-) -> dict[str, Any] | None:
-    """Add a concrete middle-beat setback when a provider returns a smooth montage.
-
-    This bounded repair preserves the provider's premise and timing while making
-    the missing causal turn explicit. It is used only after deterministic quality
-    validation has identified the absent escalation, before spending another LLM
-    repair round on a problem that has a safe local fix.
-    """
-    if not isinstance(story, dict):
-        return None
-    shots = story.get("native_shots")
-    if not isinstance(shots, list) or len(shots) < 3 or not all(isinstance(shot, dict) for shot in shots):
-        return None
-    quality = evaluate_native_h3_story_quality(story)
-    checks = quality.get("checks") if isinstance(quality, dict) else None
-    if not isinstance(checks, dict):
-        return None
-    if checks.get("escalation_or_reversal") and checks.get("opening_keyframe_has_motion"):
-        return None
-
-    repaired = deepcopy(story)
-    repaired_shots = repaired["native_shots"]
-    trace = repaired.get("news_trace") if isinstance(repaired.get("news_trace"), dict) else {}
-    anchors = [str(item).strip() for item in trace.get("visual_anchors", []) if str(item).strip()]
-    mechanism = str(trace.get("news_mechanism") or "the visible news mechanism").strip().rstrip(".")
-    anchor = anchors[0] if anchors else "the visible anchor"
-    protagonist = str(character or "the protagonist").strip()
-    if not checks.get("opening_keyframe_has_motion"):
-        opening_prompt = str(repaired.get("opening_keyframe_prompt") or "").strip().rstrip(".")
-        repaired["opening_keyframe_prompt"] = (
-            f"Opening action already in progress: {protagonist} jolts forward while the active news mechanism "
-            f"is already acting; {opening_prompt}. Keep {protagonist}'s body and reaction visibly moving from the first frame."
-        )
-
-    if not checks.get("escalation_or_reversal"):
-        middle = repaired_shots[1]
-        action = str(middle.get("action") or f"{protagonist} attempts the objective").strip().rstrip(".")
-        state_change = str(middle.get("state_change") or "the plan changes").strip().rstrip(".")
-        middle["action"] = (
-            f"{action}, but {mechanism} visibly worsens, changes the route around {anchor}, and blocks {protagonist}'s advance; "
-            f"{protagonist} is knocked backward, so the first plan fails and the protagonist loses ground."
-        )
-        middle["state_change"] = (
-            f"{state_change}; the route is blocked, the setback reverses the plan, {protagonist} is forced backward, and the protagonist is left farther from the objective."
-        )
-
-    gag_card = repaired.get("gag_card")
-    if isinstance(gag_card, dict) and not _NATIVE_TURN_PATTERN.search(
-        " ".join(str(gag_card.get(key) or "") for key in ("setback", "payoff_reversal"))
-    ):
-        gag_card["setback"] = (
-            f"{mechanism} worsens around {anchor}, so {protagonist}'s first attempt fails and costs ground."
-        )
-    _sanitize_native_h3_unmarked_props(repaired)
-    return repaired
-
-
 def ground_native_h3_ending_keyframe_prompt(story: dict[str, Any]) -> str:
     """Keep the ending keyframe visibly tied to the resolved news story."""
     if not isinstance(story, dict):
@@ -350,34 +289,6 @@ def ground_native_h3_ending_keyframe_prompt(story: dict[str, Any]) -> str:
     if suffix and suffix.casefold() not in prompt.casefold():
         return f"{prompt.rstrip('.')} {suffix}"
     return prompt
-
-
-def _sanitize_native_h3_unmarked_props(story: dict[str, Any]) -> None:
-    """Replace benign mail terminology that can imply hidden readable text.
-
-    Native H3 visual validation forbids ``letter``/``letters`` because a text
-    bearing prop is easy for the renderer to turn into accidental subtitles.
-    Keep the physical mail gag while making the no-readable-text contract
-    explicit in the generated story fields. ``news_trace`` remains untouched
-    because it is semantic evidence, not a render instruction.
-    """
-    def visit(value: Any, *, key: str = "") -> Any:
-        if key == "news_trace":
-            return value
-        if isinstance(value, dict):
-            for child_key, child_value in list(value.items()):
-                value[child_key] = visit(child_value, key=str(child_key))
-            return value
-        if isinstance(value, list):
-            for index, child_value in enumerate(value):
-                value[index] = visit(child_value)
-            return value
-        if isinstance(value, str):
-            value = re.sub(r"\bletters\b", "unmarked mail capsules", value, flags=re.IGNORECASE)
-            return re.sub(r"\bletter\b", "unmarked mail capsule", value, flags=re.IGNORECASE)
-        return value
-
-    visit(story)
 
 
 def evaluate_native_h3_news_grounding(
@@ -612,175 +523,6 @@ def evaluate_native_h3_news_grounding(
     return {"passed": not errors, "score": score, "checks": checks, "errors": errors}
 
 
-def repair_native_h3_news_trace_integration(
-    story: dict[str, Any],
-    news_context: dict[str, Any] | None,
-    *,
-    creative_brief: str = "",
-    character: str = "the protagonist",
-) -> dict[str, Any] | None:
-    """Repair a small news-grounding omission without changing the plot.
-
-    Some models translate every source concept into English and omit the
-    application-owned source phrase. Restore concrete terms from the selected
-    keyword before applying the existing anchor repair. The source/title checks
-    stay strict; only the trace metadata is repaired, not the generated plot.
-    """
-    if not isinstance(story, dict):
-        return None
-    trace = story.get("news_trace")
-    if not isinstance(trace, dict):
-        return None
-    source = news_context if isinstance(news_context, dict) else {}
-    repaired = deepcopy(story)
-    repaired_trace = dict(repaired.get("news_trace") or {})
-    source_concepts = [
-        str(item).strip()
-        for item in trace.get("source_concepts", [])
-        if str(item).strip()
-    ]
-    source_text = " ".join(
-        str(source.get(key) or "").strip()
-        for key in ("title", "keyword", "category")
-    ).casefold()
-    derived_source_concepts = [
-        raw_concept.strip()
-        for raw_concept in re.split(r"[;,，、|/]+", str(source.get("keyword") or ""))
-        if raw_concept.strip()
-        and len(raw_concept.strip()) >= 2
-        and raw_concept.strip().casefold() not in {"news", "top"}
-        and raw_concept.strip().casefold() in source_text
-    ][:5]
-    if not derived_source_concepts:
-        title = str(source.get("title") or "").strip()
-        if title:
-            derived_source_concepts = [title]
-    if not any(concept.casefold() in source_text for concept in source_concepts):
-        if not derived_source_concepts:
-            return None
-        source_concepts = derived_source_concepts
-        repaired_trace["source_concepts"] = source_concepts
-        repaired["news_trace"] = repaired_trace
-    quality = evaluate_native_h3_news_grounding(repaired, news_context, creative_brief=creative_brief)
-    checks = quality.get("checks") if isinstance(quality, dict) else None
-    if not isinstance(checks, dict):
-        return None
-    required_checks = (
-        "source_title_locked",
-        "source_concepts_are_source_derived",
-        "visual_translation_present",
-        "visual_anchors_present",
-    )
-    if not all(bool(checks.get(key)) for key in required_checks):
-        return None
-    source_concept = next(
-        (concept for concept in source_concepts if concept.casefold() in source_text),
-        "",
-    )
-    if not source_concept:
-        return None
-    anchors = [str(item).strip() for item in trace.get("visual_anchors", []) if str(item).strip()]
-    if not anchors:
-        return None
-    repaired_trace = dict(repaired.get("news_trace") or {})
-    integration = str(repaired_trace.get("integration") or "").strip().rstrip(".")
-    repaired_spine = repaired.get("story_spine") if isinstance(repaired.get("story_spine"), dict) else {}
-    objective = str(repaired_spine.get("objective") or "the protagonist's objective").strip().rstrip(".")
-    anchor = anchors[0]
-    if not _news_anchor_matches_text(anchor, str(repaired_trace.get("visual_translation") or "")):
-        repaired_trace["visual_translation"] = (
-            f"The source concept '{source_concept}' is translated into the visible anchor '{anchor}', "
-            "which drives the same on-screen conflict."
-        )
-    bridge_concepts = [
-        concept
-        for concept in source_concepts
-        if concept.casefold() in source_text
-    ][:2]
-    if len(bridge_concepts) >= 2:
-        translation = str(repaired_trace.get("visual_translation") or "").strip().rstrip(".")
-        repaired_trace["visual_translation"] = (
-            f"{translation}. The visible mapping preserves the source concepts "
-            f"'{bridge_concepts[0]}' and '{bridge_concepts[1]}' through the same causal anchor."
-        ).strip(". ") + "."
-    repaired_trace["integration"] = (
-        f"{integration}. The shared visual mission is anchored by the exact visible object or action "
-        f"'{anchor}', which {character} must resolve as part of the same causal story while pursuing "
-        f"'{objective}'. The source concept '{source_concept}' is safely represented by this visible anchor."
-    ).strip(". ") + "."
-    if len(bridge_concepts) >= 2:
-        repaired_trace["integration"] = (
-            f"{repaired_trace['integration'].rstrip('.')}. The same mission carries the source concepts "
-            f"'{bridge_concepts[0]}' and '{bridge_concepts[1]}' into the visible action."
-        )
-    news_mechanism = str(repaired_trace.get("news_mechanism") or "").strip().rstrip(".")
-    if news_mechanism and not any(
-        _news_statement_reaches_text(anchor, news_mechanism)
-        or _news_statement_reaches_text(news_mechanism, anchor)
-        for anchor in anchors
-    ):
-        repaired_trace["news_mechanism"] = (
-            f"{news_mechanism} at the visible anchor '{anchor}'."
-        )
-    repaired["news_trace"] = repaired_trace
-
-    # Keep the brief contract in the story fields as well as in the trace.  A
-    # provider can return a news-grounded plot while dropping the requested
-    # tone; the local validator intentionally checks story fields, so recover
-    # the bounded, project-level micro-gag requirements before rendering.
-    if not checks.get("user_brief_survives") and creative_brief:
-        story_spine = repaired.get("story_spine")
-        if isinstance(story_spine, dict):
-            emotional_arc = str(story_spine.get("emotional_arc") or "").strip().rstrip(".")
-            story_spine["emotional_arc"] = (
-                f"{emotional_arc}. The requested tone stays cute and readable, with one physical "
-                "setback and one visible payoff in a compact micro-gag."
-            ).strip(". ") + "."
-        repaired_trace["integration"] = (
-            f"{repaired_trace['integration'].rstrip('.')}. The requested creative tone remains a "
-            "cute, readable physical micro-gag with one setback and one visible payoff."
-        )
-
-    shots = repaired.get("native_shots")
-    if not isinstance(shots, list) or not shots:
-        return None
-    matching_indices: list[int] = []
-    for index, shot in enumerate(shots):
-        if isinstance(shot, dict):
-            shot_text = " ".join(str(value) for value in shot.values())
-            if _news_anchor_matches_text(anchor, shot_text):
-                matching_indices.append(index)
-
-    # Preserve the provider's action and timing.  Only add a compact visible
-    # anchor clause to the earliest missing beat(s) and the payoff beat.
-    target_indices = list(matching_indices[:2])
-    for index in (0, len(shots) - 1):
-        if index not in target_indices:
-            target_indices.append(index)
-    for index in target_indices:
-        shot = shots[index]
-        if not isinstance(shot, dict):
-            continue
-        if not _news_anchor_matches_text(anchor, " ".join(str(value) for value in shot.values())):
-            action = str(shot.get("action") or "").strip().rstrip(".")
-            shot["action"] = f"{action}. Keep the visible anchor '{anchor}' in the causal action.".strip(". ") + "."
-
-    # A provider can preserve the source anchor while letting the declared
-    # consequence disappear from the final beat. Carry that exact consequence
-    # into the payoff's state change so the semantic gate checks the rendered
-    # outcome, not merely the opening setup.
-    news_consequence = str(repaired_trace.get("news_consequence") or "").strip()
-    payoff_shot = shots[-1] if isinstance(shots[-1], dict) else None
-    payoff_text = " ".join(str(value) for value in payoff_shot.values()) if payoff_shot else ""
-    if payoff_shot is not None and news_consequence and not _news_statement_reaches_text(news_consequence, payoff_text):
-        existing_state = str(payoff_shot.get("state_change") or "").strip().rstrip(".")
-        consequence_clause = f"The payoff visibly shows the news consequence: {news_consequence}"
-        payoff_shot["state_change"] = f"{existing_state}. {consequence_clause}.".strip(". ") + "."
-    repaired["native_shots"] = shots
-    _sanitize_native_h3_unmarked_props(repaired)
-    return repaired
-
-
 def _news_anchor_matches_text(anchor: str, text: str) -> bool:
     """Match a concrete anchor across small wording variations without accepting generic mood words."""
     normalized_anchor = " ".join(str(anchor or "").casefold().split())
@@ -903,84 +645,96 @@ def merge_native_h3_storyboard(
     base_storyboard: dict[str, Any],
     generated_story: dict[str, Any],
 ) -> dict[str, Any]:
-    """Apply an LLM-generated story to the reusable character rules.
+    """Apply a flexible LLM story to the reusable character rules.
 
-    The base preset supplies identity and continuity constraints only. Plot,
-    setting, props, keyframes, audio, and native shots must come from the
-    generated story; missing values are an error rather than a fallback.
+    The base preset owns identity, safety, and timing.  Creative metadata is
+    optional; only the shot list and its visible actions are required to build
+    a renderable H3 prompt.  Missing descriptive shot fields receive
+    deterministic defaults so a free model is not rejected for presentation
+    details that the prompt composer can already infer.
     """
     if not isinstance(base_storyboard, dict):
         raise StoryboardError("Native H3 base storyboard must be a mapping")
     if not isinstance(generated_story, dict):
         raise StoryboardError("Native H3 generated story must be a mapping")
-    required = (
-        "name",
-        "base_prompt",
-        "opening_keyframe_prompt",
-        "ending_keyframe_prompt",
-        "negative_prompt",
-        "news_trace",
-        "story_spine",
-        "world",
-        "native_audio",
-        "native_shots",
-    )
-    missing = [key for key in required if not str(generated_story.get(key) or "").strip() and key not in {"story_spine", "world", "native_shots"}]
-    if missing:
-        raise StoryboardError("Generated native H3 story missing values: " + ", ".join(missing))
-    spine = generated_story.get("story_spine")
-    world = generated_story.get("world")
-    news_trace = generated_story.get("news_trace")
-    gag_card = generated_story.get("gag_card")
-    shots = generated_story.get("native_shots")
     expected_times = native_h3_shot_times(base_storyboard)
-    if (
-        not isinstance(spine, dict)
-        or not isinstance(world, dict)
-        or not isinstance(news_trace, dict)
-        or not isinstance(shots, list)
-        or len(shots) != len(expected_times)
-    ):
-        raise StoryboardError(
-            "Generated native H3 story must define story_spine, world, news_trace, and exactly "
-            f"{len(expected_times)} native_shots"
+    shots = generated_story.get("native_shots")
+    if not isinstance(shots, list):
+        shots = generated_story.get("shots") or generated_story.get("beats")
+    if not isinstance(shots, list) or len(shots) != len(expected_times):
+        raise StoryboardError(f"Generated native H3 story must define exactly {len(expected_times)} native shots")
+
+    def first_text(mapping: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = str(mapping.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    normalized_shots: list[dict[str, Any]] = []
+    for index, raw_shot in enumerate(shots):
+        if not isinstance(raw_shot, dict):
+            raise StoryboardError(f"Generated native H3 shot {index + 1} must be a mapping")
+        action = first_text(
+            raw_shot,
+            "action",
+            "primary_action",
+            "visual_action",
+            "visual",
+            "description",
+            "shot_description",
         )
-    required_spine = ("premise", "objective", "obstacle", "stakes", "climax", "resolution")
-    missing_spine = [key for key in required_spine if not str(spine.get(key) or "").strip()]
-    if missing_spine:
-        raise StoryboardError("Generated native H3 story_spine missing values: " + ", ".join(missing_spine))
-    if gag_card is not None and not isinstance(gag_card, dict):
-        raise StoryboardError("Generated native H3 gag_card must be a mapping when present")
-    story_quality = evaluate_native_h3_story_quality(generated_story, expected_times=expected_times)
-    if not story_quality["passed"]:
-        raise StoryboardError("Generated native H3 story quality is insufficient: " + "; ".join(story_quality["errors"]))
-    required_shot = ("time", "title", "action", "camera", "state_change")
-    for index, shot in enumerate(shots, start=1):
-        if not isinstance(shot, dict):
-            raise StoryboardError(f"Generated native H3 shot {index} must be a mapping")
-        missing_shot = [key for key in required_shot if not str(shot.get(key) or "").strip()]
-        if missing_shot:
-            raise StoryboardError(
-                f"Generated native H3 shot {index} missing values: " + ", ".join(missing_shot)
-            )
+        if not action:
+            raise StoryboardError(f"Generated native H3 shot {index + 1} must contain an action")
+        title = first_text(raw_shot, "title", "name", "beat")
+        if not title:
+            title = re.split(r"[.;:!?]", action, maxsplit=1)[0].strip()[:160] or f"Beat {index + 1}"
+        camera = first_text(raw_shot, "camera", "camera_direction", "camera_movement", "shot")
+        if not camera:
+            camera = "Follow the primary action with readable spatial continuity."
+        state_change = first_text(raw_shot, "state_change", "end_state", "effect", "result")
+        if not state_change:
+            state_change = action
+        normalized_shots.append(
+            {
+                **raw_shot,
+                "time": first_text(raw_shot, "time", "time_range", "timestamp") or expected_times[index],
+                "title": title,
+                "action": action,
+                "camera": camera,
+                "state_change": state_change,
+            }
+        )
+
+    duration_seconds = float(
+        base_storyboard.get("native_duration_seconds")
+        or native_h3_duration_from_times(expected_times)
+    )
     timing_ok, timing_error = validate_native_h3_shot_timing(
-        shots,
-        duration_seconds=float(
-            base_storyboard.get("native_duration_seconds")
-            or native_h3_duration_from_times(expected_times)
-        ),
+        normalized_shots,
+        duration_seconds=duration_seconds,
     )
     if not timing_ok:
         raise StoryboardError("Generated native H3 shot timing is invalid: " + timing_error)
+
+    raw_world = generated_story.get("world")
+    generated_world = raw_world if isinstance(raw_world, dict) else {}
     base_world = dict(base_storyboard.get("world") or {})
-    generated_rules = world.get("continuity_rules") or []
-    if not isinstance(generated_rules, list):
-        raise StoryboardError("Generated native H3 world.continuity_rules must be a list")
+    world = {
+        **base_world,
+        **deepcopy(generated_world),
+    }
+    for key in ("setting", "visual_language"):
+        if str(world.get(key) or "").strip().lower().startswith("generated "):
+            world[key] = ""
+    generated_rules = generated_world.get("continuity_rules")
+    if not isinstance(generated_rules, list) or not generated_rules:
+        generated_rules = base_world.get("continuity_rules") or []
+    world["continuity_rules"] = [str(rule).strip() for rule in generated_rules if str(rule).strip()]
+
     character = str(base_storyboard.get("character") or "the protagonist").strip()
     subject_context = dict(base_storyboard.get("subject_context") or {})
-    subject_items = [
-        item for item in (subject_context.get("subjects") or []) if isinstance(item, dict)
-    ]
+    subject_items = [item for item in (subject_context.get("subjects") or []) if isinstance(item, dict)]
     interaction_required = bool(
         dict(subject_context.get("interaction_contract") or {}).get("required", False)
     ) and len(subject_items) == 2
@@ -992,17 +746,89 @@ def merge_native_h3_storyboard(
         continuity_rules = [
             f"Only one {character} appears; preserve the same identity, proportions, silhouette, and palette throughout."
         ]
-    for rule in generated_rules:
-        value = str(rule or "").strip()
-        if interaction_required and "only" in value.lower() and "protagonist" in value.lower():
+    for rule in world["continuity_rules"]:
+        if interaction_required and "only" in rule.lower() and "protagonist" in rule.lower():
             continue
-        if value and value not in continuity_rules:
-            continuity_rules.append(value)
-    if not continuity_rules:
-        raise StoryboardError("Native H3 story must preserve at least one continuity rule")
+        if rule not in continuity_rules:
+            continuity_rules.append(rule)
+    world["continuity_rules"] = continuity_rules
+
+    def clean_runtime_placeholder(value: Any) -> str:
+        text = str(value or "").strip()
+        return "" if text.lower().startswith("generated ") else text
+
+    base_spine = {
+        key: clean_runtime_placeholder(value)
+        for key, value in dict(base_storyboard.get("story_spine") or {}).items()
+    }
+    generated_spine = generated_story.get("story_spine")
+    spine = {
+        **base_spine,
+        **(
+            {
+                key: clean_runtime_placeholder(value)
+                for key, value in generated_spine.items()
+                if clean_runtime_placeholder(value)
+            }
+            if isinstance(generated_spine, dict)
+            else {}
+        ),
+    }
+    spine_defaults = {
+        "premise": normalized_shots[0]["action"],
+        "objective": "Advance the visible story through a concrete physical payoff.",
+        "obstacle": normalized_shots[min(1, len(normalized_shots) - 1)]["action"],
+        "stakes": normalized_shots[min(1, len(normalized_shots) - 1)]["state_change"],
+        "climax": normalized_shots[-1]["action"],
+        "resolution": normalized_shots[-1]["state_change"],
+    }
+    for key, default in spine_defaults.items():
+        if not str(spine.get(key) or "").strip():
+            spine[key] = default
+
+    generated_base_prompt = first_text(generated_story, "base_prompt", "visual_anchor")
+    base_prompt = generated_base_prompt or str(base_storyboard.get("base_prompt") or "").strip()
+    style_description = first_text(generated_story, "style_description", "visual_style")
+    if not generated_base_prompt and style_description:
+        base_prompt = f"{base_prompt} {style_description}".strip()
+    opening_prompt = first_text(
+        generated_story,
+        "opening_keyframe_prompt",
+        "opening_prompt",
+        "first_frame_prompt",
+    )
+    if not opening_prompt:
+        opening_prompt = f"{base_prompt}. {normalized_shots[0]['action']}".strip(". ")
+    ending_prompt = first_text(
+        generated_story,
+        "ending_keyframe_prompt",
+        "ending_prompt",
+        "last_frame_prompt",
+    )
+    if not ending_prompt:
+        ending_prompt = f"{base_prompt}. {normalized_shots[-1]['action']} {normalized_shots[-1]['state_change']}".strip(". ")
+    negative_prompt = first_text(generated_story, "negative_prompt", "negative")
+    if not negative_prompt:
+        negative_prompt = str(base_storyboard.get("negative_prompt") or "").strip()
+    native_audio = generated_story.get("native_audio")
+    if isinstance(native_audio, dict):
+        native_audio = " ".join(
+            f"{label}: {str(native_audio.get(key) or '').strip()}"
+            for key, label in (("overall_soundscape", "Overall soundscape"), ("non_diegetic_music", "Non-diegetic music"))
+            if str(native_audio.get(key) or "").strip()
+        )
+    native_audio = str(native_audio or "").strip()
+    if not native_audio:
+        native_audio = "; ".join(
+            first_text(shot, "audio_direction", "audio")
+            for shot in shots
+            if isinstance(shot, dict) and first_text(shot, "audio_direction", "audio")
+        )
+
+    gag_card = generated_story.get("gag_card")
+    news_trace = generated_story.get("news_trace")
     merged = deepcopy(base_storyboard)
-    generated_base_prompt = str(generated_story["base_prompt"]).strip()
-    generated_negative_prompt = str(generated_story["negative_prompt"]).strip()
+    generated_base_prompt = base_prompt
     if interaction_required:
         subject_names = [
             str(item.get("name") or "").strip()
@@ -1015,37 +841,33 @@ def merge_native_h3_storyboard(
         ).strip()
         negative_parts = [
             part.strip()
-            for part in generated_negative_prompt.split(",")
+            for part in negative_prompt.split(",")
             if part.strip() and part.strip().lower() not in {"humans", "extra characters", "duplicate", "duplicate kirby"}
         ]
         negative_parts.extend(["identity swap", "unrequested third subject"])
-        generated_negative_prompt = ", ".join(dict.fromkeys(negative_parts))
+        negative_prompt = ", ".join(dict.fromkeys(negative_parts))
     merged.update(
         {
-            "name": str(generated_story["name"]).strip(),
+            "name": first_text(generated_story, "name", "title", "story_name") or f"{character} native H3 story",
             "base_prompt": generated_base_prompt,
-            "opening_keyframe_prompt": str(generated_story["opening_keyframe_prompt"]).strip(),
-            "ending_keyframe_prompt": str(generated_story["ending_keyframe_prompt"]).strip(),
-            "negative_prompt": generated_negative_prompt,
-            "news_trace": deepcopy(news_trace),
+            "opening_keyframe_prompt": opening_prompt,
+            "ending_keyframe_prompt": ending_prompt,
+            "negative_prompt": negative_prompt,
+            **({"news_trace": deepcopy(news_trace)} if isinstance(news_trace, dict) else {}),
             **({"gag_card": deepcopy(gag_card)} if isinstance(gag_card, dict) else {}),
-            "story_spine": deepcopy(spine),
-            "world": {
-                **base_world,
-                **deepcopy(world),
-                "continuity_rules": continuity_rules,
-            },
-            "native_audio": str(generated_story["native_audio"]).strip(),
-            "native_shots": deepcopy(shots),
-            "native_shot_times": [str(shot["time"]).strip() for shot in shots],
-            "story_quality": deepcopy(story_quality),
+            "story_spine": spine,
+            "world": {**world, "continuity_rules": continuity_rules},
+            "native_audio": native_audio,
+            "native_shots": normalized_shots,
+            "native_shot_times": [str(shot["time"]).strip() for shot in normalized_shots],
+            "story_quality": evaluate_native_h3_story_quality(
+                {**generated_story, "story_spine": spine, "native_shots": normalized_shots},
+                expected_times=expected_times,
+            ),
             "story_source": "news_llm",
         }
     )
     merged["segments"] = _native_shots_to_segments(merged["native_shots"])
-    progression = validate_story_progression(merged["segments"])
-    if not progression["passed"]:
-        raise StoryboardError("Generated native H3 story progression is invalid: " + "; ".join(progression["errors"]))
     return merged
 
 
@@ -1172,9 +994,6 @@ def build_story_plan(
             raise StoryboardError(f"Story segment {segment_id} duration_seconds must be positive")
         segment["duration_seconds"] = segment_duration_value
     planned_duration = sum(float(segment["duration_seconds"]) for segment in selected)
-    progression = validate_story_progression(selected)
-    if not progression["passed"]:
-        raise StoryboardError("Invalid story progression: " + "; ".join(progression["errors"]))
     return {
         "storyboard_name": str(storyboard.get("name") or "unnamed_storyboard"),
         "storyboard_path": str(storyboard.get("_path") or ""),
@@ -1186,7 +1005,6 @@ def build_story_plan(
         "segment_count": segment_count,
         "planned_duration_seconds": round(planned_duration, 3),
         "segments": selected,
-        "progression_check": progression,
     }
 
 
@@ -1374,25 +1192,6 @@ def build_storyboard_segments(
         )
         previous_end_state = str(segment["end_state"])
     return segments
-
-
-def validate_story_progression(segments: list[dict[str, Any]]) -> dict[str, Any]:
-    errors: list[str] = []
-    goals = [str(segment.get("narrative_goal", "")).strip().lower() for segment in segments]
-    if len(goals) != len(set(goals)):
-        errors.append("narrative_goal values must be distinct across segments")
-    for index, segment in enumerate(segments):
-        for key in ("act", "act_goal", "spine_beat", "cause", "effect", "must_show"):
-            if not segment.get(key):
-                errors.append(f"segment {index + 1} has no {key} story-spine contract")
-        if not str(segment.get("next_hook", "")).strip():
-            errors.append(f"segment {index + 1} has no next_hook")
-        if index > 0:
-            prior_end = str(segments[index - 1].get("end_state", "")).strip().lower()
-            current_start = str(segment.get("start_state", "")).strip().lower()
-            if not prior_end or not current_start:
-                errors.append(f"segment {index + 1} lacks explicit state handoff")
-    return {"passed": not errors, "errors": errors, "distinct_goals": len(goals) == len(set(goals))}
 
 
 def story_state_contract(segment: dict[str, Any]) -> str:

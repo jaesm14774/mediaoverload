@@ -100,6 +100,9 @@ class SharedSkillHelperTests(unittest.TestCase):
                 "instagram": {
                     "caption": "IG caption",
                     "media_paths": ["ig.mp4"],
+                    "format": "reel",
+                    "additional_params": {"facebook_use_reels": True},
+                    "content_strategy": {"platform": "facebook"},
                     "validation": {"is_publish_ready": True},
                 }
             },
@@ -107,6 +110,9 @@ class SharedSkillHelperTests(unittest.TestCase):
 
         self.assertEqual(plan["instagram"]["caption"], "IG caption")
         self.assertEqual(plan["instagram"]["media_paths"], ["ig.mp4"])
+        self.assertEqual(plan["instagram"]["format"], "reel")
+        self.assertEqual(plan["instagram"]["additional_params"]["facebook_use_reels"], True)
+        self.assertEqual(plan["instagram"]["content_strategy"]["platform"], "facebook")
         self.assertTrue(plan["instagram"]["validation"]["is_publish_ready"])
         self.assertIs(AdapterMediaPost, NativeMediaPost)
 

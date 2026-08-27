@@ -11,23 +11,19 @@ agentic runtime.
 ## Current short-video contract
 
 The production Kirby native-H3 recipes use a single 15-second clip with three
-causal beats: hook, escalation, and payoff. The Kirby quality brief turns each
-episode into one readable cute micro-gag: one Kirby, one simple prop, one
-dominant motion, one setback, and one visible reversal. The first second must
-already contain motion and an expressive reaction; the episode must not become
-an action-film lore scene, duplicate-character fight, or static portal reveal.
-The generated story also carries a `gag_card` with `hook_frame`,
-`character_desire`, `prop_rule`, `setback`, `expressive_reaction`,
-`payoff_reversal`, and `loop_reason`. This is the content source of truth:
-the opening keyframe, three native beats, and final H3 prompt must all express
-the same physical joke before technical QA runs.
-The story combines that creative brief with the current news item; the
-repository preset supplies only the character/style/continuity contract. The
-LLM must return a `news_trace` that maps source concepts to concrete visual
-anchors, and the validator rejects a generic story when those anchors do not
-reach the hook and later causal beats. Beat boundaries may move slightly, but
-they must remain contiguous from 0 to 15 seconds and the final beat must solve
-the original objective.
+causal beats: hook, escalation, and payoff. The repository preset supplies the
+character, identity, safety, continuity, and timing contract; the LLM supplies
+the current story. Creative metadata such as `gag_card`, `story_spine`, and
+`news_trace` is optional and is retained as observability/context when present.
+The pre-render contract only requires a JSON story with the expected number of
+shots, visible actions, contiguous timing, and safe visual prompt text. Missing
+titles, camera directions, state changes, keyframes, or audio are filled from
+the generated actions and the stable preset before prompt composition.
+
+News grounding and story quality are recorded as advisory scores at this stage,
+not as free-model generation gates. Beat boundaries must remain contiguous from
+0 to 15 seconds; post-render technical QA and any recipe-enabled semantic QA
+remain the authoritative checks for the actual media.
 
 The production route uses `configs/storyboards/kirby_native_15s.yaml` as its
 identity and continuity contract. Direct H3 rendering is intentionally capped
@@ -41,7 +37,7 @@ submission; the system does not silently shorten it or substitute a fallback.
 adds a reviewed landing frame, `native_h3_l2va_story` keeps only the reviewed
 landing frame, and `native_h3_ref2va` consumes either a validated manifest or
 the six-candidate Discord reference gate when its manifest is empty. All modes
-share the same news-grounded story validator and QA/package nodes.
+share the same minimal render-contract normalization and QA/package nodes.
 
 ## Runtime path
 
@@ -143,12 +139,14 @@ the rotating adapter randomizes the first candidate for every request and then
 tries the remaining candidates if the selected route fails.
 
 The current snapshot keeps the largest general-purpose/open multimodal models
-that passed repeated MediaOverload JSON smoke tests. The 550B Ultra model is
-included: its first weak prompt produced invalid JSON, but the stricter JSON
-contract and repair pass made it usable. Models are assigned a request mode in
-the YAML file: `structured` sends `response_format`, `prompt_only` relies on
-the strict prompt plus the shared parser, and `reasoning_off` disables hidden
-reasoning when it otherwise consumes the answer budget.
+that passed repeated MediaOverload JSON smoke tests. Models are assigned a
+request mode in the YAML file: `structured` sends `response_format`,
+`prompt_only` relies on the prompt plus the shared parser, and `reasoning_off`
+disables hidden reasoning when it otherwise consumes the answer budget. Native
+H3 story generation explicitly uses prompt-only JSON for every model, even if
+the catalog entry says `structured`; this avoids making a free-plan provider
+implement the old nested semantic schema. The application still normalizes and
+checks the small render/safety contract locally.
 
 The Nano 12B VL model is intentionally vision-only in the default snapshot:
 its image route is useful, while its text route took about two minutes in the
@@ -181,15 +179,10 @@ The native H3 QA node delegates technical checks to the shared
 warnings, and a duration-aware contact sheet in the run directory. When the
 recipe enables `semantic_qa_required`, the shared Prompt Engine sends that
 contact sheet to the configured vision model and records the full request and
-response under `agentic/logs/runs/<run_id>/llm/`. The semantic judge checks
-protagonist identity, visible action, the news-derived visual anchor,
-progression, cute hit, readable expression, single-gag focus, first-second
-action, completed action, payoff, and unwanted extra characters; it must not
-infer evidence from the title or prompt. A recipe can set
-`semantic_qa_blocking: true` to make a failed semantic result a hard
-pre-publication gate. Kirby's checked-in recipe enables that policy, so
-Discord approval cannot turn a generic pose or missing payoff into a publishable
-video. Recipes without that flag may retain advisory semantic QA.
+response under `agentic/logs/runs/<run_id>/llm/`. The semantic result is
+advisory evidence for human review and never blocks the run. Technical media QA
+remains the hard pre-publication check, and Discord approval remains the
+authority for subjective story and visual quality.
 
 ## Automated social publishing
 

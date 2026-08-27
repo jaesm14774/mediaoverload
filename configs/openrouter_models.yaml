@@ -5,9 +5,10 @@ randomize_each_request: true
 
 # This pool mirrors AGENTIC_OPENROUTER_TEXT_MODELS and
 # AGENTIC_OPENROUTER_VISION_MODELS in media_overload.env.
-# mode=structured sends response_format; prompt_only relies on the strict prompt
-# plus the shared fence/fragment JSON parser; reasoning_off disables hidden
-# reasoning where it otherwise consumes the answer budget.
+# mode=structured sends response_format for ordinary JSON requests;
+# prompt_only relies on the prompt plus the shared fence/fragment JSON parser;
+# reasoning_off disables hidden reasoning where it otherwise consumes the answer
+# budget. Native H3 story generation explicitly uses prompt-only JSON.
 text:
   - id: nvidia/nemotron-3-ultra-550b-a55b:free
     mode: structured
