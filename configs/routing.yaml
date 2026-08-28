@@ -33,9 +33,11 @@ routing:
 
   longvideo_config:
     mix_weights:
-      t2v: 1
-    review_policy: opening_only
-    continuity_mode: independent
+      anchor_first_last: 1
+    review_policy: anchors
+    continuity_mode: planned_anchor
+    workflow_names:
+      - minimax_h3_lowvram_15s_fl2va_i2v
 
   # Scheduler runs use a persisted shuffle bag so a short run window cannot
   # accidentally repeat the same strategy while still respecting weights.
@@ -112,7 +114,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_t2v
+        - minimax_h3_lowvram_15s_fl2va_i2v
       transition_workflow_name:
         - krea2_turbo_img2img
         - image_to_image
@@ -428,8 +430,8 @@ routing:
         refine_workflow_name: "Required img2img refine stage. It must preserve the selected source image contract while applying the requested changes."
       text2longvideo:
         image_workflow_name: "Optional per-segment T2I anchor/reference stage used only by an explicit non-T2V recipe."
-        video_workflow_name: "Required multi-segment H3 stage; the default is prompt-only T2V. Explicit anchor recipes use planned story-state images, never a rendered video tail."
-        transition_workflow_name: "Optional planned story-state anchor/transition stage used only by an explicit anchor recipe."
+        video_workflow_name: "Required multi-segment H3 stage; the default uses planned first/last story-state images for continuity. Prompt-only T2V remains an explicit fallback."
+        transition_workflow_name: "Planned story-state anchor stage used by the default continuity recipe; it never relies on a rendered video tail."
       native_h3_story:
         image_workflow_name: "Opening keyframe candidate; review selects one first frame."
         video_workflow_name: "Native H3 I2VA stage. It receives first_frame and leaves the ending unconstrained."
@@ -608,7 +610,7 @@ routing:
           - "只要純靜態圖。"
           - "需要長篇故事、多段轉場與段落銜接，應改選 text2longvideo。"
       text2longvideo:
-        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡；預設以 4 個約 5 秒的 H3 T2V 片段組成 20 秒，只有明確選擇時才使用規劃好的圖像 anchor。"
+        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡；預設以 4 個約 5 秒的 H3 片段、規劃好的首尾 story-state anchor 組成 20 秒，純 prompt T2V 僅作明確 fallback。"
         best_for:
           - "需求有起承轉合、腳本段落、章節、旁白、storyboard 或多個 scene beat。"
           - "使用者提到 story、episode、narration、multi-scene 這類語意。"

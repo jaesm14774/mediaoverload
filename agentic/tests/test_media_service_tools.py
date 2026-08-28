@@ -166,6 +166,27 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
         ):
             communicator.wait_for_completion("prompt-history-success")
 
+    def test_wait_for_completion_recovers_from_raw_timeout_error(self) -> None:
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188, timeout=1)
+
+        class FakeSocket:
+            connected = True
+            sock = None
+
+            def settimeout(self, value: float) -> None:
+                del value
+
+            def recv(self):
+                raise TimeoutError("timed out")
+
+        communicator.ws = FakeSocket()  # type: ignore[assignment]
+        with patch.object(
+            communicator,
+            "get_history",
+            return_value={"prompt-history-raw-timeout": {"status": {"completed": True, "status_str": "success"}}},
+        ):
+            communicator.wait_for_completion("prompt-history-raw-timeout")
+
     def test_comfy_media_filename_cannot_escape_run_output_directory(self) -> None:
         output_dir = Path(tempfile.mkdtemp())
 

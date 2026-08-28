@@ -7,6 +7,7 @@ from agentic.assets.kirby_input import assert_kirby_input, inspect_kirby_input
 from agentic.minimax_prompting import subject_identity_lock
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
+from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.prompting import (
     build_segment_prompt,
     validate_story_segments,
@@ -34,7 +35,18 @@ class AgentPlanningSkills:
         idea_variants = list(context.node.inputs.get("idea_variants", []))
         selected_variant = idea_variants[0] if idea_variants else {"style": style}
         selected_style = str(selected_variant.get("style", style))
-        outputs = self.prompt_engine.expand_goal(context.plan.goal, selected_style, idea_variants)
+        reference_analysis = context.state.node_outputs.get("reference-video-analysis")
+        outputs = self.prompt_engine.expand_goal(
+            context.plan.goal,
+            selected_style,
+            idea_variants,
+            reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
+        )
+        reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
+        if reference_directive and reference_directive not in str(outputs.get("creative_brief") or ""):
+            outputs["creative_brief"] = "\n".join(
+                part for part in (str(outputs.get("creative_brief") or "").strip(), reference_directive) if part
+            )
         return SkillResult(
             status="success",
             outputs=outputs,
@@ -71,7 +83,14 @@ class AgentPlanningSkills:
         brief_source = context.state[context.node.depends_on[0]] if context.node.depends_on else {}
         brief = str(brief_source.get("creative_brief", context.plan.goal.prompt))
         tone = str(context.node.inputs.get("tone", "coherent progression"))
-        segments = self.prompt_engine.segment_story(context.plan.goal, brief, segment_count, tone)
+        reference_analysis = context.state.node_outputs.get("reference-video-analysis")
+        segments = self.prompt_engine.segment_story(
+            context.plan.goal,
+            brief,
+            segment_count,
+            tone,
+            reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
+        )
         validate_story_segments(segments, segment_count)
         return SkillResult(
             status="success",
@@ -266,7 +285,8 @@ class AgentMediaSkills:
             )
         if isinstance(prior_frame_path, str) and prior_frame_path:
             workflow_name = str(
-                context.plan.goal.constraints.get("identity_refine_workflow_name")
+                context.node.inputs.get("identity_refine_workflow_name")
+                or context.plan.goal.constraints.get("identity_refine_workflow_name")
                 or "image_to_image"
             )
             result = self.tools.call(
@@ -317,6 +337,12 @@ class AgentMediaSkills:
                             f"Freeze one single moment {'immediately before the physical action begins' if anchor_position == 'first' else 'immediately after the decisive outcome'}; "
                             "do not depict a sequence, a storyboard, or multiple copies of the character."
                         )
+                        if anchor_position == "last":
+                            prompt += (
+                                " Render every named prop from the end state literally at a natural scale, "
+                                "grounded in a physically plausible location and clearly separate from Kirby's face, "
+                                "eyes, and body; preserve one readable wide composition."
+                            )
                 prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
                 if prompt_key == "opening_keyframe_prompt":
                     story_output = context.state.node_outputs.get("native-story-prompt", {})
@@ -358,7 +384,9 @@ class AgentMediaSkills:
                 negative_prompt = (
                     f"{negative_prompt}, storyboard, contact sheet, comic panels, multi-panel, split screen, collage, "
                     "tiny distant subject, cropped character, white or unrecognizable character, duplicate Kirby, "
-                    "second Kirby, cloned subject"
+                    "second Kirby, cloned subject, object on face, object on head, object covering eyes, "
+                    "oversized prop, giant orb, floating unrelated object, humanoid silhouette, black figure, "
+                    "light beam, lens flare"
                     + (", identity swap, unrequested third subject" if interaction_required else "")
                 )
             attempts = 1 if character != "kirby" else max(1, int(context.node.inputs.get("max_regenerations", 2)) + 1)
@@ -945,7 +973,7 @@ class AgentMediaSkills:
                 "node_prompt_modes": summary["node_prompt_modes"],
                 "review_summary": summary["review_summary"],
             },
-            logs=[f"Persisted workflow summary for {summary_scope}."],
+            logs=["completed"],
         )
 
     def package_sticker_outputs(self, context: SkillContext) -> SkillResult:

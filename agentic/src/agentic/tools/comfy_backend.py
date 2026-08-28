@@ -217,7 +217,7 @@ class AgenticComfyCommunicator:
                 if raw_socket is not None and hasattr(raw_socket, "settimeout"):
                     raw_socket.settimeout(read_timeout)
                 raw_message = self.ws.recv()
-            except (websocket.WebSocketTimeoutException, socket.timeout):
+            except (websocket.WebSocketTimeoutException, socket.timeout, TimeoutError):
                 # A completed prompt can occasionally lose its terminal
                 # websocket event while ComfyUI has already removed it from
                 # the queue. Consult the authoritative history endpoint so a

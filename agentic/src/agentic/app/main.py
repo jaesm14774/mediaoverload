@@ -24,6 +24,7 @@ from agentic.skills.agent_social import register_agent_social_skills
 from agentic.skills.comfy_image import register_comfy_image_skills
 from agentic.skills.comfy_workflow_skills import register_comfy_workflow_skills
 from agentic.skills.longvideo import register_longvideo_skills
+from agentic.skills.reference_video import register_reference_video_skills
 from agentic.skills.storyboard import register_storyboard_skills
 from agentic.tools.comfy import register_builtin_tools
 from agentic.tools.authoring import register_authoring_tools
@@ -90,6 +91,7 @@ def build_runtime(
             news_service=NewsContextService(),
         ),
     )
+    register_reference_video_skills(skill_registry, tool_registry, resolved_output_root)
     register_storyboard_skills(skill_registry, tool_registry)
 
     idea_director = IdeaDirector()
@@ -164,6 +166,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-image", help="Input image path for img2img/i2v/upscale workflows")
     parser.add_argument("--input-video", help="Input video path for frame extraction workflows")
+    parser.add_argument(
+        "--reference-video",
+        help="Reference video path or URL used to extract pacing, shot, and motion evidence for remix planning",
+    )
+    parser.add_argument(
+        "--reference-video-depth",
+        choices=("standard", "deep"),
+        default="standard",
+        help="Reference-video analysis depth (both modes currently use local structural evidence; deep is reserved for richer analysis)",
+    )
+    parser.add_argument(
+        "--reference-keyframes",
+        type=int,
+        default=12,
+        help="Number of evenly spaced reference keyframes to extract (2-20)",
+    )
     parser.add_argument("--input-dir", help="Input directory for publish/review workflows")
     parser.add_argument("--media-path", action="append", dest="media_paths", help="Explicit media path for publish/review workflows; repeatable")
     parser.add_argument("--text", help="Text payload for TTS-style workflows")
@@ -232,6 +250,9 @@ def main() -> None:
         constraints={
             "input_image_path": args.input_image,
             "input_video_path": args.input_video,
+            "reference_video_source": args.reference_video,
+            "reference_video_depth": args.reference_video_depth,
+            "reference_video_max_keyframes": args.reference_keyframes,
             "input_dir": args.input_dir,
             "media_paths": args.media_paths or [],
             "text": args.text,
