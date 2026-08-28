@@ -94,7 +94,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         ))
         self.assertEqual(long_video["duration_seconds"], 20)
         self.assertEqual(long_video["constraints"]["segment_count"], 4)
-        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_t2v")
+        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_15s_fl2va_i2v")
 
     def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(

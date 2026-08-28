@@ -57,11 +57,11 @@ class RoutingContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2longvideo"]["video_workflow_name"][0],
-            "minimax_h3_lowvram_t2v",
+            "minimax_h3_lowvram_15s_fl2va_i2v",
         )
 
         stage_contracts = self.hints["workflow_stage_contracts"]
-        self.assertIn("prompt-only T2V", stage_contracts["text2longvideo"]["video_workflow_name"])
+        self.assertIn("planned first/last story-state images", stage_contracts["text2longvideo"]["video_workflow_name"])
         for strategy in self.routing["strategy_candidates"]:
             self.assertIn(strategy, stage_contracts)
         self.assertIn("not connected as video conditioning", stage_contracts["text2video"]["image_workflow_name"])

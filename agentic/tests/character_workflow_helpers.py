@@ -25,6 +25,9 @@ _GENERATION_FIELDS = {
     "rng",
     "selected_character_name",
     "character_selection",
+    "reference_video_source",
+    "reference_video_depth",
+    "reference_video_max_keyframes",
 }
 _REVIEW_FIELDS = {
     "dry_run_publish",

@@ -139,3 +139,75 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertIn("Duration: 3 seconds", str(captured["prompt"]))
         self.assertNotIn("Duration: 20 seconds", str(captured["prompt"]))
         self.assertIn("segment-01-opening_video", str(captured["run_dir"]))
+
+    def test_render_segment_video_consumes_prepared_segment_direction(self) -> None:
+        captured: dict[str, object] = {}
+        tools = ToolRegistry()
+
+        def fake_render(payload: dict[str, object]) -> dict[str, object]:
+            captured.update(payload)
+            return {"saved_files": ["C:/tmp/segment.mp4"]}
+
+        tools.register("comfy.render_image_to_video", fake_render, "test renderer")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skills = LongVideoSkills(tools, Path(temp_dir))
+            plan = ExecutionPlan(
+                goal=GoalRequest(
+                    prompt="Kirby catches one visible news-derived object",
+                    style="anime cinematic",
+                    constraints={
+                        "character": "Kirby",
+                        "news_context": {
+                            "title": "A wind warning changes the harbor",
+                            "keyword": "wind; harbor",
+                        },
+                    },
+                ),
+                workflow_name="longvideo_real_v2",
+                nodes=[],
+            )
+            node = ExecutionNode(
+                node_id="segment-video-01",
+                skill_name="longvideo.render_segment_video",
+                inputs={
+                    "segment_index": 0,
+                    "recipe": "anchor_first",
+                    "workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
+                    "render_tool": "comfy.workflow.image_to_video",
+                    "anchor_nodes": {"first": "opening-frame"},
+                    "width": 512,
+                    "height": 288,
+                    "length": 81,
+                    "steps": 16,
+                },
+                depends_on=["segment-prompt-01"],
+            )
+            state = RunState(
+                goal={"prompt": plan.goal.prompt},
+                metadata={},
+                node_outputs={
+                    "script-plan": {
+                        "segments": [
+                            {
+                                "segment_id": "segment-1",
+                                "visual": "Kirby braces against a gust at the harbor",
+                                "action": "grabs a loose warning buoy",
+                                "camera": "track with the buoy as it swings",
+                                "start_state": "the buoy hangs still",
+                                "end_state": "the buoy is secured against the gust",
+                                "cause": "the wind pulls the buoy loose",
+                                "effect": "Kirby secures the harbor marker",
+                            }
+                        ]
+                    },
+                    "idea-brief": {"negative_prompt": "blurry"},
+                    "segment-prompt-01": {"prompt": "Keep the buoy visible and show the gust physically pulling it left."},
+                    "opening-frame": {"selected_assets": ["C:/tmp/opening.png"]},
+                },
+            )
+
+            result = skills.render_segment_video(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertIn("LLM segment direction", str(captured["prompt"]))
+        self.assertIn("Keep the buoy visible", str(captured["prompt"]))

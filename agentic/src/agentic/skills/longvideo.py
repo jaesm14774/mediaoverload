@@ -7,6 +7,7 @@ from typing import Any
 
 from agentic.h3_reference import build_reference_lineage, format_ref2va_prompt, normalize_reference_manifest
 from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.minimax_prompting import structured_visual_prompt
 from agentic.runtime.prompting import (
     build_minimax_h3_prompt,
@@ -251,6 +252,16 @@ class LongVideoSkills:
                 if configured_brief
                 else user_brief
             )
+        context_state = getattr(context, "state", None)
+        state_outputs = getattr(context_state, "node_outputs", {}) or {}
+        reference_analysis = state_outputs.get("reference-video-analysis")
+        reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
+        if reference_directive:
+            creative_brief = "\n".join(
+                part
+                for part in (creative_brief, reference_directive)
+                if part
+            )
         news_context = context.plan.goal.constraints.get("news_context") or {}
         if not isinstance(news_context, dict):
             raise RuntimeError("Native H3 news_context must be a mapping")
@@ -262,6 +273,7 @@ class LongVideoSkills:
             duration_seconds=duration_seconds,
             news_context=news_context,
             creative_brief=creative_brief,
+            reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
         )
         storyboard["ending_keyframe_prompt"] = ground_native_h3_ending_keyframe_prompt(storyboard)
         render_mode = str(context.node.inputs.get("render_mode") or "").strip()
@@ -297,6 +309,7 @@ class LongVideoSkills:
                 "news_grounding": dict(story_payload.get("news_grounding") or {}),
                 "generated_storyboard": storyboard,
                 "creative_brief": creative_brief,
+                "reference_video_analysis": reference_analysis if isinstance(reference_analysis, dict) else {},
             },
             metrics={"duration_seconds": duration_seconds, "native_shot_count": len(storyboard.get("native_shots") or [])},
             logs=[
@@ -382,6 +395,13 @@ class LongVideoSkills:
             raise RuntimeError("Conditioning plan 'reference_bundle' did not resolve a reference manifest")
 
         constraints = context.plan.goal.constraints
+        prompt_node_id = str(context.node.depends_on[0]) if context.node.depends_on else ""
+        prepared_prompt_output = context.state.node_outputs.get(prompt_node_id)
+        prepared_prompt = (
+            str(prepared_prompt_output.get("prompt") or "").strip()
+            if isinstance(prepared_prompt_output, dict)
+            else ""
+        )
         prompt = f"{segment['visual']}, {context.plan.goal.style}, motion continuity, coherent action"
         prompt_anchor = first_frame or last_frame
         segment_frame_rate = float(
@@ -407,6 +427,15 @@ class LongVideoSkills:
                 segment,
                 prior_frame=prompt_anchor,
             )["prompt"]
+            if prepared_prompt:
+                prompt = "\n".join(
+                    (
+                        prompt,
+                        "LLM segment direction (use as a refinement of the declared story state; "
+                        "do not add a new prop, character, location, or plot): "
+                        + prepared_prompt,
+                    )
+                )
 
         width = context.node.inputs.get("width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
         height = context.node.inputs.get("height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")

@@ -22,8 +22,19 @@ class PromptEngine:
     ) -> dict[str, Any]:
         return self.llm_engine.route_generation_strategy(request)
 
-    def expand_goal(self, goal: GoalRequest, selected_style: str, idea_variants: list[dict[str, Any]]) -> dict[str, Any]:
-        return self.llm_engine.expand_goal(goal, selected_style, idea_variants)
+    def expand_goal(
+        self,
+        goal: GoalRequest,
+        selected_style: str,
+        idea_variants: list[dict[str, Any]],
+        reference_analysis: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.llm_engine.expand_goal(
+            goal,
+            selected_style,
+            idea_variants,
+            reference_analysis=reference_analysis,
+        )
 
     def compose_prompt(
         self,
@@ -49,8 +60,15 @@ class PromptEngine:
         creative_brief: str,
         segment_count: int,
         tone: str,
+        reference_analysis: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return self.llm_engine.segment_story(goal, creative_brief, segment_count, tone)
+        return self.llm_engine.segment_story(
+            goal,
+            creative_brief,
+            segment_count,
+            tone,
+            reference_analysis=reference_analysis,
+        )
 
     def sticker_expressions(self, goal: GoalRequest, prompt: str, character: str, expression_count: int) -> list[str]:
         return self.llm_engine.sticker_expressions(goal, prompt, character, expression_count)

@@ -304,7 +304,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("agent.goal.expand", skill_names)
         self.assertIn("agent.story.segment", skill_names)
         self.assertIn("agent.segment.prepare", skill_names)
-        self.assertNotIn("media.image.generate_keyframe", skill_names)
+        self.assertIn("media.image.generate_keyframe", skill_names)
         self.assertIn("longvideo.render_segment_video", skill_names)
         self.assertNotIn("media.video.extract_last_frame", skill_names)
         self.assertIn("media.audio.narrate", skill_names)
@@ -779,7 +779,8 @@ class AgenticPlannerTests(unittest.TestCase):
         plan = self.planner.build_plan(goal)
         first_last = next(node for node in plan.nodes if node.node_id == "segment-anchor-last-candidates-01")
         second_video = next(node for node in plan.nodes if node.node_id == "segment-video-02")
-        self.assertIn("segment-frame-01", first_last.depends_on)
+        self.assertNotIn("segment-frame-01", first_last.depends_on)
+        self.assertEqual(first_last.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
         self.assertEqual(second_video.inputs["conditioning_plan"]["anchors"]["first"], "segment-anchor-last-candidates-01")
         self.assertNotIn("segment-tail-01", first_last.depends_on)
         self.assertNotIn("segment-tail-01", second_video.depends_on)
@@ -855,7 +856,7 @@ class AgenticPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "longvideo_length"):
             self.planner.build_plan(goal)
 
-    def test_long_video_default_is_four_t2v_segments_for_twenty_seconds(self) -> None:
+    def test_long_video_default_is_four_anchor_segments_for_twenty_seconds(self) -> None:
         goal = self.planner.create_goal(
             prompt="Kirby crosses a windy meadow and reaches a glowing seed",
             media_type="long_video",
@@ -868,16 +869,17 @@ class AgenticPlannerTests(unittest.TestCase):
         videos = [node for node in plan.nodes if node.node_id.startswith("segment-video-")]
 
         self.assertEqual(plan.metadata["segment_count"], 4)
-        self.assertEqual(plan.metadata["recipe_sequence"], ["t2v", "t2v", "t2v", "t2v"])
+        self.assertEqual(plan.metadata["recipe_sequence"], ["anchor_first_last", "anchor_first_last", "anchor_first_last", "anchor_first_last"])
         self.assertEqual([node.inputs["workflow_name"] for node in videos], [
-            "minimax_h3_lowvram_t2v",
-            "minimax_h3_lowvram_t2v",
-            "minimax_h3_lowvram_t2v",
-            "minimax_h3_lowvram_t2v",
+            "minimax_h3_lowvram_15s_fl2va_i2v",
+            "minimax_h3_lowvram_15s_fl2va_i2v",
+            "minimax_h3_lowvram_15s_fl2va_i2v",
+            "minimax_h3_lowvram_15s_fl2va_i2v",
         ])
         self.assertEqual([node.inputs["length"] for node in videos], [120, 120, 120, 120])
-        self.assertTrue(all(not node.inputs["conditioning_plan"]["anchors"] for node in videos))
-        self.assertFalse(any(node.node_id in {"image-asset-check", "transition-asset-check"} for node in plan.nodes))
+        self.assertTrue(all(node.inputs["conditioning_plan"]["anchors"] for node in videos))
+        self.assertTrue(any(node.node_id == "image-asset-check" for node in plan.nodes))
+        self.assertTrue(any(node.node_id == "transition-asset-check" for node in plan.nodes))
         self.assertFalse(any(node.node_id.startswith("segment-tail-") for node in plan.nodes))
         self.assertTrue(all("segment-tail-" not in dependency for node in videos for dependency in node.depends_on))
 

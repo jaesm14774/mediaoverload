@@ -475,6 +475,9 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     news_history_path = generation.news_history_path
     routing_history_path = generation.routing_history_path
     rng = generation.rng
+    requested_reference_video_source = str(generation.reference_video_source or "").strip()
+    requested_reference_video_depth = str(generation.reference_video_depth or "").strip().lower()
+    requested_reference_video_max_keyframes = generation.reference_video_max_keyframes
     dry_run_publish = review.dry_run_publish
     publish_mode = review.publish_mode
     publish_platforms = list(review.publish_platforms)
@@ -655,6 +658,21 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         routed_segment_count=routing.get("count_plan", {}).get("segment_count"),
         requested_duration_seconds=requested_duration_seconds,
     )
+    reference_video_source = requested_reference_video_source or str(
+        generation.get("reference_video_source") or ""
+    ).strip()
+    reference_video_depth = requested_reference_video_depth or str(
+        generation.get("reference_video_depth") or "standard"
+    ).strip().lower()
+    reference_video_max_keyframes = int(
+        requested_reference_video_max_keyframes
+        if requested_reference_video_max_keyframes is not None
+        else generation.get("reference_video_max_keyframes") or 12
+    )
+    if reference_video_depth not in {"standard", "deep"}:
+        raise ValueError("reference_video_depth must be 'standard' or 'deep'")
+    if not 2 <= reference_video_max_keyframes <= 20:
+        raise ValueError("reference_video_max_keyframes must be an integer between 2 and 20")
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
         social_media.get("platforms"),
@@ -856,6 +874,9 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         # consumes, so keep the route's authoritative input to one raw frame.
         "skip_upscale_for_i2v": config_generation_type == "text2image2video",
         "output_dir": str(resolved_output_dir),
+        "reference_video_source": reference_video_source,
+        "reference_video_depth": reference_video_depth,
+        "reference_video_max_keyframes": reference_video_max_keyframes,
         "use_tts": use_tts if agentic_media_type == "long_video" else False,
         "source_temperature": temperature,
         "source_config_path": str(path),
@@ -2302,7 +2323,9 @@ def _prioritize_h3_profile(
         elif generation_type in {"native_h3_ref2va", "text2image2native_h3_ref2va"}:
             continue
         elif generation_type == "text2longvideo":
-            suffix = "t2v"
+            # Long-video continuity is the default route. Pure T2V remains
+            # available through an explicit longvideo recipe override.
+            suffix = "15s_fl2va_i2v"
         else:
             suffix = "i2v"
         preferred = f"minimax_h3_{slug}_{suffix}"

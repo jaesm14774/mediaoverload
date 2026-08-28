@@ -19,6 +19,9 @@ class CharacterGenerationOptions:
     rng: random.Random | None = None
     selected_character_name: str | None = None
     character_selection: dict[str, Any] | None = None
+    reference_video_source: str | None = None
+    reference_video_depth: str | None = None
+    reference_video_max_keyframes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

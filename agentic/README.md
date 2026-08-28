@@ -82,7 +82,7 @@ agentic --goal "kirby explores a surreal city at night" \
         --comfy-root D:\ComfyUI_windows_portable
 ```
 
-This chain now uses the new runtime to compose `segment prompt -> recipe-specific anchors/references -> I2V segments -> tail/continuation or transition -> concat -> gif preview`. The selected mix can use first, first+last, last, or reference-bundle conditioning per segment; it is not a single fixed first-keyframe path. Add `--use-tts` if you also want per-segment narration generation and final mux.
+This chain now uses the default long-video contract to compose `segment prompt -> planned first/last story-state anchors -> H3 FL2VA segments -> concat -> trim -> technical QA/contact sheet`. The default is four roughly five-second segments for a 20-second output, with pure prompt-only T2V available only through an explicit recipe override. Add `--use-tts` if you also want per-segment narration generation and final mux.
 
 Additional runtime primitives are available:
 
@@ -139,7 +139,7 @@ The following paths are covered by the checked-in runtime tests and local-adapte
 - `image_to_video`
 - `text2img2video`
 - `video_narrate`
-- `long_video` (minimal chain without claiming full `--use-tts` validation yet)
+- `long_video` (default 20-second planned-anchor path with final technical QA; TTS remains optional)
 
 The current development order should keep validating small primitives first, then reuse them inside more complex chains such as `long_video`.
 

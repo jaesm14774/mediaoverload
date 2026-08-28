@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +21,10 @@ if str(AGENTIC_SRC) not in sys.path:
     sys.path.insert(0, str(AGENTIC_SRC))
 
 from agentic.app.main import build_runtime
+from agentic.tools.context_services import NewsContextService
 
 
-MIX_WEIGHTS = {"t2v": 1}
+MIX_WEIGHTS = {"anchor_first_last": 1}
 RECIPE_NAMES = ("anchor_first", "anchor_first_last", "anchor_last", "reference_bundle", "t2v")
 EXPECTED_REFERENCE_CANDIDATES = 4
 
@@ -68,13 +70,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--recipe",
         choices=("mix",) + RECIPE_NAMES,
-        default="t2v",
+        default="anchor_first_last",
         help="Use the sampled recipe mix or force one H3 conditioning recipe for every segment",
     )
     parser.add_argument(
         "--continuity-mode",
         choices=("planned_anchor", "independent"),
-        default="independent",
+        default="planned_anchor",
         help="Use a prior planned landing anchor where the recipe supports it, or make every segment independent",
     )
     parser.add_argument("--seed", type=int, default=55)
@@ -87,8 +89,104 @@ def parse_args() -> argparse.Namespace:
         help="Frames per segment; defaults to 120 for 4x5s or 240 for 2x10s",
     )
     parser.add_argument("--steps", type=int, default=16)
+    parser.add_argument(
+        "--reference-video",
+        help="Optional local reference video or URL used during story planning; it is analyzed into evidence before rendering",
+    )
+    parser.add_argument(
+        "--reference-video-depth",
+        choices=("standard", "deep"),
+        default="standard",
+    )
+    parser.add_argument("--reference-keyframes", type=int, default=12)
+    parser.add_argument(
+        "--news-from-db",
+        action="store_true",
+        help="Select one unseen family-safe news item from the configured MySQL news table",
+    )
+    parser.add_argument(
+        "--news-history-file",
+        help="JSON history file used to exclude previously selected DB news items",
+    )
+    parser.add_argument(
+        "--news-context-file",
+        help="Existing JSON news context to render deterministically instead of selecting a new item",
+    )
+    parser.add_argument("--news-lookback-days", type=int, default=7)
+    parser.add_argument("--news-limit", type=int, default=200)
+    parser.add_argument(
+        "--goal-prompt",
+        default=(
+            "Create a playful, news-grounded Kirby short with one dominant visible mechanism, "
+            "one readable setback, and one concrete physical payoff; let the selected news item "
+            "determine the setting and action."
+        ),
+    )
     parser.add_argument("--smoke", action="store_true", help="Use a short 17-frame, 8-step render")
     return parser.parse_args()
+
+
+def _load_news_context(args: argparse.Namespace, output_root: Path) -> tuple[dict[str, Any], str]:
+    context_file = str(args.news_context_file or "").strip()
+    if context_file:
+        path = Path(context_file).expanduser().resolve()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise SystemExit("--news-context-file must contain a JSON object")
+        raw_context = payload.get("news_context", payload)
+        if not isinstance(raw_context, dict):
+            raise SystemExit("news_context in --news-context-file must be a JSON object")
+        context = dict(raw_context)
+        source = "file"
+    elif args.news_from_db:
+        service = NewsContextService()
+        history_path = Path(
+            args.news_history_file
+            or (output_root.parent / "news_selection_history.json")
+        ).expanduser().resolve()
+        history: list[dict[str, Any]] = []
+        if history_path.exists():
+            existing = json.loads(history_path.read_text(encoding="utf-8"))
+            if not isinstance(existing, list):
+                raise SystemExit("news history must contain a JSON array")
+            history = [item for item in existing if isinstance(item, dict)]
+        excluded = {
+            str(item.get("key") or service.selection_key(item.get("title", ""), item.get("keyword", "")))
+            for item in history
+            if str(item.get("key") or "").strip()
+        }
+        selected = service.get_random_news(
+            lookback_days=max(1, int(args.news_lookback_days)),
+            limit=max(1, int(args.news_limit)),
+            exclude_keys=excluded,
+        )
+        if selected is None:
+            raise SystemExit("No unseen usable DB news item was available")
+        context = selected.to_dict()
+        history.append(
+            {
+                "key": service.selection_key(selected.title, selected.keyword),
+                **context,
+                "selected_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+        source = "mysql:news_ch.news"
+    else:
+        context = {}
+        source = "none"
+
+    if context:
+        if any(not str(context.get(key) or "").strip() for key in ("title", "keyword")):
+            raise SystemExit("news context must contain non-empty title and keyword")
+        selection_path = output_root / "news_selection.json"
+        selection_path.parent.mkdir(parents=True, exist_ok=True)
+        selection_path.write_text(
+            json.dumps({"source": source, "news_context": context}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    return context, source
 
 
 def main() -> int:
@@ -97,6 +195,7 @@ def main() -> int:
         raise SystemExit("--segments must be 2 or 4 for the 20-second experiment matrix")
     output_root = Path(args.output_root).expanduser().resolve()
     comfy_root = Path(args.comfy_root).expanduser().resolve()
+    news_context, news_source = _load_news_context(args, output_root)
     length = 17 if args.smoke else (args.length or (240 if args.segments == 2 else 120))
     steps = 8 if args.smoke else args.steps
     target_duration = (length / 24.0) * args.segments if args.smoke else 20.0
@@ -109,10 +208,7 @@ def main() -> int:
     )
     recipe_weights = dict(MIX_WEIGHTS) if args.recipe == "mix" else {args.recipe: 1}
     goal = planner.create_goal(
-        prompt=(
-            "Kirby crosses a windy meadow, discovers a glowing seed, protects it from a storm, "
-            "and reaches a warm clearing with a clear visual payoff."
-        ),
+        prompt=args.goal_prompt,
         media_type="long_video",
         duration_seconds=target_duration,
         style="polished 2D anime cinematic, clear silhouette, coherent camera motion",
@@ -135,6 +231,10 @@ def main() -> int:
             "require_human_review": False,
             "enable_review_loop": False,
             "use_tts": False,
+            "reference_video_source": args.reference_video,
+            "reference_video_depth": args.reference_video_depth,
+            "reference_video_max_keyframes": args.reference_keyframes,
+            "news_context": news_context,
         },
     )
     plan = planner.build_plan(goal)
@@ -180,6 +280,8 @@ def main() -> int:
         "planned_anchor_consumers": planned_anchor_consumers,
         "planned_anchor_contract_passed": planned_anchor_contract_passed,
         "target_duration": target_duration,
+        "news_source": news_source,
+        "news_context": news_context,
     }
     result = runner.run(plan)
     report["workflow_status"] = result.status

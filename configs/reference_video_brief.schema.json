@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mediaoverload.local/schemas/reference-video-brief.schema.json",
+  "title": "MediaOverload Reference Video Brief",
+  "type": "object",
+  "required": [
+    "version",
+    "analysis_mode",
+    "source",
+    "media",
+    "content_analysis",
+    "style_profile",
+    "structure_analysis",
+    "replication_guidance",
+    "keyframes",
+    "contact_sheet_path",
+    "brief_path"
+  ],
+  "properties": {
+    "version": {"type": "string"},
+    "created_at": {"type": "string"},
+    "analysis_mode": {"const": "structural_ffmpeg"},
+    "analysis_depth": {"enum": ["standard", "deep"]},
+    "source": {
+      "type": "object",
+      "required": ["type", "value", "local_path", "downloaded"],
+      "properties": {
+        "type": {"type": "string"},
+        "value": {"type": "string"},
+        "local_path": {"type": "string"},
+        "downloaded": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "media": {
+      "type": "object",
+      "required": ["path", "duration_seconds", "width", "height", "frame_rate", "has_audio"],
+      "properties": {
+        "path": {"type": "string"},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "frame_rate": {"type": "number", "minimum": 0},
+        "has_audio": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "content_analysis": {"type": "object"},
+    "style_profile": {"type": "object"},
+    "structure_analysis": {
+      "type": "object",
+      "required": ["scene_count", "scenes", "pacing", "motion"],
+      "properties": {
+        "scene_count": {"type": "integer", "minimum": 1},
+        "scenes": {"type": "array", "items": {"type": "object"}},
+        "pacing": {"type": "object"},
+        "motion": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "replication_guidance": {
+      "type": "object",
+      "required": ["mode", "key_elements", "custom_work", "motion_required", "differentiation_seeds"],
+      "properties": {
+        "mode": {"const": "borrow_grammar_not_assets"},
+        "key_elements": {"type": "array", "items": {"type": "string"}},
+        "custom_work": {"type": "array", "items": {"type": "string"}},
+        "motion_required": {"type": "boolean"},
+        "differentiation_seeds": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "keyframes": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["index", "time_seconds", "path"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1},
+          "time_seconds": {"type": "number", "minimum": 0},
+          "path": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "contact_sheet_path": {"type": "string"},
+    "brief_path": {"type": "string"}
+  },
+  "additionalProperties": true
+}

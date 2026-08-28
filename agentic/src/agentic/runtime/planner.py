@@ -204,6 +204,49 @@ class TaskPlanner:
             raise ValueError(f"{media_type} requires native_h3_storyboard_path or storyboard_path")
         return storyboard_path
 
+    @staticmethod
+    def _reference_video_source(goal: GoalRequest) -> str:
+        return str(goal.constraints.get("reference_video_source") or "").strip()
+
+    @classmethod
+    def _reference_video_analysis_node(cls, goal: GoalRequest) -> ExecutionNode | None:
+        source = cls._reference_video_source(goal)
+        if not source:
+            return None
+        try:
+            max_keyframes = int(goal.constraints.get("reference_video_max_keyframes") or 12)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("reference_video_max_keyframes must be an integer between 2 and 20") from exc
+        if not 2 <= max_keyframes <= 20:
+            raise ValueError("reference_video_max_keyframes must be an integer between 2 and 20")
+        depth = str(goal.constraints.get("reference_video_depth") or "standard").strip().lower()
+        if depth not in {"standard", "deep"}:
+            raise ValueError("reference_video_depth must be 'standard' or 'deep'")
+        return ExecutionNode(
+            node_id="reference-video-analysis",
+            skill_name="reference.video.analyze",
+            inputs={
+                "source": source,
+                "max_keyframes": max_keyframes,
+                "analysis_depth": depth,
+            },
+            tags=["reference-video", "analysis", "evidence"],
+            stage="analysis",
+        )
+
+    @classmethod
+    def _reference_video_metadata(cls, goal: GoalRequest) -> dict[str, object] | None:
+        source = cls._reference_video_source(goal)
+        if not source:
+            return None
+        return {
+            "source": source,
+            "analysis_node": "reference-video-analysis",
+            "analysis_depth": str(goal.constraints.get("reference_video_depth") or "standard"),
+            "max_keyframes": int(goal.constraints.get("reference_video_max_keyframes") or 12),
+            "policy": "borrow_timing_framing_motion_grammar_not_source_assets",
+        }
+
     def _native_h3_finalize_nodes(
         self,
         goal: GoalRequest,
@@ -387,8 +430,11 @@ class TaskPlanner:
                 "Native H3 use_last_frame=true with multiple ending candidates requires require_human_review=true; refusing to select one automatically."
             )
         storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_story")
+        reference_node = self._reference_video_analysis_node(goal)
+        story_prompt_dependencies = [reference_node.node_id] if reference_node else []
 
         nodes = [
+            *([reference_node] if reference_node else []),
             ExecutionNode(
                 node_id="native-story-prompt",
                 skill_name="longvideo.prepare_native_h3_story",
@@ -402,6 +448,7 @@ class TaskPlanner:
                         else "image_to_video"
                     ),
                 },
+                depends_on=story_prompt_dependencies,
                 tags=["creative", "story", "native-h3"],
                 stage="prompting",
             ),
@@ -578,6 +625,7 @@ class TaskPlanner:
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
             "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "use_last_frame": use_last_frame, "lowvram_preview": lowvram_fl2va},
+            **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
             "graph_overview": [node.node_id for node in nodes],
         }
         return ExecutionPlan(
@@ -627,8 +675,11 @@ class TaskPlanner:
         frame_rate = float(goal.constraints.get("native_h3_frame_rate") or 24)
         render_duration = round(length / frame_rate, 3)
         storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_t2v_story")
+        reference_node = self._reference_video_analysis_node(goal)
+        story_prompt_dependencies = [reference_node.node_id] if reference_node else []
 
         nodes = [
+            *([reference_node] if reference_node else []),
             ExecutionNode(
                 node_id="native-story-prompt",
                 skill_name="longvideo.prepare_native_h3_story",
@@ -638,6 +689,7 @@ class TaskPlanner:
                     "style": goal.style,
                     "render_mode": "text_to_video",
                 },
+                depends_on=story_prompt_dependencies,
                 tags=["creative", "story", "native-h3", "t2v"],
                 stage="prompting",
             ),
@@ -701,6 +753,7 @@ class TaskPlanner:
                 "lowvram_preview": lowvram_t2v,
             },
             "render_mode": "text_to_video",
+            **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
             "graph_overview": [node.node_id for node in nodes],
         }
         return ExecutionPlan(
@@ -742,6 +795,8 @@ class TaskPlanner:
             goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_l2va else "q4")
         )
         storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_l2va_story")
+        reference_node = self._reference_video_analysis_node(goal)
+        story_prompt_dependencies = [reference_node.node_id] if reference_node else []
         pre_video_review = self._pre_video_review_enabled(goal)
         pre_video_requires_human = self._pre_video_review_requires_human(goal)
         stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
@@ -757,10 +812,12 @@ class TaskPlanner:
         )
         ending_source_node = "native-l2va-ending-keyframe"
         nodes = [
+            *([reference_node] if reference_node else []),
             ExecutionNode(
                 node_id="native-story-prompt",
                 skill_name="longvideo.prepare_native_h3_story",
                 inputs={"storyboard_path": storyboard_path, "duration_seconds": int(goal.duration_seconds), "style": goal.style, "render_mode": "last_frame_to_video"},
+                depends_on=story_prompt_dependencies,
                 tags=["creative", "story", "native-h3", "l2va"],
                 stage="prompting",
             ),
@@ -870,6 +927,7 @@ class TaskPlanner:
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
             "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "lowvram_preview": lowvram_l2va},
             "render_mode": "last_frame_to_video",
+            **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
             "graph_overview": [node.node_id for node in nodes],
         }
         return ExecutionPlan(
@@ -1230,7 +1288,7 @@ class TaskPlanner:
             preferred_workflows = [preferred_workflows]
         candidates = recipe_candidates(capabilities, preferred_workflows=preferred_workflows)
         default_weights = {
-            "t2v": 1,
+            "anchor_first_last": 1,
         }
         configured_weights = goal.constraints.get("longvideo_mix_weights")
         weights = (
@@ -1362,11 +1420,15 @@ class TaskPlanner:
         )
 
         idea_variants = self.idea_director.generate_variations(goal)
+        reference_node = self._reference_video_analysis_node(goal)
+        planning_dependencies = [reference_node.node_id] if reference_node else []
         nodes: list[ExecutionNode] = [
+            *([reference_node] if reference_node else []),
             ExecutionNode(
                 node_id="idea-brief",
                 skill_name="agent.goal.expand",
                 inputs={"prompt": goal.prompt, "style": goal.style, "idea_variants": idea_variants},
+                depends_on=planning_dependencies,
                 tags=["creative"],
             ),
             ExecutionNode(
@@ -1539,17 +1601,17 @@ class TaskPlanner:
             if recipe.requires_last:
                 last_candidate = f"{prefix}-anchor-last-candidates-{suffix}"
                 last_dependencies = [prompt_node, "image-asset-check", "transition-asset-check"]
-                # FL2VA/L2VA landing anchors are planned from the segment's
-                # opening anchor when one exists.  This preserves an explicit
-                # state transition without copying any rendered video frame.
-                if recipe.requires_first and anchor_nodes.get("first"):
-                    last_dependencies.append(anchor_nodes["first"])
+                # Landing anchors are generated as independent T2I state
+                # images. The prior planned landing anchor remains the next
+                # segment's explicit first-frame condition, while avoiding
+                # low-denoise redraw artifacts in the landing image itself.
                 nodes.append(
                     ExecutionNode(
                         node_id=last_candidate,
                         skill_name="media.image.generate_keyframe",
                         inputs={
                             "workflow_name": image_manifest.name,
+                            "identity_refine_workflow_name": transition_manifest.name,
                             "segment_index": index,
                             "anchor_position": "last",
                             "width": frame_width,
@@ -2039,6 +2101,7 @@ class TaskPlanner:
             "final_video_node": final_video_node,
             "review_loop_enabled": review_loop_enabled,
             "review_notes": review_notes,
+            **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
         }
         return ExecutionPlan(
             goal=goal,

@@ -180,3 +180,4 @@ class AuthoringToolTests(unittest.TestCase):
         self.assertIn("\"review_summary\"", payload)
         self.assertIn("\"retry_direction\": \"increase visible action\"", payload)
         self.assertIn("\"platform_bundle\"", payload)
+        self.assertEqual(result.logs, ["completed"])

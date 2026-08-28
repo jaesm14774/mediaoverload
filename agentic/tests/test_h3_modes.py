@@ -434,6 +434,55 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "comfy.workflow.image_to_image")
         self.assertEqual(calls[0][1]["image_count"], 4)
 
+    def test_kirby_landing_anchor_is_text_first_and_locks_prop_placement(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            def call(self, name, payload):
+                calls.append((name, payload))
+                return {"saved_files": ["landing.png"]}
+
+        context = SimpleNamespace(
+            node=SimpleNamespace(
+                inputs={
+                    "workflow_name": "krea2_turbo",
+                    "identity_refine_workflow_name": "krea2_turbo_img2img",
+                    "anchor_position": "last",
+                    "segment_index": 0,
+                    "max_regenerations": 0,
+                },
+                depends_on=[],
+            ),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Kirby protects a glowing seed",
+                    style="anime",
+                    constraints={"character": "kirby"},
+                )
+            ),
+            state=RunState(
+                goal={},
+                metadata={},
+                node_outputs={
+                    "script-plan": {
+                        "segments": [
+                            {"end_state": "Kirby stands beside a small glowing seed on the grass"}
+                        ]
+                    }
+                },
+            ),
+        )
+        report = SimpleNamespace(passed=True, reasons=[])
+        with patch("agentic.skills.agent_primitives.inspect_kirby_input", return_value=report):
+            result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "landing-anchor").generate_keyframe(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
+        self.assertEqual(calls[0][1]["workflow_name"], "krea2_turbo")
+        self.assertIn("Landing keyframe only", calls[0][1]["prompt"])
+        self.assertIn("Render every named prop", calls[0][1]["prompt"])
+        self.assertIn("object on face", calls[0][1]["negative_prompt"])
+
     def test_ref2va_deduplicates_selected_asset_against_string_manifest_entry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "identity.png"
