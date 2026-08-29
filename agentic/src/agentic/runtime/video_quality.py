@@ -52,6 +52,261 @@ VIDEO_SEMANTIC_QA_SCHEMA: dict[str, Any] = {
 }
 
 
+EDIT_CREATIVE_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string", "enum": ["pass", "fail", "uncertain"]},
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "dimensions": {
+            "type": "object",
+            "properties": {
+                "continuity": {"type": "integer", "minimum": 0, "maximum": 100},
+                "rhythm": {"type": "integer", "minimum": 0, "maximum": 100},
+                "interest": {"type": "integer", "minimum": 0, "maximum": 100},
+                "artifact_control": {"type": "integer", "minimum": 0, "maximum": 100},
+                "story_readability": {"type": "integer", "minimum": 0, "maximum": 100},
+            },
+            "required": [
+                "continuity",
+                "rhythm",
+                "interest",
+                "artifact_control",
+                "story_readability",
+            ],
+            "additionalProperties": False,
+        },
+        "checks": {
+            "type": "object",
+            "properties": {
+                "joins_are_coherent": {"type": "boolean"},
+                "transition_is_intentional": {"type": "boolean"},
+                "no_ghosting_or_black_flash": {"type": "boolean"},
+                "pacing_has_intent": {"type": "boolean"},
+                "visual_variety_serves_story": {"type": "boolean"},
+                "story_progression_reads": {"type": "boolean"},
+                "subject_remains_readable": {"type": "boolean"},
+                "effect_does_not_dominate": {"type": "boolean"},
+            },
+            "required": [
+                "joins_are_coherent",
+                "transition_is_intentional",
+                "no_ghosting_or_black_flash",
+                "pacing_has_intent",
+                "visual_variety_serves_story",
+                "story_progression_reads",
+                "subject_remains_readable",
+                "effect_does_not_dominate",
+            ],
+            "additionalProperties": False,
+        },
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "next_change": {
+            "type": "string",
+            "enum": [
+                "keep",
+                "shorter_fade",
+                "clean_fade",
+                "hard_cut",
+                "try_editorial",
+                "try_chapter_dip",
+                "change_variant",
+            ],
+        },
+        "rationale": {"type": "string"},
+    },
+    "required": [
+        "status",
+        "score",
+        "dimensions",
+        "checks",
+        "strengths",
+        "issues",
+        "next_change",
+        "rationale",
+    ],
+    "additionalProperties": False,
+}
+
+
+def build_edit_creative_review_prompt(
+    *,
+    goal: str,
+    style: str,
+    plan: dict[str, Any],
+    candidate_attempt: int,
+    previous_review: dict[str, Any] | None = None,
+) -> str:
+    previous = json.dumps(previous_review or {}, ensure_ascii=False)
+    return "\n".join(
+        [
+            f"Editing goal: {goal}",
+            f"Style direction: {style}",
+            f"Candidate attempt: {candidate_attempt}",
+            f"Candidate EditPlan JSON: {json.dumps(plan, ensure_ascii=False)}",
+            f"Previous candidate review JSON: {previous}",
+            "The first attached image is the candidate's overall contact sheet. The remaining attached images are chronological review frames, with extra frames sampled immediately before, during, and after each segment join.",
+            "Read every attached frame in time order. Treat segment joins and merge continuity as the highest-priority editorial question: inspect whether the subject, motion direction, screen geography, lighting, and emotional cause carry naturally across each join.",
+            "Judge this as a senior fashion short-form editor: a transition is useful only when it improves rhythm or meaning. Do not reward an effect merely because it is flashy. Penalize ghosting, double exposure, black/white flashes without motivation, hard vertical splits, frozen holds, repeated poses, accidental crop changes, or a transition that becomes the subject.",
+            "A good result has readable subject/action, intentional pacing, enough visual variation to stay interesting, and a concrete progression from opening to ending. If the source clips are only loosely related, say so instead of inventing a story that is not visible.",
+            "Use status=pass only when the candidate is publishable as an edit on its own merits. A hard cut may pass when it is rhythmically intentional and preserves clean readability; transition_is_intentional means that the chosen cut or transition supports the edit, not that a decorative effect must exist. Use fail when a visible issue should trigger another deterministic variant. Use uncertain when the evidence is insufficient; uncertain is not acceptance.",
+            "Choose next_change as the smallest safe deterministic change that addresses the largest visible weakness. Use keep only when the candidate is clearly the best available result.",
+            "Return JSON only.",
+        ]
+    )
+
+
+def normalize_edit_creative_review(
+    payload: Any,
+    *,
+    contact_sheet_path: str,
+    evidence_paths: list[str],
+    candidate_attempt: int,
+    candidate_plan: dict[str, Any],
+    prompt_mode: str,
+    llm_backend: dict[str, Any],
+) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    schema_valid = _is_strict_edit_creative_review(data)
+    raw_dimensions = data.get("dimensions") if isinstance(data.get("dimensions"), dict) else {}
+    dimensions: dict[str, int] = {}
+    for key in ("continuity", "rhythm", "interest", "artifact_control", "story_readability"):
+        try:
+            dimensions[key] = max(0, min(100, int(raw_dimensions.get(key, 0))))
+        except (TypeError, ValueError):
+            dimensions[key] = 0
+    raw_checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    checks = {}
+    for key in (
+        "joins_are_coherent",
+        "transition_is_intentional",
+        "no_ghosting_or_black_flash",
+        "pacing_has_intent",
+        "visual_variety_serves_story",
+        "story_progression_reads",
+        "subject_remains_readable",
+        "effect_does_not_dominate",
+    ):
+        value = raw_checks.get(key, False)
+        checks[key] = value if type(value) is bool else False
+    try:
+        score = max(0, min(100, int(data.get("score", 0))))
+    except (TypeError, ValueError):
+        score = 0
+    model_status = str(data.get("status") or "uncertain").strip().lower()
+    if model_status not in {"pass", "fail", "uncertain"}:
+        model_status = "uncertain"
+    next_change = str(data.get("next_change") or "change_variant").strip().lower()
+    if next_change not in {
+        "keep",
+        "shorter_fade",
+        "clean_fade",
+        "hard_cut",
+        "try_editorial",
+        "try_chapter_dip",
+        "change_variant",
+    }:
+        next_change = "change_variant"
+    critical_checks = all(
+        checks[key]
+        for key in (
+            "joins_are_coherent",
+            "transition_is_intentional",
+            "no_ghosting_or_black_flash",
+            "pacing_has_intent",
+            "visual_variety_serves_story",
+            "story_progression_reads",
+            "subject_remains_readable",
+            "effect_does_not_dominate",
+        )
+    )
+    passed = schema_valid and model_status == "pass" and score >= 72 and critical_checks
+    return {
+        "enabled": True,
+        "required": True,
+        "passed": passed,
+        "status": "pass" if passed else ("uncertain" if model_status == "uncertain" or not schema_valid else "fail"),
+        "schema_valid": schema_valid,
+        "model_status": model_status,
+        "score": score,
+        "dimensions": dimensions,
+        "checks": checks,
+        "strengths": [str(item).strip() for item in (data.get("strengths") or []) if str(item).strip()],
+        "issues": [str(item).strip() for item in (data.get("issues") or []) if str(item).strip()],
+        "next_change": next_change,
+        "rationale": str(data.get("rationale") or "").strip(),
+        "candidate_attempt": int(candidate_attempt),
+        "candidate_plan": candidate_plan,
+        "contact_sheet_path": contact_sheet_path,
+        "evidence_paths": list(evidence_paths),
+        "prompt_mode": prompt_mode,
+        "llm_backend": llm_backend,
+    }
+
+
+def _is_strict_edit_creative_review(data: dict[str, Any]) -> bool:
+    """Validate the provider response before any permissive normalization.
+
+    The vision model is an untrusted boundary.  In particular, Python's
+    ``bool("false")`` is true, so every gate field must be an actual JSON
+    boolean before it can contribute to acceptance.
+    """
+
+    top_level = {
+        "status",
+        "score",
+        "dimensions",
+        "checks",
+        "strengths",
+        "issues",
+        "next_change",
+        "rationale",
+    }
+    if set(data) != top_level:
+        return False
+    if type(data.get("status")) is not str or data["status"] not in {"pass", "fail", "uncertain"}:
+        return False
+    score = data.get("score")
+    if type(score) is not int or not 0 <= score <= 100:
+        return False
+    dimension_keys = {"continuity", "rhythm", "interest", "artifact_control", "story_readability"}
+    dimensions = data.get("dimensions")
+    if not isinstance(dimensions, dict) or set(dimensions) != dimension_keys:
+        return False
+    if any(type(value) is not int or not 0 <= value <= 100 for value in dimensions.values()):
+        return False
+    check_keys = {
+        "joins_are_coherent",
+        "transition_is_intentional",
+        "no_ghosting_or_black_flash",
+        "pacing_has_intent",
+        "visual_variety_serves_story",
+        "story_progression_reads",
+        "subject_remains_readable",
+        "effect_does_not_dominate",
+    }
+    checks = data.get("checks")
+    if not isinstance(checks, dict) or set(checks) != check_keys:
+        return False
+    if any(type(value) is not bool for value in checks.values()):
+        return False
+    if not isinstance(data.get("strengths"), list) or any(type(item) is not str for item in data["strengths"]):
+        return False
+    if not isinstance(data.get("issues"), list) or any(type(item) is not str for item in data["issues"]):
+        return False
+    if type(data.get("next_change")) is not str or data["next_change"] not in {
+        "keep",
+        "shorter_fade",
+        "clean_fade",
+        "hard_cut",
+        "try_editorial",
+        "try_chapter_dip",
+        "change_variant",
+    }:
+        return False
+    return type(data.get("rationale")) is str
+
+
 def build_video_semantic_qa_prompt(
     *,
     character: str,

@@ -3,7 +3,8 @@
 This runner intentionally creates every conditioning asset through ComfyUI
 before the H3 render. It does not use mock media, reference audio, or a
 prompt-only shortcut. All generated artifacts and the report are written to
-the caller-selected D/E-drive output root.
+the caller-selected output root, defaulting to the repository's ``output/``
+directory.
 """
 
 from __future__ import annotations
@@ -307,7 +308,7 @@ def _write_report(report_path: Path, report: dict[str, object]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run all canonical MiniMax H3 modes through real ComfyUI")
     parser.add_argument("--comfy-root", default=r"D:\ComfyUI_windows_portable", help="Portable ComfyUI root on D/E drive")
-    parser.add_argument("--output-root", default=r"D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e")
+    parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "h3_modes_e2e"))
     parser.add_argument("--comfy-host", default="127.0.0.1")
     parser.add_argument("--comfy-port", type=int, default=8188)
     parser.add_argument("--mode", choices=[mode.value for mode in H3Mode], action="append", dest="modes")

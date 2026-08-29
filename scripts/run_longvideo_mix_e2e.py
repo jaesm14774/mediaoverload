@@ -63,7 +63,7 @@ def _qa(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the shared long-video conditioning mix through ComfyUI")
     parser.add_argument("--comfy-root", default=r"D:\ComfyUI_windows_portable")
-    parser.add_argument("--output-root", default=r"D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_longvideo_mix_e2e")
+    parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "longvideo_mix_e2e"))
     parser.add_argument("--comfy-host", default="127.0.0.1")
     parser.add_argument("--comfy-port", type=int, default=8188)
     parser.add_argument("--segments", type=int, default=4)

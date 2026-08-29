@@ -27,7 +27,7 @@ MODE_OUTPUTS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Verify generated H3 E2E outputs with strict video/audio QA")
-    parser.add_argument("--output-root", default=r"D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e")
+    parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "h3_modes_e2e"))
     return parser.parse_args()
 
 

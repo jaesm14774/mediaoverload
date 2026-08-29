@@ -11,7 +11,7 @@ from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
 from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
 from agentic.runtime.observability import RunRecorder
-from agentic.runtime.video_quality import normalize_video_semantic_qa
+from agentic.runtime.video_quality import normalize_edit_creative_review, normalize_video_semantic_qa
 
 
 class _FakeTextModel:
@@ -31,6 +31,72 @@ class _FakeManager:
 
 
 class LLMEngineTests(unittest.TestCase):
+    def test_edit_creative_review_requires_story_serving_visual_variety(self) -> None:
+        checks = {
+            "joins_are_coherent": True,
+            "transition_is_intentional": True,
+            "no_ghosting_or_black_flash": True,
+            "pacing_has_intent": True,
+            "visual_variety_serves_story": False,
+            "story_progression_reads": True,
+            "subject_remains_readable": True,
+            "effect_does_not_dominate": True,
+        }
+        result = normalize_edit_creative_review(
+            {
+                "status": "pass",
+                "score": 96,
+                "dimensions": {key: 90 for key in ("continuity", "rhythm", "interest", "artifact_control", "story_readability")},
+                "checks": checks,
+                "strengths": [],
+                "issues": ["The effect adds variety without serving the story."],
+                "next_change": "change_variant",
+                "rationale": "Remove the distracting effect.",
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            evidence_paths=["join.jpg"],
+            candidate_attempt=1,
+            candidate_plan={"profile": "editorial_kinetic_v1"},
+            prompt_mode="llm",
+            llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "pass" if result["passed"] else "fail")
+
+    def test_edit_creative_review_rejects_string_boolean_checks(self) -> None:
+        checks = {
+            "joins_are_coherent": "true",
+            "transition_is_intentional": True,
+            "no_ghosting_or_black_flash": True,
+            "pacing_has_intent": True,
+            "visual_variety_serves_story": True,
+            "story_progression_reads": True,
+            "subject_remains_readable": True,
+            "effect_does_not_dominate": True,
+        }
+        result = normalize_edit_creative_review(
+            {
+                "status": "pass",
+                "score": 99,
+                "dimensions": {key: 99 for key in ("continuity", "rhythm", "interest", "artifact_control", "story_readability")},
+                "checks": checks,
+                "strengths": [],
+                "issues": [],
+                "next_change": "keep",
+                "rationale": "Looks good.",
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            evidence_paths=["join.jpg"],
+            candidate_attempt=1,
+            candidate_plan={"profile": "baseline_concat"},
+            prompt_mode="llm",
+            llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["schema_valid"])
+
     def test_run_recorder_sanitizes_run_id_before_creating_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             recorder = RunRecorder(Path(temp_dir), "../escape/run")
@@ -732,7 +798,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["prompt_mode"], "llm")
 
     def test_review_asset_candidates_vision_prefilters_to_top_ten(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-prefilter"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-prefilter"
         temp_dir.mkdir(parents=True, exist_ok=True)
         media_paths = []
         created_paths: list[Path] = []
@@ -774,7 +840,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["selected_assets"][0], media_paths[0])
 
     def test_review_asset_candidates_drops_vision_hard_failures_before_final_selection(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-hard-gate"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-hard-gate"
         temp_dir.mkdir(parents=True, exist_ok=True)
         rejected = temp_dir / "duplicate.png"
         accepted = temp_dir / "single.png"
@@ -816,7 +882,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["selected_assets"], [str(accepted)])
 
     def test_stage_probe_rejects_a_vision_batch_when_all_candidates_are_weak(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-stage-min-score"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-stage-min-score"
         temp_dir.mkdir(parents=True, exist_ok=True)
         candidates = [temp_dir / "weak_a.png", temp_dir / "weak_b.png"]
         for path in candidates:
@@ -850,7 +916,7 @@ class LLMEngineTests(unittest.TestCase):
                 path.unlink(missing_ok=True)
 
     def test_stage_probe_does_not_fallback_when_vision_batch_schema_is_invalid(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-invalid-batch"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-invalid-batch"
         temp_dir.mkdir(parents=True, exist_ok=True)
         candidates = [temp_dir / f"candidate_{index}.png" for index in range(4)]
         for path in candidates:
@@ -881,7 +947,7 @@ class LLMEngineTests(unittest.TestCase):
                 path.unlink(missing_ok=True)
 
     def test_stage_probe_keeps_binary_vision_scores_below_the_quality_gate(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-binary-score"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-binary-score"
         temp_dir.mkdir(parents=True, exist_ok=True)
         candidates = [temp_dir / f"candidate_{index}.png" for index in range(4)]
         for path in candidates:
@@ -915,7 +981,7 @@ class LLMEngineTests(unittest.TestCase):
                 path.unlink(missing_ok=True)
 
     def test_stage_probe_rejects_out_of_range_single_vision_scores(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-single-range"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-single-range"
         temp_dir.mkdir(parents=True, exist_ok=True)
         candidates = [temp_dir / "candidate_a.png", temp_dir / "candidate_b.png"]
         for path in candidates:
@@ -949,7 +1015,7 @@ class LLMEngineTests(unittest.TestCase):
                 path.unlink(missing_ok=True)
 
     def test_review_rejects_a_batch_when_every_candidate_hits_a_hard_failure(self) -> None:
-        temp_dir = Path(__file__).resolve().parents[1] / ".tmp-tests" / "vision-all-hard-fail"
+        temp_dir = Path(__file__).resolve().parents[2] / ".tmp-tests" / "vision-all-hard-fail"
         temp_dir.mkdir(parents=True, exist_ok=True)
         candidates = [temp_dir / "duplicate_a.png", temp_dir / "duplicate_b.png"]
         for path in candidates:

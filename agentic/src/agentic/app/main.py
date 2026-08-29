@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -23,6 +24,7 @@ from agentic.skills.agent_primitives import register_agent_primitive_skills
 from agentic.skills.agent_social import register_agent_social_skills
 from agentic.skills.comfy_image import register_comfy_image_skills
 from agentic.skills.comfy_workflow_skills import register_comfy_workflow_skills
+from agentic.skills.editing import register_editing_skills
 from agentic.skills.longvideo import register_longvideo_skills
 from agentic.skills.reference_video import register_reference_video_skills
 from agentic.skills.storyboard import register_storyboard_skills
@@ -44,6 +46,7 @@ def build_runtime(
     run_id: str | None = None,
     logger=None,
     recorder: RunRecorder | None = None,
+    input_roots: Iterable[Path] = (),
 ) -> tuple[TaskPlanner, WorkflowRunner, RunMemory]:
     if recorder is None and logger is not None:
         recorder = getattr(logger, "run_recorder", None)
@@ -75,12 +78,18 @@ def build_runtime(
         comfy_host=comfy_host,
         comfy_port=comfy_port,
     )
-    register_media_service_tools(tool_registry, resolved_output_root)
+    register_media_service_tools(tool_registry, resolved_output_root, input_roots=input_roots)
     register_social_service_tools(tool_registry, resolved_output_root)
     register_agent_primitive_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_agent_social_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_comfy_image_skills(skill_registry, tool_registry, resolved_output_root)
     register_comfy_workflow_skills(skill_registry, tool_registry, resolved_output_root)
+    register_editing_skills(
+        skill_registry,
+        tool_registry,
+        resolved_output_root,
+        prompt_engine=prompt_engine,
+    )
     register_longvideo_skills(
         skill_registry,
         tool_registry,
@@ -184,6 +193,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-dir", help="Input directory for publish/review workflows")
     parser.add_argument("--media-path", action="append", dest="media_paths", help="Explicit media path for publish/review workflows; repeatable")
+    parser.add_argument("--edit-input", action="append", dest="edit_input_paths", help="Ordered image/video input for image_sequence_edit; repeatable")
+    parser.add_argument("--edit-input-root", action="append", dest="edit_input_roots", help="Approved root for image_sequence_edit inputs; repeatable")
+    parser.add_argument(
+        "--edit-profile",
+        choices=("baseline_concat", "motion_cut_v1", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
+        help="Timeline profile for image_sequence_edit",
+    )
+    parser.add_argument("--edit-transition-duration", type=float, help="Transition overlap in seconds for timeline editing")
+    parser.add_argument("--edit-variant-seed", type=int, help="Deterministic variation seed for timeline editing")
+    parser.add_argument("--edit-require-audio", action="store_true", help="Require an audio stream in image_sequence_edit QA")
+    parser.add_argument("--edit-analyze-audio", action="store_true", help="Run loudness/silence analysis in image_sequence_edit QA")
+    parser.add_argument("--edit-creative-review", action="store_true", help="Run a blocking vision-LLM creative review loop for edit candidates")
+    parser.add_argument("--edit-creative-review-max-attempts", type=int, help="Maximum deterministic edit candidates reviewed by the vision LLM (1-4)")
+    parser.add_argument(
+        "--longvideo-edit-profile",
+        choices=("baseline_concat", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
+        help="Use the agent timeline editor to merge non-TTS long-video segments",
+    )
     parser.add_argument("--text", help="Text payload for TTS-style workflows")
     parser.add_argument("--character", help="Optional character or subject identity for agentic planning")
     parser.add_argument("--platform", action="append", dest="platforms", help="Target publish platform; repeatable")
@@ -239,6 +266,7 @@ def main() -> None:
         comfy_host=args.comfy_host,
         comfy_port=args.comfy_port,
         comfy_root=Path(args.comfy_root).resolve() if args.comfy_root else None,
+        input_roots=[Path(root) for root in args.edit_input_roots or []],
     )
 
     goal = planner.create_goal(
@@ -255,6 +283,15 @@ def main() -> None:
             "reference_video_max_keyframes": args.reference_keyframes,
             "input_dir": args.input_dir,
             "media_paths": args.media_paths or [],
+            "edit_input_paths": args.edit_input_paths or [],
+            "edit_profile": args.edit_profile,
+            "edit_transition_duration": args.edit_transition_duration,
+            "edit_variant_seed": args.edit_variant_seed,
+            "edit_require_audio": args.edit_require_audio,
+            "edit_analyze_audio": args.edit_analyze_audio,
+            "edit_creative_review": args.edit_creative_review,
+            "edit_creative_review_max_attempts": args.edit_creative_review_max_attempts,
+            "longvideo_edit_profile": args.longvideo_edit_profile,
             "text": args.text,
             "character": args.character,
             "platforms": args.platforms or [],

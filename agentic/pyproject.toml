@@ -24,6 +24,7 @@ dependencies = [
 
 [project.scripts]
 agentic = "agentic.app.main:main"
+agentic-edit = "agentic.tools.editing_cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

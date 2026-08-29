@@ -50,6 +50,95 @@ class AgenticPlannerTests(unittest.TestCase):
             ["media.audio.narrate", "media.video.merge_audio", "media.video.gif_preview"],
         )
 
+    def test_image_sequence_edit_is_a_first_class_agent_plan(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="edit three generated stills into a fashion reel",
+            media_type="image_sequence_edit",
+            duration_seconds=9,
+            style="editorial surreal",
+            auto_download_assets=False,
+            constraints={
+                "edit_input_paths": ["/tmp/one.png", "/tmp/two.png", "/tmp/three.png"],
+                "edit_profile": "editorial_kinetic_v1",
+                "edit_variant_seed": 4,
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+
+        self.assertEqual(plan.workflow_name, "image_sequence_edit_v1")
+        compose = plan.nodes[0]
+        self.assertEqual(compose.skill_name, "media.video.compose_timeline")
+        self.assertEqual(compose.inputs["profile"], "editorial_kinetic_v1")
+        self.assertEqual(compose.inputs["variant_seed"], 4)
+        self.assertEqual(plan.nodes[1].skill_name, "media.video.qa")
+
+    def test_image_sequence_edit_defaults_to_motion_cut_for_stills(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="animate generated stills into a reel",
+            media_type="image_sequence_edit",
+            duration_seconds=9,
+            style="playful",
+            auto_download_assets=False,
+            constraints={
+                "edit_input_paths": ["/tmp/one.png", "/tmp/two.png", "/tmp/three.png"],
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+
+        self.assertEqual(plan.nodes[0].inputs["profile"], "motion_cut_v1")
+        self.assertFalse(plan.nodes[0].inputs["creative_review"])
+
+    def test_image_sequence_edit_defaults_to_hard_cut_for_video_segments(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="join generated video segments",
+            media_type="image_sequence_edit",
+            duration_seconds=15,
+            style="cinematic",
+            auto_download_assets=False,
+            constraints={
+                "edit_input_paths": ["/tmp/one.mp4", "/tmp/two.mp4", "/tmp/three.mp4"],
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+
+        self.assertEqual(plan.nodes[0].inputs["profile"], "baseline_concat")
+        self.assertFalse(plan.nodes[0].inputs["creative_review"])
+
+    def test_explicit_edit_plan_drives_render_and_qa_contract(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="render an explicit edit plan",
+            media_type="image_sequence_edit",
+            duration_seconds=9,
+            style="editorial",
+            auto_download_assets=False,
+            constraints={
+                "edit_plan": {
+                    "clips": [{"path": "/tmp/one.png"}, {"path": "/tmp/two.png"}],
+                    "transitions": [{"name": "fade", "duration_seconds": 0.1}],
+                    "output_width": 720,
+                    "output_height": 1280,
+                    "fps": 30,
+                    "target_duration_seconds": 4,
+                    "profile": "xfade_clean_v1",
+                }
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+        compose = plan.nodes[0]
+        qa = plan.nodes[1]
+
+        self.assertEqual(compose.inputs["edit_plan"]["output_width"], 720)
+        self.assertEqual(qa.inputs["expected_width"], 720)
+        self.assertEqual(qa.inputs["expected_height"], 1280)
+        self.assertEqual(qa.inputs["expected_fps"], 30.0)
+        self.assertEqual(qa.inputs["target_duration"], 4.0)
+        self.assertTrue(qa.inputs["require_audio"])
+        self.assertTrue(qa.inputs["require_stereo_audio"])
+
     def test_text2video_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
             prompt="robot chef in rainy alley",
@@ -312,6 +401,47 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("media.audio.concat", skill_names)
         self.assertIn("media.video.merge_audio", skill_names)
         self.assertIn("media.video.gif_preview", skill_names)
+
+    def test_long_video_can_opt_into_timeline_editing_without_tts(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="kirby explores a rainy cyberpunk alley",
+            media_type="long_video",
+            duration_seconds=20,
+            style="anime cinematic travel film",
+            auto_download_assets=False,
+            constraints={
+                "use_tts": False,
+                "longvideo_edit_profile": "xfade_clean_v1",
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+        editor = next(node for node in plan.nodes if node.node_id == "edit-segment-timeline")
+
+        self.assertEqual(editor.skill_name, "media.video.compose_timeline")
+        self.assertEqual(editor.inputs["profile"], "xfade_clean_v1")
+        self.assertNotIn("media.video.concat", {node.skill_name for node in plan.nodes})
+        self.assertEqual(plan.metadata["longvideo_edit_profile"], "xfade_clean_v1")
+
+    def test_long_video_review_retry_reuses_timeline_editor(self) -> None:
+        goal = self.planner.create_goal(
+            prompt="kirby explores a rainy cyberpunk alley",
+            media_type="long_video",
+            duration_seconds=20,
+            style="anime cinematic travel film",
+            auto_download_assets=False,
+            constraints={
+                "use_tts": False,
+                "longvideo_edit_profile": "xfade_clean_v1",
+                "enable_review_loop": True,
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+        retry_editor = next(node for node in plan.nodes if node.node_id == "review-edit-segment-timeline")
+
+        self.assertEqual(retry_editor.skill_name, "media.video.compose_timeline")
+        self.assertNotIn("review-concat-final-video", [node.node_id for node in plan.nodes])
 
     def test_long_video_review_loop_adds_regeneration_path(self) -> None:
         goal = self.planner.create_goal(

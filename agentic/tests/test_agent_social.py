@@ -16,7 +16,7 @@ from agentic.tools.context_services import DiscordHumanReviewService
 class AgentSocialSkillTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.project_root = Path(__file__).resolve().parents[1]
+        cls.project_root = Path(__file__).resolve().parents[2]
 
     def test_publish_social_blocks_when_platform_bundle_is_not_ready(self) -> None:
         tool_registry = ToolRegistry()
@@ -1160,7 +1160,7 @@ class AgentSocialSkillTests(unittest.TestCase):
 class DiscordHumanReviewServiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.project_root = Path(__file__).resolve().parents[1]
+        cls.project_root = Path(__file__).resolve().parents[2]
 
     def test_review_candidates_filters_paths_to_media_under_output_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

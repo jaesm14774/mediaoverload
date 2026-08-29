@@ -1034,8 +1034,8 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         stage_probe=review.stage_probe,
     )
     run_id = uuid.uuid4().hex[:12]
-    recorder = RunRecorder(repo_root / "agentic" / "logs" / "runs", run_id)
-    logger, log_path = create_run_logger(repo_root / "agentic" / "logs" / "runs", run_id, recorder=recorder)
+    recorder = RunRecorder(repo_root / "logs" / "runs", run_id)
+    logger, log_path = create_run_logger(repo_root / "logs" / "runs", run_id, recorder=recorder)
     os.environ["AGENTIC_RUN_LOGGER_NAME"] = logger.name
     logger.info("workflow.start | run_id=%s | config=%s", run_id, Path(config_path).resolve())
     logger.info("character.config.load | path=%s", Path(config_path).resolve())
@@ -2830,25 +2830,13 @@ def _summarize_character_config(
 
 
 def _resolve_output_dir(repo_root: Path, configured_output_dir: Any, character_name: str) -> Path:
-    base = _resolve_repo_path(repo_root, str(configured_output_dir or (repo_root / "agentic" / "output")))
+    base = _resolve_repo_path(repo_root, str(configured_output_dir or (repo_root / "output")))
     return Path(base) / character_name.lower()
 
 
 def _resolve_repo_path(repo_root: Path, raw_path: str) -> Path:
     normalized = raw_path.strip()
     if not normalized:
-        return repo_root / "agentic" / "output"
-    # Character configs are shared with the Windows host and may contain a
-    # drive-qualified path such as ``D:/MediaOverload/output``.  Inside the
-    # Linux container that string is not an absolute path; without this
-    # mapping it becomes ``/app/D:/MediaOverload/output`` and bypasses the
-    # mounted ``/app/output`` directory.
-    if (
-        len(normalized) >= 3
-        and normalized[1] == ":"
-        and normalized[2] in {"/", "\\"}
-        and Path("/comfyui").is_dir()
-    ):
         return repo_root / "output"
     if normalized.startswith("/app/"):
         return repo_root / normalized.removeprefix("/app/")

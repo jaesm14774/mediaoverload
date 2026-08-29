@@ -21,6 +21,7 @@ from agentic.app.character_workflow import (
     _asset_qualified_workflow_candidates,
     _route_generation_from_character_config,
     _select_fresh_news,
+    _resolve_output_dir,
     _resolve_publish_prompt,
     build_goal_payload_from_character_config,
     collect_media_paths_from_run_result,
@@ -47,6 +48,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             output_root = Path(temp_dir) / "generated"
             _allow_runtime_output_for_visual_evidence(output_root)
             self.assertIn(str(output_root.resolve()), os.environ["AGENTIC_ALLOWED_IMAGE_ROOTS"])
+
+    def test_character_output_defaults_to_project_output_root(self) -> None:
+        self.assertEqual(
+            _resolve_output_dir(self.repo_root, None, "Kirby"),
+            self.repo_root / "output" / "kirby",
+        )
 
     def test_duration_policy_selects_single_action_or_native_story(self) -> None:
         short = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -971,7 +978,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 yaml.safe_dump(
                     {
                         "character": {"name": "Kirby"},
-                        "generation": {"output_dir": "/app/output_media"},
+                        "generation": {"output_dir": "/app/output"},
                         "social_media": {
                             "platforms": {
                                 "instagram": {

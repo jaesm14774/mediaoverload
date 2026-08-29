@@ -28,8 +28,11 @@ from agentic.runtime.prompting import (
 )
 from agentic.minimax_prompting import short_action_contract
 from agentic.runtime.video_quality import (
+    EDIT_CREATIVE_REVIEW_SCHEMA,
     VIDEO_SEMANTIC_QA_SCHEMA,
     build_video_semantic_qa_prompt,
+    build_edit_creative_review_prompt,
+    normalize_edit_creative_review,
     normalize_video_semantic_qa,
 )
 from agentic.storyboard import (
@@ -2300,6 +2303,78 @@ class LLMPromptEngine:
             llm_backend=self.backend_info(),
             news_anchor_terms=news_anchor_terms,
             subject_context=dict(subject_context or {}),
+        )
+
+    def evaluate_edit_contact_sheet(
+        self,
+        *,
+        contact_sheet_path: str,
+        evidence_paths: list[str] | None,
+        goal: str,
+        style: str,
+        plan: dict[str, Any],
+        candidate_attempt: int,
+        previous_review: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run a blocking visual review for an agent-controlled edit candidate."""
+
+        contact_path = str(contact_sheet_path or "").strip()
+        evidence = [str(path).strip() for path in (evidence_paths or []) if str(path).strip()]
+        base = {
+            "enabled": True,
+            "required": True,
+            "passed": None,
+            "status": "unavailable",
+            "candidate_attempt": int(candidate_attempt),
+            "candidate_plan": plan,
+            "contact_sheet_path": contact_path,
+            "evidence_paths": evidence,
+            "issues": [],
+            "strengths": [],
+            "prompt_mode": "template",
+            "llm_backend": self.backend_info(),
+        }
+        if not contact_path or not Path(contact_path).is_file():
+            base["reason"] = "edit creative-review contact sheet is missing"
+            return base
+        manager = self._manager_or_none()
+        if manager is None:
+            base["reason"] = "vision model unavailable for edit creative review"
+            return base
+        images = [contact_path] + [path for path in evidence if path != contact_path]
+        user_prompt = build_edit_creative_review_prompt(
+            goal=goal,
+            style=style,
+            plan=plan,
+            candidate_attempt=candidate_attempt,
+            previous_review=previous_review,
+        )
+        try:
+            payload = self._chat_json_with_recorder(
+                manager,
+                LONG_VIDEO_SYSTEM_PROMPT,
+                user_prompt,
+                schema_name="edit_creative_review",
+                schema=EDIT_CREATIVE_REVIEW_SCHEMA,
+                model="vision",
+                images=images,
+                max_retries=1,
+                request_timeout=float(os.environ.get("AGENTIC_EDIT_REVIEW_TIMEOUT_SECONDS", "90")),
+                max_models_per_call=1,
+                repair_attempts=1,
+            )
+        except Exception as exc:
+            base["reason"] = f"edit creative review failed: {type(exc).__name__}: {exc}"
+            base["prompt_mode"] = "llm"
+            return base
+        return normalize_edit_creative_review(
+            payload,
+            contact_sheet_path=contact_path,
+            evidence_paths=images,
+            candidate_attempt=candidate_attempt,
+            candidate_plan=plan,
+            prompt_mode="llm",
+            llm_backend=self.backend_info(),
         )
 
     def _template_fallback(

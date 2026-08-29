@@ -18,7 +18,7 @@ from typing import Any, Iterable
 
 
 DEFAULT_RUN_COUNT = 20
-DEFAULT_OUTPUT_DIR = Path("agentic/logs/reflections")
+DEFAULT_OUTPUT_DIR = Path("logs/reflections")
 
 _TOKEN_PATTERN = re.compile(r"[a-z][a-z0-9'-]{2,}|[\u4e00-\u9fff]{2,}", re.IGNORECASE)
 _STOPWORDS = {
@@ -487,7 +487,7 @@ def _next_experiment(batch_counts: Counter[str]) -> str:
 
 
 def inspect_recent_runs(repo_root: Path, count: int = DEFAULT_RUN_COUNT) -> dict[str, Any]:
-    run_root = repo_root / "agentic" / "logs" / "runs"
+    run_root = repo_root / "logs" / "runs"
     candidates: list[tuple[datetime, Path, dict[str, Any]]] = []
     for run_dir in run_root.iterdir() if run_root.is_dir() else []:
         manifest_path = run_dir / "run_manifest.json"

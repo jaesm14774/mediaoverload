@@ -23,13 +23,13 @@ different mode. Reference audio is intentionally disabled.
 
 The runner generates all prerequisite images and videos through ComfyUI, then
 executes the H3 render and strict technical QA. Models are resolved from the
-configured D/E-drive ComfyUI root; the runner does not create model or media
-artifacts on C:
+configured D/E-drive ComfyUI root; generated media and reports use the
+repository's canonical `output/` root by default:
 
 ```powershell
 python scripts/run_h3_modes_e2e.py `
   --comfy-root 'D:\ComfyUI_windows_portable' `
-  --output-root 'D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e'
+  --output-root '.\output\h3_modes_e2e'
 ```
 
 For a single mode, repeat `--mode` as needed. The report is merged instead of

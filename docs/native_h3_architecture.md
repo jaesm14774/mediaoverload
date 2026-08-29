@@ -168,10 +168,10 @@ Each run stores the generated video plus:
 - `native_h3` plan and prompt lineage in the normal agentic run result;
 - GIF preview and first/last continuity frame paths.
 
-The canonical debug record is `agentic/logs/runs/<run_id>/`. It contains
+The canonical debug record is `logs/runs/<run_id>/`. It contains
 `lifecycle.log`, `events.jsonl`, `llm/*.json` with every request/response and
 repair attempt, `nodes/*.json` with node outputs, workflow result JSON, and
-`run_manifest.json`. `agentic/logs/agentic_portfolio.jsonl` remains a compact
+`run_manifest.json`. `logs/agentic_portfolio.jsonl` remains a compact
 cross-run memory and is not the source of truth for prompt debugging.
 
 The native H3 QA node delegates technical checks to the shared
@@ -179,7 +179,7 @@ The native H3 QA node delegates technical checks to the shared
 warnings, and a duration-aware contact sheet in the run directory. When the
 recipe enables `semantic_qa_required`, the shared Prompt Engine sends that
 contact sheet to the configured vision model and records the full request and
-response under `agentic/logs/runs/<run_id>/llm/`. The semantic result is
+response under `logs/runs/<run_id>/llm/`. The semantic result is
 advisory evidence for human review and never blocks the run. Technical media QA
 remains the hard pre-publication check, and Discord approval remains the
 authority for subjective story and visual quality.

@@ -22,7 +22,7 @@ class ReferenceVideoTests(unittest.TestCase):
 
     def test_reference_video_node_is_added_only_when_source_is_present(self) -> None:
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "reference-video-plan",
             comfy_host="127.0.0.1",
             comfy_port=8188,

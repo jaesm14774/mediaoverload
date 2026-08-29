@@ -34,6 +34,13 @@ pip install -e .
 | `AGENTIC_LLM_MODE` | LLM 後端模式（角色流程的路由與自動 prompt 會用到） | `llm` |
 | `AGENTIC_RUN_LOGGER_NAME` | 由 `run_character_workflow` 設定，供執行期記錄用 | （執行時注入） |
 
+### 產物與執行資料夾規則
+
+- `output/`：所有生成的圖片、影片、編輯結果、報告與 review 產物；角色名稱與 benchmark 名稱只作為其下的分類。
+- `logs/`：所有 run manifest、lifecycle/events、LLM 紀錄、portfolio 記憶與反思報告。
+- `.tmp-tests/`：測試暫存資料；不屬於正式產物，也不應被流程當成輸入。
+- ComfyUI 安裝目錄只負責模型與服務本身；MediaOverload 會把取回的媒體保存到 repo 的 `output/`，不再另建 `output_media` 或 `agentic/output`。
+
 ---
 
 ## 專案結構（精簡）
@@ -519,7 +526,7 @@ python run_media_interface.py --character kirby --prompt '在既有構圖上重�
 # 全部五種：t2va / i2va / fl2va / l2va / ref2va
 python scripts/run_h3_modes_e2e.py `
   --comfy-root 'D:\ComfyUI_windows_portable' `
-  --output-root 'D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e'
+  --output-root '.\output\h3_modes_e2e'
 
 # 逐條重跑指定 mode（可重複 --mode）
 python scripts/run_h3_modes_e2e.py --mode t2va
@@ -530,7 +537,7 @@ python scripts/run_h3_modes_e2e.py --mode ref2va
 
 # 只對已產生的影片重跑 strict QA
 python scripts/verify_h3_e2e_outputs.py `
-  --output-root 'D:\ComfyUI_windows_portable\ComfyUI\output\mediaoverload_h3_p2_e2e'
+  --output-root '.\output\h3_modes_e2e'
 ```
 
 H3 runner 的 canonical workflow 對應：`t2va → minimax_h3_lowvram_t2v`、`i2va → minimax_h3_lowvram_i2v`、`fl2va/l2va → minimax_h3_lowvram_15s_fl2va_i2v`、`ref2va → minimax_h3_ref2va`。完整 conditioning、解析度、音訊與 QA contract 請見 [`docs/minimax_h3_p2_e2e.md`](docs/minimax_h3_p2_e2e.md)。

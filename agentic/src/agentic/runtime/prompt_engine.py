@@ -212,6 +212,27 @@ class PromptEngine:
             duration_seconds=duration_seconds,
         )
 
+    def evaluate_edit_contact_sheet(
+        self,
+        *,
+        contact_sheet_path: str,
+        evidence_paths: list[str] | None,
+        goal: str,
+        style: str,
+        plan: dict[str, Any],
+        candidate_attempt: int,
+        previous_review: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.llm_engine.evaluate_edit_contact_sheet(
+            contact_sheet_path=contact_sheet_path,
+            evidence_paths=evidence_paths,
+            goal=goal,
+            style=style,
+            plan=plan,
+            candidate_attempt=candidate_attempt,
+            previous_review=previous_review,
+        )
+
     def review_asset_candidates(
         self,
         goal: GoalRequest,

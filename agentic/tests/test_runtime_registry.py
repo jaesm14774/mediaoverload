@@ -11,7 +11,7 @@ from agentic.app.main import build_runtime
 class RuntimeRegistryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.project_root = Path(__file__).resolve().parents[1]
+        cls.project_root = Path(__file__).resolve().parents[2]
         cls.planner, cls.runner, cls.run_memory = build_runtime(cls.project_root)
 
     def test_publish_and_review_skills_are_registered(self) -> None:
@@ -22,6 +22,7 @@ class RuntimeRegistryTests(unittest.TestCase):
         self.assertIn("publish.media.process", skill_names)
         self.assertIn("publish.social.dispatch", skill_names)
         self.assertIn("review.assets.select", skill_names)
+        self.assertIn("media.video.compose_timeline", skill_names)
 
     def test_authoring_tools_are_registered(self) -> None:
         tool_names = set(self.runner.tool_registry.list_names())
@@ -31,6 +32,8 @@ class RuntimeRegistryTests(unittest.TestCase):
         self.assertIn("workflow.validate_manifest", tool_names)
         self.assertIn("workflow.author.create_draft", tool_names)
         self.assertIn("workflow.author.patch_draft", tool_names)
+        self.assertIn("media.compose_edit", tool_names)
+        self.assertIn("media.materialize_edit", tool_names)
 
     def test_runtime_uses_comfyui_root_environment_for_asset_checks(self) -> None:
         configured_root = self.project_root / ".tmp-tests" / "configured-comfy-root"

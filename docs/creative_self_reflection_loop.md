@@ -45,7 +45,7 @@ flowchart LR
 python scripts/run_creative_reflection.py --count 20
 ```
 
-輸出會放在 `agentic/logs/reflections/`：
+輸出會放在 `logs/reflections/`：
 
 - `creative_reflection_<timestamp>.json`: 可供下一輪工具讀取的逐 run evidence。
 - `creative_reflection_<timestamp>.md`: 人類可讀的逐 run 反思與 batch diagnosis。

@@ -10,7 +10,7 @@ from agentic.runtime.creative_reflection import inspect_recent_runs, render_mark
 
 class CreativeReflectionTests(unittest.TestCase):
     def _write_run(self, root: Path, run_id: str, updated_at: str, *, prompt: str, storyboard_path: str, segments: list[dict[str, str]], review_text: str = "", review_status: str = "reject", qa: dict | None = None, strategy: str = "text2longvideo") -> None:
-        run_dir = root / "agentic" / "logs" / "runs" / run_id
+        run_dir = root / "logs" / "runs" / run_id
         run_dir.mkdir(parents=True)
         review_path = root / "output" / "kirby" / "review_sessions" / f"{run_id}.json"
         review_path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,7 @@ class CreativeReflectionTests(unittest.TestCase):
                 review_status="accept",
                 qa={"enabled": False, "status": "disabled", "passed": None, "score": 0},
             )
-            manifest_path = root / "agentic" / "logs" / "runs" / "run-b" / "run_manifest.json"
+            manifest_path = root / "logs" / "runs" / "run-b" / "run_manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["failure_node"] = "dispatch-publish"
             manifest["failure_reason"] = "YouTube OAuth failed"
@@ -119,7 +119,7 @@ class CreativeReflectionTests(unittest.TestCase):
     def test_native_report_prefers_story_source_over_numeric_creative_seed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            run_dir = root / "agentic" / "logs" / "runs" / "native-source"
+            run_dir = root / "logs" / "runs" / "native-source"
             run_dir.mkdir(parents=True)
             records = [
                 {

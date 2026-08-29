@@ -13,7 +13,9 @@ configs/social_media/**/*.env
 configs/social_media/discord/*.env
 
 # 輸出和暫存
-output_media/
+output/
+logs/
+.tmp-tests/
 __pycache__/
 *.pyc
 tmp/
@@ -30,4 +32,4 @@ docker-compose.yml
 
 # 文檔
 *.md
-LICENSE 
+LICENSE

@@ -914,6 +914,7 @@ class AgentMediaSkills:
                     collected.setdefault(key, []).extend(str(item) for item in value)
                 elif isinstance(value, str) and value:
                     collected.setdefault(key, []).append(value)
+        collected = {key: list(dict.fromkeys(values)) for key, values in collected.items()}
         collected["prompt_lineage"] = self._collect_prompt_lineage(context)
         collected["node_prompt_modes"] = self._collect_node_prompt_modes(context)
         return SkillResult(status="success", outputs=collected, logs=["Collected upstream artifacts for an agent step."])

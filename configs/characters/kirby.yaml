@@ -2,7 +2,7 @@ character:
   group_name: Kirby
 
 generation:
-  output_dir: D:/MediaOverload/output
+  output_dir: output
   # Apply the speed transform after the final video is rendered and before
   # technical QA, Discord review, and social publishing.
   video_speed:

@@ -42,7 +42,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             publish_after_generate=False,
         ))
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-plan",
             comfy_host="127.0.0.1",
             comfy_port=8188,
@@ -115,7 +115,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         ))
         payload["constraints"]["native_h3_use_last_frame"] = True
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-last-frame-plan",
             comfy_host="127.0.0.1",
             comfy_port=8188,
@@ -155,7 +155,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             no_review=True,
         ))
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-no-review-plan",
             comfy_host="127.0.0.1",
             comfy_port=8188,
@@ -184,7 +184,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             stage_probe=True,
         ))
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-stage-probe-plan",
             comfy_host="127.0.0.1",
             comfy_port=8188,
@@ -456,7 +456,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             publish_after_generate=False,
         ))
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-t2v-plan",
             comfy_host="127.0.0.1",
             comfy_port=8188,

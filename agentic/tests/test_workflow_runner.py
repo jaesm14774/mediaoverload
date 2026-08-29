@@ -13,7 +13,7 @@ from agentic.skills.agent_primitives import AgentMediaSkills
 
 class WorkflowRunnerTests(unittest.TestCase):
     def make_workspace_tempdir(self) -> Path:
-        base_dir = Path(__file__).resolve().parents[1] / ".tmp-tests"
+        base_dir = Path(__file__).resolve().parents[2] / ".tmp-tests"
         base_dir.mkdir(parents=True, exist_ok=True)
         temp_dir = base_dir / f"workflow-runner-{uuid.uuid4().hex}"
         temp_dir.mkdir()

@@ -41,7 +41,7 @@ agentic --goal "a robot chef preparing noodles in a rainy night market" \
         --execute
 ```
 
-That workflow writes real `PNG` frames plus summary files into `agentic/output/`.
+That workflow writes real `PNG` frames plus summary files into `output/`.
 
 For a real ComfyUI image generation run:
 
@@ -54,7 +54,7 @@ agentic --goal "kirby in a neon ramen alley" \
         --comfy-port 8188
 ```
 
-This uses the active `krea2_turbo.json` graph in the repo and writes actual ComfyUI outputs into `agentic/output/`. ComfyUI must already be running and reachable.
+This uses the active `krea2_turbo.json` graph in the repo and writes actual ComfyUI outputs into `output/`. ComfyUI must already be running and reachable.
 
 For the `text2img2video` chain:
 
@@ -83,6 +83,52 @@ agentic --goal "kirby explores a surreal city at night" \
 ```
 
 This chain now uses the default long-video contract to compose `segment prompt -> planned first/last story-state anchors -> H3 FL2VA segments -> concat -> trim -> technical QA/contact sheet`. The default is four roughly five-second segments for a 20-second output, with pure prompt-only T2V available only through an explicit recipe override. Add `--use-tts` if you also want per-segment narration generation and final mux.
+
+For agent-controlled editing of generated images or video segments:
+
+```bash
+agentic --goal "turn these generated shots into a clean vertical reel" \
+        --media-type image_sequence_edit \
+        --duration-seconds 15 \
+        --edit-input C:\\path\\to\\shot-01.mp4 \
+        --edit-input C:\\path\\to\\shot-02.mp4 \
+        --edit-input C:\\path\\to\\shot-03.mp4 \
+        --edit-profile xfade_clean_v1 \
+        --edit-transition-duration 0.10 \
+        --execute \
+        --output-dir C:\\path\\to\\edit-output
+```
+
+`image_sequence_edit` is the provider-neutral, OpenCut-inspired timeline surface. It records an ordered `EditPlan`, normalizes images/video to one canvas, adds bounded still-image motion, renders deterministic transitions, preserves/creates a stereo audio lane, emits an edit manifest and contact sheet, then runs technical QA and a GIF preview. Still-only input defaults to `motion_cut_v1`: bounded zoom/pan with clean hard cuts. Video-only input defaults to `baseline_concat`; transition profiles remain explicit opt-ins until they pass the independent repeat gate. Add `--edit-creative-review` to enable a blocking vision-LLM loop (up to four deterministic candidates); each rejected candidate keeps its rendered MP4, contact sheet, join evidence and review JSON, while only the best passing candidate is materialized to the requested output. The loop can change transition grammar and bounded pan/zoom/drift motion for generated video segments, so a static source clip can receive a controlled editorial treatment. If the vision review is unavailable or uncertain, the edit fails closed.
+
+For example, run the creative gate explicitly when a clean default edit is not enough:
+
+```bash
+agentic --goal "make the generated shots playful, readable and rhythmically varied" \
+        --media-type image_sequence_edit \
+        --duration-seconds 15 \
+        --edit-input C:\\path\\to\\shot-01.mp4 \
+        --edit-input C:\\path\\to\\shot-02.mp4 \
+        --edit-input C:\\path\\to\\shot-03.mp4 \
+        --edit-input-root C:\\path\\to \
+        --edit-creative-review \
+        --edit-creative-review-max-attempts 4 \
+        --execute \
+        --output-dir C:\\path\\to\\edit-output
+```
+
+`editorial_kinetic_v1` also enables this review automatically. Technical QA alone is never a creative acceptance gate.
+
+For a declarative JSON plan, use the standalone editor entrypoint:
+
+```bash
+agentic-edit --edit-plan C:\\path\\to\\edit-plan.json \
+             --output C:\\path\\to\\edit-output\\edited.mp4
+```
+
+The plan contract contains ordered `clips`, an empty `transitions` list for hard-cut profiles or one transition per boundary for transition profiles, `output_width`, `output_height`, `fps`, optional `target_duration_seconds`, `profile`, and deterministic `variant_seed`. Input files must be under the repository, configured output root, `AGENTIC_ALLOWED_MEDIA_ROOTS`/`AGENTIC_ALLOWED_IMAGE_ROOTS`, or an explicit `--input-root`. Add `--creative-review --creative-review-max-attempts 4` to the standalone command to run the same blocking loop. Creative-review receipts include the exact candidate plans, LLM backend, scores, issues, next-change recommendation and selected output; no second LLM rewrite or social dispatch is implied.
+
+The same compositor can be inserted into a non-TTS `long_video` plan with `--longvideo-edit-profile xfade_clean_v1`. TTS long-video runs remain on the existing audio-owned packaging route until a separate audio-aware edit contract is validated.
 
 Additional runtime primitives are available:
 
@@ -125,7 +171,7 @@ The runtime is no longer limited to workflow-specific wrappers. It now exposes a
 
 - Goal and prompt skills: `agent.goal.expand`, `agent.prompt.compose`, `agent.story.segment`, `agent.segment.prepare`, `agent.sticker.expressions`
 - Media skills: `media.ensure_workflow`, `media.image.refine`, `media.image.upscale`, `media.image.animate`
-- Audio/video packaging skills: `media.audio.narrate`, `media.audio.concat`, `media.video.concat`, `media.video.merge_audio`, `media.video.gif_preview`, `media.video.extract_last_frame`
+- Audio/video packaging skills: `media.audio.narrate`, `media.audio.concat`, `media.video.concat`, `media.video.compose_timeline`, `media.video.merge_audio`, `media.video.gif_preview`, `media.video.extract_last_frame`
 
 Those skills are the default building blocks for composed capabilities instead of hard-coded strategy flow.
 
@@ -140,6 +186,7 @@ The following paths are covered by the checked-in runtime tests and local-adapte
 - `text2img2video`
 - `video_narrate`
 - `long_video` (default 20-second planned-anchor path with final technical QA; TTS remains optional)
+- `image_sequence_edit` (ordered image/video timeline, deterministic transitions, optional vision-LLM creative loop, manifest/contact sheet, technical QA)
 
 The current development order should keep validating small primitives first, then reuse them inside more complex chains such as `long_video`.
 

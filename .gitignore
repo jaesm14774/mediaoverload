@@ -10,10 +10,8 @@ configs/social_media/credentials/**/*.env
 
 # 輸出目錄
 output/
-output_media/
 _sop_h3_work/
 .tmp-tests/
-agentic/.tmp-tests/
 agentic/agentic/
 instagrapi/
 __pycache__/

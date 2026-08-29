@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Any
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
+from agentic.runtime.editing import EDIT_PROFILES, IMAGE_SUFFIXES, EditPlan
 from agentic.assets.registry import AssetRegistry, WorkflowManifest
 from agentic.runtime.creativity import IdeaDirector
 
@@ -364,6 +366,8 @@ class TaskPlanner:
             return self._build_native_h3_ref2va_plan(goal, auto_reference_generation=True)
         if goal.media_type == "video_narrate":
             return self._build_video_narrate_plan(goal)
+        if goal.media_type == "image_sequence_edit":
+            return self._build_image_sequence_edit_plan(goal)
         workflow_manifest = self._pick_goal_workflow(goal)
         if goal.media_type == "storyboard":
             return self._build_storyboard_plan(goal, workflow_manifest)
@@ -1817,18 +1821,45 @@ class TaskPlanner:
             if tts_node:
                 tts_nodes.append(tts_node)
 
-        final_video_node = "concat-final-video"
-        nodes.append(
-            ExecutionNode(
-                node_id=final_video_node,
-                skill_name="media.video.concat",
-                inputs={"method": "demuxer"},
-                depends_on=segment_video_nodes,
-                tags=["package", "video"],
-                tool_name="media.concat_videos",
-                stage="package",
+        longvideo_edit_profile = str(goal.constraints.get("longvideo_edit_profile") or "").strip()
+        if longvideo_edit_profile and longvideo_edit_profile not in EDIT_PROFILES:
+            raise ValueError(f"Unsupported longvideo_edit_profile: {longvideo_edit_profile}")
+        if longvideo_edit_profile and use_tts:
+            raise ValueError("longvideo_edit_profile currently requires use_tts=false so the edit owns segment audio")
+        if longvideo_edit_profile:
+            final_video_node = "edit-segment-timeline"
+            nodes.append(
+                ExecutionNode(
+                    node_id=final_video_node,
+                    skill_name="media.video.compose_timeline",
+                    inputs={
+                        "profile": longvideo_edit_profile,
+                        "output_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
+                        "output_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
+                        "fps": segment_frame_rate,
+                        "target_duration_seconds": float(goal.duration_seconds),
+                        "variant_seed": int(goal.constraints.get("edit_variant_seed") or mix_seed),
+                        "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.1),
+                    },
+                    depends_on=segment_video_nodes,
+                    tags=["package", "video", "editing", "timeline"],
+                    tool_name="media.compose_edit",
+                    stage="package",
+                )
             )
-        )
+        else:
+            final_video_node = "concat-final-video"
+            nodes.append(
+                ExecutionNode(
+                    node_id=final_video_node,
+                    skill_name="media.video.concat",
+                    inputs={"method": "demuxer"},
+                    depends_on=segment_video_nodes,
+                    tags=["package", "video"],
+                    tool_name="media.concat_videos",
+                    stage="package",
+                )
+            )
         preview_dependency = final_video_node
         if use_tts:
             nodes.extend(
@@ -1966,18 +1997,40 @@ class TaskPlanner:
                 retry_video_nodes.append(retry_video)
                 if retry_tts:
                     retry_tts_nodes.append(retry_tts)
-            nodes.append(
-                ExecutionNode(
-                    node_id="review-concat-final-video",
-                    skill_name="media.video.concat",
-                    inputs={"method": "demuxer"},
-                    depends_on=retry_video_nodes,
-                    tags=["package", "video", "retry"],
-                    tool_name="media.concat_videos",
-                    stage="package",
+            if longvideo_edit_profile:
+                retry_preview_dependency = "review-edit-segment-timeline"
+                nodes.append(
+                    ExecutionNode(
+                        node_id=retry_preview_dependency,
+                        skill_name="media.video.compose_timeline",
+                        inputs={
+                            "profile": longvideo_edit_profile,
+                            "output_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
+                            "output_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
+                            "fps": segment_frame_rate,
+                            "target_duration_seconds": float(goal.duration_seconds),
+                            "variant_seed": int(goal.constraints.get("edit_variant_seed") or mix_seed) + 1,
+                            "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.1),
+                        },
+                        depends_on=retry_video_nodes,
+                        tags=["package", "video", "editing", "timeline", "retry"],
+                        tool_name="media.compose_edit",
+                        stage="package",
+                    )
                 )
-            )
-            retry_preview_dependency = "review-concat-final-video"
+            else:
+                retry_preview_dependency = "review-concat-final-video"
+                nodes.append(
+                    ExecutionNode(
+                        node_id=retry_preview_dependency,
+                        skill_name="media.video.concat",
+                        inputs={"method": "demuxer"},
+                        depends_on=retry_video_nodes,
+                        tags=["package", "video", "retry"],
+                        tool_name="media.concat_videos",
+                        stage="package",
+                    )
+                )
             if use_tts:
                 nodes.extend(
                     [
@@ -2097,6 +2150,7 @@ class TaskPlanner:
             "review_policy": review_policy,
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_tts": use_tts,
+            "longvideo_edit_profile": longvideo_edit_profile,
             "video_speed": self._video_speed_config(goal),
             "final_video_node": final_video_node,
             "review_loop_enabled": review_loop_enabled,
@@ -2159,6 +2213,131 @@ class TaskPlanner:
             nodes=nodes,
             metadata=metadata,
             description=f"Narrate existing video '{input_video_path}'",
+        )
+
+    def _build_image_sequence_edit_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        raw_paths = goal.constraints.get("edit_input_paths") or goal.constraints.get("media_paths") or []
+        if isinstance(raw_paths, str):
+            input_paths = [raw_paths]
+        else:
+            input_paths = [str(path) for path in raw_paths if str(path).strip()]
+        if not input_paths and not isinstance(goal.constraints.get("edit_plan"), dict):
+            raise ValueError("media_type 'image_sequence_edit' requires --edit-input or an edit_plan")
+
+        raw_edit_plan = goal.constraints.get("edit_plan")
+        explicit_plan = EditPlan.from_dict(raw_edit_plan) if isinstance(raw_edit_plan, dict) else None
+        if explicit_plan:
+            effective_profile = explicit_plan.profile
+        else:
+            requested_profile = str(goal.constraints.get("edit_profile") or "").strip()
+            if requested_profile:
+                effective_profile = requested_profile
+            elif input_paths and all(Path(path).suffix.lower() in IMAGE_SUFFIXES for path in input_paths):
+                effective_profile = "motion_cut_v1"
+            else:
+                effective_profile = "baseline_concat"
+        if effective_profile not in EDIT_PROFILES:
+            raise ValueError(f"Unsupported edit_profile: {effective_profile}")
+
+        output_path = str(goal.constraints.get("edit_output_path") or "").strip()
+        qa_target_duration = explicit_plan.target_duration_seconds if explicit_plan else (
+            float(goal.duration_seconds) if goal.duration_seconds > 0 else None
+        )
+        creative_review_max_attempts = int(goal.constraints.get("edit_creative_review_max_attempts") or 3)
+        if creative_review_max_attempts < 1 or creative_review_max_attempts > 4:
+            raise ValueError("edit_creative_review_max_attempts must be between 1 and 4")
+        compose_inputs: dict[str, Any] = {
+            "profile": effective_profile,
+            "output_width": explicit_plan.output_width if explicit_plan else int(goal.constraints.get("edit_width") or goal.constraints.get("width") or 576),
+            "output_height": explicit_plan.output_height if explicit_plan else int(goal.constraints.get("edit_height") or goal.constraints.get("height") or 1024),
+            "fps": explicit_plan.fps if explicit_plan else float(goal.constraints.get("edit_fps") or goal.constraints.get("video_frame_rate") or 24),
+            "target_duration_seconds": qa_target_duration,
+            "variant_seed": explicit_plan.variant_seed if explicit_plan else int(goal.constraints.get("edit_variant_seed") or 0),
+            "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.10),
+            "creative_review": bool(goal.constraints.get("edit_creative_review", False))
+            or effective_profile == "editorial_kinetic_v1",
+            "creative_review_max_attempts": creative_review_max_attempts,
+            "require_audio": bool(goal.constraints.get("edit_require_audio", False)) or effective_profile != "baseline_concat",
+            "require_stereo_audio": bool(goal.constraints.get("edit_require_audio", False)) or effective_profile != "baseline_concat",
+            "analyze_audio": bool(goal.constraints.get("edit_analyze_audio", False)),
+        }
+        if input_paths:
+            compose_inputs["input_paths"] = input_paths
+        if explicit_plan:
+            compose_inputs["edit_plan"] = explicit_plan.to_dict()
+        if output_path:
+            compose_inputs["output_path"] = output_path
+
+        nodes = [
+            ExecutionNode(
+                node_id="compose-edit",
+                skill_name="media.video.compose_timeline",
+                inputs=compose_inputs,
+                tags=["render", "editing", "timeline"],
+                tool_name="media.compose_edit",
+                stage="package",
+            ),
+            ExecutionNode(
+                node_id="edit-video-qa",
+                skill_name="media.video.qa",
+                inputs={
+                    "target_duration": qa_target_duration,
+                    "duration_tolerance": 0.35,
+                    "expected_width": compose_inputs["output_width"],
+                    "expected_height": compose_inputs["output_height"],
+                    "expected_fps": compose_inputs["fps"],
+                    "require_audio": bool(goal.constraints.get("edit_require_audio", False)) or effective_profile != "baseline_concat",
+                    "require_stereo_audio": bool(goal.constraints.get("edit_require_audio", False)) or effective_profile != "baseline_concat",
+                    "analyze_audio": bool(goal.constraints.get("edit_analyze_audio", False)),
+                    "frame_count": 12,
+                    "columns": 4,
+                    "scale_width": 360,
+                },
+                depends_on=["compose-edit"],
+                tags=["quality", "editing", "video"],
+                tool_name="media.video_qa",
+                stage="quality",
+            ),
+            ExecutionNode(
+                node_id="edit-preview-gif",
+                skill_name="media.video.gif_preview",
+                inputs={"fps": 12, "scale_width": 512},
+                depends_on=["compose-edit", "edit-video-qa"],
+                tags=["preview", "editing"],
+                tool_name="media.video_to_gif",
+                stage="package",
+            ),
+            ExecutionNode(
+                node_id="collect-edit-outputs",
+                skill_name="agent.output.collect",
+                inputs={"keys": ["video_path", "manifest_path", "contact_sheet_path", "gif_path", "saved_files"]},
+                depends_on=["compose-edit", "edit-video-qa", "edit-preview-gif"],
+                tags=["artifact", "editing"],
+                stage="package",
+            ),
+            ExecutionNode(
+                node_id="persist-edit-summary",
+                skill_name="agent.summary.persist",
+                inputs={"summary_name": "image_sequence_edit_summary.json", "summary_scope": "image_sequence_edit"},
+                depends_on=["collect-edit-outputs"],
+                tags=["artifact", "summary", "editing"],
+                stage="package",
+            ),
+        ]
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name="image_sequence_edit_v1",
+            nodes=nodes,
+            metadata={
+                "graph_overview": [node.node_id for node in nodes],
+                "input_paths": input_paths,
+                "profile": compose_inputs.get("profile"),
+                "variant_seed": compose_inputs.get("variant_seed"),
+                "output_path": output_path,
+                "qa_target_duration": qa_target_duration,
+                "explicit_edit_plan": explicit_plan is not None,
+            },
+            description="Compose an agent-controlled timeline from generated images or video segments",
         )
 
     def _build_text2img2video_plan(self, goal: GoalRequest) -> ExecutionPlan:

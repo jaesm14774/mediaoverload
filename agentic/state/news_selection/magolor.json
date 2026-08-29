@@ -46,5 +46,21 @@
     "created_at": "2026-08-27 00:00:00",
     "key": "whatsapp強化兩階段驗證機制\u001f新聞;whatsapp;mfa",
     "selected_at": "2026-08-27T22:54:33.598229+00:00"
+  },
+  {
+    "title": "Google推出Gemini 3.5 Transcribe轉錄模型，可整理口語並區分多名說話者",
+    "keyword": "新聞;google;Gemini 3.5 Transcribe;語音轉文字;語音辨識;Gemini API",
+    "category": "新聞",
+    "created_at": "2026-08-28 00:00:00",
+    "key": "google推出gemini 3.5 transcribe轉錄模型，可整理口語並區分多名說話者\u001f新聞;google;gemini 3.5 transcribe;語音轉文字;語音辨識;gemini api",
+    "selected_at": "2026-08-28T23:23:31.607455+00:00"
+  },
+  {
+    "title": "Avada WordPress主題修補9.8分RCE漏洞，AI代理2小時完成6段攻擊鏈",
+    "keyword": "新聞;WordPress;Avada;CVE-2026-18431;Wordfence;AI代理",
+    "category": "新聞",
+    "created_at": "2026-08-27 00:00:00",
+    "key": "avada wordpress主題修補9.8分rce漏洞，ai代理2小時完成6段攻擊鏈\u001f新聞;wordpress;avada;cve-2026-18431;wordfence;ai代理",
+    "selected_at": "2026-08-29T04:20:58.527227+00:00"
   }
 ]

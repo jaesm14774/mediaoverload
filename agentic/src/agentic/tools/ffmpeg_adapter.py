@@ -40,6 +40,36 @@ class FFmpegAdapter:
         )
         return output_path
 
+    def extract_frame_at(self, video_path: str, output_path: str, timestamp_seconds: float) -> str:
+        """Extract one deterministic review frame at a bounded timestamp."""
+
+        self._ensure_binaries()
+        timestamp = float(timestamp_seconds)
+        if not math.isfinite(timestamp) or timestamp < 0:
+            raise ValueError("timestamp_seconds must be finite and non-negative")
+        self._ensure_parent(output_path)
+        self._run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                video_path,
+                "-ss",
+                f"{timestamp:.6f}",
+                "-frames:v",
+                "1",
+                "-vf",
+                "format=yuvj420p",
+                "-q:v",
+                "2",
+                "-y",
+                output_path,
+            ]
+        )
+        return output_path
+
     def probe_media(self, media_path: str) -> dict[str, object]:
         self._ensure_binaries()
         raw = self._run_capture(

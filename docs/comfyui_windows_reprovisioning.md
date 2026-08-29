@@ -153,7 +153,6 @@ foreach ($Name in $ModelDirs) {
     New-Item -ItemType Directory -Force -Path (Join-Path $Comfy "models\$Name") | Out-Null
 }
 New-Item -ItemType Directory -Force -Path (Join-Path $Comfy 'custom_nodes') | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Comfy 'output\mediaoverload') | Out-Null
 ```
 
 初次安裝不要建立或複製 `extra_model_paths.yaml`。只有在所有模型已整理到獨立磁碟、並且你明確知道每個 path 的用途時，才採用官方 [extra model paths](https://docs.comfy.org/installation/desktop/windows) 設定；改完必須重啟 ComfyUI。

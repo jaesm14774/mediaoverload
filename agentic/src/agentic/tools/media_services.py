@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterable
 
 from agentic.runtime.registry import ToolRegistry
+from agentic.runtime.editing import EditPlan
+from agentic.tools.editing_adapter import OpenCutEditAdapter
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.tts_adapter import TTSAdapter
 
 
 class MediaServiceTools:
-    def __init__(self, output_root: Path) -> None:
+    def __init__(self, output_root: Path, input_roots: Iterable[Path] = ()) -> None:
         self.output_root = output_root
+        self.input_roots = tuple(input_roots)
         self.output_root.mkdir(parents=True, exist_ok=True)
         self._ffmpeg: FFmpegAdapter | None = None
+        self._editing: OpenCutEditAdapter | None = None
         self._tts: TTSAdapter | None = None
 
     def extract_last_frame(self, payload: dict[str, object]) -> dict[str, object]:
@@ -222,6 +227,35 @@ class MediaServiceTools:
             )
         }
 
+    def compose_edit(self, payload: dict[str, object]) -> dict[str, object]:
+        service = self._editing_service()
+        raw_plan = payload.get("edit_plan")
+        if not isinstance(raw_plan, dict):
+            raise ValueError("media.compose_edit requires an edit_plan object")
+        plan = EditPlan.from_dict(raw_plan)
+        return service.render(
+            plan,
+            output_path=str(payload["output_path"]),
+            manifest_path=str(payload["manifest_path"]) if payload.get("manifest_path") else None,
+            contact_sheet_path=str(payload["contact_sheet_path"]) if payload.get("contact_sheet_path") else None,
+            review_evidence_dir=str(payload["review_evidence_dir"]) if payload.get("review_evidence_dir") else None,
+        )
+
+    def materialize_edit(self, payload: dict[str, object]) -> dict[str, object]:
+        service = self._editing_service()
+        raw_result = payload.get("result")
+        if not isinstance(raw_result, dict):
+            raise ValueError("media.materialize_edit requires a rendered result object")
+        raw_review = payload.get("creative_review")
+        creative_review = raw_review if isinstance(raw_review, dict) else None
+        return service.materialize_result(
+            raw_result,
+            output_path=str(payload["output_path"]),
+            manifest_path=str(payload["manifest_path"]) if payload.get("manifest_path") else None,
+            contact_sheet_path=str(payload["contact_sheet_path"]) if payload.get("contact_sheet_path") else None,
+            creative_review=creative_review,
+        )
+
     def generate_tts(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._tts_service()
         output_path = str(payload["output_path"])
@@ -239,14 +273,23 @@ class MediaServiceTools:
             self._ffmpeg = FFmpegAdapter()
         return self._ffmpeg
 
+    def _editing_service(self) -> OpenCutEditAdapter:
+        if self._editing is None:
+            self._editing = OpenCutEditAdapter(output_root=self.output_root, input_roots=self.input_roots)
+        return self._editing
+
     def _tts_service(self) -> TTSAdapter:
         if self._tts is None:
             self._tts = TTSAdapter()
         return self._tts
 
 
-def register_media_service_tools(tool_registry: ToolRegistry, output_root: Path) -> None:
-    tools = MediaServiceTools(output_root=output_root)
+def register_media_service_tools(
+    tool_registry: ToolRegistry,
+    output_root: Path,
+    input_roots: Iterable[Path] = (),
+) -> None:
+    tools = MediaServiceTools(output_root=output_root, input_roots=input_roots)
     tool_registry.register("media.extract_last_frame", tools.extract_last_frame, "Extract the last frame from a video")
     tool_registry.register("media.concat_videos", tools.concat_videos, "Concatenate multiple videos")
     tool_registry.register("media.change_video_speed", tools.change_video_speed, "Change video and audio playback speed")
@@ -256,4 +299,6 @@ def register_media_service_tools(tool_registry: ToolRegistry, output_root: Path)
     tool_registry.register("media.merge_audio_video", tools.merge_audio_video, "Merge one audio track into a video")
     tool_registry.register("audio.concat_tracks", tools.concat_audio, "Concatenate multiple audio tracks")
     tool_registry.register("media.create_video_from_image", tools.create_video_from_image, "Create a video from a still image and audio")
+    tool_registry.register("media.compose_edit", tools.compose_edit, "Render a deterministic OpenCut-inspired timeline")
+    tool_registry.register("media.materialize_edit", tools.materialize_edit, "Materialize the selected edit candidate")
     tool_registry.register("audio.generate_tts_real", tools.generate_tts, "Generate real narration audio")

@@ -9,7 +9,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Inspect recent MediaOverload runs and write an evidence-first reflection report.")
     parser.add_argument("--count", type=int, default=20, help="Number of newest run manifests to inspect.")
     parser.add_argument("--repo-root", type=Path, default=None, help="Repository root; defaults to the parent of scripts/.")
-    parser.add_argument("--output-dir", type=Path, default=None, help="Report directory; defaults to agentic/logs/reflections.")
+    parser.add_argument("--output-dir", type=Path, default=None, help="Report directory; defaults to logs/reflections.")
     args = parser.parse_args()
 
     repo_root = (args.repo_root or Path(__file__).resolve().parents[1]).resolve()

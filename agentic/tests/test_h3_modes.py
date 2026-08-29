@@ -32,7 +32,7 @@ class H3ModePlanTests(unittest.TestCase):
             no_review=no_review,
         ))
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / generation_type,
             comfy_host="127.0.0.1",
             comfy_port=8188,
@@ -154,7 +154,7 @@ class H3ModePlanTests(unittest.TestCase):
         payload["constraints"]["native_h3_reference_candidate_count"] = 1
         payload["constraints"]["native_h3_reference_selection_limit"] = 12
         planner, _runner, _memory = build_runtime(
-            self.repo_root / "agentic",
+            self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "auto-ref2va-bounds",
             comfy_host="127.0.0.1",
             comfy_port=8188,
@@ -187,7 +187,7 @@ class H3ModePlanTests(unittest.TestCase):
             ))
             payload["constraints"]["media_paths"] = [str(image)]
             planner, _runner, _memory = build_runtime(
-                self.repo_root / "agentic",
+            self.repo_root,
                 output_root=self.repo_root / ".tmp-tests" / "direct-ref2va-no-review",
                 comfy_host="127.0.0.1",
                 comfy_port=8188,
@@ -233,7 +233,7 @@ class H3ModePlanTests(unittest.TestCase):
             payload["constraints"]["media_paths"] = [str(image), str(video)]
             payload["constraints"]["native_h3_reference_selection_limit"] = 4
             planner, _runner, _memory = build_runtime(
-                self.repo_root / "agentic",
+                self.repo_root,
                 output_root=self.repo_root / ".tmp-tests" / "ref2va-review",
                 comfy_host="127.0.0.1",
                 comfy_port=8188,

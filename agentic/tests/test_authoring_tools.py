@@ -11,7 +11,7 @@ from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest,
 
 class AuthoringToolTests(unittest.TestCase):
     def make_workspace_tempdir(self) -> Path:
-        base_dir = Path(__file__).resolve().parents[1] / ".tmp-tests"
+        base_dir = Path(__file__).resolve().parents[2] / ".tmp-tests"
         base_dir.mkdir(parents=True, exist_ok=True)
         temp_dir = base_dir / f"authoring-tools-{uuid.uuid4().hex}"
         temp_dir.mkdir()
@@ -20,7 +20,7 @@ class AuthoringToolTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.project_root = Path(__file__).resolve().parents[1]
+        cls.project_root = Path(__file__).resolve().parents[2]
         cls.planner, cls.runner, cls.run_memory = build_runtime(cls.project_root)
 
     def test_asset_plan_and_acquire_contracts_return_expected_shape(self) -> None:
