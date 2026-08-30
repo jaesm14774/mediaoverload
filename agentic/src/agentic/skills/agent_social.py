@@ -376,7 +376,7 @@ class AgentSocialSkills:
             )
         review_metadata = self._review_metadata(context)
         if first_frame_review or last_frame_review or anchor_set_review or reference_review:
-            review_text = self._build_stage_review_text()
+            review_text = self._build_stage_review_text(strategy=review_metadata["strategy"])
         elif final_video_review or final_media_review:
             review_text = self._build_final_publish_review_text(
                 draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
@@ -755,8 +755,8 @@ class AgentSocialSkills:
         return {"strategy": strategy or "unknown", "workflow": workflow or "unknown"}
 
     @staticmethod
-    def _build_stage_review_text() -> str:
-        return "stage: preview"
+    def _build_stage_review_text(*, strategy: str) -> str:
+        return f"Strategy: {strategy}\nstage: preview"
 
     @staticmethod
     def _build_review_text(
