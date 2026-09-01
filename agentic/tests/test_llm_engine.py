@@ -144,6 +144,25 @@ class LLMEngineTests(unittest.TestCase):
         self.assertNotIn("9:16", user_prompt)
         self.assertNotIn("vertical", user_prompt.lower())
 
+    def test_expand_goal_injects_reference_micro_gag_contract(self) -> None:
+        manager = _FakeManager(
+            [
+                '{"creative_brief":"llm brief","prompt":"llm prompt","negative_prompt":"llm negative"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="Kirby bounces one mochi off a lunchbox",
+            media_type="text2img2video",
+            duration_seconds=6,
+            style="polished 2D anime",
+            constraints={"reference_micro_gag_profile": "reference_micro_gag_v1"},
+        )
+        engine.expand_goal(goal, "polished 2D anime", [], reference_analysis={"keyframes": []})
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("Reference micro-gag contract", user_prompt)
+        self.assertIn("first frame must already show the hook", user_prompt)
+
     def test_compose_prompt_injects_topic_neutral_short_action_contract(self) -> None:
         manager = _FakeManager(
             [
@@ -1421,6 +1440,76 @@ class LLMEngineTests(unittest.TestCase):
             contact_sheet_path="contact_sheet.jpg",
             prompt_mode="llm",
             llm_backend={},
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "fail")
+
+    def test_reference_micro_gag_requires_mechanism_identity_motion_and_alignment(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 100,
+                "checks": {
+                    "protagonist_clear": True,
+                    "primary_action_visible": True,
+                    "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
+                    "unwanted_extra_characters": False,
+                    "reference_mechanism_visible": False,
+                    "character_identity_consistent": True,
+                    "temporal_identity_stable": True,
+                    "meaningful_motion": True,
+                    "prompt_alignment": True,
+                },
+                "observed_story": "The protagonist remains beside a pretty background.",
+                "issues": [],
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+            require_news_anchor=False,
+            require_reference_contract=True,
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "fail")
+
+    def test_reference_micro_gag_blocks_temporal_identity_morphing(self) -> None:
+        result = normalize_video_semantic_qa(
+            {
+                "status": "pass",
+                "score": 100,
+                "checks": {
+                    "protagonist_clear": True,
+                    "primary_action_visible": True,
+                    "progression_visible": True,
+                    "cute_hit": True,
+                    "expression_visible": True,
+                    "single_gag": True,
+                    "first_second_action": True,
+                    "action_completion_visible": True,
+                    "payoff_visible": True,
+                    "unwanted_extra_characters": False,
+                    "reference_mechanism_visible": True,
+                    "character_identity_consistent": True,
+                    "temporal_identity_stable": False,
+                    "meaningful_motion": True,
+                    "prompt_alignment": True,
+                },
+                "observed_story": "The character becomes a stretched red smear before returning to a pose.",
+                "issues": ["severe temporal morphing obscures the physical gag"],
+            },
+            contact_sheet_path="contact_sheet.jpg",
+            prompt_mode="llm",
+            llm_backend={},
+            require_news_anchor=False,
+            require_reference_contract=True,
         )
 
         self.assertFalse(result["passed"])

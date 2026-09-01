@@ -81,6 +81,22 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
         style=style_direction,
         quality=_quality_clause(goal.media_type),
     )
+    opening_scene = str(goal.prompt or "").split(";", 1)[0].strip()
+    opening_keyframe_prompt = structured_visual_prompt(
+        subject=subject_anchor,
+        scene=opening_scene or "one uncluttered scene at the start of the gag",
+        action=(
+            "single still opening moment only: show the protagonist already beginning the one physical action "
+            "with the dominant prop; no aftermath, no before-and-after sequence, no second pose, no duplicate"
+        ),
+        environment=(
+            f"{_interaction_clause(goal)}; uncluttered background; one dominant prop; generous negative space; "
+            "the protagonist appears exactly once"
+        ),
+        camera="single stable readable composition for the first frame of an image-to-video shot",
+        style=style_direction,
+        quality="clean silhouette, coherent anatomy, no montage, no storyboard panels, no repeated subject",
+    )
     negative_prompt = ", ".join(
         [
             "ugly",
@@ -111,6 +127,7 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     return {
         "creative_brief": f"{goal.prompt} translated into an executable {goal.media_type} workflow with strict subject continuity",
         "prompt": visual_prompt,
+        "opening_keyframe_prompt": opening_keyframe_prompt,
         "negative_prompt": negative_prompt,
         "selected_style": selected_style,
         "idea_variants": idea_variants,

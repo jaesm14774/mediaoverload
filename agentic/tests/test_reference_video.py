@@ -73,6 +73,45 @@ class ReferenceVideoTests(unittest.TestCase):
         self.assertEqual(story.depends_on, ["reference-video-analysis"])
         self.assertEqual(plan.metadata["reference_video"]["analysis_depth"], "deep")
 
+    def test_text2img2video_reference_profile_reuses_existing_i2v_graph(self) -> None:
+        planner, _runner, _memory = build_runtime(
+            self.repo_root,
+            output_root=self.repo_root / ".tmp-tests" / "reference-video-i2v-plan",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        plan = planner.build_plan(
+            planner.create_goal(
+                prompt="Kirby taps a jelly cube and gets surprised by the wobble",
+                media_type="text2img2video",
+                duration_seconds=6,
+                style="polished 2D anime",
+                auto_download_assets=False,
+                constraints={
+                    "reference_video_source": "C:/references/clip.mp4",
+                    "reference_video_depth": "deep",
+                    "reference_video_max_keyframes": 12,
+                    "reference_micro_gag_profile": "reference_micro_gag_v1",
+                    "seed": 1234,
+                    "duration_override_seconds": 6,
+                    "video_frame_rate": 24,
+                    "skip_upscale_for_i2v": True,
+                },
+            )
+        )
+        node_ids = [node.node_id for node in plan.nodes]
+        self.assertEqual(node_ids[0], "reference-video-analysis")
+        self.assertEqual(plan.workflow_name, "text2img2video_v1")
+        idea = next(node for node in plan.nodes if node.node_id == "idea-brief")
+        image = next(node for node in plan.nodes if node.node_id == "render-image")
+        animate = next(node for node in plan.nodes if node.node_id == "animate-video")
+        qa = next(node for node in plan.nodes if node.node_id == "video-qa")
+        self.assertEqual(idea.depends_on, ["reference-video-analysis"])
+        self.assertEqual(image.inputs["seed"], 1234)
+        self.assertEqual(animate.inputs["seed"], 1234)
+        self.assertEqual(qa.inputs["semantic_qa_profile"], "reference_micro_gag_v1")
+        self.assertIn("reference-video-analysis", qa.depends_on)
+
     def test_reference_analyzer_writes_structural_brief_and_visual_evidence(self) -> None:
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             self.skipTest("ffmpeg and ffprobe are required for the reference-video evidence test")

@@ -22,6 +22,7 @@ class CharacterGenerationOptions:
     reference_video_source: str | None = None
     reference_video_depth: str | None = None
     reference_video_max_keyframes: int | None = None
+    seed: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

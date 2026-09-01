@@ -62,22 +62,23 @@ class ComfyWorkflowSkills:
     def image_to_video(self, context: SkillContext) -> SkillResult:
         image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context)
         prompt = context.node.inputs.get("prompt") or self._resolve_prompt(context)
-        result = self.tools.call(
-            "comfy.workflow.image_to_video",
-            {
-                "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
-                "workflow_name": str(context.node.inputs.get("workflow_name", "")),
-                "image_path": image_path,
-                "prompt": prompt,
-                "width": context.node.inputs.get("width"),
-                "height": context.node.inputs.get("height"),
-                "model_profile": str(
-                    context.node.inputs.get("model_profile")
-                    or context.plan.goal.constraints.get("native_h3_model_profile")
-                    or "q4"
-                ),
-            },
-        )
+        payload: dict[str, object] = {
+            "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
+            "workflow_name": str(context.node.inputs.get("workflow_name", "")),
+            "image_path": image_path,
+            "prompt": prompt,
+            "width": context.node.inputs.get("width"),
+            "height": context.node.inputs.get("height"),
+            "model_profile": str(
+                context.node.inputs.get("model_profile")
+                or context.plan.goal.constraints.get("native_h3_model_profile")
+                or "q4"
+            ),
+        }
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
+        result = self.tools.call("comfy.workflow.image_to_video", payload)
         return SkillResult(status="success", outputs=result, logs=["Rendered video from still image with ComfyUI."])
 
     def _build_run_dir(self, prompt: str, suffix: str) -> Path:

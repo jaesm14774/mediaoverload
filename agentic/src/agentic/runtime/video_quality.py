@@ -17,6 +17,11 @@ VIDEO_SEMANTIC_QA_SCHEMA: dict[str, Any] = {
                 "required_subjects_clear": {"type": "boolean"},
                 "primary_action_visible": {"type": "boolean"},
                 "news_anchor_visible": {"type": "boolean"},
+                "reference_mechanism_visible": {"type": "boolean"},
+                "character_identity_consistent": {"type": "boolean"},
+                "temporal_identity_stable": {"type": "boolean"},
+                "meaningful_motion": {"type": "boolean"},
+                "prompt_alignment": {"type": "boolean"},
                 "progression_visible": {"type": "boolean"},
                 "cute_hit": {"type": "boolean"},
                 "expression_visible": {"type": "boolean"},
@@ -316,6 +321,7 @@ def build_video_semantic_qa_prompt(
     rendered_prompt: str,
     duration_seconds: int | float | None = None,
     subject_context: dict[str, Any] | None = None,
+    contract_profile: str = "",
 ) -> str:
     context = dict(subject_context or {})
     subjects = [
@@ -329,6 +335,30 @@ def build_video_semantic_qa_prompt(
         if interaction_required and len(subjects) == 2
         else f"The required protagonist is: {character}."
     )
+    reference_profile = str(contract_profile or "").strip()
+    anchor_rule = (
+        "The reference-derived visual anchor means the translated physical mechanism from the reference grammar, not a copied asset; do not require a news anchor for this profile."
+        if reference_profile == "reference_micro_gag_v1"
+        else "The news-derived visual anchor must be visible; the news title itself is not visual evidence."
+    )
+    anchor_definition = (
+        "'reference-derived visual anchor' means the visible prop, force, or physical mechanism translated from the reference grammar, not a copied asset, character, plot, or UI."
+        if reference_profile == "reference_micro_gag_v1"
+        else "'news-derived visual anchor' means the translated object/action from story.news_trace (for example a glowing orb or shadowy tendrils), not a literal news logo, headline, anchorperson, or readable text."
+    )
+    pass_rule = (
+        "Pass only when both declared subject slots are clear, the required interaction is visible, the primary action is visible, and the frames show meaningful progression."
+        if interaction_required and reference_profile == "reference_micro_gag_v1"
+        else (
+            "Pass only when both declared subject slots are clear, the required interaction is visible, the primary action and reference-derived physical mechanism are visible, and the frames show meaningful progression."
+            if interaction_required
+            else (
+                "Pass only when one protagonist is clear, the primary action and reference-derived physical mechanism are visible, and the frames show meaningful progression."
+                if reference_profile == "reference_micro_gag_v1"
+                else "Pass only when one protagonist is clear, the primary action and concrete news-derived visual anchor are visible, and the frames show meaningful progression."
+            )
+        )
+    )
     return "\n".join(
         [
             f"Character: {character}",
@@ -339,17 +369,23 @@ def build_video_semantic_qa_prompt(
             f"Rendered video prompt: {rendered_prompt}",
             "The attached image is a contact sheet sampled from the final video in time order.",
             "Judge only what is visibly supported by the sampled frames; do not infer missing events from the prompt.",
-            (
-                "Pass only when both declared subject slots are clear, the required interaction is visible, the primary action is visible, the concrete news-derived visual anchor is present, and the frames show meaningful progression."
-                if interaction_required
-                else "Pass only when one protagonist is clear, the primary action is visible, the concrete news-derived visual anchor is present, and the frames show meaningful progression."
-            ) + " 'news-derived visual anchor' means the translated object/action from story.news_trace (for example a glowing orb or shadowy tendrils), not a literal news logo, headline, anchorperson, or readable text.",
+            anchor_rule,
+            f"{pass_rule} {anchor_definition}",
             "Cute-hit contract: cute_hit is true only when the sampled frames show an immediate, memorable cute or comedic visual beat with a clear emotional read; a generic standing pose, pretty background, or lore reveal is not a cute hit. expression_visible is true only when the required subject's face or body reaction is readable at a glance. interaction_visible is true only when the declared subject slots visibly affect, respond to, touch, look toward, or jointly manipulate one another or one shared mechanism. single_gag is true only when one dominant prop/action/reversal carries the clip; multiple plot devices, combat lore, unrequested third subjects, or abstract exposition fail it. first_second_action is true only when the visible action begins within the first second, not after an atmospheric hold.",
             "Reference-derived quality signals: a small protagonist against one oversized prop or environment, tactile contact with a real-feeling object, readable squash/stretch or recoil, generous negative space, and a final image that echoes the opening are positive signals when they serve the same gag. Do not require all signals, and do not award them for decorative spectacle without cause and effect.",
+            (
+                "Reference micro-gag hard checks: reference_mechanism_visible means the translated physical prop, force, or mechanism is visibly present; character_identity_consistent means the declared protagonist remains the same readable identity across the sampled frames; temporal_identity_stable means there is no severe unexplained morph, stretched body, melted prop, ghost duplicate, or identity collapse in an intermediate frame; meaningful_motion means the subject or prop changes spatial state beyond blinking, breathing, or a camera push; prompt_alignment means the visible action matches the rendered prompt's main cause-and-effect beat. Set any of these false when evidence is weak or contradictory."
+                if reference_profile == "reference_micro_gag_v1"
+                else ""
+            ),
             f"Duration contract: {int(duration_seconds or 0)} seconds. For clips of 6 seconds or less, action_completion_visible is true only when one physical action clearly starts, changes, and finishes in the sampled frames; a zoom, pan, reaction, or repeated holding pose is not completion. For a 15-second clip, payoff_visible is true only when the final sampled frames show the same objective resolved with concrete physical evidence; a static hold or unexplained camera change is not a payoff.",
             "Read the contact-sheet panels in chronological order, left-to-right and then top-to-bottom. Each panel is a still sample from a moving video; do not call the rendered video static merely because the QA evidence is packaged as still images. Judge progression from visible changes between adjacent panels.",
             "Set unexpected_extra_subjects=true when any subject outside the declared subject slots is clearly visible and not required by the rendered story. Keep the legacy unwanted_extra_characters field aligned with the same judgement.",
-            "The news title must not be treated as visual evidence. If the video is visually unrelated to the story anchor, fail it.",
+            (
+                "The news title must not be treated as visual evidence. If the video is visually unrelated to the story anchor, fail it."
+                if reference_profile != "reference_micro_gag_v1"
+                else "Do not require a news title or news coverage; judge only the original physical gag and its visible reference-derived mechanism."
+            ),
             "Ignore the grid used to package these sampled frames as a QA contact sheet. For the rendered content itself, a multi-panel, collage, or split-screen layout is a hard visual issue outside the ref2va reference-video route; do not downgrade it to a subjective style advisory.",
             "Use caption_guidance to state what the publish caption may safely claim from the visible result.",
         ]
@@ -364,6 +400,8 @@ def normalize_video_semantic_qa(
     llm_backend: dict[str, Any],
     news_anchor_terms: list[str] | None = None,
     subject_context: dict[str, Any] | None = None,
+    require_news_anchor: bool = True,
+    require_reference_contract: bool = False,
 ) -> dict[str, Any]:
     data = payload if isinstance(payload, dict) else {}
     raw_checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
@@ -375,6 +413,11 @@ def normalize_video_semantic_qa(
             "protagonist_clear",
             "primary_action_visible",
             "news_anchor_visible",
+            "reference_mechanism_visible",
+            "character_identity_consistent",
+            "temporal_identity_stable",
+            "meaningful_motion",
+            "prompt_alignment",
             "progression_visible",
             "cute_hit",
             "expression_visible",
@@ -428,7 +471,6 @@ def normalize_video_semantic_qa(
         for key in (
             "protagonist_clear",
             "primary_action_visible",
-            "news_anchor_visible",
             "progression_visible",
             "cute_hit",
             "expression_visible",
@@ -438,8 +480,21 @@ def normalize_video_semantic_qa(
             "payoff_visible",
         )
     ]
+    if require_news_anchor:
+        required_checks.insert(2, checks["news_anchor_visible"])
     if interaction_required:
         required_checks.extend([required_subjects_clear, interaction_visible])
+    if require_reference_contract:
+        required_checks.extend(
+            [
+                checks["reference_mechanism_visible"],
+                checks["character_identity_consistent"],
+                checks["temporal_identity_stable"],
+                checks["meaningful_motion"],
+                checks["prompt_alignment"],
+                not unexpected_extra_subjects,
+            ]
+        )
     required_checks_passed = all(required_checks)
     issue_text = " ".join(str(item).strip().lower() for item in (data.get("issues") or []))
     multipanel_issue = any(

@@ -109,6 +109,7 @@ class StoryboardContractTests(unittest.TestCase):
         brief = build_goal_brief(goal, goal.style, [])
         self.assertIn("one clear physical action only", brief["prompt"])
         self.assertIn("completed end state", brief["prompt"])
+        self.assertIn("opening_keyframe_prompt", brief)
 
     def test_short_action_contract_is_topic_neutral_and_not_aspect_specific(self) -> None:
         contract = short_action_contract(6, media_type="image_to_video")

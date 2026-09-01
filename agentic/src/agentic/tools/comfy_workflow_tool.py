@@ -603,6 +603,7 @@ class ComfyWorkflowToolset:
                 negative_prompt_binding=NodeBinding(kind="negative_prompt", node_type="PrimitiveString", title="negative"),
                 width_binding=NodeBinding(kind="width", node_type="PrimitiveInt", title="width"),
                 height_binding=NodeBinding(kind="height", node_type="PrimitiveInt", title="height"),
+                steps_binding=NodeBinding(kind="steps", node_type="KSampler", input_key="steps"),
             ),
             "comfy.workflow.image_to_image": ComfyWorkflowSpec(
                 name="comfy.workflow.image_to_image",
@@ -613,6 +614,7 @@ class ComfyWorkflowToolset:
                 prompt_binding=NodeBinding(kind="prompt", node_type="PrimitiveString", title="positive"),
                 negative_prompt_binding=NodeBinding(kind="negative_prompt", node_type="PrimitiveString", title="negative"),
                 image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
+                steps_binding=NodeBinding(kind="steps", node_type="KSampler", input_key="steps"),
             ),
             "comfy.workflow.image_upscale": ComfyWorkflowSpec(
                 name="comfy.workflow.image_upscale",

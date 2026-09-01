@@ -139,6 +139,66 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertTrue(qa.inputs["require_audio"])
         self.assertTrue(qa.inputs["require_stereo_audio"])
 
+    def test_drama_plan_compiles_into_existing_edit_timeline_node(self) -> None:
+        drama_plan = {
+            "plan_id": "episode-001",
+            "title": "The runaway prop",
+            "premise": "A small mistake creates a physical comedy payoff.",
+            "objective": "recover the prop",
+            "character_ids": ["hero"],
+            "prop_ids": ["prop"],
+            "scenes": [
+                {
+                    "scene_id": "S01",
+                    "beat": "HOOK",
+                    "duration_seconds": 2,
+                    "objective": "reach the prop",
+                    "start_state": "the hero reaches",
+                    "action_beats": ["the prop slips"],
+                    "end_state": "the hero loses balance",
+                    "next_hook": "the hero must recover it",
+                    "cause": "the prop slips",
+                    "effect": "the hero stumbles",
+                    "character_ids": ["hero"],
+                    "prop_ids": ["prop"],
+                    "selected_source_path": "/tmp/scene-01.mp4",
+                },
+                {
+                    "scene_id": "S02",
+                    "beat": "PAYOFF",
+                    "duration_seconds": 2,
+                    "objective": "recover the prop",
+                    "start_state": "the hero is off balance",
+                    "action_beats": ["the hero catches it"],
+                    "end_state": "the hero holds it proudly",
+                    "next_hook": "loop back to the opening reach",
+                    "cause": "the hero reacts",
+                    "effect": "the prop is recovered",
+                    "character_ids": ["hero"],
+                    "prop_ids": ["prop"],
+                    "selected_source_path": "/tmp/scene-02.mp4",
+                },
+            ],
+        }
+        goal = self.planner.create_goal(
+            prompt="compile this short drama",
+            media_type="image_sequence_edit",
+            duration_seconds=4,
+            style="playful",
+            auto_download_assets=False,
+            constraints={"drama_plan": drama_plan},
+        )
+
+        plan = self.planner.build_plan(goal)
+
+        compose = plan.nodes[0]
+        self.assertTrue(plan.metadata["explicit_drama_plan"])
+        self.assertEqual(compose.inputs["profile"], "motion_cut_v1")
+        self.assertEqual(compose.inputs["drama_plan"]["plan_id"], "episode-001")
+        self.assertEqual(compose.inputs["output_width"], 576)
+        self.assertEqual(compose.inputs["output_height"], 1024)
+        self.assertEqual(plan.nodes[1].inputs["target_duration"], 4.0)
+
     def test_text2video_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
             prompt="robot chef in rainy alley",

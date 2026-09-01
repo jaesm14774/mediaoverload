@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Any
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
+from agentic.runtime.drama import DramaPlan, DramaPlanError, compile_drama_plan
 from agentic.runtime.editing import EDIT_PROFILES, IMAGE_SUFFIXES, EditPlan
 from agentic.assets.registry import AssetRegistry, WorkflowManifest
 from agentic.runtime.creativity import IdeaDirector
@@ -2221,13 +2223,31 @@ class TaskPlanner:
             input_paths = [raw_paths]
         else:
             input_paths = [str(path) for path in raw_paths if str(path).strip()]
-        if not input_paths and not isinstance(goal.constraints.get("edit_plan"), dict):
-            raise ValueError("media_type 'image_sequence_edit' requires --edit-input or an edit_plan")
+        raw_drama_plan = goal.constraints.get("drama_plan")
+        drama_plan_source = str(goal.constraints.get("drama_plan_source") or "").strip()
+        if raw_drama_plan is None and drama_plan_source:
+            source_path = Path(drama_plan_source).expanduser().resolve()
+            if not source_path.is_file():
+                raise DramaPlanError(f"DramaPlan file does not exist: {source_path}")
+            raw_drama_plan = json.loads(source_path.read_text(encoding="utf-8"))
+        if not input_paths and not isinstance(goal.constraints.get("edit_plan"), dict) and raw_drama_plan is None:
+            raise ValueError("media_type 'image_sequence_edit' requires --edit-input, an edit_plan, or a drama_plan")
 
         raw_edit_plan = goal.constraints.get("edit_plan")
+        if raw_edit_plan is not None and raw_drama_plan is not None:
+            raise ValueError("image_sequence_edit accepts either edit_plan or drama_plan, not both")
         explicit_plan = EditPlan.from_dict(raw_edit_plan) if isinstance(raw_edit_plan, dict) else None
+        drama_plan = None
+        compiled_drama_plan = None
+        if raw_drama_plan is not None:
+            if not isinstance(raw_drama_plan, dict):
+                raise DramaPlanError("drama_plan must be an object or a JSON file path")
+            drama_plan = DramaPlan.from_dict(raw_drama_plan).validate(require_assets=True)
+            compiled_drama_plan = compile_drama_plan(drama_plan)
         if explicit_plan:
             effective_profile = explicit_plan.profile
+        elif compiled_drama_plan:
+            effective_profile = compiled_drama_plan.profile
         else:
             requested_profile = str(goal.constraints.get("edit_profile") or "").strip()
             if requested_profile:
@@ -2240,19 +2260,25 @@ class TaskPlanner:
             raise ValueError(f"Unsupported edit_profile: {effective_profile}")
 
         output_path = str(goal.constraints.get("edit_output_path") or "").strip()
-        qa_target_duration = explicit_plan.target_duration_seconds if explicit_plan else (
-            float(goal.duration_seconds) if goal.duration_seconds > 0 else None
-        )
+        if explicit_plan:
+            qa_target_duration = explicit_plan.target_duration_seconds
+        elif compiled_drama_plan:
+            natural_duration = sum(scene.duration_seconds for scene in drama_plan.scenes) - sum(
+                transition.duration_seconds for transition in compiled_drama_plan.transitions
+            )
+            qa_target_duration = compiled_drama_plan.target_duration_seconds or round(natural_duration, 3)
+        else:
+            qa_target_duration = float(goal.duration_seconds) if goal.duration_seconds > 0 else None
         creative_review_max_attempts = int(goal.constraints.get("edit_creative_review_max_attempts") or 3)
         if creative_review_max_attempts < 1 or creative_review_max_attempts > 4:
             raise ValueError("edit_creative_review_max_attempts must be between 1 and 4")
         compose_inputs: dict[str, Any] = {
             "profile": effective_profile,
-            "output_width": explicit_plan.output_width if explicit_plan else int(goal.constraints.get("edit_width") or goal.constraints.get("width") or 576),
-            "output_height": explicit_plan.output_height if explicit_plan else int(goal.constraints.get("edit_height") or goal.constraints.get("height") or 1024),
-            "fps": explicit_plan.fps if explicit_plan else float(goal.constraints.get("edit_fps") or goal.constraints.get("video_frame_rate") or 24),
+            "output_width": explicit_plan.output_width if explicit_plan else compiled_drama_plan.output_width if compiled_drama_plan else int(goal.constraints.get("edit_width") or goal.constraints.get("width") or 576),
+            "output_height": explicit_plan.output_height if explicit_plan else compiled_drama_plan.output_height if compiled_drama_plan else int(goal.constraints.get("edit_height") or goal.constraints.get("height") or 1024),
+            "fps": explicit_plan.fps if explicit_plan else compiled_drama_plan.fps if compiled_drama_plan else float(goal.constraints.get("edit_fps") or goal.constraints.get("video_frame_rate") or 24),
             "target_duration_seconds": qa_target_duration,
-            "variant_seed": explicit_plan.variant_seed if explicit_plan else int(goal.constraints.get("edit_variant_seed") or 0),
+            "variant_seed": explicit_plan.variant_seed if explicit_plan else compiled_drama_plan.variant_seed if compiled_drama_plan else int(goal.constraints.get("edit_variant_seed") or 0),
             "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.10),
             "creative_review": bool(goal.constraints.get("edit_creative_review", False))
             or effective_profile == "editorial_kinetic_v1",
@@ -2265,6 +2291,8 @@ class TaskPlanner:
             compose_inputs["input_paths"] = input_paths
         if explicit_plan:
             compose_inputs["edit_plan"] = explicit_plan.to_dict()
+        if drama_plan:
+            compose_inputs["drama_plan"] = drama_plan.to_dict()
         if output_path:
             compose_inputs["output_path"] = output_path
 
@@ -2336,13 +2364,24 @@ class TaskPlanner:
                 "output_path": output_path,
                 "qa_target_duration": qa_target_duration,
                 "explicit_edit_plan": explicit_plan is not None,
+                "explicit_drama_plan": drama_plan is not None,
             },
-            description="Compose an agent-controlled timeline from generated images or video segments",
+            description=(
+                "Compile a short-drama plan into the deterministic timeline editor"
+                if drama_plan
+                else "Compose an agent-controlled timeline from generated images or video segments"
+            ),
         )
 
     def _build_text2img2video_plan(self, goal: GoalRequest) -> ExecutionPlan:
         pre_video_review = self._pre_video_review_enabled(goal)
         stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
+        reference_node = self._reference_video_analysis_node(goal)
+        reference_micro_gag_profile = str(
+            goal.constraints.get("reference_micro_gag_profile") or ""
+        ).strip()
+        if reference_micro_gag_profile and reference_node is None:
+            raise ValueError("reference_micro_gag_profile requires reference_video_source")
         image_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_IMAGE_WORKFLOWS,
@@ -2375,42 +2414,51 @@ class TaskPlanner:
             if pre_video_review
             else self._constraint_int(goal, "image_count", 1)
         )
-        nodes = [
-            ExecutionNode(
-                node_id="idea-brief",
-                skill_name="agent.goal.expand",
-                inputs={
-                    "prompt": goal.prompt,
-                    "style": goal.style,
-                    "idea_variants": self.idea_director.generate_variations(goal),
-                },
-                tags=["creative"],
-                stage="prompting",
-            ),
-            ExecutionNode(
-                node_id="image-asset-check",
-                skill_name="image.ensure_workflow",
-                inputs={"workflow_name": image_manifest.name, "auto_download": goal.auto_download_assets},
-                depends_on=["idea-brief"],
-                tags=["assets"],
-                tool_name="asset.ensure_workflow_ready",
-                stage="assets",
-            ),
-            ExecutionNode(
-                node_id="render-image",
-                skill_name="image.render",
-                inputs={
-                    "workflow_name": image_manifest.name,
-                    "width": image_manifest.recommended_defaults.get("width", 1024),
-                    "height": image_manifest.recommended_defaults.get("height", 1024),
-                    "image_count": image_count,
-                },
-                depends_on=["idea-brief", "image-asset-check"],
-                tags=["render", "image"],
-                tool_name="comfy.workflow.text_to_image",
-                stage="render",
-            ),
-        ]
+        nodes: list[ExecutionNode] = []
+        if reference_node:
+            nodes.append(reference_node)
+        nodes.extend(
+            [
+                ExecutionNode(
+                    node_id="idea-brief",
+                    skill_name="agent.goal.expand",
+                    inputs={
+                        "prompt": goal.prompt,
+                        "style": goal.style,
+                        "idea_variants": self.idea_director.generate_variations(goal),
+                    },
+                    depends_on=[reference_node.node_id] if reference_node else [],
+                    tags=["creative"],
+                    stage="prompting",
+                ),
+                ExecutionNode(
+                    node_id="image-asset-check",
+                    skill_name="image.ensure_workflow",
+                    inputs={"workflow_name": image_manifest.name, "auto_download": goal.auto_download_assets},
+                    depends_on=["idea-brief"],
+                    tags=["assets"],
+                    tool_name="asset.ensure_workflow_ready",
+                    stage="assets",
+                ),
+                ExecutionNode(
+                    node_id="render-image",
+                    skill_name="image.render",
+                    inputs={
+                        "workflow_name": image_manifest.name,
+                        "width": image_manifest.recommended_defaults.get("width", 1024),
+                        "height": image_manifest.recommended_defaults.get("height", 1024),
+                        "image_count": image_count,
+                    },
+                    depends_on=["idea-brief", "image-asset-check"],
+                    tags=["render", "image"],
+                    tool_name="comfy.workflow.text_to_image",
+                    stage="render",
+                ),
+            ]
+        )
+        image_render_node = nodes[-1]
+        if goal.constraints.get("seed") is not None:
+            image_render_node.inputs["seed"] = int(goal.constraints["seed"])
         if use_upscale_for_i2v:
             nodes.extend(
                 [
@@ -2475,47 +2523,62 @@ class TaskPlanner:
             animate_dependencies = ["idea-brief", "render-image", "stage-review-select", "video-asset-check"]
         nodes.extend(
             [
-            ExecutionNode(
-                node_id="animate-video",
-                skill_name="image.animate",
-                inputs={
-                    "workflow_name": video_manifest.name,
-                    "video_count": self._constraint_int(goal, "video_count", 1),
-                    **(
-                        {
-                            "length": round(
-                                int(goal.constraints["duration_override_seconds"])
-                                * float(goal.constraints.get("video_frame_rate") or 24)
-                            )
-                        }
-                        if goal.constraints.get("duration_override_seconds") is not None
-                        else {}
-                    ),
-                },
-                depends_on=animate_dependencies,
-                tags=["render", "video"],
-                tool_name="comfy.workflow.image_to_video",
-                stage="render",
-            ),
-            ExecutionNode(
-                node_id="video-qa",
-                skill_name="media.video.qa",
-                inputs=self._video_qa_inputs(goal, video_manifest),
-                depends_on=["animate-video"],
-                tags=["quality", "technical-qa", "video"],
-                tool_name="media.video_qa",
-                stage="quality",
-            ),
-            ExecutionNode(
-                node_id="gif-preview",
-                skill_name="media.video.gif_preview",
-                inputs={"fps": 12, "scale_width": 512},
-                depends_on=["animate-video"],
-                tags=["preview", "gif"],
-                tool_name="media.video_to_gif",
-                stage="package",
-            ),
-        ]
+                ExecutionNode(
+                    node_id="animate-video",
+                    skill_name="image.animate",
+                    inputs={
+                        "workflow_name": video_manifest.name,
+                        "video_count": self._constraint_int(goal, "video_count", 1),
+                        **(
+                            {
+                                "length": round(
+                                    int(goal.constraints["duration_override_seconds"])
+                                    * float(goal.constraints.get("video_frame_rate") or 24)
+                                )
+                            }
+                            if goal.constraints.get("duration_override_seconds") is not None
+                            else {}
+                        ),
+                        **(
+                            {"seed": int(goal.constraints["seed"])}
+                            if goal.constraints.get("seed") is not None
+                            else {}
+                        ),
+                    },
+                    depends_on=animate_dependencies,
+                    tags=["render", "video"],
+                    tool_name="comfy.workflow.image_to_video",
+                    stage="render",
+                ),
+                ExecutionNode(
+                    node_id="video-qa",
+                    skill_name="media.video.qa",
+                    inputs={
+                        **self._video_qa_inputs(goal, video_manifest),
+                        "semantic_qa_required": bool(reference_micro_gag_profile),
+                        "semantic_qa_profile": reference_micro_gag_profile,
+                        "character": str(goal.constraints.get("character") or ""),
+                        "subject_context": dict(goal.constraints.get("subject_context") or {}),
+                    },
+                    depends_on=[
+                        "animate-video",
+                        "idea-brief",
+                        *([reference_node.node_id] if reference_node else []),
+                    ],
+                    tags=["quality", "technical-qa", "video"],
+                    tool_name="media.video_qa",
+                    stage="quality",
+                ),
+                ExecutionNode(
+                    node_id="gif-preview",
+                    skill_name="media.video.gif_preview",
+                    inputs={"fps": 12, "scale_width": 512},
+                    depends_on=["animate-video"],
+                    tags=["preview", "gif"],
+                    tool_name="media.video_to_gif",
+                    stage="package",
+                ),
+            ]
         )
         video_output_node = self._append_video_speed_node(
             goal,
@@ -2525,7 +2588,11 @@ class TaskPlanner:
         )
         video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
         video_qa_node.inputs = self._scaled_video_qa_inputs(goal, video_qa_node.inputs)
-        video_qa_node.depends_on = [video_output_node]
+        video_qa_node.depends_on = [
+            video_output_node,
+            "idea-brief",
+            *([reference_node.node_id] if reference_node else []),
+        ]
         gif_preview_node = next(node for node in nodes if node.node_id == "gif-preview")
         gif_preview_node.depends_on = [video_output_node]
         if review_loop_enabled:
@@ -2555,6 +2622,11 @@ class TaskPlanner:
                             "width": image_manifest.recommended_defaults.get("width", 1024),
                             "height": image_manifest.recommended_defaults.get("height", 1024),
                             "image_count": image_count,
+                            **(
+                                {"seed": int(goal.constraints["seed"])}
+                                if goal.constraints.get("seed") is not None
+                                else {}
+                            ),
                         },
                         depends_on=["review-refine-prompt", "image-asset-check"],
                         tags=["render", "image", "retry"],
@@ -2584,6 +2656,11 @@ class TaskPlanner:
                                     )
                                 }
                                 if goal.constraints.get("duration_override_seconds") is not None
+                                else {}
+                            ),
+                            **(
+                                {"seed": int(goal.constraints["seed"])}
+                                if goal.constraints.get("seed") is not None
                                 else {}
                             ),
                         },
@@ -2661,6 +2738,8 @@ class TaskPlanner:
             "review_loop_enabled": review_loop_enabled,
             "video_speed": self._video_speed_config(goal),
             "review_notes": review_notes,
+            "reference_micro_gag_profile": reference_micro_gag_profile,
+            **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
         }
         return ExecutionPlan(
             goal=goal,

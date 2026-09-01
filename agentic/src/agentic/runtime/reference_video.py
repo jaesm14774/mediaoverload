@@ -247,6 +247,8 @@ class ReferenceVideoAnalyzer:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
                 timeout=self.timeout_seconds,
             )
@@ -419,6 +421,8 @@ class ReferenceVideoAnalyzer:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
                 timeout=self.timeout_seconds,
             )
@@ -439,6 +443,8 @@ class ReferenceVideoAnalyzer:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
                 timeout=self.timeout_seconds,
             )

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
+from agentic.runtime.drama import DramaPlan, compile_drama_plan
 from agentic.runtime.editing import EditPlan, build_edit_plan
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.prompt_engine import PromptEngine
@@ -19,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", action="append", dest="inputs", help="Ordered image or video input; repeatable")
     parser.add_argument("--input-root", action="append", dest="input_roots", help="Approved root for edit inputs; repeatable")
     parser.add_argument("--edit-plan", help="JSON file containing an EditPlan")
+    parser.add_argument("--drama-plan", help="JSON file containing a DramaPlan; scenes are compiled into an EditPlan")
     parser.add_argument("--output", required=True, help="Output MP4 path")
     parser.add_argument(
         "--profile",
@@ -40,14 +42,24 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.edit_plan:
+    if args.edit_plan and args.drama_plan:
+        raise ValueError("Use either --edit-plan or --drama-plan, not both")
+    raw_drama_plan = None
+    if args.drama_plan:
+        payload = json.loads(Path(args.drama_plan).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Drama plan JSON must contain an object")
+        drama_plan = DramaPlan.from_dict(payload)
+        plan = compile_drama_plan(drama_plan)
+        raw_drama_plan = drama_plan.to_dict()
+    elif args.edit_plan:
         payload = json.loads(Path(args.edit_plan).read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("Edit plan JSON must contain an object")
         plan = EditPlan.from_dict(payload)
     else:
         if not args.inputs:
-            raise ValueError("At least one --input is required when --edit-plan is not supplied")
+            raise ValueError("At least one --input is required when --edit-plan or --drama-plan is not supplied")
         plan = build_edit_plan(
             args.inputs,
             profile=args.profile,
@@ -75,7 +87,6 @@ def main() -> None:
         node_id="compose-edit",
         skill_name="media.video.compose_timeline",
         inputs={
-            "edit_plan": plan.to_dict(),
             "output_path": str(output),
             "contact_sheet_path": str(output.with_suffix(".contact_sheet.jpg")),
             "manifest_path": str(output.with_suffix(".edit_manifest.json")),
@@ -85,6 +96,11 @@ def main() -> None:
             "require_stereo_audio": plan.profile != "baseline_concat",
         },
     )
+    if raw_drama_plan is not None:
+        node.inputs["drama_plan"] = raw_drama_plan
+        node.inputs["drama_plan_path"] = str(output.with_suffix(".drama_plan.json"))
+    else:
+        node.inputs["edit_plan"] = plan.to_dict()
     context = SkillContext(
         plan=ExecutionPlan(goal=goal, workflow_name="image_sequence_edit_v1", nodes=[node]),
         node=node,

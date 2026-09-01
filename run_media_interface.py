@@ -48,12 +48,16 @@ def main() -> None:
     parser.add_argument("--character", type=str, help="Character name")
     parser.add_argument("--prompt", type=str, default="", help="Prompt text")
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature parameter")
+    parser.add_argument("--seed", type=int, help="Optional deterministic seed passed to the image and video workflows")
     parser.add_argument("--generation-type", type=str, help="Override generation type, for example text2longvideo")
     parser.add_argument(
         "--duration-seconds",
         type=int,
         help="Requested clip duration; 5 seconds uses one clear action, 15 seconds uses a compact native H3 story",
     )
+    parser.add_argument("--reference-video", type=str, help="Optional local reference video or URL used as structural visual evidence")
+    parser.add_argument("--reference-video-depth", choices=("standard", "deep"), default="standard")
+    parser.add_argument("--reference-keyframes", type=int, default=12, help="Number of structural reference keyframes (2-20)")
     parser.add_argument("--dry-run-publish", action="store_true", help="Run publish stage in dry-run mode")
     parser.add_argument(
         "--publish-mode",
@@ -126,6 +130,10 @@ def main() -> None:
             duration_seconds=args.duration_seconds,
             output_dir=args.output_dir,
             news_driven=args.news_driven,
+            reference_video_source=args.reference_video,
+            reference_video_depth=args.reference_video_depth,
+            reference_video_max_keyframes=args.reference_keyframes,
+            seed=args.seed,
         ),
         review=CharacterReviewOptions(
             dry_run_publish=args.dry_run_publish,

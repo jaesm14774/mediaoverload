@@ -15,6 +15,7 @@ from agentic.runtime.editing import (
     EditTransition,
     build_edit_plan,
 )
+from agentic.runtime.drama import DramaPlan, DramaPlanError, compile_drama_plan
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 
@@ -35,21 +36,48 @@ class EditingSkills:
     def compose_timeline(self, context: SkillContext) -> SkillResult:
         run_dir = self.output_root / "editing" / f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid4().hex[:10]}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        raw_plan = context.node.inputs.get("edit_plan")
-        if isinstance(raw_plan, dict):
-            plan = EditPlan.from_dict(raw_plan)
-        else:
-            paths = self._input_paths(context)
-            plan = build_edit_plan(
-                paths,
-                profile=str(context.node.inputs.get("profile") or "xfade_clean_v1"),
-                output_width=int(context.node.inputs.get("output_width") or 576),
-                output_height=int(context.node.inputs.get("output_height") or 1024),
-                fps=float(context.node.inputs.get("fps") or 24),
-                target_duration_seconds=self._optional_float(context.node.inputs.get("target_duration_seconds")),
-                variant_seed=int(context.node.inputs.get("variant_seed") or 0),
-                transition_duration_seconds=float(context.node.inputs.get("transition_duration_seconds") or 0.10),
+        raw_drama_plan = context.node.inputs.get("drama_plan")
+        drama_plan_path: str | None = None
+        if raw_drama_plan is not None and context.node.inputs.get("edit_plan") is not None:
+            raise ValueError("compose_timeline accepts either drama_plan or edit_plan, not both")
+        if raw_drama_plan is not None:
+            if isinstance(raw_drama_plan, DramaPlan):
+                drama_plan = raw_drama_plan.validate(require_assets=True)
+            elif isinstance(raw_drama_plan, dict):
+                drama_plan = DramaPlan.from_dict(raw_drama_plan).validate(require_assets=True)
+            elif isinstance(raw_drama_plan, str):
+                drama_source = Path(raw_drama_plan).expanduser().resolve()
+                if not drama_source.is_file():
+                    raise DramaPlanError(f"DramaPlan file does not exist: {drama_source}")
+                payload = json.loads(drama_source.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise DramaPlanError("DramaPlan JSON must contain an object")
+                drama_plan = DramaPlan.from_dict(payload).validate(require_assets=True)
+            else:
+                raise DramaPlanError("drama_plan must be an object or a JSON file path")
+            plan = compile_drama_plan(drama_plan)
+            persisted_drama_plan = self._resolve_output_path(
+                context.node.inputs.get("drama_plan_path"),
+                run_dir / "drama_plan.json",
             )
+            self._write_json(persisted_drama_plan, drama_plan.to_dict())
+            drama_plan_path = str(persisted_drama_plan)
+        else:
+            raw_plan = context.node.inputs.get("edit_plan")
+            if isinstance(raw_plan, dict):
+                plan = EditPlan.from_dict(raw_plan)
+            else:
+                paths = self._input_paths(context)
+                plan = build_edit_plan(
+                    paths,
+                    profile=str(context.node.inputs.get("profile") or "xfade_clean_v1"),
+                    output_width=int(context.node.inputs.get("output_width") or 576),
+                    output_height=int(context.node.inputs.get("output_height") or 1024),
+                    fps=float(context.node.inputs.get("fps") or 24),
+                    target_duration_seconds=self._optional_float(context.node.inputs.get("target_duration_seconds")),
+                    variant_seed=int(context.node.inputs.get("variant_seed") or 0),
+                    transition_duration_seconds=float(context.node.inputs.get("transition_duration_seconds") or 0.10),
+                )
         output_path = self._resolve_output_path(
             context.node.inputs.get("output_path"),
             run_dir / "edited.mp4",
@@ -102,6 +130,7 @@ class EditingSkills:
                     "required": True,
                     "status": "external_benchmark_review_required",
                 },
+                drama_plan_path=drama_plan_path,
                 logs=[
                     f"Rendered fixed {plan.profile} benchmark candidate with production QA; external review required.",
                 ],
@@ -134,6 +163,7 @@ class EditingSkills:
                 run_dir=run_dir,
                 plan=plan,
                 creative_review={"enabled": False, "required": False, "status": "not_requested"},
+                drama_plan_path=drama_plan_path,
                 logs=[f"Rendered {plan.profile} timeline with {len(plan.clips)} clips."],
             )
 
@@ -294,6 +324,7 @@ class EditingSkills:
                 "creative_review": creative_review,
                 "creative_review_path": str(receipt_path),
                 "creative_review_required": True,
+                "drama_plan_path": drama_plan_path,
                 "saved_files": [str(output_path), str(manifest_path), str(contact_sheet_path), str(receipt_path)],
             },
             metrics={
@@ -333,6 +364,10 @@ class EditingSkills:
         inputs: dict[str, Any],
     ) -> dict[str, object]:
         video_path = str(result.get("video_path") or "")
+        # DramaPlan currently carries dialogue/SFX as declarative cues. Until
+        # the audio compositor is enabled, visual-only drama renders must not
+        # silently claim that their generated filler track is real audio.
+        default_require_audio = plan.profile != "baseline_concat" and inputs.get("drama_plan") is None
         return self.tools.call(
             "media.video_qa",
             {
@@ -342,8 +377,8 @@ class EditingSkills:
                 "expected_width": plan.output_width,
                 "expected_height": plan.output_height,
                 "expected_fps": plan.fps,
-                "require_audio": bool(inputs.get("require_audio", plan.profile != "baseline_concat")),
-                "require_stereo_audio": bool(inputs.get("require_stereo_audio", plan.profile != "baseline_concat")),
+                "require_audio": bool(inputs.get("require_audio", default_require_audio)),
+                "require_stereo_audio": bool(inputs.get("require_stereo_audio", default_require_audio)),
                 "analyze_audio": bool(inputs.get("analyze_audio", False)),
             },
         )
@@ -451,6 +486,7 @@ class EditingSkills:
         run_dir: Path,
         plan: EditPlan,
         creative_review: dict[str, Any],
+        drama_plan_path: str | None,
         logs: list[str],
     ) -> SkillResult:
         return SkillResult(
@@ -459,6 +495,7 @@ class EditingSkills:
                 **result,
                 "run_dir": str(run_dir),
                 "creative_review": creative_review,
+                **({"drama_plan_path": drama_plan_path} if drama_plan_path else {}),
                 "saved_files": [
                     str(result.get("video_path") or ""),
                     str(result.get("manifest_path") or ""),

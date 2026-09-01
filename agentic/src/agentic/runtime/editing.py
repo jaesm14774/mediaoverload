@@ -9,7 +9,7 @@ from typing import Any
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
-TRANSITIONS = {"fade", "fadeblack", "fadewhite", "wipeleft", "wiperight", "smoothleft", "circleopen"}
+TRANSITIONS = {"hard_cut", "fade", "fadeblack", "fadewhite", "wipeleft", "wiperight", "smoothleft", "circleopen"}
 MOTIONS = {"none", "slow_zoom_in", "slow_zoom_out", "pan_left", "pan_right", "drift_up", "drift_down"}
 EDIT_PROFILES = {
     "baseline_concat",
@@ -151,8 +151,11 @@ class EditPlan:
         for transition in self.transitions:
             if transition.name not in TRANSITIONS:
                 raise EditPlanError(f"Unknown transition: {transition.name}")
-            if not math.isfinite(transition.duration_seconds) or transition.duration_seconds <= 0:
-                raise EditPlanError("Transition duration must be positive")
+            if not math.isfinite(transition.duration_seconds) or (
+                transition.duration_seconds < 0
+                or (transition.name != "hard_cut" and transition.duration_seconds <= 0)
+            ):
+                raise EditPlanError("Transition duration must be non-negative for hard_cut and positive otherwise")
             if transition.duration_seconds > MAX_TRANSITION_DURATION_SECONDS:
                 raise EditPlanError(f"Transition duration cannot exceed {MAX_TRANSITION_DURATION_SECONDS}")
         return self

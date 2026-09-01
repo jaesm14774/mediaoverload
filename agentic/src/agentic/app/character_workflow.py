@@ -363,10 +363,23 @@ def resolve_character_selection(
     configured_name = str(character.get("name") or Path(request.config_path).stem)
     group_name = str(character.get("group_name") or "").strip()
     configured_subject_mode = _subject_mode(loaded_config)
-    subject_mode, subject_mode_weights = _resolve_subject_mode(
-        loaded_config,
-        rng=request.generation.rng,
+    reference_micro_gag_requested = (
+        str(request.generation.preferred_generation_type or "").strip().lower() == "text2image2video"
+        and bool(str(request.generation.reference_video_source or "").strip())
     )
+    if reference_micro_gag_requested:
+        # A reference-derived micro-gag may borrow timing and physical grammar,
+        # but its default contract is one readable protagonist. Do not let the
+        # general Kirby config's random interaction weighting add an unrelated
+        # second subject to every I2V candidate.
+        configured_subject_mode = SUBJECT_MODE_SINGLE
+    if reference_micro_gag_requested:
+        subject_mode, subject_mode_weights = SUBJECT_MODE_SINGLE, None
+    else:
+        subject_mode, subject_mode_weights = _resolve_subject_mode(
+            loaded_config,
+            rng=request.generation.rng,
+        )
     if subject_mode == SUBJECT_MODE_INTERACTION:
         generation = dict(loaded_config.get("generation", {}) or {})
         interaction = dict(generation.get("two_character_interaction", {}) or {})
@@ -475,6 +488,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     news_history_path = generation.news_history_path
     routing_history_path = generation.routing_history_path
     rng = generation.rng
+    requested_seed = generation.seed
     requested_reference_video_source = str(generation.reference_video_source or "").strip()
     requested_reference_video_depth = str(generation.reference_video_depth or "").strip().lower()
     requested_reference_video_max_keyframes = generation.reference_video_max_keyframes
@@ -673,6 +687,14 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         raise ValueError("reference_video_depth must be 'standard' or 'deep'")
     if not 2 <= reference_video_max_keyframes <= 20:
         raise ValueError("reference_video_max_keyframes must be an integer between 2 and 20")
+    reference_micro_gag_profile = bool(
+        config_generation_type == "text2image2video" and reference_video_source
+    )
+    if reference_micro_gag_profile:
+        # The collection's clips already encode their intended short-form
+        # rhythm. Do not apply Kirby's general 2x playback transform to this
+        # profile or the generated payoff will be compressed out of the clip.
+        video_speed = {"enabled": False, "factor": 1.0}
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
         social_media.get("platforms"),
@@ -785,6 +807,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         "interaction_contract": dict(subject_context.get("interaction_contract") or {}),
         "character_selection": character_selection,
         "character_profile": selected_profile,
+        "seed": int(requested_seed) if requested_seed is not None else None,
         "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
         "video_speed": video_speed,
@@ -865,6 +888,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             else False
         ),
         "native_h3_semantic_qa_required": bool(native_recipe.get("semantic_qa_required", False)),
+        "reference_micro_gag_profile": "reference_micro_gag_v1" if reference_micro_gag_profile else "",
         "native_h3_creative_brief": native_h3_creative_brief,
         "native_h3_visual_style_contract": native_h3_visual_style_contract,
         "visual_style_contract": native_h3_visual_style_contract,

@@ -7,6 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from agentic.app.character_requests import (
+    CharacterGenerationOptions,
+    CharacterReviewOptions,
+    CharacterRuntimeOptions,
+    CharacterWorkflowRequest,
+)
 from agentic.app.character_workflow import (
     build_goal_payload_from_character_config,
     resolve_character_selection,
@@ -274,6 +280,55 @@ class CharacterGroupSelectionTests(unittest.TestCase):
             {"single": 3.0, "two_character_interaction": 1.0},
         )
         self.assertEqual(resolved["subject_mode_selection_source"], "weighted_random")
+
+    def test_reference_micro_gag_overrides_random_subject_mode_to_single(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "reference-random.yaml"
+            config.write_text(
+                "character:\n"
+                "  group_name: Kirby\n"
+                "generation:\n"
+                "  subject_mode: random\n"
+                "  subject_mode_weights:\n"
+                "    single: 2\n"
+                "    two_character_interaction: 5\n"
+                "  two_character_interaction:\n"
+                "    is_same_group: false\n",
+                encoding="utf-8",
+            )
+            single_result = Mock()
+            single_result.to_dict.return_value = {
+                "mode": "group",
+                "group_name": "Kirby",
+                "selected_character": "Bandana Waddle Dee",
+                "candidate_count": 1,
+                "selected_profile": {},
+                "selection_source": "group_weighted_random",
+            }
+            request = CharacterWorkflowRequest(
+                repo_root=self.repo_root,
+                config_path=config,
+                generation=CharacterGenerationOptions(
+                    preferred_generation_type="text2image2video",
+                    reference_video_source="C:/references/clip.mp4",
+                    rng=random.Random(0),
+                ),
+                review=CharacterReviewOptions(),
+                runtime=CharacterRuntimeOptions(),
+            )
+            with patch.object(
+                CharacterGroupSelectionService,
+                "select_random_character",
+                return_value=single_result,
+            ) as select_single, patch.object(
+                CharacterGroupSelectionService,
+                "select_pair",
+            ) as select_pair:
+                resolved = resolve_character_selection(request)
+
+        select_single.assert_called_once()
+        select_pair.assert_not_called()
+        self.assertEqual(resolved["subject_mode"], "single")
 
     def test_random_subject_mode_can_select_pair_without_distinct_name_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

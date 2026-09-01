@@ -199,6 +199,7 @@ class PromptEngine:
         rendered_prompt: str,
         news_anchor_terms: list[str] | None = None,
         duration_seconds: int | float | None = None,
+        contract_profile: str = "",
     ) -> dict[str, Any]:
         return self.llm_engine.evaluate_video_contact_sheet(
             contact_sheet_path=contact_sheet_path,
@@ -210,6 +211,7 @@ class PromptEngine:
             rendered_prompt=rendered_prompt,
             news_anchor_terms=news_anchor_terms,
             duration_seconds=duration_seconds,
+            contract_profile=contract_profile,
         )
 
     def evaluate_edit_contact_sheet(

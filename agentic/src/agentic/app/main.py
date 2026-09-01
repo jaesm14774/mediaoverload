@@ -195,6 +195,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--media-path", action="append", dest="media_paths", help="Explicit media path for publish/review workflows; repeatable")
     parser.add_argument("--edit-input", action="append", dest="edit_input_paths", help="Ordered image/video input for image_sequence_edit; repeatable")
     parser.add_argument("--edit-input-root", action="append", dest="edit_input_roots", help="Approved root for image_sequence_edit inputs; repeatable")
+    parser.add_argument("--drama-plan", help="JSON DramaPlan file for image_sequence_edit; compiles scenes into the deterministic timeline editor")
     parser.add_argument(
         "--edit-profile",
         choices=("baseline_concat", "motion_cut_v1", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
@@ -284,6 +285,7 @@ def main() -> None:
             "input_dir": args.input_dir,
             "media_paths": args.media_paths or [],
             "edit_input_paths": args.edit_input_paths or [],
+            "drama_plan_source": args.drama_plan,
             "edit_profile": args.edit_profile,
             "edit_transition_duration": args.edit_transition_duration,
             "edit_variant_seed": args.edit_variant_seed,

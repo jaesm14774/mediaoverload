@@ -231,9 +231,15 @@ class AgentPlanningSkills:
 
 
 class AgentMediaSkills:
-    def __init__(self, tools: ToolRegistry, output_root: Path) -> None:
+    def __init__(
+        self,
+        tools: ToolRegistry,
+        output_root: Path,
+        prompt_engine: PromptEngine | None = None,
+    ) -> None:
         self.tools = tools
         self.output_root = output_root
+        self.prompt_engine = prompt_engine or PromptEngine()
         self.output_root.mkdir(parents=True, exist_ok=True)
 
     def ensure_workflow(self, context: SkillContext) -> SkillResult:
@@ -646,6 +652,9 @@ class AgentMediaSkills:
             "width": context.node.inputs.get("width"),
             "height": context.node.inputs.get("height"),
         }
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
         if context.plan.goal.media_type == "long_video" and workflow_name.startswith("minimax_h3_"):
             constraints = context.plan.goal.constraints
             payload.update(
@@ -882,10 +891,57 @@ class AgentMediaSkills:
         }
         result = self.tools.call("media.video_qa", payload)
         passed = bool(result.get("passed", False))
+        semantic_required = bool(context.node.inputs.get("semantic_qa_required", False))
+        if semantic_required:
+            contact_sheet_path = str(result.get("contact_sheet_path") or payload["contact_sheet_path"])
+            idea_output = context.state.node_outputs.get("idea-brief", {})
+            reference_analysis = context.state.node_outputs.get("reference-video-analysis", {})
+            reference_structure = (
+                reference_analysis.get("structure_analysis", {})
+                if isinstance(reference_analysis, dict)
+                else {}
+            )
+            reference_guidance = (
+                reference_analysis.get("replication_guidance", {})
+                if isinstance(reference_analysis, dict)
+                else {}
+            )
+            semantic = self.prompt_engine.evaluate_video_contact_sheet(
+                contact_sheet_path=contact_sheet_path,
+                character=str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or ""),
+                subject_context=dict(context.node.inputs.get("subject_context") or {}),
+                story_spine={
+                    "goal": context.plan.goal.prompt,
+                    "profile": str(context.node.inputs.get("semantic_qa_profile") or ""),
+                    "reference_structure": reference_structure,
+                    "reference_guidance": reference_guidance,
+                },
+                native_shots=[],
+                news_context={},
+                rendered_prompt=str(
+                    idea_output.get("prompt")
+                    or idea_output.get("creative_brief")
+                    or context.plan.goal.prompt
+                )
+                if isinstance(idea_output, dict)
+                else context.plan.goal.prompt,
+                duration_seconds=context.plan.goal.duration_seconds,
+                contract_profile=str(context.node.inputs.get("semantic_qa_profile") or ""),
+            )
+            result["semantic_qa"] = semantic
+            result["semantic_qa_required"] = True
         return SkillResult(
             status="success" if passed else "failed",
             outputs=result,
-            metrics={"passed": passed, "duration": result.get("duration", 0)},
+            metrics={
+                "passed": passed,
+                "duration": result.get("duration", 0),
+                "semantic_qa_enabled": int(semantic_required),
+                "semantic_qa_passed": int(
+                    isinstance(result.get("semantic_qa"), dict)
+                    and result["semantic_qa"].get("passed") is True
+                ),
+            },
             logs=["Technical video QA passed." if passed else "Technical video QA failed."],
         )
 
@@ -1191,7 +1247,7 @@ def register_agent_primitive_skills(
     prompt_engine: PromptEngine | None = None,
 ) -> None:
     planning = AgentPlanningSkills(prompt_engine=prompt_engine)
-    media = AgentMediaSkills(tool_registry, output_root)
+    media = AgentMediaSkills(tool_registry, output_root, prompt_engine=prompt_engine)
     skill_registry.register("agent.goal.expand", planning.expand_goal, "Expand a goal into an agent-ready brief")
     skill_registry.register("agent.prompt.compose", planning.compose_prompt, "Compose a reusable prompt bundle")
     skill_registry.register("agent.story.segment", planning.segment_story, "Break a story into reusable segments")

@@ -1,0 +1,43 @@
+version: "1.0"
+model:
+  workflow: krea2_turbo
+  refine_workflow: krea2_turbo_img2img
+  width: 1024
+  height: 576
+  steps: 8
+  cfg: 1.0
+  sampler: euler
+  scheduler: simple
+  denoise_for_reference_rescue: 0.25
+benchmark:
+  score_threshold: 80
+  max_attempts: 5
+  default_acceptance_trials: 10
+  seed_base: 20260830
+  seed_policy: "stable per source item; keep the requested seed across prompt rewrites"
+  image_score_weights:
+    style_grammar: 30
+    palette_lighting: 20
+    composition: 20
+    subject_clarity: 15
+    creative_beat: 15
+  hard_gates:
+    - subject_readable
+    - main_gag_visible
+    - no_ui_or_watermark
+    - no_unrequested_extra_subjects
+    - not_generic_off_style
+style_contract:
+  summary: "Rounded mascot-led 2D illustration with one immediate tactile visual gag, candy colors, generous negative space, and a handmade or game-art surface."
+  subject_grammar: "One small readable protagonist with a simple face, soft silhouette, clear expression, and occasional tiny supporting forms only when the gag needs them."
+  composition_grammar: "One dominant subject or one small subject against an oversized prop or environment; centered poster-like framing or a clean asymmetrical vignette; no accidental grids."
+  palette_and_lighting: "Candy pink, coral, butter yellow, sky cyan, lavender, cream, and deep indigo; soft glow or graphic high contrast when the joke needs impact."
+  medium_and_surface: "Clean 2D cel illustration, soft watercolor or gouache, paper grain, colored-pencil edges, or polished game key art; avoid generic glossy 3D."
+  creative_mechanisms:
+    - "Tactile interaction with an oversized everyday object or food."
+    - "Small-versus-large scale reversal with squash, recoil, or a readable surprise."
+    - "Cozy surreal transformation that resolves in one memorable physical payoff."
+  avoid:
+    - "Social UI, account bars, playback controls, watermarks, readable interface text, or accidental screenshot framing."
+    - "Generic anime character sheets, crowded scenes, multiple unrelated plot devices, or unrequested extra characters."
+    - "Photorealism, sterile 3D renders, muddy colors, and decorative effects that replace the gag."

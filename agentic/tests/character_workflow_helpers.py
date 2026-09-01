@@ -28,6 +28,7 @@ _GENERATION_FIELDS = {
     "reference_video_source",
     "reference_video_depth",
     "reference_video_max_keyframes",
+    "seed",
 }
 _REVIEW_FIELDS = {
     "dry_run_publish",

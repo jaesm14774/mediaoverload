@@ -49,18 +49,19 @@ class ComfyImageSkills:
     def render_image(self, context: SkillContext) -> SkillResult:
         prompt_bundle = self._resolve_prompt_bundle(context)
         run_dir = self._build_run_dir(context.plan.goal.prompt)
-        result = self.tools.call(
-            "comfy.render_image",
-            {
-                "workflow_name": context.node.inputs["workflow_name"],
-                "prompt": prompt_bundle["prompt"],
-                "negative_prompt": prompt_bundle["negative_prompt"],
-                "width": context.node.inputs.get("width", 1024),
-                "height": context.node.inputs.get("height", 1024),
-                "image_count": int(context.node.inputs.get("image_count", 1)),
-                "run_dir": str(run_dir),
-            },
-        )
+        payload = {
+            "workflow_name": context.node.inputs["workflow_name"],
+            "prompt": prompt_bundle["prompt"],
+            "negative_prompt": prompt_bundle["negative_prompt"],
+            "width": context.node.inputs.get("width", 1024),
+            "height": context.node.inputs.get("height", 1024),
+            "image_count": int(context.node.inputs.get("image_count", 1)),
+            "run_dir": str(run_dir),
+        }
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
+        result = self.tools.call("comfy.render_image", payload)
         return SkillResult(
             status="success",
             outputs=result,
@@ -70,9 +71,15 @@ class ComfyImageSkills:
 
     @staticmethod
     def _resolve_prompt_bundle(context: SkillContext) -> dict[str, str]:
+        reference_micro_gag = str(
+            context.plan.goal.constraints.get("reference_micro_gag_profile") or ""
+        ).strip()
         for dependency in reversed(context.node.depends_on):
             dependency_output = context.state[dependency]
-            prompt = dependency_output.get("prompt")
+            prompt_key = "opening_keyframe_prompt" if reference_micro_gag else "prompt"
+            prompt = dependency_output.get(prompt_key)
+            if not isinstance(prompt, str) or not prompt:
+                prompt = dependency_output.get("prompt")
             if isinstance(prompt, str) and prompt:
                 return {
                     "prompt": prompt,
