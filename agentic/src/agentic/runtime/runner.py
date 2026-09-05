@@ -196,6 +196,7 @@ class WorkflowRunner:
             "retry_intensity",
             "publish_ready",
             "media_paths",
+            "timeline_path",
             "caption",
             "platform_bundle",
             "caption_strategy",

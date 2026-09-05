@@ -9,7 +9,7 @@ from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest,
 from agentic.runtime.video_conditioning import (
     capabilities_from_manifests,
     recipe_candidates,
-    sample_recipe_sequence,
+    production_recipe_sequence,
 )
 from agentic.runtime.registry import ToolRegistry
 from agentic.skills.longvideo import LongVideoSkills
@@ -42,36 +42,39 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertFalse(recipe.requires_references)
         self.assertEqual(recipe.render_tool, "comfy.workflow.text_to_video")
 
-    def test_positive_weight_for_unsupported_recipe_fails_before_render(self) -> None:
+    def test_production_sequence_is_deterministic_and_reserves_fl2va_for_state_changes(self) -> None:
         capabilities = capabilities_from_manifests(self.registry.all_manifests())
+        eligible = recipe_candidates(
+            capabilities,
+            preferred_workflows=[
+                "minimax_h3_lowvram_i2v",
+                "minimax_h3_lowvram_15s_fl2va_i2v",
+            ],
+        )
 
-        with self.assertRaisesRegex(ValueError, "no compatible workflow"):
-            sample_recipe_sequence(
-                {"anchor_first": 1, "future_control_bundle": 2},
-                3,
-                recipe_candidates(capabilities),
-                seed=7,
-            )
+        sequence = production_recipe_sequence(6, eligible)
 
-    def test_mix_is_reproducible_and_samples_each_segment_independently(self) -> None:
+        self.assertEqual(
+            sequence,
+            [
+                "anchor_first",
+                "anchor_first",
+                "anchor_first_last",
+                "anchor_first",
+                "anchor_first_last",
+                "anchor_first_last",
+            ],
+        )
+        self.assertEqual(production_recipe_sequence(6, eligible), sequence)
+
+    def test_production_sequence_uses_ref2va_only_for_supplied_opening_references(self) -> None:
         capabilities = capabilities_from_manifests(self.registry.all_manifests())
         eligible = recipe_candidates(capabilities)
-        seed, sequence = sample_recipe_sequence(
-            {"anchor_first": 1, "anchor_first_last": 3, "anchor_last": 2, "reference_bundle": 2},
-            40,
-            eligible,
-            seed=20260815,
-        )
-        _, repeated = sample_recipe_sequence(
-            {"anchor_first": 1, "anchor_first_last": 3, "anchor_last": 2, "reference_bundle": 2},
-            40,
-            eligible,
-            seed=20260815,
-        )
 
-        self.assertEqual(seed, 20260815)
-        self.assertEqual(sequence, repeated)
-        self.assertGreaterEqual(len(set(sequence)), 3)
+        sequence = production_recipe_sequence(4, eligible, use_reference_bundle=True)
+
+        self.assertEqual(sequence[0], "reference_bundle")
+        self.assertTrue(all(item in {"reference_bundle", "anchor_first", "anchor_first_last"} for item in sequence))
 
     def test_last_frame_recipe_binds_only_last_anchor_to_h3_renderer(self) -> None:
         captured: dict[str, object] = {}

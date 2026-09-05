@@ -1,0 +1,80 @@
+# Generic static contract for the automated native H3 route.
+#
+# This file defines timing, causal progression, continuity, and QA fields only.
+# News selection, plot details, setting, props, action wording, and character
+# appearance are resolved at runtime from the selected brief and character_profile.
+
+name: native_h3_15s_contract
+character: selected protagonist
+native_duration_seconds: 15
+segment_duration_seconds: 5
+default_segment_count: 3
+story_source: news_llm
+
+story_generation:
+  mode: dynamic_news_llm
+  plot_generated_at_runtime: true
+  required_shot_times:
+    - 0-4s
+    - 4-10s
+    - 10-15s
+  required_beats:
+    - hook
+    - escalation
+    - payoff
+
+# The resolved character_profile supplies canonical appearance and identity.
+# Keep this contract free of character-specific anatomy, palette, costume, or
+# silhouette details.
+base_prompt: >-
+  Use the resolved character_profile as the sole authority for protagonist
+  identity, anatomy, proportions, costume, silhouette, and palette. Keep it
+  stable. Generate setting, quest, props, and ending from the current brief and
+  news context.
+
+negative_prompt: >-
+  unrequested characters, duplicate protagonist, identity drift, malformed
+  anatomy, readable words, letters, numbers, signs, labels, subtitles, logos,
+  watermark, hard cuts, teleporting, frozen poses, repeated holding shots
+
+world:
+  setting: generated from the selected brief and news item at runtime
+  visual_language: >-
+    coherent cinematic staging, clear negative space, visible material response,
+    and an expressive reaction
+  continuity_rules:
+    - Use the resolved character_profile as the sole protagonist identity authority in every shot.
+    - Keep one world geography across all three shots unless a transition is required.
+    - Each shot changes the objective state and hands it to the next beat.
+    - The final shot resolves the objective; an opening echo must not hide payoff or start a new quest.
+    - Rendered input frames are authoritative; do not redraw identity or reset the world.
+
+# Structural placeholders only. The native H3 resolver replaces the narrative
+# details with news-grounded LLM output before render.
+story_spine:
+  premise: generated from the selected brief and news item at runtime
+  objective: generated from the selected brief and news item at runtime
+  obstacle: generated from the selected brief and news item at runtime
+  stakes: generated from the selected brief and news item at runtime
+  emotional_arc: generated at runtime from uncertainty through earned relief
+  climax: generated from the selected brief and news item at runtime
+  resolution: generated from the selected brief and news item at runtime
+
+native_audio: generated from the resolved story at runtime
+
+native_shots:
+  - time: 0-4s
+    title: Hook - establish the central question
+    action: Introduce the concrete problem and show the protagonist making the first irreversible response.
+    camera: Begin with visible motion and establish the stable geography needed for the next beat.
+    state_change: The protagonist recognizes the problem and commits to one clear objective.
+  - time: 4-10s
+    title: Escalation - advance under pressure
+    action: The protagonist actively pursues the objective while the dominant obstacle intensifies or changes the plan.
+    camera: Follow continuous action through the same geography without a reset or unrelated cut.
+    state_change: The mission becomes harder, and the protagonist reaches a visibly changed state.
+  - time: 10-15s
+    title: Payoff - resolve the objective
+    action: The protagonist performs the decisive action and creates a concrete visible result.
+    camera: Follow the decisive action into a stable ending composition that proves the result.
+    state_change: The original problem is resolved; the ending settles without introducing a new quest.

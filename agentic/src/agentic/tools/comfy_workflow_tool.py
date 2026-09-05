@@ -54,6 +54,9 @@ class ComfyWorkflowSpec:
     width_binding: NodeBinding | None = None
     height_binding: NodeBinding | None = None
     length_binding: NodeBinding | None = None
+    frame_rate_binding: NodeBinding | None = None
+    total_frames_binding: NodeBinding | None = None
+    timeline_binding: NodeBinding | None = None
     steps_binding: NodeBinding | None = None
     image_binding: NodeBinding | None = None
     last_image_binding: NodeBinding | None = None
@@ -65,6 +68,8 @@ class ComfyWorkflowSpec:
     reference_image_size_binding: NodeBinding | None = None
     seed_enabled: bool = True
     default_payload: dict[str, Any] = field(default_factory=dict)
+    timeout_seconds: int | None = None
+    required_node_types: tuple[str, ...] = ()
 
 
 class ComfyWorkflowToolset:
@@ -140,9 +145,13 @@ class ComfyWorkflowToolset:
         self._check_server()
 
         try:
-            generator = self.adapter.build_generator(host=self.comfy_host, port=self.comfy_port)
+            generator_kwargs: dict[str, Any] = {"host": self.comfy_host, "port": self.comfy_port}
+            if spec.timeout_seconds is not None:
+                generator_kwargs["timeout"] = spec.timeout_seconds
+            generator = self.adapter.build_generator(**generator_kwargs)
         except Exception as exc:
             raise RuntimeError(self._connection_error_message()) from exc
+        self._check_required_node_types(generator, spec)
         reference_info: dict[str, Any] | None = None
         runtime_workflow = workflow
         model_overrides = self._resolve_model_overrides(spec, merged_payload)
@@ -265,6 +274,17 @@ class ComfyWorkflowToolset:
             updates.append(self._binding_update(spec.height_binding, int(payload["height"]), str(workflow_path)))
         if spec.length_binding and payload.get("length") is not None:
             updates.append(self._binding_update(spec.length_binding, int(payload["length"]), str(workflow_path)))
+        if spec.frame_rate_binding and payload.get("frame_rate") is not None:
+            updates.append(self._binding_update(spec.frame_rate_binding, float(payload["frame_rate"]), str(workflow_path)))
+        if spec.total_frames_binding and payload.get("total_frames") is not None:
+            updates.append(self._binding_update(spec.total_frames_binding, int(payload["total_frames"]), str(workflow_path)))
+        if spec.timeline_binding and payload.get("timeline_data") is not None:
+            timeline_data = payload["timeline_data"]
+            if isinstance(timeline_data, dict):
+                timeline_data = json.dumps(timeline_data, ensure_ascii=False, separators=(",", ":"))
+            if not isinstance(timeline_data, str):
+                raise ValueError("timeline_data must be a mapping or serialized JSON string")
+            updates.append(self._binding_update(spec.timeline_binding, timeline_data, str(workflow_path)))
         if spec.steps_binding and payload.get("steps") is not None:
             updates.append(self._binding_update(spec.steps_binding, int(payload["steps"]), str(workflow_path)))
 
@@ -559,6 +579,23 @@ class ComfyWorkflowToolset:
                 "ComfyUI is missing required Ref2VA node(s): "
                 + ", ".join(missing)
                 + ". Update ComfyUI and install ComfyUI-VideoHelperSuite before running this mode."
+            )
+
+    @staticmethod
+    def _check_required_node_types(generator: Any, spec: ComfyWorkflowSpec) -> None:
+        missing: list[str] = []
+        for node_type in spec.required_node_types:
+            try:
+                info = generator.get_object_info(node_type)
+            except Exception:
+                info = {}
+            if not isinstance(info, dict) or not info.get(node_type):
+                missing.append(node_type)
+        if missing:
+            raise RuntimeError(
+                "ComfyUI is missing required node type(s): "
+                + ", ".join(missing)
+                + ". Install the custom nodes required by the selected workflow before rendering."
             )
 
     def _binding_update(self, binding: NodeBinding, value: Any, workflow_path: str) -> dict[str, Any]:

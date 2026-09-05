@@ -29,7 +29,7 @@ class ReferenceVideoTests(unittest.TestCase):
         )
         base_constraints = {
             "character": "Kirby",
-            "native_h3_storyboard_path": str(self.repo_root / "configs" / "storyboards" / "kirby_native_15s.yaml"),
+            "native_h3_storyboard_path": str(self.repo_root / "configs" / "storyboards" / "native_h3_15s.yaml"),
             "native_h3_workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
             "native_h3_keyframe_workflow_name": "krea2_turbo",
             "native_h3_refine_workflow_name": "krea2_turbo_img2img",

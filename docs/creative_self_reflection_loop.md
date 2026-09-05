@@ -28,7 +28,7 @@ flowchart LR
 - `observed_evidence`: 來源 prompt、storyboard path、segment action/state、review session、QA 狀態與本機成品路徑。
 - `root_cause`: 只描述流程根因，例如 `storyboard_drift`、`segment_contract_gap`、`review_context_missing`，不把「某張圖不好看」當成根因。
 - `severity`: `blocker` 會在生成前阻擋；`high` 要先修流程；`medium` 進入下一輪實驗；`boundary` 是技術、review 可用性或發佈問題，不得誤改創意 prompt。
-- `next_experiment`: 下一輪只改一件事，例如「移除 news-driven longvideo 的靜態 storyboard default」。
+- `next_experiment`: 下一輪只改一件事，例如「比較 generic longvideo storyboard 的 30 秒 payoff 是否更完整」。
 - `comparison_signal`: 同時保存 technical QA、semantic QA、人工 rejection tags 與最終成品；任何單一分數都不能代表內容合格。
 
 ## 本 repo 的硬規則
@@ -53,13 +53,14 @@ python scripts/run_creative_reflection.py --count 20
 
 ## 第一輪已落地的優化
 
-- `configs/characters/kirby.yaml` 不再為 news-driven longvideo 指定固定 Meadow 故事；新 run 會從當輪 brief 產生段落。
+- `configs/characters/kirby.yaml` 的 native H3 recipe 已改用 generic `native_h3_15s.yaml`；角色外觀由 resolved `character_profile` 提供，故事內容仍從當輪 brief 產生。
+- `text2longvideo` 現在預設 30 秒、6 個五秒段落，使用 `text2longvideo_story.yaml` 的 hook → goal → attempt → setback → reversal → payoff 節奏；明確 45 秒請求可再延伸 aftermath/coda。
 - 故事段落現在要求 `action`、`camera`、狀態起訖與因果欄位，並在 render 前執行 story-anchor gate；空動作或完全偏離 brief 會先停止。
 - 所有 route 的 review 摘要會優先讀取 native story、script plan 或當輪 objective，避免 reviewer 只看到「未提供故事摘要」。
 - `native_h3_t2v_story` 已改為必須執行且阻擋式 semantic QA；但 semantic QA 仍只是一個訊號，不能取代人工觀眾。
 - Native H3 的 news contract v2 要求 `news_mechanism`、`news_consequence` 與 `context / mechanism / consequence` 三類 anchor；QA 會阻擋只有單一 orb、balloon、wallet 或其他重複物件而沒有事件機制的故事。
 
-本輪尚未重新呼叫 ComfyUI/GPU 或重試外部發佈；下一個有界實驗是重新生成一個同類 `text2longvideo`，確認故事不再漂移，再比較成品的動作、連貫性與 payoff。Reject 結構化 tags 仍是下一個 review-side 優化，不會用猜測的理由覆寫既有 review。
+本輪已重新呼叫 ComfyUI/GPU 完成 H3 長片對照：Ref2VA 故事鏈雖能渲染但停留在相近畫面，未達內容品質；I2V 實際尾幀鏈完成約 30 秒且具可讀的追逐、接住、種下、發芽推進，技術 QA 通過；短 production smoke 也證實尾幀契約接通，但尚未替代人工發佈驗收。現行 `text2longvideo` 已固定採用 I2V＋實際尾幀，FL2V 只作明確狀態轉換；Director 路線已移除。下一個有界實驗應直接比較完整 30／45 秒成片的動作、連貫性與 payoff，不再重試已判定失敗的 Director 路線。Reject 結構化 tags 仍是 review-side 優化，不會用猜測的理由覆寫既有 review。
 
 ## 研究依據與取捨
 

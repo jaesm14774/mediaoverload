@@ -35,9 +35,6 @@ MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_ONLY_GENERATION_TYPES = {"text2img", "sticker_pack"}
 
-# A bare character invocation is the autonomous production mode. It must
-# exercise the complete news-to-media path instead of allowing the strategy
-# LLM to stop at an image-only strategy.
 NEWS_GROUNDED_GENERATION_TYPES = frozenset(
     {
         "native_h3_story",
@@ -48,11 +45,6 @@ NEWS_GROUNDED_GENERATION_TYPES = frozenset(
         "text2image2native_h3_ref2va",
         "text2longvideo",
     }
-)
-AUTONOMOUS_E2E_ROUTE_PREFERENCE = (
-    "native_h3_story",
-    "text2image2native_h3_ref2va",
-    "text2longvideo",
 )
 SUBJECT_MODE_SINGLE = "single"
 SUBJECT_MODE_INTERACTION = "two_character_interaction"
@@ -575,11 +567,14 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         asset_root=asset_root,
     )
     config_generation_type = str(routing["generation_type"])
+    longvideo_config = dict(routing.get("longvideo_config", {}) or {})
+    longvideo_config.update(
+        dict(dict(strategies.get("text2longvideo", {}) or {}).get("longvideo_config", {}) or {})
+    )
     effective_news_driven = bool(
         news_driven
         or (
             not str(prompt).strip()
-            and routing.get("selection_source") == "autonomous_e2e_default"
             and config_generation_type in NEWS_GROUNDED_GENERATION_TYPES
         )
     )
@@ -671,6 +666,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         generation=generation,
         routed_segment_count=routing.get("count_plan", {}).get("segment_count"),
         requested_duration_seconds=requested_duration_seconds,
+        longvideo_config=longvideo_config,
     )
     reference_video_source = requested_reference_video_source or str(
         generation.get("reference_video_source") or ""
@@ -721,11 +717,16 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         platform_configs.pop("youtube", None)
         skipped_platforms.append("youtube:image_only_route")
     hashtags = [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag]
-    longvideo_config = dict(routing.get("longvideo_config", {}) or {})
-    longvideo_config.update(
-        dict(dict(strategies.get("text2longvideo", {}) or {}).get("longvideo_config", {}) or {})
-    )
     use_tts = bool(longvideo_config.get("use_tts", False))
+    if (
+        agentic_media_type == "long_video"
+        and str(longvideo_config.get("production_profile") or "").strip().lower()
+        == "text2longvideo"
+    ):
+        # A publishable 30/45-second story must retain its requested runtime;
+        # Kirby's short-form 2x playback transform would otherwise compress it
+        # to half length before the publish review.
+        video_speed = {"enabled": False, "factor": 1.0}
 
     native_keyframe_candidate_count = max(1, int(native_recipe.get("keyframe_candidate_count") or 1))
     if (
@@ -984,8 +985,10 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         # Keep long-video policy in the shared strategy config. The planner
         # consumes provider-neutral recipe names.
         longvideo_config_keys = {
-            "mix_weights": "longvideo_mix_weights",
-            "mix_seed": "longvideo_mix_seed",
+            "production_profile": "longvideo_production_profile",
+            "default_duration_seconds": "longvideo_default_duration_seconds",
+            "segment_duration": "longvideo_segment_duration",
+            "storyboard_path": "storyboard_path",
             "review_policy": "longvideo_review_policy",
             "continuity_mode": "longvideo_continuity_mode",
             "workflow_names": "longvideo_workflow_names",
@@ -997,6 +1000,12 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             "length": "longvideo_length",
             "steps": "longvideo_steps",
             "model_profile": "longvideo_model_profile",
+            "reference_manifest": "reference_manifest",
+            "reference_image_paths": "reference_image_paths",
+            "reference_video_paths": "reference_video_paths",
+            "reference_max_images": "longvideo_reference_max_images",
+            "reference_max_videos": "longvideo_reference_max_videos",
+            "reference_selection_limit": "longvideo_reference_selection_limit",
         }
         for source_key, target_key in longvideo_config_keys.items():
             value = longvideo_config.get(source_key)
@@ -1008,6 +1017,14 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
                     if isinstance(value, list)
                     else value
                 )
+        if str(constraints.get("longvideo_production_profile") or "").strip().lower() == "text2longvideo":
+            # The routing count policy is intentionally conservative for LLM
+            # schema generation. Production duration, however, must determine
+            # the actual number of five-second H3 clips so 30s and 45s do not
+            # render four clips and stretch the final image for the remainder.
+            if requested_duration_seconds is not None:
+                duration_seconds = max(1, int(requested_duration_seconds))
+            constraints["segment_count"] = max(2, math.ceil(float(duration_seconds) / 5.0))
     character_config_summary = _summarize_character_config(
         path=path,
         character=character,
@@ -1017,6 +1034,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         social_media=social_media,
         strategies=strategies,
         platform_configs=platform_configs,
+        effective_longvideo_config=longvideo_config,
     )
     character_config_summary["subject_context"] = subject_context
     return {
@@ -1225,6 +1243,9 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     "review_scope": _publish_review_scope(media_paths),
                     "review_all_candidates": _publish_review_scope(media_paths) == "final_media",
                     "publish_prompt_source": publish_prompt_source,
+                    # Keep editorial rotation different across successful
+                    # workflow runs while preserving a traceable key.
+                    "post_strategy_seed": run_id,
                     "visual_grounding": _extract_publish_visual_grounding(generation_dict),
                     "news_context": dict(payload["constraints"].get("news_context") or {}),
                     "news_grounding_required": bool(
@@ -1511,7 +1532,11 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
         # Explicit final paths take precedence over package saved_files. A
         # video package may also expose opening/ending PNGs in saved_files;
         # those are continuity artifacts, not publish candidates.
-        for key in ("media_paths", "video_path", "final_video_path", "image_path", "final_image_path"):
+        if outputs.get("final_video_path"):
+            append_media(outputs.get("final_video_path"))
+            if collected:
+                return collected
+        for key in ("media_paths", "final_video_path", "video_path", "image_path", "final_image_path"):
             append_media(outputs.get(key))
         if collected:
             return collected
@@ -1919,31 +1944,6 @@ def _route_generation_from_character_config(
             prompt_mode="duration_policy",
         )
 
-    # The exact public command `python run_media_interface.py --character X`
-    # is intentionally deterministic: it is an autonomous E2E production run,
-    # not an invitation for the strategy LLM to choose a shortcut. Keep
-    # explicit prompts, generation types, and durations on their existing
-    # paths; only the empty bare invocation gets this policy.
-    if (
-        not str(prompt).strip()
-        and not news_driven
-        and requested_duration_seconds is None
-    ):
-        selected_generation_type = next(
-            (
-                candidate
-                for candidate in AUTONOMOUS_E2E_ROUTE_PREFERENCE
-                if candidate in generation_type_candidates
-            ),
-            generation_type_candidates[0],
-        )
-        return build_fixed_route(
-            selected_generation_type,
-            "bare character invocation requires the complete news-to-story-to-media workflow",
-            selection_source="autonomous_e2e_default",
-            prompt_mode="autonomous_e2e",
-        )
-
     if rng is not None:
         selected_generation_type = _weighted_candidate_choice(
             dict(generation.get("generation_type_weights", {}) or {}),
@@ -2180,21 +2180,15 @@ def _collect_workflow_stage_candidates(
                 ],
             }
         elif generation_type == "text2longvideo":
+            longvideo_config = dict(routing_config.get("longvideo_config", {}) or {})
+            workflow_names = [
+                str(name).strip()
+                for name in list(longvideo_config.get("workflow_names", []) or [])
+                if str(name).strip()
+            ]
             inferred = {
-                "image_workflow_name": [
-                    _nested_get(strategy, "first_stage", "workflow_name"),
-                    _nested_get(strategy, "first_stage", "workflow_path"),
-                    generation_workflows.get("text2img"),
-                ],
-                "video_workflow_name": [
-                    _nested_get(strategy, "video_generation", "workflow_name"),
-                    _nested_get(strategy, "video_generation", "workflow_path"),
-                    generation_workflows.get("text2video"),
-                ],
-                "transition_workflow_name": [
-                    _nested_get(strategy, "frame_transition", "workflow_name"),
-                    _nested_get(strategy, "frame_transition", "workflow_path"),
-                ],
+                "video_workflow_name": workflow_names[:1],
+                "transition_workflow_name": workflow_names[1:2],
             }
         elif generation_type == "native_h3_story":
             native_recipe = dict(generation.get("native_h3_story", {}) or {})
@@ -2347,9 +2341,7 @@ def _prioritize_h3_profile(
         elif generation_type in {"native_h3_ref2va", "text2image2native_h3_ref2va"}:
             continue
         elif generation_type == "text2longvideo":
-            # Long-video continuity is the default route. Pure T2V remains
-            # available through an explicit longvideo recipe override.
-            suffix = "15s_fl2va_i2v"
+            suffix = "i2v"
         else:
             suffix = "i2v"
         preferred = f"minimax_h3_{slug}_{suffix}"
@@ -2565,6 +2557,7 @@ def _resolve_duration_seconds(
     generation: dict[str, Any] | None = None,
     routed_segment_count: Any | None = None,
     requested_duration_seconds: int | None = None,
+    longvideo_config: dict[str, Any] | None = None,
 ) -> int:
     requested = max(1, int(requested_duration_seconds)) if requested_duration_seconds is not None else None
     if config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
@@ -2584,10 +2577,23 @@ def _resolve_duration_seconds(
         return requested or 5
     if config_generation_type != "text2longvideo":
         return requested or 30
-    longvideo = dict(strategies.get("text2longvideo", {}) or {})
-    longvideo_config = dict(longvideo.get("longvideo_config", {}) or {})
-    segment_count = int(routed_segment_count or longvideo_config.get("segment_count", 3))
-    segment_duration = int(longvideo_config.get("segment_duration", 5))
+    configured_longvideo = dict(longvideo_config or {})
+    if not configured_longvideo:
+        longvideo = dict(strategies.get("text2longvideo", {}) or {})
+        configured_longvideo = dict(longvideo.get("longvideo_config", {}) or {})
+    if (
+        str(configured_longvideo.get("production_profile") or "").strip().lower()
+        == "text2longvideo"
+        and requested is not None
+    ):
+        # Production duration is an explicit user contract. Do not replace
+        # 30s/45s with the legacy routing count multiplied by one segment.
+        return requested
+    default_duration = configured_longvideo.get("default_duration_seconds")
+    if default_duration not in (None, ""):
+        return max(10, int(default_duration))
+    segment_count = int(routed_segment_count or configured_longvideo.get("segment_count", 3))
+    segment_duration = int(configured_longvideo.get("segment_duration", 5))
     return max(10, segment_count * segment_duration)
 
 
@@ -2820,9 +2826,14 @@ def _summarize_character_config(
     social_media: dict[str, Any],
     strategies: dict[str, Any],
     platform_configs: dict[str, dict[str, Any]],
+    effective_longvideo_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     longvideo = dict(strategies.get("text2longvideo", {}) or {})
-    longvideo_config = dict(longvideo.get("longvideo_config", {}) or {})
+    longvideo_config = dict(
+        effective_longvideo_config
+        if effective_longvideo_config is not None
+        else longvideo.get("longvideo_config", {}) or {}
+    )
     return {
         "config_path": str(path),
         "character_name": str(selected_character_name or character.get("name") or path.stem),
@@ -2847,6 +2858,10 @@ def _summarize_character_config(
         "longvideo": {
             "segment_count": int(longvideo_config.get("segment_count", 0) or 0),
             "segment_duration": int(longvideo_config.get("segment_duration", 0) or 0),
+            "default_duration_seconds": int(longvideo_config.get("default_duration_seconds", 0) or 0),
+            "storyboard_path": str(longvideo_config.get("storyboard_path") or ""),
+            "production_profile": str(longvideo_config.get("production_profile") or ""),
+            "continuity_mode": str(longvideo_config.get("continuity_mode") or ""),
             "use_tts": bool(longvideo_config.get("use_tts", False)),
             "tts_voice": str(longvideo_config.get("tts_voice", "")),
         },

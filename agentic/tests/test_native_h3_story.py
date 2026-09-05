@@ -211,7 +211,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
     def test_news_only_native_h3_does_not_validate_autonomous_brief_as_user_objective(self) -> None:
         captured: dict[str, object] = {}
-        storyboard_fixture = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard_fixture = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard_fixture.update(
             {
                 "opening_keyframe_prompt": "Kirby reacts to a visible news-derived disruption in a clear meadow composition.",
@@ -252,7 +252,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             ),
             node=SimpleNamespace(
                 inputs={
-                    "storyboard_path": "configs/storyboards/kirby_native_15s.yaml",
+                    "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
                     "duration_seconds": 15,
                     "style": "polished 2D anime",
                 }
@@ -321,7 +321,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(result.outputs["identity_reports"][0]["validation"], "human_selected_immutable")
 
     def test_native_prompt_includes_creative_variation_and_cleans_title_artifact(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         prompt = format_native_h3_prompt(
             storyboard,
             creative_brief="a blue-hour summer storm",
@@ -335,7 +335,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("loop the opening", prompt)
 
     def test_native_prompt_carries_the_single_visual_gag_contract(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["gag_card"] = {
             "hook_frame": "Kirby is already being dragged by a runaway cushion",
             "character_desire": "Kirby wants one soft nap",
@@ -354,7 +354,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("Replay reason", prompt)
 
     def test_native_gag_card_is_preserved_when_story_is_merged(self) -> None:
-        base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         generated_story = {
             "name": "Kirby and the Runaway Cushion",
             "base_prompt": "One Kirby, polished 2D anime, squash-and-stretch comedy motion.",
@@ -502,7 +502,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("start where the previous shot ends", error)
 
     def test_native_prompt_rejects_unbounded_scene_rewrite(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         prompt = format_native_h3_prompt(
             storyboard,
             creative_brief=(
@@ -515,7 +515,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("red shards", prompt)
 
     def test_native_h3_story_is_generated_from_news_and_replaces_fixed_plot(self) -> None:
-        base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         generated_story = {
             "name": "Kirby and the Lantern Current",
             "base_prompt": "Kirby is the only protagonist in a moonlit canal city where floating lanterns drift against the tide.",
@@ -718,7 +718,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(rejected["checks"]["news_anchor_not_default_object_loop"])
 
     def test_native_h3_render_prompt_carries_news_mechanism_contract(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["news_trace"] = {
             "visual_translation": "A city blackout closes a canal path.",
             "news_mechanism": "synchronized lights shut down and block the route",
@@ -765,7 +765,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(quality["passed"], quality)
 
     def test_native_h3_safety_contract_rejects_readable_text_without_semantic_repair(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         invalid_story = {
             "base_prompt": "Kirby reaches for a glowing document covered in financial symbols.",
             "native_shots": [
@@ -818,7 +818,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("stamp with readable content", stamped_text)
 
     def test_native_h3_rejects_text_cues_in_story_spine_and_keyframe_prompts(self) -> None:
-        story = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        story = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         story.update(
             {
                 "name": "Kirby and the Lantern Current",
@@ -902,7 +902,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(NewsContextService.is_usable_selection("Central bank changes reserve policy", "gold;reserve"))
 
     def test_native_h3_optional_semantic_fields_do_not_trigger_repair(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         valid_story = {
             "name": "Kirby and the Lantern Current",
             "base_prompt": "Kirby is the only protagonist in a moonlit canal city with a runaway lantern.",
@@ -974,7 +974,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
 
     def test_native_h3_free_model_minimal_story_is_normalized_with_advisory_scores(self) -> None:
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         minimal_story = {
             "story_name": "Kirby and the Loose Lantern",
             "style_description": "Soft pastel animation with readable squash-and-stretch motion.",
@@ -1038,7 +1038,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
     def test_native_h3_story_does_not_fallback_when_llm_is_unavailable(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/kirby_native_15s.yaml")
+        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         with patch.object(engine, "_manager_or_none", return_value=None):
             with self.assertRaises(PromptGenerationError):
                 engine.generate_native_h3_storyboard(

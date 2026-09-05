@@ -90,6 +90,7 @@ class AgentPlanningSkills:
             segment_count,
             tone,
             reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
+            production_profile=str(context.node.inputs.get("production_profile") or ""),
         )
         validate_story_segments(segments, segment_count)
         return SkillResult(
@@ -316,8 +317,29 @@ class AgentMediaSkills:
                 context.plan.goal.constraints.get("keyframe_workflow_name")
                 or context.node.inputs["workflow_name"]
             )
-            character = str(context.plan.goal.constraints.get("character") or "").strip().lower()
+            character_label = str(
+                context.plan.goal.constraints.get("character") or "the selected protagonist"
+            ).strip()
+            character = character_label.lower()
             subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
+            profile = dict(
+                subject_context.get("character_profile")
+                or context.plan.goal.constraints.get("character_profile")
+                or {}
+            )
+            profile_details = "; ".join(
+                part
+                for part in (
+                    str(profile.get("role_description") or "").strip(),
+                    str(profile.get("keywords") or "").strip(),
+                )
+                if part
+            )
+            resolved_subject = (
+                f"{character_label} ({profile_details})"
+                if profile_details
+                else character_label
+            )
             interaction_required = bool(
                 dict(subject_context.get("interaction_contract") or {}).get("required", False)
             )
@@ -346,7 +368,7 @@ class AgentMediaSkills:
                         if anchor_position == "last":
                             prompt += (
                                 " Render every named prop from the end state literally at a natural scale, "
-                                "grounded in a physically plausible location and clearly separate from Kirby's face, "
+                                f"grounded in a physically plausible location and clearly separate from {character_label}'s face, "
                                 "eyes, and body; preserve one readable wide composition."
                             )
                 prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
@@ -382,15 +404,15 @@ class AgentMediaSkills:
                     )
                 else:
                     prompt = (
-                        f"{prompt}, single continuous animation frame, one single Kirby only, one composition, "
-                        "Kirby large and clearly visible "
-                        "in the foreground or midground, full readable round pink body and bright red feet, "
+                        f"{prompt}, single continuous animation frame, one {resolved_subject} only, one composition, "
+                        f"{character_label} large and clearly visible in the foreground or midground, "
+                        "with the resolved character_profile appearance readable, "
                         "no storyboard, no sequence, no contact sheet, no split composition"
                     )
                 negative_prompt = (
                     f"{negative_prompt}, storyboard, contact sheet, comic panels, multi-panel, split screen, collage, "
-                    "tiny distant subject, cropped character, white or unrecognizable character, duplicate Kirby, "
-                    "second Kirby, cloned subject, object on face, object on head, object covering eyes, "
+                    f"tiny distant subject, cropped character, unrecognizable character, duplicate {character_label}, "
+                    f"second {character_label}, cloned subject, object on face, object on head, object covering eyes, "
                     "oversized prop, giant orb, floating unrelated object, humanoid silhouette, black figure, "
                     "light beam, lens flare"
                     + (", identity swap, unrequested third subject" if interaction_required else "")
@@ -827,6 +849,7 @@ class AgentMediaSkills:
                 "video_path": video_path,
                 "output_path": str(video_dir / f"{Path(video_path).stem}_trimmed.mp4"),
                 "duration_seconds": duration_seconds,
+                "normalize_audio": bool(context.node.inputs.get("normalize_audio", False)),
             },
         )
         return SkillResult(
@@ -970,6 +993,17 @@ class AgentMediaSkills:
                     collected.setdefault(key, []).extend(str(item) for item in value)
                 elif isinstance(value, str) and value:
                     collected.setdefault(key, []).append(value)
+        preferred_video_node = str(context.node.inputs.get("preferred_video_node") or "").strip()
+        if preferred_video_node:
+            preferred_output = context.state.node_outputs.get(preferred_video_node, {})
+            if isinstance(preferred_output, dict):
+                preferred_video = preferred_output.get("video_path") or preferred_output.get("final_video_path")
+                if isinstance(preferred_video, list):
+                    preferred_video = next((item for item in preferred_video if item), "")
+                if preferred_video:
+                    preferred_path = str(preferred_video)
+                    collected["final_video_path"] = [preferred_path]
+                    collected["video_path"] = [preferred_path]
         collected = {key: list(dict.fromkeys(values)) for key, values in collected.items()}
         collected["prompt_lineage"] = self._collect_prompt_lineage(context)
         collected["node_prompt_modes"] = self._collect_node_prompt_modes(context)
@@ -999,6 +1033,7 @@ class AgentMediaSkills:
             "style": context.plan.goal.style,
             "workflow_name": context.plan.workflow_name,
             "summary_scope": summary_scope,
+            "metadata": dict(context.node.inputs.get("summary_metadata") or {}),
             "dependency_outputs": dependencies,
             "final_outputs": self._flatten_summary_outputs(dependencies),
             "review_summary": {

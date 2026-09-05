@@ -109,12 +109,12 @@
     "_meta": {"title": "Save Kirby H3 native 15s video"}
   },
   "16": {
-    "inputs": {"image": "kirby_native_15s_first.png"},
+    "inputs": {"image": "native_h3_15s_first.png"},
     "class_type": "LoadImage",
     "_meta": {"title": "Kirby native 15s first frame"}
   },
   "18": {
-    "inputs": {"image": "kirby_native_15s_last.png"},
+    "inputs": {"image": "native_h3_15s_last.png"},
     "class_type": "LoadImage",
     "_meta": {"title": "Kirby native 15s last frame"}
   }

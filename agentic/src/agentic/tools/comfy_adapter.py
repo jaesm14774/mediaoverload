@@ -30,8 +30,8 @@ class ComfyAdapter:
             workflow_path=workflow_path,
         )
 
-    def build_generator(self, host: str | None = None, port: int | None = None) -> Any:
-        return AgenticMediaGenerator(host=host, port=port)
+    def build_generator(self, host: str | None = None, port: int | None = None, timeout: int | None = None) -> Any:
+        return AgenticMediaGenerator(host=host, port=port, timeout=timeout)
 
     @staticmethod
     def load_workflow(workflow_path: Path) -> dict[str, Any]:

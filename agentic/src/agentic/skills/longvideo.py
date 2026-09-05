@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -503,6 +504,13 @@ class LongVideoSkills:
             outputs=outputs,
             metrics={"video_count": len(result.get("saved_files", [])), "recipe": recipe},
             logs=[f"Rendered {segment['segment_id']} clip with {recipe} conditioning."],
+        )
+
+        overlap = int(
+            context.node.inputs.get(
+                "continuity_overlap_frames",
+                constraints.get("director_continuity_overlap_frames", DIRECTOR_CONTINUITY_OVERLAP_FRAMES),
+            )
         )
 
     def render_native_h3(self, context: SkillContext) -> SkillResult:
@@ -1048,7 +1056,7 @@ class LongVideoSkills:
             storyboard = dict(story.get("generated_storyboard") or {})
             semantic_qa = self.prompt_engine.evaluate_video_contact_sheet(
                 contact_sheet_path=str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
-                character=str(constraints.get("character") or "Kirby"),
+                character=str(constraints.get("character") or "the protagonist"),
                 subject_context=dict(constraints.get("subject_context") or {}),
                 story_spine=dict(story.get("story_spine") or storyboard.get("story_spine") or {}),
                 native_shots=[item for item in (storyboard.get("native_shots") or []) if isinstance(item, dict)],

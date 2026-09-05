@@ -421,8 +421,8 @@ class AgenticComfyCommunicator:
 
 
 class AgenticMediaGenerator:
-    def __init__(self, host: str | None = None, port: int | None = None) -> None:
-        self.communicator = AgenticComfyCommunicator(host, port)
+    def __init__(self, host: str | None = None, port: int | None = None, timeout: int | None = None) -> None:
+        self.communicator = AgenticComfyCommunicator(host, port, timeout=timeout)
         self.communicator.connect_websocket()
 
     def generate(

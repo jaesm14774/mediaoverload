@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
+from agentic.runtime.post_strategy import resolve_post_strategy
 
 
-PLATFORM_STRATEGY_VERSION = "2026-08-25.v1"
+PLATFORM_STRATEGY_VERSION = "2026-09-02.v2"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 YOUTUBE_TITLE_MAX = 100
@@ -49,6 +50,7 @@ def build_platform_bundle(
     platform_captions: dict[str, str],
     platforms: list[str],
     media_paths: list[str] | None,
+    post_strategy: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build platform-native packages without expanding the generic caption contract.
 
@@ -58,6 +60,7 @@ def build_platform_bundle(
     """
     selected_media = [str(path) for path in (media_paths or []) if str(path).strip()]
     safe_hashtags = sanitize_hashtags(hashtags)
+    effective_post_strategy = dict(post_strategy or resolve_post_strategy(goal, selected_media))
     effective_platforms = [str(platform) for platform in platforms]
     if not effective_platforms:
         effective_platforms = [str(platform) for platform in platform_captions]
@@ -67,6 +70,7 @@ def build_platform_bundle(
         platform_name = str(platform)
         source_caption = str(platform_captions.get(platform_name) or caption).strip()
         entry = _base_entry(source_caption, safe_hashtags, selected_media)
+        entry["post_strategy"] = dict(effective_post_strategy)
         normalized_name = platform_name.casefold()
         if normalized_name == "youtube":
             entry.update(
@@ -75,6 +79,7 @@ def build_platform_bundle(
                     caption=source_caption,
                     hashtags=safe_hashtags,
                     media_paths=selected_media,
+                    post_strategy=effective_post_strategy,
                 )
             )
         elif normalized_name.startswith("facebook"):
@@ -84,6 +89,7 @@ def build_platform_bundle(
                     caption=source_caption,
                     hashtags=safe_hashtags,
                     media_paths=selected_media,
+                    post_strategy=effective_post_strategy,
                 )
             )
         bundle[platform_name] = entry
@@ -113,12 +119,13 @@ def _build_youtube_package(
     caption: str,
     hashtags: str,
     media_paths: list[str],
+    post_strategy: dict[str, Any],
 ) -> dict[str, Any]:
     video_paths = _paths_with_extensions(media_paths, VIDEO_EXTENSIONS)
     answer_line = _answer_first_line(caption)
     title = _youtube_title(answer_line, goal.prompt)
     description = _youtube_description(caption, answer_line, hashtags)
-    tags = _youtube_tags(hashtags, goal.prompt, caption)
+    tags = _youtube_tags(hashtags)
     # Media produced by this runtime is synthetic by default. A caller may
     # not turn off the disclosure through an unverified goal constraint.
     synthetic_media = True
@@ -153,8 +160,15 @@ def _build_youtube_package(
             "format": "video",
             "search_intent": _search_intent(goal.prompt),
             "answer_first": bool(answer_line),
-            "hook": "first_visible_story_line",
-            "payoff": "caption_closing_beat",
+            "post_strategy_version": str(post_strategy.get("strategy_version") or ""),
+            "variant_id": str(post_strategy.get("variant_id") or ""),
+            "variation_key": str(post_strategy.get("variation_key") or ""),
+            "editorial_question": str(post_strategy.get("editorial_question") or ""),
+            "hook": str(post_strategy.get("hook_mode") or ""),
+            "payoff": str(post_strategy.get("payoff_mode") or ""),
+            "cta_policy": str(post_strategy.get("cta_policy") or ""),
+            "hashtag_policy": str(post_strategy.get("hashtag_policy") or ""),
+            "discovery_terms": list(post_strategy.get("discovery_terms") or []),
             "originality_basis": str(
                 goal.constraints.get("originality_basis") or "creator_produced_or_owned_media"
             ),
@@ -170,7 +184,7 @@ def _build_youtube_package(
                     "returning_viewers",
                     "satisfaction_feedback",
                 ],
-                "avoid_optimizing_for": ["keyword_stuffing", "hashtag_count"],
+                "avoid_optimizing_for": ["keyword_stuffing", "fixed_hashtag_quota"],
             },
         },
         "validation": {
@@ -196,6 +210,7 @@ def _build_facebook_package(
     caption: str,
     hashtags: str,
     media_paths: list[str],
+    post_strategy: dict[str, Any],
 ) -> dict[str, Any]:
     video_paths = _paths_with_extensions(media_paths, VIDEO_EXTENSIONS)
     image_paths = _paths_with_extensions(media_paths, IMAGE_EXTENSIONS)
@@ -229,8 +244,15 @@ def _build_facebook_package(
             "strategy_version": PLATFORM_STRATEGY_VERSION,
             "platform": "facebook",
             "format": format_name,
-            "hook": "first_visible_story_line",
-            "payoff": "compact_emotional_or_practical_takeaway",
+            "post_strategy_version": str(post_strategy.get("strategy_version") or ""),
+            "variant_id": str(post_strategy.get("variant_id") or ""),
+            "variation_key": str(post_strategy.get("variation_key") or ""),
+            "editorial_question": str(post_strategy.get("editorial_question") or ""),
+            "hook": str(post_strategy.get("hook_mode") or ""),
+            "payoff": str(post_strategy.get("payoff_mode") or ""),
+            "cta_policy": str(post_strategy.get("cta_policy") or ""),
+            "hashtag_policy": str(post_strategy.get("hashtag_policy") or ""),
+            "discovery_terms": list(post_strategy.get("discovery_terms") or []),
             "originality_basis": str(
                 goal.constraints.get("originality_basis") or "creator_produced_or_owned_media"
             ),
@@ -247,7 +269,7 @@ def _build_facebook_package(
                     "earnings_rate",
                     "non_qualified_views",
                 ],
-                "avoid_optimizing_for": ["engagement_bait", "excessive_hashtags"],
+                "avoid_optimizing_for": ["engagement_bait", "excessive_hashtags", "fixed_hashtag_quota"],
             },
         },
         "validation": {
@@ -283,11 +305,11 @@ def _youtube_description(caption: str, answer_line: str, hashtags: str) -> str:
     return "\n\n".join(parts).strip()
 
 
-def _youtube_tags(hashtags: str, prompt: str, caption: str) -> list[str]:
-    candidates: list[str] = []
-    candidates.extend(_hashtag_tokens(hashtags))
-    candidates.extend(_word_tokens(prompt))
-    candidates.extend(_word_tokens(caption))
+def _youtube_tags(hashtags: str) -> list[str]:
+    # YouTube documents title, thumbnail, and description as the important
+    # discovery metadata; tags are retained only when the creator explicitly
+    # selected a semantic tag, rather than mining production prompts.
+    candidates = _hashtag_tokens(hashtags)
     tags: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -371,10 +393,6 @@ def _hashtag_tokens(value: str) -> list[str]:
         if cleaned and cleaned.casefold() not in {item.casefold() for item in tokens}:
             tokens.append(cleaned)
     return tokens
-
-
-def _word_tokens(value: str) -> list[str]:
-    return re.findall(r"[\w-]{2,40}", str(value or ""), flags=re.UNICODE)
 
 
 def _single_line(value: str) -> str:

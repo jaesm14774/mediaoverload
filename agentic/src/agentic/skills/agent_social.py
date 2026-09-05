@@ -10,6 +10,7 @@ from agentic.runtime.platform_content import (
     build_platform_bundle,
     sanitize_hashtags,
 )
+from agentic.runtime.post_strategy import resolve_post_strategy
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.tools.context_services import DiscordHumanReviewService
@@ -36,6 +37,7 @@ class AgentSocialSkills:
         approved_review_text = str(review_select.get("approved_review_text") or "").strip()
         edited_review_text = str(review_select.get("edited_review_text") or "").strip()
         review_text = approved_review_text or edited_review_text
+        post_strategy = resolve_post_strategy(context.plan.goal, selected_media)
         if review_text:
             caption_override, hashtags_override = self._split_review_caption_and_hashtags(review_text)
             if not caption_override:
@@ -56,6 +58,7 @@ class AgentSocialSkills:
                     platform_captions=platform_captions,
                     platforms=platforms,
                     media_paths=selected_media,
+                    post_strategy=post_strategy,
                 ),
                 "caption_strategy": "human_approved_review",
                 "prompt_mode": "human_approved_review",
@@ -81,6 +84,7 @@ class AgentSocialSkills:
                 "hashtags": str(bundle["hashtags"]),
                 "platform_captions": dict(bundle.get("platform_captions", {})),
                 "platform_bundle": dict(bundle.get("platform_bundle", {})),
+                "post_strategy": dict(bundle.get("post_strategy") or post_strategy),
                 "caption_strategy": str(bundle.get("caption_strategy", "generic")),
                 "dispatch_ready": bool(bundle.get("dispatch_ready", False)),
                 "prompt_mode": str(bundle.get("prompt_mode", "template")),

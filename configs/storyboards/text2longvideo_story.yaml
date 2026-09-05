@@ -1,0 +1,261 @@
+# Generic story contract for text2longvideo.
+#
+# The default six cards form a complete 30-second arc at five seconds per
+# segment. Cards 7-9 are optional aftermath/coda cards for an explicit 45-second
+# request; they extend the resolved payoff instead of opening a second quest.
+# Concrete plot, setting, props, and character appearance come from the current
+# brief, news context, and resolved character_profile at runtime.
+
+name: text2longvideo_story_contract
+character: selected protagonist
+native_duration_seconds: 30
+segment_duration_seconds: 5
+default_segment_count: 6
+story_source: dynamic_news_llm
+
+story_generation:
+  mode: dynamic_news_llm
+  plot_generated_at_runtime: true
+  default_duration_seconds: 30
+  default_segment_count: 6
+  optional_extension_segment_count: 9
+  required_beats:
+    - hook
+    - goal
+    - attempt
+    - setback
+    - reversal
+    - payoff
+    - aftermath
+  production_rules:
+    - Each five-second segment must contain a readable setup, physical change, and handoff.
+    - The first six segments must complete the central objective within 30 seconds.
+    - Segments 7-9 may deepen consequence or provide a visual coda, but must not create a new quest.
+    - The resolved character_profile is the only source of protagonist appearance.
+
+base_prompt: >-
+  Selected protagonist contract only: use the resolved character_profile as the
+  sole authority for the protagonist's recognizable identity, anatomy,
+  proportions, costume, silhouette, and palette. Preserve one continuous
+  protagonist and one coherent story world while the current brief and news
+  context supply the concrete plot, setting, props, and visual details.
+
+negative_prompt: >-
+  unrequested characters, duplicate protagonist, identity drift, malformed
+  anatomy, unrelated subplot, new quest after payoff, hard reset, teleporting,
+  frozen pose, montage, contact sheet, readable words, logos, watermark
+
+world:
+  setting: generated from the selected brief and news item at runtime
+  visual_language: >-
+    cinematic visual storytelling, readable cause-and-effect, specific material
+    response, purposeful camera movement, and a clear visual motif that can echo
+    between the opening and ending
+  continuity_rules:
+    - The resolved character_profile remains the sole authority for the protagonist identity in every segment.
+    - Keep one stable world geography and one dominant story mechanism unless the resolved brief explicitly requires a motivated transition.
+    - Every segment must inherit the previous rendered tail as its start state and make a visible state change.
+    - Cause and effect must be legible across adjacent segments; no segment may reset the pose, geography, objective, or identity.
+    - Segment 1 opens a concrete question; segments 2-5 pursue, complicate, and reframe the same objective; segment 6 pays it off.
+    - Optional segments 7-9 may show consequence, reaction, or a visual echo only after the central payoff is already visible.
+    - The final frame should be settled and reviewable, with an opening echo that reinforces continuity without erasing the result.
+    - Rendered tail frames are authoritative for continuity; do not redraw a competing character or world state.
+
+story_spine:
+  premise: A selected protagonist faces one concrete problem shaped by the current brief and news context.
+  objective: Pursue one visible objective whose progress can be shown through changing states.
+  obstacle: A single dominant physical or social mechanism complicates that objective.
+  stakes: The objective becomes harder to achieve until the protagonist changes tactics or commits more deeply.
+  emotional_arc: Curiosity becomes commitment, pressure, surprise, and earned relief.
+  climax: The protagonist applies a learned or reframed action that changes the dominant mechanism.
+  resolution: The original objective settles visibly, followed by a readable reaction or visual echo.
+
+segments:
+  - id: hook
+    act: setup
+    phase: hook
+    act_goal: Make the central question immediately legible.
+    spine_beat: Establish the problem before explaining it.
+    narrative_goal: Show the protagonist already inside a concrete problem and reveal why the first response matters.
+    cause: The current brief presents a specific change, signal, or disruption that demands a response.
+    action: The protagonist notices the disruption, reacts physically, and commits to investigating or protecting the objective.
+    action_beats:
+      - Start with the protagonist and the problem already visible in the same readable geography.
+      - Show a small irreversible reaction that turns observation into intention.
+    effect: The protagonist has a clear objective and the audience has a concrete question to follow.
+    must_show:
+      - the resolved protagonist identity from character_profile
+      - the concrete opening problem or mechanism
+      - a visible first reaction and committed objective
+    start_state: The protagonist and the unresolved problem are visible in the opening geography.
+    end_state: The protagonist has committed to one objective and is moving toward the first attempt.
+    next_hook: The first attempt appears possible but carries a visible cost or constraint.
+    camera: Use a motivated opening move that reveals the problem and ends on the protagonist's commitment.
+
+  - id: goal
+    act: setup
+    phase: goal
+    act_goal: Turn the question into a visible plan.
+    spine_beat: Define what success looks like and begin pursuit.
+    narrative_goal: Make the protagonist's desired result and first tactic readable without introducing a second plot.
+    cause: The opening disruption gives the protagonist enough information to choose one immediate tactic.
+    action: The protagonist selects the tactic, moves into position, and begins the first deliberate attempt.
+    action_beats:
+      - Clarify the desired end state through gesture, staging, or a visible target.
+      - Begin the first attempt with a specific movement that can produce a measurable change.
+    effect: The protagonist gains partial access to the objective, but the obstacle exposes its first constraint.
+    must_show:
+      - the same protagonist and geography from the hook
+      - a visible objective or target state
+      - the first deliberate attempt and its immediate constraint
+    start_state: The protagonist is committed to the objective and approaching the first attempt.
+    end_state: The first attempt has begun and the objective is closer, but not yet secure.
+    next_hook: The obstacle reacts in a way that makes the original tactic insufficient.
+    camera: Track the approach and let the camera reveal the first measurable state change.
+
+  - id: attempt
+    act: confrontation
+    phase: attempt
+    act_goal: Test the initial plan through physical action.
+    spine_beat: Let the mechanism answer the protagonist's first move.
+    narrative_goal: Deliver a concrete attempt with a readable partial result rather than another explanation.
+    cause: The first tactic creates contact with the dominant obstacle or mechanism.
+    action: The protagonist follows through on the tactic, adapts to resistance, and briefly appears to make progress.
+    action_beats:
+      - Show contact, resistance, or feedback from the dominant mechanism.
+      - Convert that feedback into a visible partial success or unstable advantage.
+    effect: Progress is real but fragile, and the protagonist's position is exposed to a stronger reversal.
+    must_show:
+      - the physical interaction that tests the plan
+      - a visible partial success or unstable advantage
+      - the same objective state advancing rather than resetting
+    start_state: The first attempt is underway and the obstacle is about to respond.
+    end_state: The protagonist has made partial progress but is in a less stable position.
+    next_hook: A consequence arrives that threatens the progress just achieved.
+    camera: Stay attached to the contact point, then reveal the changed balance of the situation.
+
+  - id: setback
+    act: confrontation
+    phase: setback
+    act_goal: Escalate the cost without changing the story question.
+    spine_beat: Make the initial plan fail in a useful, visible way.
+    narrative_goal: Show a setback that forces a new tactic while preserving the same objective and world.
+    cause: The dominant mechanism exploits the weakness revealed by the first attempt.
+    action: The protagonist loses ground, protects the most important element, and recognizes what the first plan misunderstood.
+    action_beats:
+      - Make the setback physically visible through displacement, loss of control, or a changed relationship.
+      - Preserve one valuable piece of progress so the next tactic grows from what happened.
+    effect: The original tactic is no longer viable, but the failure reveals the leverage needed for a reversal.
+    must_show:
+      - a clear consequence caused by the prior attempt
+      - the protagonist's readable reaction to the setback
+      - a preserved objective and a newly understood constraint
+    start_state: Partial progress exists, but the protagonist's first tactic is failing.
+    end_state: The protagonist has lost the initial advantage and understands the obstacle differently.
+    next_hook: A new tactic becomes possible because the protagonist notices the mechanism's weakness.
+    camera: Follow the loss of control into a close readable reaction, then reveal the new tactical clue.
+
+  - id: reversal
+    act: confrontation
+    phase: reversal
+    act_goal: Convert the setback into a decisive new plan.
+    spine_beat: Reframe the problem and commit to the final attempt.
+    narrative_goal: Make the protagonist's learning visible and turn it immediately into purposeful action.
+    cause: The setback exposes a repeatable pattern or opening in the dominant mechanism.
+    action: The protagonist changes position, timing, or method and commits to a decisive counter-move.
+    action_beats:
+      - Show the protagonist recognizing the useful pattern through a physical or visual cue.
+      - Execute the first half of the revised tactic so its causal advantage is unmistakable.
+    effect: The dominant mechanism begins to yield, and the objective moves into the final decisive action.
+    must_show:
+      - the clue or pattern learned from the setback
+      - a visible change in tactic, timing, or position
+      - the same objective now within reach
+    start_state: The protagonist has lost the first advantage but has identified a tactical opening.
+    end_state: The revised tactic is active and the obstacle is beginning to give way.
+    next_hook: The final action must complete the objective before the opening cost returns.
+    camera: Reveal the tactical reframe, then accelerate with the protagonist into the decisive attempt.
+
+  - id: payoff
+    act: resolution
+    phase: payoff
+    act_goal: Complete the objective and make the result undeniable.
+    spine_beat: Earn the answer to the opening question.
+    narrative_goal: Deliver the decisive action, visible consequence, and settled reaction within the segment.
+    cause: The revised tactic exploits the mechanism revealed by the setback.
+    action: The protagonist completes the decisive action, stabilizes the situation, and visibly confirms the result.
+    action_beats:
+      - Carry the revised tactic through the decisive contact or transformation.
+      - Hold long enough to show the resolved state, reaction, and opening echo.
+    effect: The original objective is visibly achieved and the story can end without another quest.
+    must_show:
+      - the decisive action and its causal result
+      - the resolved objective in a stable readable composition
+      - a reaction or visual echo that answers the opening question
+    start_state: The revised tactic is active and the objective is within decisive reach.
+    end_state: The objective is complete, the protagonist is settled, and the result is clearly visible.
+    next_hook: The completed result invites a reaction or visual echo, never a new quest.
+    camera: Follow the decisive movement into a stable payoff composition and hold on the proof of completion.
+
+  - id: aftermath
+    act: resolution
+    phase: aftermath
+    act_goal: Deepen the payoff for an explicit extended runtime.
+    spine_beat: Show the first consequence of success.
+    narrative_goal: Let the resolved world react to the completed objective without undoing it.
+    cause: The payoff changes the surrounding situation or the protagonist's relationship to it.
+    action: The protagonist observes, shares, or gently interacts with the consequence of the completed objective.
+    action_beats:
+      - Preserve the completed objective while revealing one meaningful consequence.
+      - Give the protagonist a readable reaction that confirms the emotional landing.
+    effect: The audience sees why the payoff matters beyond the instant of completion.
+    must_show:
+      - the completed objective remains visible
+      - one consequence caused by the payoff
+      - a stable reaction from the resolved protagonist
+    start_state: The central objective is complete and the payoff composition is stable.
+    end_state: The consequence of success is visible without reopening the problem.
+    next_hook: A final coda can echo the opening image or mechanism.
+    camera: Ease out from the payoff to reveal consequence while preserving the same geography.
+
+  - id: coda
+    act: resolution
+    phase: coda
+    act_goal: Add a memorable visual echo for an explicit extended runtime.
+    spine_beat: Revisit the opening motif after the change.
+    narrative_goal: Turn the opening question into a satisfying visual comparison.
+    cause: The completed objective changes the meaning or appearance of the opening motif.
+    action: The protagonist returns attention to the changed motif and reacts to the difference.
+    action_beats:
+      - Echo the opening composition with the resolved state clearly changed.
+      - Show a small final reaction that adds charm without introducing new stakes.
+    effect: The audience can compare before and after and feel the story has landed.
+    must_show:
+      - an identifiable echo of the opening motif
+      - the visible difference created by the completed objective
+      - the protagonist's final readable reaction
+    start_state: The payoff consequence is established and the original motif is available for comparison.
+    end_state: The opening motif has become a resolved visual echo.
+    next_hook: The final loop may return visually to the opening without resetting the story state.
+    camera: Compose a deliberate visual rhyme with the opening while keeping the changed state explicit.
+
+  - id: loop_echo
+    act: resolution
+    phase: loop_echo
+    act_goal: Close the extended version with a settled, replayable image.
+    spine_beat: End on consequence rather than a new problem.
+    narrative_goal: Provide a final hold that makes the completed story easy to review and replay.
+    cause: The resolved world settles after the payoff and its consequence.
+    action: The protagonist makes one final contained gesture or reaction that reinforces the completed objective.
+    action_beats:
+      - Keep the gesture subordinate to the completed result.
+      - Hold on the stable final state long enough for semantic QA to read it.
+    effect: The film ends with a complete state, clear continuity, and no unresolved quest.
+    must_show:
+      - the final resolved state and completed objective
+      - stable protagonist identity and world geography
+      - a clean hold suitable for the rendered-tail and semantic QA checks
+    start_state: The story's consequence and visual echo are already visible.
+    end_state: The protagonist and world settle into the final reviewable composition.
+    next_hook: Replay may return to the opening motif, but the resolved state remains authoritative.
+    camera: Hold a calm final composition that preserves the payoff and the visual echo.

@@ -99,7 +99,7 @@ workflows:
       recipes:
         anchor_first_last:
           anchors: [first, last]
-          continuation: "planned_anchor"
+          continuation: "rendered_tail"
           render_tool: "comfy.workflow.image_to_video"
         anchor_last:
           anchors: [last]

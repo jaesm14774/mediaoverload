@@ -121,6 +121,7 @@ class _FakeAssetRegistry:
 
 
 class ComfyWorkflowToolsetTests(unittest.TestCase):
+
     def test_execute_retries_same_workflow_after_provider_oom(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

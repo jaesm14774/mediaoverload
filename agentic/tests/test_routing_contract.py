@@ -57,11 +57,11 @@ class RoutingContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2longvideo"]["video_workflow_name"][0],
-            "minimax_h3_lowvram_15s_fl2va_i2v",
+            "minimax_h3_lowvram_i2v",
         )
 
         stage_contracts = self.hints["workflow_stage_contracts"]
-        self.assertIn("planned first/last story-state images", stage_contracts["text2longvideo"]["video_workflow_name"])
+        self.assertIn("previous segment's rendered tail", stage_contracts["text2longvideo"]["video_workflow_name"])
         for strategy in self.routing["strategy_candidates"]:
             self.assertIn(strategy, stage_contracts)
         self.assertIn("not connected as video conditioning", stage_contracts["text2video"]["image_workflow_name"])
@@ -71,6 +71,10 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("reference images/videos", stage_contracts["native_h3_ref2va"]["video_workflow_name"])
         self.assertIn("segment", stage_contracts["text2longvideo"]["video_workflow_name"])
         self.assertEqual(self.routing["count_policies"]["text2longvideo"]["segment_count"], {"min": 4, "max": 8})
+        longvideo_config = self.routing["longvideo_config"]
+        self.assertEqual(longvideo_config["default_duration_seconds"], 30)
+        self.assertEqual(longvideo_config["segment_duration"], 5)
+        self.assertEqual(longvideo_config["storyboard_path"], "configs/storyboards/text2longvideo_story.yaml")
         auto_contract = stage_contracts["text2image2native_h3_ref2va"]
         self.assertIn("six", auto_contract["image_workflow_name"])
         self.assertIn("explicitly selected", auto_contract["video_workflow_name"])

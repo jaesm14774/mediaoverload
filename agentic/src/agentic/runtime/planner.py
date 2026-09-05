@@ -379,6 +379,7 @@ class TaskPlanner:
             return self._build_comfy_primitive_plan(goal, workflow_manifest)
         return self._build_long_video_plan(goal, workflow_manifest)
 
+
     def _build_native_h3_story_plan(self, goal: GoalRequest) -> ExecutionPlan:
         """Build one causal native H3 clip through the normal skill graph.
 
@@ -1270,6 +1271,11 @@ class TaskPlanner:
         stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         review_notes = str(goal.constraints.get("review_notes", "") or "")
         selection_limit = self._review_selection_limit(goal, default=self._constraint_int(goal, "review_selection_limit", 3))
+        production_profile = str(
+            goal.constraints.get("longvideo_production_profile") or "text2longvideo"
+        ).strip().lower()
+        if production_profile != "text2longvideo":
+            raise ValueError("longvideo_production_profile must be 'text2longvideo'")
         review_policy = str(
             goal.constraints.get("longvideo_review_policy")
             or goal.constraints.get("longvideo_frame_review_policy")
@@ -1277,15 +1283,15 @@ class TaskPlanner:
         ).strip().lower()
         if review_policy not in {"opening_only", "anchors", "every_segment"}:
             raise ValueError("longvideo_review_policy must be 'opening_only', 'anchors', or 'every_segment'")
-        continuity_mode = str(goal.constraints.get("longvideo_continuity_mode") or "planned_anchor").strip().lower()
-        if continuity_mode not in {"planned_anchor", "independent"}:
-            raise ValueError("longvideo_continuity_mode must be 'planned_anchor' or 'independent'")
+        continuity_mode = str(goal.constraints.get("longvideo_continuity_mode") or "rendered_tail").strip().lower()
+        if continuity_mode != "rendered_tail":
+            raise ValueError("longvideo_continuity_mode must be 'rendered_tail'")
 
         from agentic.runtime.video_conditioning import (
             ConditioningPlan,
             capabilities_from_manifests,
+            production_recipe_sequence,
             recipe_candidates,
-            sample_recipe_sequence,
         )
 
         capabilities = capabilities_from_manifests(self.asset_registry.all_manifests())
@@ -1293,20 +1299,18 @@ class TaskPlanner:
         if isinstance(preferred_workflows, str):
             preferred_workflows = [preferred_workflows]
         candidates = recipe_candidates(capabilities, preferred_workflows=preferred_workflows)
-        default_weights = {
-            "anchor_first_last": 1,
-        }
-        configured_weights = goal.constraints.get("longvideo_mix_weights")
-        weights = (
-            dict(configured_weights)
-            if isinstance(configured_weights, dict) and configured_weights
-            else dict(default_weights)
-        )
-        mix_seed, recipe_sequence = sample_recipe_sequence(
-            weights,
+        variant_seed = int(goal.constraints.get("edit_variant_seed") or 17)
+        recipe_sequence = production_recipe_sequence(
             segment_count,
             candidates,
-            seed=goal.constraints.get("longvideo_mix_seed"),
+            use_reference_bundle=bool(
+                goal.constraints.get("reference_manifest")
+                or goal.constraints.get("native_h3_reference_manifest")
+                or goal.constraints.get("reference_image_paths")
+                or goal.constraints.get("native_h3_reference_image_paths")
+                or goal.constraints.get("reference_video_paths")
+                or goal.constraints.get("native_h3_reference_video_paths")
+            ),
         )
         selected_capabilities = {
             recipe_name: candidates[recipe_name][0]
@@ -1444,6 +1448,7 @@ class TaskPlanner:
                     "segment_count": segment_count,
                     "duration_seconds": goal.duration_seconds,
                     "tone": "playful cinematic escalation",
+                    "production_profile": production_profile,
                 },
                 depends_on=["idea-brief"],
                 tags=["story"],
@@ -1501,10 +1506,10 @@ class TaskPlanner:
         def append_segment(
             prefix: str,
             index: int,
-            previous_planned_anchor_node: str | None,
+            previous_rendered_tail_node: str | None,
             *,
             retry: bool = False,
-        ) -> tuple[str, str, str | None, str | None]:
+        ) -> tuple[str, str, str | None, str | None, str | None]:
             suffix = f"{index + 1:02d}"
             prompt_node = f"{prefix}-prompt-{suffix}"
             video_node = f"{prefix}-video-{suffix}"
@@ -1530,16 +1535,9 @@ class TaskPlanner:
             anchor_review_nodes: list[str] = []
 
             if recipe.requires_first:
-                # A segment may continue only from a planned story-state anchor
-                # generated before video rendering.  A rendered video tail is a
-                # QA artifact, not a creative input for the next segment.
-                if (
-                    continuity_mode == "planned_anchor"
-                    and previous_planned_anchor_node
-                    and recipe.continuation == "planned_anchor"
-                ):
-                    anchor_nodes["first"] = previous_planned_anchor_node
-                    input_dependencies.append(previous_planned_anchor_node)
+                if previous_rendered_tail_node:
+                    anchor_nodes["first"] = previous_rendered_tail_node
+                    input_dependencies.append(previous_rendered_tail_node)
                 else:
                     # Keep the original segment-frame id stable for callers and
                     # persisted plans while the payload now carries a generic
@@ -1607,10 +1605,8 @@ class TaskPlanner:
             if recipe.requires_last:
                 last_candidate = f"{prefix}-anchor-last-candidates-{suffix}"
                 last_dependencies = [prompt_node, "image-asset-check", "transition-asset-check"]
-                # Landing anchors are generated as independent T2I state
-                # images. The prior planned landing anchor remains the next
-                # segment's explicit first-frame condition, while avoiding
-                # low-denoise redraw artifacts in the landing image itself.
+                # Landing anchors are deliberate T2I state targets for FL2V;
+                # the next segment still starts from its rendered tail.
                 nodes.append(
                     ExecutionNode(
                         node_id=last_candidate,
@@ -1753,9 +1749,7 @@ class TaskPlanner:
                 workflow_name=capability.workflow_name,
                 anchor_nodes=anchor_nodes,
                 reference_node=reference_node,
-                continuation_node=(previous_planned_anchor_node or "")
-                if continuity_mode == "planned_anchor" and recipe.continuation == "planned_anchor"
-                else "",
+                continuation_node=previous_rendered_tail_node or "",
             )
             render_inputs = {
                 "recipe": recipe_name,
@@ -1768,6 +1762,7 @@ class TaskPlanner:
                 "reference_node": reference_node,
                 "continuation": recipe.continuation,
                 "continuity_mode": continuity_mode,
+                "production_profile": production_profile,
                 "width": self._longvideo_int(goal, "longvideo_width", int(goal.constraints.get("longvideo_h3_width") or 512), 2048),
                 "height": self._longvideo_int(goal, "longvideo_height", int(goal.constraints.get("longvideo_h3_height") or 288), 2048),
                 "length": self._longvideo_int(
@@ -1795,6 +1790,50 @@ class TaskPlanner:
                     stage="render",
                 )
             )
+            tail_node: str | None = None
+            segment_qa_node: str | None = None
+            if continuity_mode == "rendered_tail":
+                tail_node = f"{prefix}-tail-{suffix}"
+                nodes.append(
+                    ExecutionNode(
+                        node_id=tail_node,
+                        skill_name="media.video.extract_last_frame",
+                        inputs={
+                            "output_name": f"{prefix}_tail_{suffix}.png",
+                            "source_video_node": video_node,
+                        },
+                        depends_on=[video_node],
+                        tags=["quality", "continuity", "tail", "segment"] + (["retry"] if retry else []),
+                        tool_name="media.extract_last_frame",
+                        stage="quality",
+                    )
+                )
+                segment_qa_node = f"{prefix}-qa-{suffix}"
+                segment_duration = max(1.0, float(render_inputs["length"]) / max(segment_frame_rate, 1.0))
+                nodes.append(
+                    ExecutionNode(
+                        node_id=segment_qa_node,
+                        skill_name="media.video.qa",
+                        inputs={
+                            "expected_width": render_inputs["width"],
+                            "expected_height": render_inputs["height"],
+                            "expected_fps": segment_frame_rate,
+                            "target_duration": segment_duration,
+                            "duration_tolerance": 0.75,
+                            "require_audio": True,
+                            "require_stereo_audio": True,
+                            "analyze_audio": True,
+                            "frame_count": 8,
+                            "columns": 4,
+                            "scale_width": 320,
+                            "source_video_node": video_node,
+                        },
+                        depends_on=[video_node],
+                        tags=["quality", "technical-qa", "segment"] + (["retry"] if retry else []),
+                        tool_name="media.video_qa",
+                        stage="quality",
+                    )
+                )
             tts_node: str | None = None
             if use_tts:
                 tts_node = f"{prefix}-tts-audio-{suffix}"
@@ -1809,19 +1848,25 @@ class TaskPlanner:
                         stage="audio",
                     )
                 )
-            planned_anchor_node = anchor_nodes.get("last") if recipe.requires_last else None
-            return video_node, prompt_node, tts_node, planned_anchor_node
+            return video_node, prompt_node, tts_node, tail_node, segment_qa_node
 
-        previous_planned_anchor_node: str | None = None
+        previous_rendered_tail_node: str | None = None
+        segment_tail_nodes: list[str] = []
+        segment_qa_nodes: list[str] = []
         for index in range(segment_count):
-            video_node, _, tts_node, previous_planned_anchor_node = append_segment(
+            video_node, _, tts_node, segment_tail_node, segment_qa_node = append_segment(
                 "segment",
                 index,
-                previous_planned_anchor_node,
+                previous_rendered_tail_node,
             )
             segment_video_nodes.append(video_node)
             if tts_node:
                 tts_nodes.append(tts_node)
+            if segment_tail_node:
+                segment_tail_nodes.append(segment_tail_node)
+                previous_rendered_tail_node = segment_tail_node
+            if segment_qa_node:
+                segment_qa_nodes.append(segment_qa_node)
 
         longvideo_edit_profile = str(goal.constraints.get("longvideo_edit_profile") or "").strip()
         if longvideo_edit_profile and longvideo_edit_profile not in EDIT_PROFILES:
@@ -1840,7 +1885,7 @@ class TaskPlanner:
                         "output_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
                         "fps": segment_frame_rate,
                         "target_duration_seconds": float(goal.duration_seconds),
-                        "variant_seed": int(goal.constraints.get("edit_variant_seed") or mix_seed),
+                        "variant_seed": int(goal.constraints.get("edit_variant_seed") or variant_seed),
                         "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.1),
                     },
                     depends_on=segment_video_nodes,
@@ -1957,8 +2002,19 @@ class TaskPlanner:
             ExecutionNode(
                 node_id=collect_node,
                 skill_name="agent.output.collect",
-                inputs={"keys": ["saved_files", "video_path", "audio_path", "gif_path", "frame_path"]},
-                depends_on=[preview_dependency, "longvideo-video-qa", "preview-gif", *segment_video_nodes, *tts_nodes],
+                inputs={
+                    "keys": ["saved_files", "video_path", "audio_path", "gif_path", "frame_path"],
+                    "preferred_video_node": final_video_node,
+                },
+                depends_on=[
+                    preview_dependency,
+                    "longvideo-video-qa",
+                    "preview-gif",
+                    *segment_video_nodes,
+                    *segment_tail_nodes,
+                    *segment_qa_nodes,
+                    *tts_nodes,
+                ],
                 tags=["artifact", "summary"],
                 stage="package",
             )
@@ -1988,17 +2044,24 @@ class TaskPlanner:
             )
             retry_video_nodes: list[str] = []
             retry_tts_nodes: list[str] = []
-            retry_planned_anchor: str | None = None
+            retry_tail_nodes: list[str] = []
+            retry_qa_nodes: list[str] = []
+            retry_rendered_tail: str | None = None
             for index in range(segment_count):
-                retry_video, _, retry_tts, retry_planned_anchor = append_segment(
+                retry_video, _, retry_tts, retry_tail, retry_qa = append_segment(
                     "review-segment",
                     index,
-                    retry_planned_anchor,
+                    retry_rendered_tail,
                     retry=True,
                 )
                 retry_video_nodes.append(retry_video)
                 if retry_tts:
                     retry_tts_nodes.append(retry_tts)
+                if retry_tail:
+                    retry_tail_nodes.append(retry_tail)
+                    retry_rendered_tail = retry_tail
+                if retry_qa:
+                    retry_qa_nodes.append(retry_qa)
             if longvideo_edit_profile:
                 retry_preview_dependency = "review-edit-segment-timeline"
                 nodes.append(
@@ -2011,7 +2074,7 @@ class TaskPlanner:
                             "output_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
                             "fps": segment_frame_rate,
                             "target_duration_seconds": float(goal.duration_seconds),
-                            "variant_seed": int(goal.constraints.get("edit_variant_seed") or mix_seed) + 1,
+                            "variant_seed": int(goal.constraints.get("edit_variant_seed") or variant_seed) + 1,
                             "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.1),
                         },
                         depends_on=retry_video_nodes,
@@ -2104,8 +2167,19 @@ class TaskPlanner:
                 ExecutionNode(
                     node_id=retry_collect,
                     skill_name="agent.output.collect",
-                    inputs={"keys": ["saved_files", "video_path", "audio_path", "gif_path", "frame_path"]},
-                    depends_on=[retry_preview_dependency, "review-longvideo-video-qa", "review-preview-gif", *retry_video_nodes, *retry_tts_nodes],
+                    inputs={
+                        "keys": ["saved_files", "video_path", "audio_path", "gif_path", "frame_path"],
+                        "preferred_video_node": retry_preview_dependency,
+                    },
+                    depends_on=[
+                        retry_preview_dependency,
+                        "review-longvideo-video-qa",
+                        "review-preview-gif",
+                        *retry_video_nodes,
+                        *retry_tail_nodes,
+                        *retry_qa_nodes,
+                        *retry_tts_nodes,
+                    ],
                     tags=["artifact", "summary", "retry"],
                     stage="package",
                 )
@@ -2134,6 +2208,37 @@ class TaskPlanner:
                 stage="package",
             )
         )
+        publish_package_node = ""
+        if production_profile == "text2longvideo":
+            publish_package_node = "persist-publish-ready-longvideo"
+            nodes.append(
+                ExecutionNode(
+                    node_id=publish_package_node,
+                    skill_name="agent.summary.persist",
+                    inputs={
+                        "summary_name": "publish_ready_longvideo.json",
+                        "summary_scope": "publish_ready_longvideo",
+                        "summary_metadata": {
+                            "production_profile": production_profile,
+                            "target_duration_seconds": float(goal.duration_seconds),
+                            "segment_count": segment_count,
+                            "recipe_sequence": list(recipe_sequence),
+                            "continuity_mode": continuity_mode,
+                            "segment_qa_nodes": list(segment_qa_nodes),
+                            "tail_frame_nodes": list(segment_tail_nodes),
+                            "final_video_node": final_video_node,
+                            "publish_contract": {
+                                "human_review_required": True,
+                                "technical_qa_required": True,
+                                "public_dispatch_requires_platform_receipt": True,
+                            },
+                        },
+                    },
+                    depends_on=["persist-longvideo-summary", *segment_qa_nodes],
+                    tags=["artifact", "summary", "publish", "longvideo"],
+                    stage="package",
+                )
+            )
         metadata = {
             "segment_count": segment_count,
             "continuity_mode": continuity_mode,
@@ -2144,8 +2249,7 @@ class TaskPlanner:
             ],
             "graph_overview": [node.node_id for node in nodes],
             "idea_variants": idea_variants,
-            "mix_seed": mix_seed,
-            "mix_weights": {name: float(weights.get(name, 0)) for name in recipe_contracts},
+            "variant_seed": variant_seed,
             "recipe_sequence": recipe_sequence,
             "recipe_workflows": {name: selected_capabilities[name].workflow_name for name in recipe_contracts},
             "conditioning_contracts": {name: recipe_contracts[name].to_dict() for name in recipe_contracts},
@@ -2153,6 +2257,10 @@ class TaskPlanner:
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_tts": use_tts,
             "longvideo_edit_profile": longvideo_edit_profile,
+            "production_profile": production_profile,
+            "segment_qa_nodes": segment_qa_nodes,
+            "segment_tail_nodes": segment_tail_nodes,
+            "publish_package_node": publish_package_node,
             "video_speed": self._video_speed_config(goal),
             "final_video_node": final_video_node,
             "review_loop_enabled": review_loop_enabled,

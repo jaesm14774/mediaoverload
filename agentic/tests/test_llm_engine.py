@@ -141,6 +141,8 @@ class LLMEngineTests(unittest.TestCase):
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
         self.assertIn("Short-action contract", user_prompt)
         self.assertIn("one dominant physical mechanism", user_prompt)
+        self.assertIn("Image prompt contract", user_prompt)
+        self.assertIn("one visual thesis", user_prompt)
         self.assertNotIn("9:16", user_prompt)
         self.assertNotIn("vertical", user_prompt.lower())
 
@@ -182,6 +184,7 @@ class LLMEngineTests(unittest.TestCase):
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
         self.assertIn("Short-action contract", user_prompt)
         self.assertIn("completed end state", user_prompt)
+        self.assertIn("observable material cues", user_prompt)
         self.assertNotIn("Qixi", user_prompt)
 
     def test_segment_story_uses_llm_array_when_available(self) -> None:
@@ -199,6 +202,122 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertEqual(segments[0]["visual"], "shot one")
         self.assertEqual(segments[1]["narration"], "line two")
+
+    def test_production_segment_story_preserves_internal_timed_shots(self) -> None:
+        shots = [
+            {
+                "time": f"{index * 4}-{(index + 1) * 4}s",
+                "title": f"beat {index + 1}",
+                "action": f"the protagonist advances through beat {index + 1}",
+                "camera": f"camera changes framing for beat {index + 1}",
+                "state_change": f"state {index + 1}",
+                "cause": f"cause {index + 1}",
+                "effect": f"effect {index + 1}",
+            }
+            for index in range(4)
+        ]
+        response = json.dumps(
+            {
+                "segments": [
+                    {
+                        "segment_id": "segment-1",
+                        "visual": "a coherent kitchen action arc",
+                        "narration": "the action escalates",
+                        "action": "the protagonist pursues the objective",
+                        "camera": "the camera follows the action",
+                        "start_state": "the protagonist is ready",
+                        "end_state": "the protagonist succeeds",
+                        "cause": "the objective creates pressure",
+                        "effect": "the next segment can begin",
+                        "shots": shots,
+                    }
+                ]
+            }
+        )
+        manager = _FakeManager([response])
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(prompt="Kirby rescues a pastry", media_type="long_video", duration_seconds=60)
+
+        segments = engine.segment_story(
+            goal,
+            "brief",
+            1,
+            "cinematic escalation",
+            production_profile="text2longvideo",
+        )
+
+        self.assertEqual(len(segments[0]["shots"]), 4)
+        self.assertIn("internal shots", manager.text_model.calls[0]["messages"][1]["content"])
+
+    def test_publishable_segment_story_forces_four_beats_even_at_five_seconds(self) -> None:
+        response = json.dumps(
+            {
+                "segments": [
+                    {
+                        "segment_id": "segment-1",
+                        "visual": "a readable meadow action",
+                        "narration": "the hero acts",
+                        "action": "the hero advances the seed",
+                        "camera": "the camera tracks the movement",
+                        "start_state": "the seed is ahead",
+                        "end_state": "the seed is secured",
+                        "cause": "the wind pushes the seed away",
+                        "effect": "the hero can carry it onward",
+                        "shots": [
+                            {
+                                "time": f"{index * 1.25:g}-{(index + 1) * 1.25:g}s",
+                                "title": f"beat {index + 1}",
+                                "action": f"the hero performs action {index + 1}",
+                                "camera": f"camera follows action {index + 1}",
+                                "state_change": f"state {index + 1}",
+                                "cause": f"cause {index + 1}",
+                                "effect": f"effect {index + 1}",
+                            }
+                            for index in range(4)
+                        ],
+                    }
+                ]
+            }
+        )
+        manager = _FakeManager([response])
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(prompt="Kirby carries a seed", media_type="long_video", duration_seconds=5, style="anime")
+
+        segments = engine.segment_story(
+            goal,
+            "brief",
+            1,
+            "cinematic escalation",
+            production_profile="text2longvideo",
+        )
+
+        self.assertEqual(len(segments[0]["shots"]), 4)
+        self.assertIn("publishable story-assembly profile", manager.text_model.calls[0]["messages"][1]["content"])
+
+    def test_production_segment_story_includes_checked_in_storyboard_sequence(self) -> None:
+        manager = _FakeManager(['{"segments":[]}'])
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="A selected protagonist follows a changing signal",
+            media_type="long_video",
+            duration_seconds=30,
+            style="cinematic animation",
+            constraints={"storyboard_path": "configs/storyboards/text2longvideo_story.yaml"},
+        )
+
+        segments = engine.segment_story(
+            goal,
+            "current brief",
+            6,
+            "playful cinematic escalation",
+            production_profile="text2longvideo",
+        )
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertEqual(len(segments), 6)
+        self.assertIn("Segment 1 (hook)", user_prompt)
+        self.assertIn("Segment 6 (payoff)", user_prompt)
+        self.assertIn("resolved character_profile", user_prompt)
 
     def test_compose_prompt_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(
@@ -707,6 +826,30 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["caption"], "Kirby stands beside a glowing blue crystal.")
         self.assertEqual(engine._manager.vision_model.calls[0]["kwargs"]["images"], ["D:\\kirby.png"])
         self.assertEqual(engine._manager.text_model.calls, [])
+
+    def test_prepare_publish_caption_does_not_inject_unrelated_news_example(self) -> None:
+        manager = _FakeManager([
+            '{"caption":"MetaKnight gets splashed by a heart-shaped wave.","hashtags":"","platform_captions":{}}'
+        ])
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        headline = "9月5日星座運勢／別宅在家！桃花就在外面"
+        engine.prepare_publish_caption(
+            GoalRequest(
+                prompt="MetaKnight gets splashed by a heart-shaped wave.",
+                media_type="publish_review",
+                style="anime",
+                constraints={
+                    "news_grounding_required": True,
+                    "news_context": {"title": headline},
+                },
+            ),
+            prefix="", hashtags=[], platforms=["facebook"],
+        )
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn(headline, user_prompt)
+        self.assertNotIn("remote", user_prompt)
+        self.assertNotIn("security openings", user_prompt)
+        self.assertNotIn("no-verification", user_prompt)
 
     def test_prepare_publish_caption_uses_only_the_common_caption_contract(self) -> None:
         engine = LLMPromptEngine(

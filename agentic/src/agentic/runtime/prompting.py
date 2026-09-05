@@ -49,6 +49,18 @@ Response in English only.
 """.strip()
 
 
+IMAGE_PROMPT_CONTRACT = """
+Image prompt contract:
+- Build one visual thesis: one focal subject, one dominant mechanism, and one readable relationship or emotional beat.
+- Describe the decisive visible state, not a list of disconnected objects; translate abstract mood into a pose, prop interaction, deformation, trail, or lighting contrast.
+- Preserve the order Subject -> Scene -> Action or visual state -> Environment -> Composition and camera -> Style and lighting -> Quality.
+- Give the viewer a clear focal path and intentional negative space; state relative scale, containment, attachment, or layer order when those relationships carry the joke.
+- Choose one medium and surface language, then name a few observable material cues; do not stack contradictory style labels or vague quality adjectives.
+- Use small secondary details only after the main read works. Treat text, charts, panels, and multi-subject layouts as hard geometry constraints when explicitly requested; otherwise avoid them.
+- End with precise constraints and a short avoid list: no duplicate subject, accidental extra characters, clutter, watermark, logo, interface, or pseudo-text.
+""".strip()
+
+
 STICKER_SYSTEM_PROMPT = """
 You design high-performing messaging stickers.
 
@@ -141,25 +153,41 @@ def build_story_segments(
     creative_brief: str,
     segment_count: int,
     tone: str,
+    production_profile: str = "",
 ) -> list[dict[str, Any]]:
     storyboard_path = str(goal.constraints.get("storyboard_path", "") or "").strip()
     if storyboard_path:
         storyboard = load_storyboard(storyboard_path)
+        storyboard_brief = " ".join(
+            part
+            for part in (
+                creative_brief,
+                f"Resolved protagonist contract: {_subject_anchor_clause(goal)}.",
+            )
+            if str(part).strip()
+        )
         storyboard_segments = build_storyboard_segments(
             storyboard,
             segment_count=segment_count,
             tone=tone,
             style=goal.style,
-            creative_brief=creative_brief,
+            creative_brief=storyboard_brief,
         )
         for segment in storyboard_segments:
             action_beats = segment.get("action_beats")
             if not str(segment.get("action") or "").strip() and isinstance(action_beats, list):
                 segment["action"] = " ".join(str(beat).strip() for beat in action_beats if str(beat).strip())
-        return validate_story_segments(
-            storyboard_segments,
-            segment_count,
-        )
+        storyboard_segments = validate_story_segments(storyboard_segments, segment_count)
+        if str(production_profile or "").strip().lower() == "text2longvideo":
+            segment_duration = max(1.0, float(goal.duration_seconds) / max(1, int(segment_count)))
+            for segment in storyboard_segments:
+                segment["shots"] = build_timed_shot_plan(
+                    segment,
+                    duration_seconds=segment_duration,
+                    shot_count=4,
+                    force_multi_beat=True,
+                )
+        return storyboard_segments
     subject_anchor = _subject_anchor_clause(goal) or goal.prompt
     story_anchor = (
         f"same story world, dominant prop, obstacle, and objective from the goal: {goal.prompt}"
@@ -203,6 +231,15 @@ def build_story_segments(
                 "creative_brief": creative_brief,
             }
         )
+    if str(production_profile or "").strip().lower() == "text2longvideo":
+        segment_duration = max(1.0, float(goal.duration_seconds) / max(1, int(segment_count)))
+        for segment in segments:
+            segment["shots"] = build_timed_shot_plan(
+                segment,
+                duration_seconds=segment_duration,
+                shot_count=4,
+                force_multi_beat=True,
+            )
     return validate_story_segments(segments, segment_count)
 
 
@@ -277,6 +314,83 @@ def validate_story_segments(
     return segments
 
 
+def build_timed_shot_plan(
+    segment: dict[str, Any],
+    *,
+    duration_seconds: float = 15.0,
+    shot_count: int = 4,
+    force_multi_beat: bool = False,
+) -> list[dict[str, str]]:
+    """Return timed beats for one production story segment.
+
+    Production segments need internal temporal structure. Keep short clips as
+    one action so they do not conflict with the shared short-action contract.
+    The fallback remains useful when an LLM response omits the optional shot
+    array.
+    """
+
+    duration = max(1.0, float(duration_seconds))
+    requested_shots = max(1, int(shot_count))
+    max_shots = (
+        max(3, min(4, requested_shots))
+        if force_multi_beat
+        else 1
+        if duration <= 6
+        else max(3, min(4, requested_shots))
+    )
+    raw_shots = segment.get("shots")
+    if isinstance(raw_shots, list) and len(raw_shots) >= 3:
+        normalized: list[dict[str, str]] = []
+        for index, item in enumerate(raw_shots[:max_shots]):
+            if not isinstance(item, dict):
+                continue
+            start = duration * index / max(1, len(raw_shots[:max_shots]))
+            end = duration * (index + 1) / max(1, len(raw_shots[:max_shots]))
+            normalized.append(
+                {
+                    "time": str(item.get("time") or f"{start:g}-{end:g}s"),
+                    "title": str(item.get("title") or f"beat {index + 1}"),
+                    "action": str(item.get("action") or segment.get("action") or "visible physical action"),
+                    "camera": str(item.get("camera") or segment.get("camera") or "camera follows the action with spatial continuity"),
+                    "state_change": str(item.get("state_change") or item.get("end_state") or segment.get("end_state") or "the visible state advances"),
+                    "cause": str(item.get("cause") or segment.get("cause") or "the immediate objective drives the next action"),
+                    "effect": str(item.get("effect") or segment.get("effect") or "the next beat becomes possible"),
+                }
+            )
+        if len(normalized) >= 3:
+            return normalized
+
+    start_state = str(segment.get("start_state") or "the protagonist is ready to act")
+    action = str(segment.get("action") or "advances the objective through a clear physical action")
+    visual = str(segment.get("visual") or "the established setting")
+    camera = str(segment.get("camera") or "the camera follows the action with a clear change in framing")
+    cause = str(segment.get("cause") or "the immediate objective creates pressure")
+    end_state = str(segment.get("end_state") or "the protagonist reaches the next visible state")
+    effect = str(segment.get("effect") or "the next story beat becomes possible")
+    fallback = [
+        ("Establish and approach", f"Begin from {start_state}; establish {visual} and move toward the objective.", "Open wide, then track toward the protagonist and the dominant prop.", start_state, "the objective becomes immediately readable", "the protagonist commits to the attempt"),
+        ("Attempt and contact", f"The protagonist performs the primary action: {action}.", camera, "the attempt is underway", "contact or the first decisive change becomes visible", "the cause creates a new obstacle"),
+        ("Reversal and reaction", f"Because {cause}, the protagonist reacts and changes position or strategy while the environment responds.", "Follow the reversal with a pan or tilt, keeping the cause and reaction in the same spatial field.", "the plan changes under pressure", "the setback or reversal is readable", "the protagonist can reach the payoff"),
+        ("Payoff and handoff", f"The protagonist completes the beat and reaches {end_state}.", "Follow the final movement, then pull out to hold the resolved composition.", end_state, "the segment settles on the visible result", effect),
+    ]
+    normalized = []
+    for index, (title, shot_action, shot_camera, state_change, shot_cause, shot_effect) in enumerate(fallback):
+        start = duration * index / len(fallback)
+        end = duration * (index + 1) / len(fallback)
+        normalized.append(
+            {
+                "time": f"{start:g}-{end:g}s",
+                "title": title,
+                "action": shot_action,
+                "camera": shot_camera,
+                "state_change": state_change,
+                "cause": shot_cause,
+                "effect": shot_effect,
+            }
+        )
+    return normalized[:max_shots]
+
+
 def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame: str | None = None) -> dict[str, Any]:
     subject_anchor = _subject_anchor_clause(goal) or "same main subject"
     news_context = _news_context(goal)
@@ -302,8 +416,14 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
     return outputs
 
 
-def build_minimax_h3_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame: str | None = None) -> dict[str, Any]:
-    """Build an H3-ready audiovisual prompt while preserving Kirby continuity."""
+def build_minimax_h3_prompt(
+    goal: GoalRequest,
+    segment: dict[str, Any],
+    prior_frame: str | None = None,
+    *,
+    official_shot_syntax: bool = False,
+) -> dict[str, Any]:
+    """Build an H3-ready audiovisual prompt while preserving selected-character continuity."""
     base = build_segment_prompt(goal, segment, prior_frame=prior_frame)
     character = _subject_names(goal) or "the main character"
     audio_direction = str(
@@ -327,17 +447,24 @@ def build_minimax_h3_prompt(goal: GoalRequest, segment: dict[str, Any], prior_fr
         "cause": str(segment.get("cause") or "the protagonist acts on the immediate objective"),
         "effect": str(segment.get("effect") or segment.get("next_hook") or "the next story beat becomes possible"),
     }
+    raw_shots = segment.get("shots")
+    shots = (
+        [dict(item) for item in raw_shots if isinstance(item, dict)]
+        if isinstance(raw_shots, list) and len(raw_shots) >= 3
+        else [shot]
+    )
     prompt = compose_minimax_h3_prompt(
         duration_seconds=duration,
         character=character,
         style=goal.style,
         base_prompt="",
         story_spine=segment.get("story_spine") if isinstance(segment.get("story_spine"), dict) else {},
-        shots=[shot],
+        shots=shots,
         audio=audio_direction,
         render_mode="image_to_video" if prior_frame else "text_to_video",
         prior_frame=bool(prior_frame),
         subject_context=_subject_context(goal),
+        official_shot_syntax=official_shot_syntax,
     )
     prompt = "\n".join(
         [
@@ -437,6 +564,11 @@ def _style_directive(style: str) -> str:
 
 
 def _action_directive(media_type: str, duration_seconds: int) -> str:
+    if media_type in {"image", "text2img2img", "image_refine", "image_upscale", "storyboard"}:
+        return (
+            "one decisive visual state or pose that makes the central idea immediately readable; any prop interaction "
+            "must show a clear physical relationship and visible consequence"
+        )
     if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "animated_sticker", "image_to_video"}:
         short_contract = short_action_contract(duration_seconds, media_type=media_type)
         if short_contract:
@@ -531,7 +663,17 @@ def _subject_anchor_clause(goal: GoalRequest) -> str:
     context = _subject_context(goal)
     subjects = list(context.get("subjects") or [])
     if not subjects:
-        return _hero_subject_clause(str(goal.constraints.get("character", "") or "").strip() or "main subject")
+        character = str(goal.constraints.get("character", "") or "").strip() or "main subject"
+        profile = dict(context.get("character_profile") or goal.constraints.get("character_profile") or {})
+        details = "; ".join(
+            part
+            for part in (
+                str(profile.get("role_description") or "").strip(),
+                str(profile.get("keywords") or "").strip(),
+            )
+            if part
+        )
+        return _hero_subject_clause(f"{character}{f' ({details})' if details else ''}")
     clauses: list[str] = []
     for item in subjects:
         if not isinstance(item, dict):
@@ -572,8 +714,6 @@ def _interaction_clause(goal: GoalRequest) -> str:
 
 def _hero_subject_clause(subject_anchor: str) -> str:
     subject = str(subject_anchor).strip() or "main subject"
-    if subject.lower() == "kirby":
-        return "Kirby as the unmistakable hero, perfectly round soft pink body, large blue eyes, red boots"
     return f"{subject} as the unmistakable hero and focal subject"
 
 
@@ -615,7 +755,10 @@ def _quality_clause(media_type: str) -> str:
         return "cinematic lighting, strong silhouette, spatial depth, clear motion path, no documentary text overlays"
     if media_type in {"sticker_pack", "animated_sticker"}:
         return "simple high-contrast silhouette, clean read at thumbnail size, no clutter"
-    return "strong focal hierarchy, polished anime rendering, layered environment detail, no documentary text overlays"
+    return (
+        "strong focal hierarchy, one dominant visual mechanism, intentional negative space, observable material cues, "
+        "polished rendering, no documentary text overlays"
+    )
 
 
 def _visual_motif_pool(news_context: dict[str, Any]) -> list[str]:

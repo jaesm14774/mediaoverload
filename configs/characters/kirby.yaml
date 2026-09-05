@@ -37,6 +37,11 @@ generation:
     visual language per clip: soft paper-grain storybook, clean cel-shaded
     sticker, warm tabletop food comedy, cozy container scale contrast, or a
     saturated sky/firework spectacle; do not stack them all together.
+    For still images and opening keyframes, make one visual thesis dominant:
+    one readable subject-mechanism relationship, one decisive visible state,
+    explicit scale/attachment/layer geometry when it carries the joke, and a
+    small set of observable material cues. Keep secondary details subordinate
+    to the focal read and avoid vague quality-adjective stacking.
   native_h3_quality:
     creative_brief: >-
       Make this a highly shareable cute micro-gag, not an action-film lore scene:
@@ -58,7 +63,7 @@ generation:
       GitHub/web text, abstract symbols, or the selected character standing still while looking
       at a portal.
   native_h3_story:
-    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: krea2_turbo
@@ -75,7 +80,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_t2v_story:
-    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_t2v
     semantic_qa_required: true
@@ -88,7 +93,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_fl2va_story:
-    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: krea2_turbo
@@ -105,7 +110,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_l2va_story:
-    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: krea2_turbo
@@ -122,7 +127,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   native_h3_ref2va:
-    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_ref2va
     reference_manifest: []
@@ -142,7 +147,7 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   text2image2native_h3_ref2va:
-    storyboard_path: configs/storyboards/kirby_native_15s.yaml
+    storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     keyframe_workflow_name: krea2_turbo
     workflow_name: minimax_h3_ref2va
@@ -165,7 +170,7 @@ generation:
   video_defaults:
     width: 608
     height: 352
-    length: 124
+    length: 248
     frame_rate: 24
     steps: 20
     draft_acceleration: spectrum

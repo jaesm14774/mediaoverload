@@ -78,7 +78,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         ))
         self.assertEqual(native["source_generation_type"], "native_h3_story")
         self.assertEqual(native["duration_seconds"], 15)
-        self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("kirby_native_15s.yaml"))
+        self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("native_h3_15s.yaml"))
         self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
 
         self.assertEqual(native["constraints"]["video_speed"], {"enabled": True, "factor": 2.0})
@@ -99,9 +99,27 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             preferred_generation_type="text2longvideo",
             publish_after_generate=False,
         ))
-        self.assertEqual(long_video["duration_seconds"], 20)
-        self.assertEqual(long_video["constraints"]["segment_count"], 4)
-        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_15s_fl2va_i2v")
+        self.assertEqual(long_video["duration_seconds"], 30)
+        self.assertEqual(long_video["constraints"]["segment_count"], 6)
+        self.assertTrue(long_video["constraints"]["storyboard_path"].endswith("text2longvideo_story.yaml"))
+        self.assertEqual(long_video["character_config_summary"]["longvideo"]["default_duration_seconds"], 30)
+        self.assertTrue(long_video["character_config_summary"]["longvideo"]["storyboard_path"].endswith("text2longvideo_story.yaml"))
+        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_i2v")
+
+        production_long_video = build_goal_payload_from_character_config(make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Kirby follows a seed through a storm and plants it beside a glowing pond",
+            duration_seconds=30,
+            preferred_generation_type="text2longvideo",
+            publish_after_generate=False,
+        ))
+        self.assertEqual(production_long_video["source_generation_type"], "text2longvideo")
+        self.assertEqual(production_long_video["media_type"], "long_video")
+        self.assertEqual(production_long_video["constraints"]["longvideo_production_profile"], "text2longvideo")
+        self.assertEqual(production_long_video["constraints"]["segment_count"], 6)
+        self.assertEqual(production_long_video["constraints"]["longvideo_continuity_mode"], "rendered_tail")
+        self.assertEqual(production_long_video["constraints"]["video_speed"], {"enabled": False, "factor": 1.0})
 
     def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(
@@ -200,8 +218,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["routing_prompt_mode"], "weighted_random")
         self.assertEqual(payload["prompt"], "Kirby protects a glowing orb in a clear three-beat story")
 
-    def test_bare_character_command_defaults_to_autonomous_e2e_route(self) -> None:
+    def test_bare_character_command_uses_generation_type_weights(self) -> None:
         config = load_character_config(self.kirby_config)
+        config["generation"]["generation_type_weights"] = {"sticker_pack": 1}
 
         result = _route_generation_from_character_config(
             self.repo_root,
@@ -214,10 +233,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             rng=random.Random(0),
         )
 
-        self.assertEqual(result["generation_type"], "native_h3_story")
-        self.assertEqual(result["selection_source"], "autonomous_e2e_default")
-        self.assertEqual(result["prompt_mode"], "autonomous_e2e")
-        self.assertTrue(result["workflow_plan"]["video_workflow_name"])
+        self.assertEqual(result["generation_type"], "sticker_pack")
+        self.assertEqual(result["selection_source"], "weighted_random")
+        self.assertEqual(result["prompt_mode"], "weighted_random")
 
     def test_weighted_route_can_select_sticker_without_llm_strategy_routing(self) -> None:
         config = load_character_config(self.kirby_config)
@@ -643,6 +661,46 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
 
         self.assertEqual(result, [video_path])
+
+    def test_publish_review_prefers_director_trimmed_video_over_raw_video(self) -> None:
+        raw_video_path = r"C:\runs\director_raw.mp4"
+        trimmed_video_path = r"C:\runs\director_trimmed.mp4"
+        result = collect_media_paths_from_run_result(
+            {
+                "state": {
+                    "node_outputs": {
+                        "director-video": {
+                            "raw_video_path": raw_video_path,
+                            "saved_files": [raw_video_path],
+                        },
+                        "collect-longvideo-outputs": {
+                            "saved_files": [raw_video_path],
+                            "video_path": [trimmed_video_path],
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(result, [trimmed_video_path])
+
+    def test_publish_review_prefers_explicit_final_video_over_segment_videos(self) -> None:
+        final_video_path = r"C:\runs\longvideo_final.mp4"
+        segment_paths = [r"C:\runs\segment_01.mp4", r"C:\runs\segment_02.mp4"]
+        result = collect_media_paths_from_run_result(
+            {
+                "state": {
+                    "node_outputs": {
+                        "collect-longvideo-outputs": {
+                            "final_video_path": [final_video_path],
+                            "video_path": [final_video_path, *segment_paths],
+                        }
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(result, [final_video_path])
 
     def test_publish_review_collects_final_images_from_image_generation(self) -> None:
         image_paths = [r"C:\runs\Kirby_1.png", r"C:\runs\Kirby_2.png"]

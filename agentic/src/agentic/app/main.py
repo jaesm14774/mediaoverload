@@ -166,6 +166,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", help="Optional output directory for artifact-producing workflows")
     parser.add_argument("--width", type=int, help="Output video width in pixels for image-to-video workflows")
     parser.add_argument("--height", type=int, help="Output video height in pixels for image-to-video workflows")
+    parser.add_argument("--longvideo-steps", type=int, help="Sampling steps for long-video H3 workflows")
     parser.add_argument("--comfy-host", help="Override ComfyUI host")
     parser.add_argument("--comfy-port", type=int, help="Override ComfyUI port")
     parser.add_argument(
@@ -211,6 +212,11 @@ def parse_args() -> argparse.Namespace:
         "--longvideo-edit-profile",
         choices=("baseline_concat", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
         help="Use the agent timeline editor to merge non-TTS long-video segments",
+    )
+    parser.add_argument(
+        "--longvideo-production-profile",
+        choices=("text2longvideo",),
+        help="Use deterministic multi-beat H3 story assembly with rendered-tail continuity and a publish package",
     )
     parser.add_argument("--text", help="Text payload for TTS-style workflows")
     parser.add_argument("--character", help="Optional character or subject identity for agentic planning")
@@ -258,6 +264,11 @@ def _build_prompt_summary(state: dict[str, object]) -> dict[str, object]:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
     args = parse_args()
     project_root = Path(__file__).resolve().parents[3]
     output_root = Path(args.output_dir).resolve() if args.output_dir else None
@@ -294,6 +305,8 @@ def main() -> None:
             "edit_creative_review": args.edit_creative_review,
             "edit_creative_review_max_attempts": args.edit_creative_review_max_attempts,
             "longvideo_edit_profile": args.longvideo_edit_profile,
+            "longvideo_production_profile": args.longvideo_production_profile,
+            "longvideo_steps": args.longvideo_steps,
             "text": args.text,
             "character": args.character,
             "platforms": args.platforms or [],

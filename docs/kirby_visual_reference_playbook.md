@@ -44,7 +44,7 @@
 | 層 | 落地內容 |
 | --- | --- |
 | Kirby config | `generation.visual_style_contract` 增加 tactile pastel、scale contrast、單一 palette、可回放 ending；creative brief 加入 prop-caused reaction 與 settled payoff。 |
-| Native storyboard | `kirby_native_15s.yaml` 提供 dynamic-news identity、continuity、可讀反應與 loop echo 的 production contract。 |
+| Native storyboard | `native_h3_15s.yaml` 提供 generic dynamic-news timing、continuity、可讀反應與 loop echo 的 production contract；角色外觀由 resolved `character_profile` 提供。 |
 | H3 prompt | `compose_minimax_h3_prompt()` 加入 cute physical-comedy、scale-and-silhouette、replay 三個 contract。 |
 | 一般短片與貼圖 prompt | 5–6 秒改成單一完整 physical action；animated sticker 改成 anticipation → impact → settle，鎖定鏡頭與首尾可接。 |
 | Routing | 5–9 秒、食物／桌面互動、反應 loop、誇張伸縮、小角色對大物件等需求優先走 `text2image2video` 的首幀審核 + I2V，而不是 `text2longvideo`。 |

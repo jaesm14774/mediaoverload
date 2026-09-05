@@ -15,7 +15,7 @@ Every video-capable prompt is organized as:
 7. Timestamped shot handoff and end state
 8. `overall_soundscape` and `non_diegetic_music`
 
-Native H3 uses the same order as one `integrated_multimodal_description` with `[Shot N / SHOT N | time]` entries. The five-beat Kirby story contract is hook, promise, escalation, reversal, and payoff.
+Native H3 uses the same order as one `integrated_multimodal_description` with `[Shot N / SHOT N | time]` entries. The generic 15-second story contract is hook, escalation, and payoff; the protagonist's appearance comes from the resolved `character_profile`.
 
 ## Text-to-video vs image-to-video
 

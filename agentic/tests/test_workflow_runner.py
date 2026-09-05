@@ -4,8 +4,9 @@ import unittest
 import uuid
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, SkillContext, SkillResult
+from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext, SkillResult
 from agentic.runtime.registry import SkillRegistry
 from agentic.runtime.runner import WorkflowRunner
 from agentic.skills.agent_primitives import AgentMediaSkills
@@ -37,6 +38,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                     "prompt_mode": "llm",
                     "original_prompt": "base prompt",
                     "revised_prompt": "revised prompt",
+                    "timeline_path": "C:\\runs\\story_timeline.json",
                     "review_notes": "stronger action",
                     "selected_assets": ["C:\\asset.png"],
                 },
@@ -67,6 +69,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(len(result.state.prompt_lineage), 1)
         self.assertEqual(result.state.prompt_lineage[0]["original_prompt"], "base prompt")
         self.assertEqual(result.state.prompt_lineage[0]["revised_prompt"], "revised prompt")
+        self.assertEqual(result.state.prompt_lineage[0]["timeline_path"], "C:\\runs\\story_timeline.json")
         self.assertEqual(result.state.prompt_lineage[0]["selected_assets"], ["C:\\asset.png"])
 
     def test_runner_records_review_selection_lineage(self) -> None:
@@ -220,6 +223,36 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "comfy.workflow.image_to_video")
         self.assertEqual(calls[0][1]["width"], 576)
         self.assertEqual(calls[0][1]["height"], 1024)
+
+    def test_collect_outputs_exposes_only_preferred_final_video_for_publish(self) -> None:
+        final_video_path = r"C:\runs\merged_final.mp4"
+        state = RunState(
+            goal={},
+            metadata={},
+            node_outputs={
+                "video-trim": {"video_path": final_video_path},
+                "segment-video-01": {"video_path": r"C:\runs\segment_01.mp4"},
+            },
+        )
+        skills = AgentMediaSkills(SimpleNamespace(), self.make_workspace_tempdir())
+        context = SkillContext(
+            plan=ExecutionPlan(goal=GoalRequest(prompt="publish long video"), workflow_name="longvideo", nodes=[]),
+            node=ExecutionNode(
+                node_id="collect-longvideo-outputs",
+                skill_name="agent.output.collect",
+                inputs={
+                    "keys": ["video_path"],
+                    "preferred_video_node": "video-trim",
+                },
+                depends_on=["video-trim", "segment-video-01"],
+            ),
+            state=state,
+        )
+
+        result = skills.collect_outputs(context)
+
+        self.assertEqual(result.outputs["final_video_path"], [final_video_path])
+        self.assertEqual(result.outputs["video_path"], [final_video_path])
 
 
 if __name__ == "__main__":

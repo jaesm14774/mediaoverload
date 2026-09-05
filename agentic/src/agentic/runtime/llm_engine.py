@@ -12,16 +12,19 @@ from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_manager_adapter import build_llm_manager
 from agentic.runtime.model_backends import _load_project_env, provider_default_model
 from agentic.runtime.observability import RunRecorder
+from agentic.runtime.post_strategy import resolve_post_strategy
 from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
 from agentic.runtime.reference_video import format_reference_video_directive, reference_keyframe_paths
 from agentic.runtime.prompting import (
     ENGLISH_GENERATION_RESPONSE_CONTRACT,
+    IMAGE_PROMPT_CONTRACT,
     LONG_VIDEO_SYSTEM_PROMPT,
     STICKER_SYSTEM_PROMPT,
     build_animated_sticker_motion_prompt,
     build_autonomous_scene_prompt,
     build_segment_prompt,
     build_goal_brief,
+    build_timed_shot_plan,
     build_sticker_prompt,
     build_story_segments,
     validate_story_segments,
@@ -53,10 +56,9 @@ WORKFLOW_STAGE_KEYS = (
     "upscale_workflow_name",
 )
 
-# This is an internal project name, not a topic a viewer can infer from the
-# media. Keep it out even if an old character or platform config still sends
-# it as a default hashtag.
-BLOCKED_HASHTAG_KEYS = frozenset({"mediaoverload"})
+# These are internal or generic reach-bait terms, not content topics a viewer
+# can infer from the media. Keep them out of model-selected hashtags.
+BLOCKED_HASHTAG_KEYS = frozenset({"mediaoverload", "fyp", "foryou", "foryoupage", "explorepage"})
 
 DEFAULT_REFERENCE_STYLE_SCORE_WEIGHTS = {
     "style_grammar": 30,
@@ -98,13 +100,40 @@ def _goal_subject_contract(goal: GoalRequest) -> tuple[dict[str, Any], list[str]
 def _goal_subject_instruction(goal: GoalRequest) -> str:
     """Describe the resolved subject slots without imposing distinct names."""
 
-    _, subject_names, interaction_required = _goal_subject_contract(goal)
+    context, subject_names, interaction_required = _goal_subject_contract(goal)
     if interaction_required and len(subject_names) == 2:
         return (
             f"Required subject slots: {', '.join(subject_names)}. The slots may have the same name; "
             "keep both visible in one frame and show a concrete mutual interaction. Do not add an unrequested third subject."
         )
-    return f"Required protagonist: {str(goal.constraints.get('character') or '').strip()}. Do not add unrequested subjects."
+    character = str(goal.constraints.get("character") or "the selected protagonist").strip()
+    profile = dict(context.get("character_profile") or goal.constraints.get("character_profile") or {})
+    if not profile and subject_names:
+        profile = dict(
+            next(
+                (
+                    item.get("profile")
+                    for item in (context.get("subjects") or [])
+                    if isinstance(item, dict) and str(item.get("name") or "").strip() == subject_names[0]
+                ),
+                {},
+            )
+            or {}
+        )
+    profile_details = "; ".join(
+        part
+        for part in (
+            str(profile.get("role_description") or "").strip(),
+            str(profile.get("keywords") or "").strip(),
+        )
+        if part
+    )
+    appearance = (
+        f" Resolved character_profile: {profile_details}. Use it as the sole source of appearance and identity."
+        if profile_details
+        else " Appearance and identity must come from the resolved character_profile; do not invent character-specific anatomy or costume."
+    )
+    return f"Required protagonist: {character}.{appearance} Do not add unrequested subjects."
 
 
 SOCIAL_CAPTION_SYSTEM_PROMPT = """
@@ -124,9 +153,11 @@ Rules:
   improve the requested social format, not as decoration on every line.
 - Use concrete visible nouns and actions; avoid hype, generic adjectives, and scene-padding.
 - Do not mention AI, prompts, models, generation, metadata, or "this image/video".
-- Use 2 to 5 hashtags chosen from the visible subject, visible action or setting,
-  and the article's actual topic. Treat supplied hashtag hints as optional and
-  omit any hint that is not supported by the media or post.
+- Use zero to three hashtags chosen from the visible subject, visible action or
+  setting, and the article's actual topic. Return an empty string when no tag
+  adds meaningful discovery context. Treat supplied hashtag hints as optional
+  and omit any hint that is not supported by the media or post. Never add
+  #FYP, #ForYou, or equivalent reach-bait just to fill space.
 - Return hashtags only in the `hashtags` field. The `caption` value must not
   contain hashtag tokens. The `hashtags` field must be one space-separated
   string such as "#one #two", never a JSON array or Python list notation.
@@ -134,6 +165,9 @@ Rules:
   In particular, never use #mediaoverload.
 - Platform captions must preserve the same factual claim and may be shortened for platform limits.
 - If the visual evidence is ambiguous, describe only the unambiguous subject, action, and setting.
+- The post may be one line, several sentences, or a short multi-paragraph story
+  when the evidence supports it. Do not force a fixed length, paragraph count,
+  takeaway list, question, or call to action.
 
 Return JSON only with caption, hashtags, and platform_captions.
 """.strip()
@@ -926,7 +960,7 @@ class LLMPromptEngine:
         return violations
 
     @staticmethod
-    def _validate_native_h3_text_lengths(story: dict[str, Any], max_length: int = 1600) -> None:
+    def _validate_native_h3_text_lengths(story: dict[str, Any], max_length: int = 3000) -> None:
         def visit(value: Any, path: str) -> None:
             if isinstance(value, str) and len(value) > max_length:
                 raise PromptGenerationError(f"Native H3 {path} exceeds {max_length} characters.")
@@ -998,6 +1032,7 @@ class LLMPromptEngine:
                     ),
                     "Return JSON with keys: creative_brief, prompt, opening_keyframe_prompt, negative_prompt.",
                     "Build the prompt in this order: Subject, Scene, Action, Environment, Camera, Style and lighting, Quality.",
+                    IMAGE_PROMPT_CONTRACT,
                     "The prompt must be generation-ready for diffusion and image-to-video models; use concrete visible nouns and verbs rather than abstract mood words.",
                     "opening_keyframe_prompt is for a single still Krea first frame: describe only the opening state and one visible action onset. Do not include later beats, aftermath, before-and-after states, montage language, duplicate subjects, reflections, or miniature copies.",
                     "For image-to-video, describe how the supplied image starts moving and evolves; do not spend the prompt redrawing the static image.",
@@ -1070,6 +1105,7 @@ class LLMPromptEngine:
                     f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                     "Return JSON with keys: prompt, negative_prompt.",
                     "Create a concise generation-ready prompt using this order: Subject, Scene, Action, Environment, Camera, Style and lighting, Quality.",
+                    IMAGE_PROMPT_CONTRACT,
                     "Use one primary physical action with a visible beginning, change, and end; place the camera instruction next to the action it controls.",
                     "When a prior/first frame is supplied, treat it as authoritative and describe motion/evolution from that frame rather than restating its appearance.",
                     "If news context exists, merge only a few concrete visual motifs into the scene instead of recreating the headline.",
@@ -1372,9 +1408,41 @@ class LLMPromptEngine:
         segment_count: int,
         tone: str,
         reference_analysis: dict[str, Any] | None = None,
+        *,
+        production_profile: str = "",
     ) -> list[dict[str, Any]]:
-        fallback = build_story_segments(goal, creative_brief, segment_count, tone)
-        manager = self._require_manager()
+        fallback = build_story_segments(
+            goal,
+            creative_brief,
+            segment_count,
+            tone,
+            production_profile=production_profile,
+        )
+        production_mode = str(production_profile or "").strip().lower() == "text2longvideo"
+        rich_shot_mode = production_mode
+        internal_shot_count = 4
+        segment_duration = max(1.0, float(goal.duration_seconds) / max(1, int(segment_count)))
+        storyboard_outline = ""
+        if str(goal.constraints.get("storyboard_path") or "").strip():
+            outline_lines = [
+                "Checked-in storyboard structural contract: follow this sequence, but replace its generic placeholders with the current brief, news context, and resolved character_profile.",
+            ]
+            for index, segment in enumerate(fallback, start=1):
+                outline_lines.append(
+                    "Segment "
+                    f"{index} ({str(segment.get('phase') or segment.get('segment_id') or '').strip()}): "
+                    f"goal={str(segment.get('act_goal') or '').strip()}; "
+                    f"cause={str(segment.get('cause') or '').strip()}; "
+                    f"effect={str(segment.get('effect') or '').strip()}; "
+                    f"handoff={str(segment.get('next_hook') or '').strip()}"
+                )
+            storyboard_outline = "\n".join(outline_lines)
+        try:
+            manager = self._require_manager()
+        except Exception:
+            if production_mode:
+                return validate_story_segments(fallback, segment_count)
+            raise
         reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
         reference_images = reference_keyframe_paths(reference_analysis)[:6]
 
@@ -1389,6 +1457,7 @@ class LLMPromptEngine:
                 f"Tone: {tone}",
                 f"Segment count: {segment_count}",
                 f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
+                storyboard_outline,
                 reference_directive,
                 (
                     "Use the attached reference keyframes as visual evidence for shot rhythm and escalation. Invent an original story and never copy source-specific subjects, plot, logos, text, or locations."
@@ -1398,12 +1467,63 @@ class LLMPromptEngine:
                 "Return JSON object with key: segments.",
                 "segments must be an array where each item has keys: segment_id, visual, narration, action, camera, start_state, end_state, cause, and effect.",
                 "Every segment must preserve identity, use one primary physical action, include a concrete camera instruction beside that action, and visibly hand off its end_state to the next segment.",
+                (
+                    "This is the publishable story-assembly profile. For every segment, return exactly 4 internal shots in a 'shots' array covering the whole segment. "
+                    "Each shot must have a chronological time range, a distinct physical action, an action-matched camera move, a visible state change, its immediate cause, and the effect that makes the next shot possible. "
+                    "Do not repeat a static look at the prop; every shot must move the protagonist, prop, or spatial relationship forward, and the final shot must hand off to the next segment."
+                    if production_mode
+                    else ""
+                ),
                 "Compress the idea before segmenting: keep one dominant news mechanism, one location unless a declared transition is required, one readable setback, and one concrete payoff. Translate the selected title or keyword into a specific physical event, then carry that same event through source concept -> active mechanism -> visible consequence. Do not import a preset's unrelated setting, prop, or quest.",
                 "The opening must create a question immediately; the middle must change the plan or cost the protagonist something; the final segment must visibly answer the opening question.",
                 "When news context is provided, do not reduce it to a category mood or generic glowing object. Use one concrete source-derived visual anchor in at least three segments, make the mechanism cause the setback, and make its consequence the final payoff. Never render article text, logos, interfaces, or a literal news report.",
                 "All story fields must be idiomatic English and generation-ready. Prefer an immediately active first half-second, explicit spatial handoffs between segments, and a settled final state that can be understood without narration.",
             ]
         )
+        segment_properties: dict[str, Any] = {
+            "segment_id": {"type": "string"},
+            "visual": {"type": "string"},
+            "narration": {"type": "string"},
+            "action": {"type": "string"},
+            "camera": {"type": "string"},
+            "start_state": {"type": "string"},
+            "end_state": {"type": "string"},
+            "cause": {"type": "string"},
+            "effect": {"type": "string"},
+        }
+        required_segment_fields = [
+            "segment_id",
+            "visual",
+            "narration",
+            "action",
+            "camera",
+            "start_state",
+            "end_state",
+            "cause",
+            "effect",
+        ]
+        if rich_shot_mode:
+            internal_shot_count = 4
+            segment_properties["shots"] = {
+                "type": "array",
+                "minItems": internal_shot_count,
+                "maxItems": internal_shot_count,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "time": {"type": "string"},
+                        "title": {"type": "string"},
+                        "action": {"type": "string"},
+                        "camera": {"type": "string"},
+                        "state_change": {"type": "string"},
+                        "cause": {"type": "string"},
+                        "effect": {"type": "string"},
+                    },
+                    "required": ["time", "title", "action", "camera", "state_change", "cause", "effect"],
+                    "additionalProperties": False,
+                },
+            }
+            required_segment_fields.append("shots")
         try:
             payload = self._chat_json_with_recorder(
                 manager,
@@ -1419,28 +1539,8 @@ class LLMPromptEngine:
                             "maxItems": segment_count,
                             "items": {
                                 "type": "object",
-                                "properties": {
-                                    "segment_id": {"type": "string"},
-                                    "visual": {"type": "string"},
-                                    "narration": {"type": "string"},
-                                    "action": {"type": "string"},
-                                    "camera": {"type": "string"},
-                                    "start_state": {"type": "string"},
-                                    "end_state": {"type": "string"},
-                                    "cause": {"type": "string"},
-                                    "effect": {"type": "string"},
-                                },
-                                "required": [
-                                    "segment_id",
-                                    "visual",
-                                    "narration",
-                                    "action",
-                                    "camera",
-                                    "start_state",
-                                    "end_state",
-                                    "cause",
-                                    "effect",
-                                ],
+                                "properties": segment_properties,
+                                "required": required_segment_fields,
                                 "additionalProperties": False,
                             },
                         }
@@ -1454,26 +1554,53 @@ class LLMPromptEngine:
             if isinstance(segments, list) and segments:
                 normalized: list[dict[str, Any]] = []
                 for index, item in enumerate(segments[:segment_count]):
-                    normalized.append(
-                        {
-                            "segment_id": str(item.get("segment_id") or f"segment-{index + 1}"),
-                            "visual": str(item.get("visual") or fallback[index]["visual"]),
-                            "narration": str(item.get("narration") or fallback[index]["narration"]),
-                            "action": str(item.get("action") or fallback[index].get("action") or ""),
-                            "camera": str(item.get("camera") or fallback[index].get("camera") or ""),
-                            "start_state": str(item.get("start_state") or fallback[index].get("start_state") or ""),
-                            "end_state": str(item.get("end_state") or fallback[index].get("end_state") or ""),
-                            "cause": str(item.get("cause") or fallback[index].get("cause") or ""),
-                            "effect": str(item.get("effect") or fallback[index].get("effect") or ""),
-                            "stage": fallback[index].get("stage"),
-                            "creative_brief": creative_brief,
-                        }
-                    )
+                    normalized_item: dict[str, Any] = {
+                        "segment_id": str(item.get("segment_id") or f"segment-{index + 1}"),
+                        "visual": str(item.get("visual") or fallback[index]["visual"]),
+                        "narration": str(item.get("narration") or fallback[index]["narration"]),
+                        "action": str(item.get("action") or fallback[index].get("action") or ""),
+                        "camera": str(item.get("camera") or fallback[index].get("camera") or ""),
+                        "start_state": str(item.get("start_state") or fallback[index].get("start_state") or ""),
+                        "end_state": str(item.get("end_state") or fallback[index].get("end_state") or ""),
+                        "cause": str(item.get("cause") or fallback[index].get("cause") or ""),
+                        "effect": str(item.get("effect") or fallback[index].get("effect") or ""),
+                        "stage": fallback[index].get("stage"),
+                        "creative_brief": creative_brief,
+                    }
+                    if rich_shot_mode:
+                        normalized_item["shots"] = build_timed_shot_plan(
+                            {**normalized_item, "shots": item.get("shots")},
+                            duration_seconds=segment_duration,
+                            shot_count=internal_shot_count,
+                            force_multi_beat=production_mode,
+                        )
+                    normalized.append(normalized_item)
                 while len(normalized) < segment_count:
-                    normalized.append(fallback[len(normalized)])
+                    fallback_item = dict(fallback[len(normalized)])
+                    if rich_shot_mode:
+                        fallback_item["shots"] = build_timed_shot_plan(
+                            fallback_item,
+                            duration_seconds=segment_duration,
+                            shot_count=internal_shot_count,
+                            force_multi_beat=production_mode,
+                        )
+                    normalized.append(fallback_item)
                 return validate_story_segments(normalized, segment_count)
         except Exception as exc:
             del exc
+        if rich_shot_mode:
+            fallback = [
+                {
+                    **segment,
+                    "shots": build_timed_shot_plan(
+                        segment,
+                        duration_seconds=segment_duration,
+                        shot_count=internal_shot_count,
+                        force_multi_beat=production_mode,
+                    ),
+                }
+                for segment in fallback
+            ]
         return validate_story_segments(fallback, segment_count)
 
     def sticker_expressions(self, goal: GoalRequest, prompt: str, character: str, expression_count: int) -> list[str]:
@@ -1617,11 +1744,24 @@ class LLMPromptEngine:
     ) -> dict[str, Any]:
         fallback = build_segment_prompt(goal, segment, prior_frame)
         fallback["negative_prompt"] = negative_prompt
-        manager = self._require_manager()
+        production_mode = str(
+            goal.constraints.get("longvideo_production_profile") or ""
+        ).strip().lower() == "text2longvideo"
+        try:
+            manager = self._require_manager()
+        except Exception:
+            if production_mode:
+                return fallback
+            raise
 
         continuity_lines = [
             f"Current segment id: {segment.get('segment_id', '')}",
             f"Current segment visual: {segment.get('visual', '')}",
+            (
+                "Internal shot beats JSON: " + json.dumps(segment.get("shots"), ensure_ascii=False)
+                if isinstance(segment.get("shots"), list)
+                else ""
+            ),
             f"Current segment narration: {segment.get('narration', '')}",
             f"Style: {goal.style}",
             f"Character: {goal.constraints.get('character', '')}",
@@ -1640,6 +1780,7 @@ class LLMPromptEngine:
                 [
                     "Return JSON with keys: prompt, narration.",
                     "Use the MiniMax temporal order: subject continuity, current scene state, one primary physical action, camera movement attached to that action, visible end state, then audio or style.",
+                    "If internal shot beats are supplied, preserve all four beats in chronological order; do not collapse them into a static subject-and-prop description.",
                     "Preserve character identity and scene geography; make the first half-second active and make the next state visibly different from the previous segment.",
                     "If a prior frame exists, describe only how the frame comes alive and evolves; do not replace it with a new composition.",
                     "If news exists, keep it as stylized motifs or atmosphere rather than literal reporting.",
@@ -1880,6 +2021,7 @@ class LLMPromptEngine:
         normalized_hashtags = [tag if tag.startswith("#") else f"#{tag}" for tag in hashtags if tag]
         character = str(goal.constraints.get("character", "") or "").strip()
         manager = self._require_manager()
+        post_strategy = resolve_post_strategy(goal, media_paths)
 
         visual_grounding = goal.constraints.get("visual_grounding")
         news_context = goal.constraints.get("news_context")
@@ -1911,6 +2053,8 @@ class LLMPromptEngine:
                 f"Platforms: {', '.join(platforms) if platforms else 'generic'}",
                 f"Editorial direction: {review_notes or 'state only what is visibly supported'}",
                 f"Visual evidence attached: {len(visual_paths)} file(s)",
+                "Editorial variation brief; use it as guidance, not as a fixed copy template: "
+                f"{json.dumps(post_strategy, ensure_ascii=False)}",
                 f"Optional hashtag hints; use only when supported by the media: {', '.join(normalized_hashtags) or 'none'}",
                 "Forbidden hashtag: #mediaoverload",
                 f"Semantic QA context, not a replacement for visual evidence: {json.dumps(visual_grounding, ensure_ascii=False) if isinstance(visual_grounding, dict) else '{}'}",
@@ -1920,12 +2064,12 @@ class LLMPromptEngine:
                     f"{news_grounding_required}. Contract: {news_trace_contract}. "
                     "Use the news as causal context, do not invent facts, and do not "
                     "claim details that are not supported by the generated media. "
-                    "When true, the caption MUST include one short, explicit bridge "
-                    "to the real-world news mechanism (for example, that the playful "
-                    "scene visualizes remote, no-verification access multiplying "
-                    "security openings). Frame it as a visual metaphor, not as a claim "
-                    "that the animation contains real incident data, and never omit "
-                    "this bridge."
+                    "When true, connect the visible scene to the supplied news context "
+                    "only when that connection is supported by both. Describe any "
+                    "metaphor as an interpretation, not as an event reported by the news. "
+                    "Do not introduce unrelated topics or invent a mechanism or connection "
+                    "when the supplied context is insufficient; describe the visible scene "
+                    "without an unsupported news claim."
                 ),
                 f"Optional prefix context: {prefix}",
             ]
@@ -1965,12 +2109,7 @@ class LLMPromptEngine:
             normalized_caption = self._clean_social_post_text(payload["caption"])
             if not normalized_caption or self._is_caption_placeholder(normalized_caption):
                 raise ValueError("Caption model returned an empty or placeholder caption.")
-            normalized_hashtag_text = self._normalize_hashtag_text(
-                payload["hashtags"],
-                required_hashtags=normalized_hashtags,
-            )
-            if not normalized_hashtag_text:
-                raise ValueError("Caption model returned no hashtags.")
+            normalized_hashtag_text = self._normalize_hashtag_text(payload["hashtags"])
             result: dict[str, Any] = {
                 "caption": normalized_caption,
                 "hashtags": normalized_hashtag_text,
@@ -2027,7 +2166,13 @@ class LLMPromptEngine:
         return payload
 
     @staticmethod
-    def _normalize_hashtag_text(hashtags: str, *, required_hashtags: list[str]) -> str:
+    def _normalize_hashtag_text(
+        hashtags: str,
+        *,
+        required_hashtags: list[str] | None = None,
+    ) -> str:
+        # Hints may influence ordering when the model selected the same tag,
+        # but they are deliberately never injected into the model's choice.
         if not isinstance(hashtags, str):
             raise ValueError("Caption model returned hashtags with an invalid type; expected a string.")
         seen: list[str] = []
@@ -2048,16 +2193,14 @@ class LLMPromptEngine:
             if key not in seen_keys:
                 seen.append(cleaned)
                 seen_keys.add(key)
-        required: list[str] = []
-        required_keys: set[str] = set()
-        for tag in required_hashtags:
-            cleaned = tag if str(tag).startswith("#") else f"#{str(tag).lstrip('#')}"
-            key = cleaned[1:].casefold() if cleaned else ""
-            if key and key not in BLOCKED_HASHTAG_KEYS and key not in required_keys:
-                required.append(cleaned)
-                required_keys.add(key)
-        ordered = required + [tag for tag in seen if tag[1:].casefold() not in required_keys]
-        return " ".join(ordered[:5])
+        hint_keys = {
+            str(tag).lstrip("#").casefold()
+            for tag in (required_hashtags or [])
+            if str(tag).strip()
+        }
+        ordered = [tag for tag in seen if tag[1:].casefold() in hint_keys]
+        ordered.extend(tag for tag in seen if tag[1:].casefold() not in hint_keys)
+        return " ".join(ordered[:3])
 
     @staticmethod
     def _clean_social_post_text(value: str) -> str:

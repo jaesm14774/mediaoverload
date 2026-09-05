@@ -1,8 +1,8 @@
-"""Run the provider-neutral long-video mix through real ComfyUI.
+"""Run the production long-video I2V/tail route through real ComfyUI.
 
-This is an execution-level smoke test for the shared conditioning planner. It
-does not publish, does not use Discord review, and never substitutes another
-recipe when a selected recipe fails.
+This is an execution-level smoke test for the production conditioning planner.
+It does not publish, does not use Discord review, and requires every segment
+after the opening to consume the preceding rendered tail.
 """
 
 from __future__ import annotations
@@ -24,8 +24,6 @@ from agentic.app.main import build_runtime
 from agentic.tools.context_services import NewsContextService
 
 
-MIX_WEIGHTS = {"anchor_first_last": 1}
-RECIPE_NAMES = ("anchor_first", "anchor_first_last", "anchor_last", "reference_bundle", "t2v")
 EXPECTED_REFERENCE_CANDIDATES = 4
 
 
@@ -61,25 +59,13 @@ def _qa(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the shared long-video conditioning mix through ComfyUI")
+    parser = argparse.ArgumentParser(description="Run the production long-video conditioning route through ComfyUI")
     parser.add_argument("--comfy-root", default=r"D:\ComfyUI_windows_portable")
-    parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "longvideo_mix_e2e"))
+    parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "longvideo_production_e2e"))
     parser.add_argument("--comfy-host", default="127.0.0.1")
     parser.add_argument("--comfy-port", type=int, default=8188)
     parser.add_argument("--segments", type=int, default=4)
-    parser.add_argument(
-        "--recipe",
-        choices=("mix",) + RECIPE_NAMES,
-        default="anchor_first_last",
-        help="Use the sampled recipe mix or force one H3 conditioning recipe for every segment",
-    )
-    parser.add_argument(
-        "--continuity-mode",
-        choices=("planned_anchor", "independent"),
-        default="planned_anchor",
-        help="Use a prior planned landing anchor where the recipe supports it, or make every segment independent",
-    )
-    parser.add_argument("--seed", type=int, default=55)
+    parser.add_argument("--variant-seed", type=int, default=55)
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=288)
     parser.add_argument(
@@ -206,7 +192,6 @@ def main() -> int:
         comfy_port=args.comfy_port,
         comfy_root=comfy_root,
     )
-    recipe_weights = dict(MIX_WEIGHTS) if args.recipe == "mix" else {args.recipe: 1}
     goal = planner.create_goal(
         prompt=args.goal_prompt,
         media_type="long_video",
@@ -216,9 +201,9 @@ def main() -> int:
         constraints={
             "character": "Kirby",
             "segment_count": max(2, args.segments),
-            "longvideo_mix_weights": recipe_weights,
-            "longvideo_mix_seed": args.seed,
-            "longvideo_continuity_mode": args.continuity_mode,
+            "edit_variant_seed": args.variant_seed,
+            "longvideo_production_profile": "text2longvideo",
+            "longvideo_continuity_mode": "rendered_tail",
             "longvideo_review_policy": "opening_only",
             "longvideo_width": args.width,
             "longvideo_height": args.height,
@@ -246,39 +231,17 @@ def main() -> int:
         for node in plan.nodes
         if any("segment-tail-" in dependency for dependency in node.depends_on)
     ]
-    planned_anchor_consumers = []
-    for node in plan.nodes:
-        if not node.node_id.startswith("segment-video-"):
-            continue
-        conditioning_plan = node.inputs.get("conditioning_plan", {})
-        continuation_node = conditioning_plan.get("continuation_node") if isinstance(conditioning_plan, dict) else None
-        if continuation_node:
-            planned_anchor_consumers.append(
-                {
-                    "node_id": node.node_id,
-                    "continuation_node": str(continuation_node),
-                    "dependency_declared": str(continuation_node) in node.depends_on,
-                }
-            )
-    expected_anchor_consumers = max(0, args.segments - 1) if args.recipe == "anchor_first_last" else None
-    planned_anchor_contract_passed = all(item["dependency_declared"] for item in planned_anchor_consumers)
-    if expected_anchor_consumers is not None:
-        planned_anchor_contract_passed = (
-            planned_anchor_contract_passed and len(planned_anchor_consumers) == expected_anchor_consumers
-        )
+    expected_tail_consumers = max(0, int(plan.metadata.get("segment_count", args.segments)) - 1)
+    tail_input_contract_passed = len(tail_dependencies) == expected_tail_consumers
     report: dict[str, Any] = {
         "recipe_sequence": plan.metadata.get("recipe_sequence", []),
         "recipe_workflows": plan.metadata.get("recipe_workflows", {}),
-        "mix_seed": plan.metadata.get("mix_seed"),
-        "mix_weights": plan.metadata.get("mix_weights", {}),
+        "variant_seed": plan.metadata.get("variant_seed"),
         "output_root": str(output_root),
         "smoke": args.smoke,
-        "requested_recipe": args.recipe,
-        "continuity_mode": args.continuity_mode,
+        "continuity_mode": "rendered_tail",
         "tail_input_dependencies": tail_dependencies,
-        "tail_input_contract_passed": not tail_dependencies,
-        "planned_anchor_consumers": planned_anchor_consumers,
-        "planned_anchor_contract_passed": planned_anchor_contract_passed,
+        "tail_input_contract_passed": tail_input_contract_passed,
         "target_duration": target_duration,
         "news_source": news_source,
         "news_context": news_context,
@@ -360,9 +323,8 @@ def main() -> int:
         and all(item.get("reference_contract_passed", True) for item in report["segment_results"])
         and report["final_qa"].get("passed") is True
         and report["tail_input_contract_passed"] is True
-        and report["planned_anchor_contract_passed"] is True
     )
-    report_path = output_root / "longvideo_mix_e2e_report.json"
+    report_path = output_root / "longvideo_production_e2e_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({**report, "report_path": str(report_path)}, indent=2, ensure_ascii=False))

@@ -274,7 +274,14 @@ class FFmpegAdapter:
         self._run(command)
         return output_path
 
-    def trim_video(self, video_path: str, output_path: str, duration_seconds: float) -> str:
+    def trim_video(
+        self,
+        video_path: str,
+        output_path: str,
+        duration_seconds: float,
+        *,
+        normalize_audio: bool = False,
+    ) -> str:
         """Trim a packaged video to an explicit duration while keeping its streams."""
 
         self._ensure_binaries()
@@ -286,23 +293,34 @@ class FFmpegAdapter:
         self._ensure_parent(output_path)
         if os.path.abspath(video_path) == os.path.abspath(output_path):
             raise ValueError("output_path must be different from video_path")
-        self._run(
+        command = [
+            "ffmpeg",
+            "-i",
+            video_path,
+            "-t",
+            f"{duration:.6f}",
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+        ]
+        if normalize_audio:
+            command.extend(
+                [
+                    "-af",
+                    "aresample=48000,loudnorm=I=-20:TP=-1.5:LRA=11",
+                    "-ar",
+                    "48000",
+                ]
+            )
+        command.extend(
             [
-                "ffmpeg",
-                "-i",
-                video_path,
-                "-t",
-                f"{duration:.6f}",
-                "-map",
-                "0:v:0",
-                "-map",
-                "0:a?",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
                 "-movflags",
                 "+faststart",
                 "-shortest",
@@ -310,6 +328,7 @@ class FFmpegAdapter:
                 output_path,
             ]
         )
+        self._run(command)
         return output_path
 
     def video_to_gif(

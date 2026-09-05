@@ -51,6 +51,7 @@ class MediaServiceTools:
                 video_path=str(payload["video_path"]),
                 output_path=str(payload["output_path"]),
                 duration_seconds=float(payload["duration_seconds"]),
+                normalize_audio=bool(payload.get("normalize_audio", False)),
             ),
             "duration_seconds": float(payload["duration_seconds"]),
         }

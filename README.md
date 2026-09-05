@@ -119,7 +119,7 @@ generation:
 | `sticker_expression_count` | 貼圖表情數量 |
 | `images_per_prompt` | 每個 prompt／表情批次出圖數 |
 
-**長片總時長**（`text2longvideo`）：`duration_seconds = max(10, segment_count × segment_duration)`，其中 `segment_count` 來自路由的 `count_plan`，`segment_duration` 預設 `5` 秒，可透過角色 YAML 覆寫（見 `text2longvideo` 範例）。
+**長片總時長**（`text2longvideo`）：未指定時預設 30 秒，使用 `configs/storyboards/text2longvideo_story.yaml` 的六段 generic story contract（hook → goal → attempt → setback → reversal → payoff）；明確指定 45 秒時延伸到 aftermath/coda 段落。系統以約 5 秒為一段拆分，每段使用四拍劇情 prompt；I2V 以實際上一段尾幀接續，只有明確狀態轉換才使用 FL2V，並在每段及最終成片執行技術 QA。
 
 ---
 
@@ -313,9 +313,9 @@ additional_params:
 
 ### 4. `text2longvideo` — 長片／多段
 
-**會用到的鍵**：`image_workflow_name`、`video_workflow_name`、`transition_workflow_name`。
+**會用到的鍵**：開場的 `image_workflow_name`、多段 I2V 的 `video_workflow_name`，以及只在明確狀態轉換時使用的 `transition_workflow_name`。
 
-這不是單純的 text-to-long-video。planner 會把 story 拆成多個 segment，依每段抽到的 recipe 產生 anchor/reference 圖，接著跑多段 I2V、tail/continuation 或 transition，最後 concat；總時長由 `segment_count × segment_duration` 決定，不固定為 Native H3 的 15 秒。
+planner 會把 story 拆成約 5 秒的 segment。第一段使用審核過的開場圖或 reference；後續每段以上一段實際渲染出的尾幀進行 H3 I2V 接續，只有劇情需要抵達新狀態時才使用 FL2V landing transition，最後 concat 並執行逐段與全片 QA。總時長依使用者要求計算，不固定為 Native H3 的 15 秒。
 
 **CLI 範例**：
 
@@ -344,22 +344,25 @@ result = run_character_workflow(
 )
 ```
 
-**YAML**（片段時長、段數語意、是否 TTS）：
+**YAML**（現行 production profile 與實際尾幀接續）：
 
 ```yaml
 additional_params:
-  strategies:
-    text2longvideo:
-      first_stage:
-        workflow_name: krea2_turbo
-      video_generation:
-        workflow_name: minimax_h3_lowvram_i2v
-      frame_transition:
-        workflow_name: krea2_turbo_img2img
-      longvideo_config:
-        segment_count: 4
-        segment_duration: 5
-        use_tts: true
+  longvideo_config:
+    production_profile: text2longvideo
+    default_duration_seconds: 30
+    segment_duration: 5
+    storyboard_path: configs/storyboards/text2longvideo_story.yaml
+    review_policy: opening_only
+    continuity_mode: rendered_tail
+    workflow_names:
+      - minimax_h3_lowvram_i2v
+      - minimax_h3_lowvram_15s_fl2va_i2v
+    width: 608
+    height: 352
+    length: 120
+    steps: 16
+    model_profile: q2
 ```
 
 ---
@@ -466,7 +469,7 @@ python run_media_interface.py --character kirby --prompt '單鏡頭短動畫，�
 # 3. 先圖後短片：krea2_turbo -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
 python run_media_interface.py --character kirby --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
 
-# 4. 長片／多段故事：每段依 recipe 產生 anchor/reference -> I2V -> tail/transition -> concat
+# 4. 長片／多段故事：審核開場 -> I2V 實際尾幀接續 -> 明確轉場時才 FL2V -> concat
 python run_media_interface.py --character kirby --prompt '三段式故事：相遇、追逐、收尾；每段要有狀態轉移' --generation-type text2longvideo
 
 # 5. Native H3 I2VA：generated opening image -> minimax_h3_lowvram_15s_fl2va_i2v

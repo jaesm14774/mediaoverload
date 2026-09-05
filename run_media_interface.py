@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -120,6 +121,11 @@ def main() -> None:
         return
 
     config_path = _resolve_config_path(args)
+    routing_history_path = (
+        REPO_ROOT / "agentic" / "state" / "routing_selection" / f"{config_path.stem}.json"
+    )
+    # Keep strategy/character routing randomness independent from --seed,
+    # which is reserved for reproducible media rendering.
     request = CharacterWorkflowRequest(
         repo_root=REPO_ROOT,
         config_path=config_path,
@@ -133,6 +139,8 @@ def main() -> None:
             reference_video_source=args.reference_video,
             reference_video_depth=args.reference_video_depth,
             reference_video_max_keyframes=args.reference_keyframes,
+            routing_history_path=str(routing_history_path),
+            rng=random.Random(),
             seed=args.seed,
         ),
         review=CharacterReviewOptions(

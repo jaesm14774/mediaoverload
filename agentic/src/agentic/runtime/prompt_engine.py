@@ -6,6 +6,7 @@ from typing import Any
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.platform_content import PLATFORM_STRATEGY_VERSION, build_platform_bundle
+from agentic.runtime.post_strategy import resolve_post_strategy
 from agentic.runtime.prompt_requests import GenerationRoutingRequest
 
 
@@ -61,6 +62,8 @@ class PromptEngine:
         segment_count: int,
         tone: str,
         reference_analysis: dict[str, Any] | None = None,
+        *,
+        production_profile: str = "",
     ) -> list[dict[str, Any]]:
         return self.llm_engine.segment_story(
             goal,
@@ -68,6 +71,7 @@ class PromptEngine:
             segment_count,
             tone,
             reference_analysis=reference_analysis,
+            production_profile=production_profile,
         )
 
     def sticker_expressions(self, goal: GoalRequest, prompt: str, character: str, expression_count: int) -> list[str]:
@@ -166,6 +170,7 @@ class PromptEngine:
             visual_paths=visual_paths,
         )
         normalized_hashtags = str(bundle.get("hashtags", "") or "").strip()
+        post_strategy = resolve_post_strategy(goal, media_paths)
         platform_captions = bundle.get("platform_captions", {})
         if not isinstance(platform_captions, dict):
             platform_captions = {}
@@ -180,8 +185,10 @@ class PromptEngine:
             },
             platforms=[str(platform) for platform in effective_platforms],
             media_paths=media_paths,
+            post_strategy=post_strategy,
         )
         bundle["platform_bundle"] = platform_bundle
+        bundle["post_strategy"] = post_strategy
         bundle["caption_strategy"] = "platform_adapted" if platform_bundle else "generic"
         bundle["platform_strategy_version"] = PLATFORM_STRATEGY_VERSION
         bundle["dispatch_ready"] = bool(media_paths) and bool(bundle.get("caption"))

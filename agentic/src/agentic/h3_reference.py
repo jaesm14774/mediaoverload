@@ -189,39 +189,87 @@ def format_ref2va_prompt(
     *,
     soundscape: str = "Generate native H3 audio from the scene; do not use reference audio.",
 ) -> str:
-    """Wrap a normal H3 scene prompt in the Ref2VA prompt contract.
+    """Wrap a scene prompt in the current official full-reference contract.
 
-    H3 Ref2VA expects six named sections.  Keeping them explicit makes the
-    workflow auditable and lets the planner preserve reference intent without
-    inventing a hidden audio input.
+    Ref2VA's full-reference rewrite format is deliberately different from the
+    ordinary H3 ``integrated_multimodal_description`` format.  In particular,
+    reference images that define reusable subjects are cited as ``<Picture N>``
+    sources inside ``<Subject N>`` definitions; they are not incorrectly
+    presented as standalone keyframes.  Keep the six section names and the
+    reference labels stable so the text encoder can associate them with the
+    ordered ComfyUI reference slots.
     """
 
     refs = list(references)
-    subject_lines = [
-        f"- {ref.get('prompt_label', ref['tag'])} ({ref['tag']}): role={ref['role']}; retain={ref['retention']}"
-        + (f"; {ref['notes']}" if ref.get("notes") else "")
-        for ref in refs
-    ]
-    retention_lines = [f"- {ref.get('prompt_label', ref['tag'])}: {ref['retention']}" for ref in refs]
+    subject_lines: list[str] = []
+    retention_lines: list[str] = []
+    summary_labels: list[str] = []
+    has_frame_anchor = False
+    for index, ref in enumerate(refs, start=1):
+        source_label = str(ref.get("prompt_label") or f"<{('Picture' if ref.get('type') == 'image' else 'Video')} {index}>")
+        subject_label = f"<Subject {index}>"
+        role = str(ref.get("role") or "subject").strip()
+        retention = str(ref.get("retention") or "fully_preserved").strip()
+        notes = str(ref.get("notes") or "").strip()
+        source_kind = "image" if ref.get("type") == "image" else "video"
+        if role == "continuation" and source_kind == "image":
+            has_frame_anchor = True
+            subject_lines.append(
+                f"{source_label} is the lossless first-frame continuity anchor for [Shot 1]."
+                + (f" {notes}" if notes else "")
+            )
+            summary_labels.append(source_label)
+            retention_lines.append(
+                f"{source_label} ([Shot 1] first frame): fully_preserved - reproduce its opening composition, subject poses, object state, lighting, and spatial landmarks before motion begins."
+            )
+            continue
+        subject_lines.append(
+            f"{subject_label} is the {role} content from {source_label}, a referenced {source_kind} asset. "
+            f"Use it as a distinct visual subject and retain {retention}."
+            + (f" {notes}" if notes else "")
+        )
+        summary_labels.append(subject_label)
+        retention_lines.append(
+            f"{subject_label} (appears throughout the target video): fully_preserved - retain its declared {role} characteristics, spatial identity, and visual relationship to the other referenced subjects."
+        )
+
+    scene = str(base_prompt).strip()
+    summary_subjects = ", ".join(summary_labels) or "the declared references"
+    task_prefix = "[keyframe completion + reference generation]" if has_frame_anchor else "[reference generation]"
+    summary = (
+        f"{task_prefix} The target video uses {summary_subjects} as distinct visual references. "
+        "The continuity anchor starts the target timeline; the remaining references guide identity, environment, props, and a coherent causal story rather than a collage of unrelated shots."
+        if has_frame_anchor
+        else (
+            f"{task_prefix} The target video uses {summary_subjects} as distinct visual references. "
+            "Their identities and roles guide the same coherent causal story rather than a collage of unrelated shots."
+        )
+    )
+    anchor_instruction = ""
+    if has_frame_anchor:
+        anchor_instruction = (
+            "The target video begins exactly from the declared continuity anchor in [Shot 1]. "
+            "Preserve that first-frame composition and current state before introducing the next physical action; do not restart the scene or reinterpret the anchor as a generic reference.\n"
+        )
+    detailed = (
+        "The target video is a polished cinematic animation with stable subject identity, readable scale, and deliberate physical cause and effect. "
+        "Each referenced subject must appear only in the role defined above; do not merge, duplicate, or replace the references.\n"
+        + anchor_instruction
+        + scene
+    )
     return "\n".join(
         [
-            "<Subject Definitions>",
+            "subject_definitions:",
             *subject_lines,
-            "</Subject Definitions>",
-            "<Summary>",
-            str(base_prompt).strip(),
-            "</Summary>",
-            "<Reference Retention>",
+            "summary:",
+            summary,
+            "retention_analysis:",
             *retention_lines,
-            "</Reference Retention>",
-            "<Detailed Description>",
-            str(base_prompt).strip(),
-            "</Detailed Description>",
-            "<Overall Soundscape>",
-            soundscape,
-            "</Overall Soundscape>",
-            "<Non-Diegetic Music>",
+            "detailed_description:",
+            detailed,
+            "overall_soundscape:",
+            str(soundscape).strip(),
+            "non_diegetic_music:",
             "Use only the music direction described in the scene prompt; no reference audio input.",
-            "</Non-Diegetic Music>",
         ]
     )

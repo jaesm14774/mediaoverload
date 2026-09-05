@@ -96,6 +96,26 @@ class FFmpegAdapterTests(unittest.TestCase):
         self.assertIn("-map 0:v:0 -map 0:a?", command_text)
         self.assertIn("-shortest", command_text)
 
+    @patch.object(FFmpegAdapter, "_run")
+    def test_trim_video_can_normalize_native_audio(self, run_mock) -> None:
+        adapter = FFmpegAdapter()
+        adapter._checked = True
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.mp4"
+            output_path = Path(directory) / "output_normalized.mp4"
+            input_path.write_bytes(b"fixture")
+
+            adapter.trim_video(
+                str(input_path),
+                str(output_path),
+                60.0,
+                normalize_audio=True,
+            )
+
+        command_text = " ".join(run_mock.call_args.args[0])
+        self.assertIn("aresample=48000,loudnorm=I=-20:TP=-1.5:LRA=11", command_text)
+        self.assertIn("-ar 48000", command_text)
+
 
 class AgenticComfyCommunicatorTests(unittest.TestCase):
     def test_default_timeout_is_configurable_for_lowvram_generation(self) -> None:

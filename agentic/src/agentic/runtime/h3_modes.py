@@ -104,6 +104,8 @@ def mode_contract(value: str | H3Mode | None, *, render_mode: str | None = None)
     return MODE_CONTRACTS[resolve_h3_mode(value, render_mode=render_mode)]
 
 
+
+
 def validate_h3_payload(
     value: str | H3Mode,
     payload: dict[str, Any],
@@ -129,7 +131,11 @@ def validate_h3_payload(
         errors.append(f"{contract.mode.value} requires an opening image")
     if not contract.requires_first_frame and first_frame and contract.mode is H3Mode.T2VA:
         errors.append("t2va must not receive an image conditioning input")
-    if contract.requires_last_frame and not last_frame and contract.mode is not H3Mode.REF2VA:
+    if (
+        contract.requires_last_frame
+        and not last_frame
+        and contract.mode is not H3Mode.REF2VA
+    ):
         errors.append(f"{contract.mode.value} requires a landing/last-frame image")
     if contract.mode is H3Mode.I2VA and last_frame:
         errors.append("i2va must not receive a last-frame conditioning input")

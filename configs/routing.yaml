@@ -32,12 +32,20 @@ routing:
     failure_policy: fallback_to_top
 
   longvideo_config:
-    mix_weights:
-      anchor_first_last: 1
-    review_policy: anchors
-    continuity_mode: planned_anchor
+    production_profile: text2longvideo
+    default_duration_seconds: 30
+    segment_duration: 5
+    storyboard_path: configs/storyboards/text2longvideo_story.yaml
+    review_policy: opening_only
+    continuity_mode: rendered_tail
     workflow_names:
+      - minimax_h3_lowvram_i2v
       - minimax_h3_lowvram_15s_fl2va_i2v
+    width: 608
+    height: 352
+    length: 120
+    steps: 16
+    model_profile: q2
 
   # Scheduler runs use a persisted shuffle bag so a short run window cannot
   # accidentally repeat the same strategy while still respecting weights.
@@ -114,12 +122,9 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_15s_fl2va_i2v
+        - minimax_h3_lowvram_i2v
       transition_workflow_name:
-        - krea2_turbo_img2img
-        - image_to_image
-        - kirby_continuity_img2img
-        - kirby_identity_img2img
+        - minimax_h3_lowvram_15s_fl2va_i2v
     native_h3_story:
       image_workflow_name:
         - krea2_turbo
@@ -429,9 +434,9 @@ routing:
         image_workflow_name: "Required source-image stage for the refine chain."
         refine_workflow_name: "Required img2img refine stage. It must preserve the selected source image contract while applying the requested changes."
       text2longvideo:
-        image_workflow_name: "Optional per-segment T2I anchor/reference stage used only by an explicit non-T2V recipe."
-        video_workflow_name: "Required multi-segment H3 stage; the default uses planned first/last story-state images for continuity. Prompt-only T2V remains an explicit fallback."
-        transition_workflow_name: "Planned story-state anchor stage used by the default continuity recipe; it never relies on a rendered video tail."
+        image_workflow_name: "Opening identity/reference stage and deliberate FL2V landing-frame stage."
+        video_workflow_name: "Required multi-segment H3 I2V stage; every segment after the opening consumes the previous segment's rendered tail."
+        transition_workflow_name: "Optional FL2V stage reserved for deliberate state transitions; its first frame still comes from the previous rendered tail."
       native_h3_story:
         image_workflow_name: "Opening keyframe candidate; review selects one first frame."
         video_workflow_name: "Native H3 I2VA stage. It receives first_frame and leaves the ending unconstrained."
@@ -610,7 +615,7 @@ routing:
           - "只要純靜態圖。"
           - "需要長篇故事、多段轉場與段落銜接，應改選 text2longvideo。"
       text2longvideo:
-        summary: "用於多段故事、旁白式內容、章節式演出與連續分鏡；預設以 4 個約 5 秒的 H3 片段、規劃好的首尾 story-state anchor 組成 20 秒，純 prompt T2V 僅作明確 fallback。"
+        summary: "用於可直接進入發文審核的多段故事、旁白式內容、章節式演出與連續分鏡；預設 30 秒拆成 6 個約 5 秒 H3 片段，使用 generic six-beat storyboard、4 個時間化動作節拍、實際尾幀接續、開場審核、逐段技術 QA 與最終發文包。"
         best_for:
           - "需求有起承轉合、腳本段落、章節、旁白、storyboard 或多個 scene beat。"
           - "使用者提到 story、episode、narration、multi-scene 這類語意。"

@@ -25,7 +25,7 @@ not as free-model generation gates. Beat boundaries must remain contiguous from
 0 to 15 seconds; post-render technical QA and any recipe-enabled semantic QA
 remain the authoritative checks for the actual media.
 
-The production route uses `configs/storyboards/kirby_native_15s.yaml` as its
+The production route uses `configs/storyboards/native_h3_15s.yaml` as its
 identity and continuity contract. Direct H3 rendering is intentionally capped
 at 362 frames (~15 seconds): the local ComfyUI H3 node documents 124-362 frames
 as the trained range. A 20-second direct request is rejected before
@@ -71,14 +71,57 @@ state changes, first/last frame contracts, and QA rules remain reproducible and
 visible in the plan manifest. The publish stage receives a compact story/news
 context rather than the full production prompt.
 
+## Publishable 30/45-second story assembly
+
+Use the `text2longvideo` route for a long story. The checked-in
+`text2longvideo` profile turns 30 seconds into six roughly
+five-second H3 clips, or 45 seconds into nine clips. Every clip receives four
+chronological internal action beats. I2V carries the actual rendered tail into
+the next clip; FL2V is reserved for deliberate state transitions. If approved
+reference images or videos are configured, only the opening clip uses Ref2VA
+for identity and prop anchoring, after which the real tail continues the story.
+
+This is the production route currently selected for the local RTX 4060. The
+segments are not independent clips joined after the fact: the story planner
+gives every segment four causal beats, each segment starts from the previous
+rendered tail, and FL2V marks deliberate state transitions before the final
+package is assembled.
+
+The route extracts a tail frame and runs technical QA for every segment, then
+writes `publish_ready_longvideo.json` beside the normal long-video summary.
+Subjective story quality remains a human review decision; a live social post
+is complete only when the platform receipt confirms the requested state.
+
+Example for a 30-second publish candidate:
+
+```powershell
+python run_media_interface.py `
+  --character kirby `
+  --generation-type text2longvideo `
+  --duration-seconds 30 `
+  --prompt "Kirby follows a glowing seed through a windy meadow, loses it to the storm, teams up with Waddle Dee to rescue it, and plants it in a warm clearing where it blooms" `
+  --publish-mode safe_poc `
+  --publish-platform youtube `
+  --publish-platform facebook `
+  --publish-platform instagram_graph
+```
+
+Change only `--duration-seconds` to `45` for the nine-segment version. The
+Kirby short-form 2x speed transform is disabled for this profile, so the
+requested long duration is preserved. `safe_poc` first produces private,
+draft, or container-only platform artifacts; use `live` only after final
+approval and the public URL/credentials required by each platform are ready.
+
 ## Kirby configuration
 
 The reusable recipe lives in:
 
 - `configs/characters/kirby.yaml` — profile, storyboard, 608x352, 362 frames,
   16 steps, and workflow names.
-- `configs/storyboards/kirby_native_15s.yaml` — one 15-second causal arc with
+- `configs/storyboards/native_h3_15s.yaml` — one generic 15-second causal arc with
   hook, escalation, and payoff; it is one H3 clip, not stitched 5-second clips.
+- `configs/storyboards/text2longvideo_story.yaml` — a generic six-beat 30-second
+  long-video arc; explicit 45-second requests append consequence/coda cards.
 - `configs/workflow/minimax_h3_lowvram_15s_fl2va_i2v.json` — visible ComfyUI
   API graph with first and last frame LoadImage bindings.
 

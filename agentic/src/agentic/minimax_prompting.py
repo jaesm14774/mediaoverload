@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import re
 from typing import Any
 
 
@@ -90,11 +91,6 @@ def subject_identity_lock(
             f"Canonical character identity: {subject}. Supplemental visual keywords: {keywords}."
             " Preserve stable identity, proportions, costume, silhouette, and palette."
         )
-    if subject.lower() == "kirby":
-        return (
-            "Kirby is the single unmistakable protagonist: a small round soft-pink hero, large expressive blue eyes, "
-            "tiny arms, red boots, clean simple silhouette, stable proportions and palette"
-        )
     return f"{subject} is the single unmistakable protagonist with stable identity, proportions, costume, silhouette, and palette"
 
 
@@ -136,6 +132,7 @@ def compose_minimax_h3_prompt(
     prior_frame: bool = False,
     continuity_rules: Sequence[Any] = (),
     subject_context: Mapping[str, Any] | None = None,
+    official_shot_syntax: bool = False,
 ) -> str:
     """Compose the local H3 prompt in MiniMax's documented multimodal shape."""
     spine = dict(story_spine or {})
@@ -163,7 +160,11 @@ def compose_minimax_h3_prompt(
         )
     prompt_parts = [
         "integrated_multimodal_description:",
-        f"Duration: {int(duration_seconds)} seconds ({int(duration_seconds)}-second short film). One continuous short film, not a montage of unrelated clips.",
+        (
+            f"Duration: {int(duration_seconds)} seconds ({int(duration_seconds)}-second short film). One coherent short film with explicit planned shot changes, not a montage of unrelated clips."
+            if official_shot_syntax
+            else f"Duration: {int(duration_seconds)} seconds ({int(duration_seconds)}-second short film). One continuous short film, not a montage of unrelated clips."
+        ),
         f"Character continuity: {identity}.",
         input_relation + ".",
     ]
@@ -185,7 +186,8 @@ def compose_minimax_h3_prompt(
     if clean_prompt_text(visual_language):
         prompt_parts.append(f"Visual language: {clean_prompt_text(visual_language)}.")
 
-    prompt_parts.append("Shot progression:")
+    if not official_shot_syntax:
+        prompt_parts.append("Shot progression:")
     for index, shot in enumerate(shots, start=1):
         time = clean_prompt_text(shot.get("time")) or f"beat {index}"
         title = clean_prompt_text(shot.get("title"))
@@ -194,17 +196,36 @@ def compose_minimax_h3_prompt(
         state_change = clean_prompt_text(shot.get("state_change") or shot.get("end_state"))
         cause = clean_prompt_text(shot.get("cause"))
         effect = clean_prompt_text(shot.get("effect"))
-        shot_parts = [f"[Shot {index} / SHOT {index} | {time}]"]
+        if official_shot_syntax:
+            shot_parts = (
+                ["[Shot 1]"]
+                if index == 1
+                else [f"[Shot {index}] At {_format_h3_cut_time(time)}, the camera cuts to"]
+            )
+        else:
+            shot_parts = [f"[Shot {index} / SHOT {index} | {time}]"]
         if title:
             shot_parts.append(f"{title}.")
         if cause:
-            shot_parts.append(f"Cause: {cause}.")
-        shot_parts.append(f"Action: {action or 'the protagonist advances the objective through a visible physical action'}.")
-        shot_parts.append(f"Camera: {camera}.")
+            shot_parts.append(f"Because {cause}," if official_shot_syntax else f"Cause: {cause}.")
+        shot_parts.append(
+            f"{action or 'the protagonist advances the objective through a visible physical action'}."
+            if official_shot_syntax
+            else f"Action: {action or 'the protagonist advances the objective through a visible physical action'}."
+        )
+        shot_parts.append(f"{camera}." if official_shot_syntax else f"Camera: {camera}.")
         if state_change:
-            shot_parts.append(f"State change: {state_change}.")
+            shot_parts.append(
+                f"The visible state changes to {state_change}."
+                if official_shot_syntax
+                else f"State change: {state_change}."
+            )
         if effect:
-            shot_parts.append(f"Effect and handoff: {effect}.")
+            shot_parts.append(
+                f"This causes the next beat: {effect}."
+                if official_shot_syntax
+                else f"Effect and handoff: {effect}."
+            )
         prompt_parts.append(" ".join(shot_parts))
 
     soundscape = clean_prompt_text(audio) or "natural stereo ambience with clear action-linked sound effects"
@@ -233,3 +254,12 @@ def compose_minimax_h3_prompt(
     if rules:
         prompt_parts.append("Additional continuity rules: " + "; ".join(rules) + ".")
     return "\n".join(prompt_parts)
+
+
+def _format_h3_cut_time(value: str) -> str:
+    """Format a shot range's start as the official H3 cut timestamp."""
+    match = re.search(r"(-?\d+(?:\.\d+)?)", str(value or ""))
+    seconds = max(0.0, float(match.group(1))) if match else 0.0
+    minutes = int(seconds // 60)
+    remainder = seconds - (minutes * 60)
+    return f"{minutes:02d}:{remainder:06.3f}"

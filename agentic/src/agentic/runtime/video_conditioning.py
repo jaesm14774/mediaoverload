@@ -7,7 +7,6 @@ provider-specific node names stay in the workflow/tool binding layer.
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -145,38 +144,40 @@ def recipe_candidates(
     return result
 
 
-def sample_recipe_sequence(
-    weights: Mapping[str, Any],
+
+
+def production_recipe_sequence(
     segment_count: int,
     eligible: Mapping[str, list[WorkflowCapability]],
     *,
-    seed: int | None = None,
-) -> tuple[int, list[str]]:
-    """Sample every segment independently and reject unsupported positive weights."""
+    use_reference_bundle: bool = False,
+) -> list[str]:
+    """Build a deterministic sequence for a publishable story assembly.
 
-    normalized: list[tuple[str, float]] = []
-    unsupported: list[str] = []
-    for raw_name, raw_weight in weights.items():
-        name = str(raw_name)
-        try:
-            weight = float(raw_weight)
-        except (TypeError, ValueError):
-            continue
-        if weight <= 0:
-            continue
-        if not eligible.get(name):
-            unsupported.append(name)
-            continue
-        normalized.append((name, weight))
-    if unsupported:
-        raise ValueError(
-            "Long-video recipe(s) have positive weight but no compatible workflow: "
-            + ", ".join(sorted(unsupported))
-        )
-    if not normalized:
-        raise ValueError("At least one supported long-video recipe must have a positive weight")
-    resolved_seed = int(seed) if seed not in (None, "") else random.SystemRandom().randint(1, 2**31 - 1)
-    rng = random.Random(resolved_seed)
-    names = [name for name, _ in normalized]
-    values = [weight for _, weight in normalized]
-    return resolved_seed, [rng.choices(names, weights=values, k=1)[0] for _ in range(max(1, int(segment_count)))]
+    The production route uses a stable editorial rhythm. I2V carries the
+    actual tail-to-next-segment handoff; FL2V is reserved for deliberate state
+    transitions and Ref2VA is used only for the opening identity lock when the
+    caller supplied approved references.
+    """
+
+    count = max(1, int(segment_count))
+
+    def supported(name: str) -> bool:
+        return bool(eligible.get(name))
+
+    if not supported("anchor_first"):
+        raise ValueError("Production long-video route requires an H3 I2V workflow with first-frame conditioning")
+
+    transition_indices: set[int] = set()
+    if count >= 3 and supported("anchor_first_last"):
+        transition_indices.update({max(1, count // 3), max(1, (2 * count) // 3), count - 1})
+
+    sequence: list[str] = []
+    for index in range(count):
+        if index == 0 and use_reference_bundle and supported("reference_bundle"):
+            sequence.append("reference_bundle")
+        elif index in transition_indices:
+            sequence.append("anchor_first_last")
+        else:
+            sequence.append("anchor_first")
+    return sequence

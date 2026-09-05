@@ -30,6 +30,13 @@ class H3ModeContractTests(unittest.TestCase):
             {"reference_image_paths": ["identity.png"], "reference_video_paths": ["motion.mp4"]},
         )
 
+    def test_fl2va_still_rejects_a_timeline_with_missing_endpoints(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_h3_payload(
+                "fl2va",
+                {},
+            )
+
 
 class H3P2VideoQualityTests(unittest.TestCase):
     def _tools(self, *, has_audio: bool = True, mean_volume: float = -20.0, silence_ratio: float = 0.05) -> MediaServiceTools:
