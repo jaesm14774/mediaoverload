@@ -58,11 +58,15 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertTrue(gate.inputs["preserve_last_frame"])
         self.assertEqual(render.skill_name, "longvideo.render_native_h3_l2va")
         self.assertEqual(plan.metadata["render_mode"], "last_frame_to_video")
-        self.assertEqual(render.inputs["width"], 512)
-        self.assertEqual(render.inputs["height"], 288)
-        self.assertEqual(render.inputs["length"], 124)
+        self.assertEqual(render.inputs["width"], plan.goal.constraints["canvas_width"])
+        self.assertEqual(render.inputs["height"], plan.goal.constraints["canvas_height"])
+        self.assertEqual(render.inputs["length"], 362)
         self.assertEqual(render.inputs["model_profile"], "q2")
         self.assertTrue(plan.metadata["native_h3"]["lowvram_preview"])
+        speed = next(node for node in plan.nodes if node.node_id == "native-h3-speed")
+        self.assertEqual(speed.inputs["speed"], 2.0)
+        qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
+        self.assertAlmostEqual(qa.inputs["target_duration"], 362 / 24 / 2)
 
     def test_fl2va_plan_is_first_and_last_frame_workflow(self) -> None:
         plan = self._plan("native_h3_fl2va_story", no_review=True)
@@ -73,11 +77,30 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertNotIn("native-ending-review", node_ids)
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(render.inputs["h3_mode"], "fl2va")
+        self.assertEqual(render.inputs["width"], plan.goal.constraints["canvas_width"])
+        self.assertEqual(render.inputs["height"], plan.goal.constraints["canvas_height"])
+        self.assertEqual(render.inputs["length"], 362)
         story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
         self.assertEqual(story_prompt.inputs["render_mode"], "first_last_frame_to_video")
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_15s_fl2va_i2v")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
+
+    def test_fl2va_review_builds_six_independent_ending_candidates(self) -> None:
+        plan = self._plan("native_h3_fl2va_story")
+        ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
+        ending_review = next(node for node in plan.nodes if node.node_id == "native-ending-review")
+        speed_nodes = [node for node in plan.nodes if node.node_id == "native-h3-speed"]
+
+        self.assertEqual(ending.inputs["image_count"], 6)
+        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["prompt_key"], "ending_keyframe_prompt")
+        self.assertTrue(ending_review.inputs["review_all_candidates"])
+        self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
+        self.assertEqual(speed_nodes, [])
+        qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
+        self.assertEqual(qa.inputs["video_node"], "native-h3-render")
+        self.assertEqual(qa.inputs["target_duration"], 362 / 24)
 
     def test_ref2va_plan_records_manifest_and_disables_reference_audio(self) -> None:
         plan = self._plan("native_h3_ref2va")
@@ -433,6 +456,56 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(calls[0][0], "comfy.workflow.image_to_image")
         self.assertEqual(calls[0][1]["image_count"], 4)
+
+    def test_ending_keyframe_can_ignore_dependency_frame_and_use_text_to_image(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            def call(self, name, payload):
+                calls.append((name, payload))
+                return {"saved_files": ["one.png", "two.png", "three.png"]}
+
+        context = SimpleNamespace(
+            node=SimpleNamespace(
+                inputs={
+                    "workflow_name": "krea2_turbo",
+                    "prompt_key": "ending_keyframe_prompt",
+                    "use_prior_frame": False,
+                    "image_count": 3,
+                    "max_regenerations": 0,
+                    "suffix": "native_h3_ending",
+                },
+                depends_on=["native-opening-review", "native-story-prompt"],
+            ),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Kirby protects a glowing seed",
+                    style="anime",
+                    constraints={"character": "kirby"},
+                )
+            ),
+            state=RunState(
+                goal={},
+                metadata={},
+                node_outputs={
+                    "native-opening-review": {"selected_assets": ["opening.png"]},
+                    "native-story-prompt": {
+                        "ending_keyframe_prompt": "Kirby stands beside the restored glowing seed in a calm meadow."
+                    },
+                },
+            ),
+        )
+        report = SimpleNamespace(passed=True, reasons=[])
+        with patch("agentic.skills.agent_primitives.inspect_kirby_input", return_value=report):
+            result = AgentMediaSkills(
+                FakeTools(), self.repo_root / ".tmp-tests" / "independent-ending"
+            ).generate_keyframe(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
+        self.assertEqual(calls[0][1]["workflow_name"], "krea2_turbo")
+        self.assertEqual(calls[0][1]["image_count"], 3)
+        self.assertIn("restored glowing seed", calls[0][1]["prompt"])
 
     def test_kirby_landing_anchor_is_text_first_and_locks_prop_placement(self) -> None:
         calls: list[tuple[str, dict[str, object]]] = []

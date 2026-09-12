@@ -503,12 +503,18 @@ class FFmpegAdapter:
                 (
                     f"scale={int(target_width)}:{int(target_height)}:force_original_aspect_ratio=decrease,"
                     f"pad={int(target_width)}:{int(target_height)}:(ow-iw)/2:(oh-ih)/2:color={background},"
-                    "format=yuv420p"
+                    "format=yuv420p,fps=30"
                 ),
                 "-c:v",
                 "libx264",
                 "-c:a",
                 "aac",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                "-b:a",
+                "128k",
                 "-movflags",
                 "+faststart",
                 "-y",

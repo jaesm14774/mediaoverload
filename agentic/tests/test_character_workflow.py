@@ -18,6 +18,7 @@ from agentic.app.character_workflow import (
     _extract_failure_details,
     _extract_publish_visual_grounding,
     _collect_count_policies,
+    _publish_selection_limit,
     _asset_qualified_workflow_candidates,
     _route_generation_from_character_config,
     _select_fresh_news,
@@ -55,6 +56,29 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             self.repo_root / "output" / "kirby",
         )
 
+    def test_explicit_story_card_route_exposes_writing_first_contract(self) -> None:
+        payload = build_goal_payload_from_character_config(
+            make_character_workflow_request(
+                self.repo_root,
+                self.kirby_config,
+                prompt="寫一篇關於父親早餐的安靜故事",
+                preferred_generation_type="story_card",
+                publish_after_generate=False,
+            )
+        )
+
+        self.assertEqual(payload["source_generation_type"], "story_card")
+        self.assertEqual(payload["media_type"], "story_card")
+        self.assertEqual(payload["constraints"]["story_card_page_count"], "auto")
+        self.assertEqual(payload["constraints"]["image_workflow_name"], "krea2_turbo")
+        self.assertEqual(payload["constraints"]["refine_workflow_name"], "")
+        self.assertEqual(payload["constraints"]["story_card_brand_label"], "CHARACTER NOTE")
+        self.assertEqual(
+            payload["constraints"]["story_card_visual"]["companion_pages"],
+            [2, 4],
+        )
+        self.assertNotIn("story_card_refine_denoise", payload["constraints"])
+
     def test_duration_policy_selects_single_action_or_native_story(self) -> None:
         short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -82,6 +106,15 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
 
         self.assertEqual(native["constraints"]["video_speed"], {"enabled": True, "factor": 2.0})
+
+        fl2va = build_goal_payload_from_character_config(make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Native H3 first and last frame story with a clear payoff",
+            preferred_generation_type="native_h3_fl2va_story",
+            publish_after_generate=False,
+        ))
+        self.assertEqual(fl2va["constraints"]["video_speed"], {"enabled": False, "factor": 1.0})
 
         default_short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -136,6 +169,26 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
 
         self.assertEqual(paths, [r"C:\retry_2x.mp4"])
+
+    def test_publish_review_keeps_all_story_card_pages_as_one_carousel(self) -> None:
+        page_paths = [rf"C:\runs\story_card_{index:02d}.png" for index in range(1, 6)]
+
+        self.assertEqual(
+            _publish_selection_limit(
+                page_paths,
+                configured_limit=1,
+                source_generation_type="story_card",
+            ),
+            len(page_paths),
+        )
+        self.assertEqual(
+            _publish_selection_limit(
+                page_paths,
+                configured_limit=1,
+                source_generation_type="text2img",
+            ),
+            1,
+        )
 
     def test_no_review_text2image2video_uses_one_keyframe_without_pre_video_gate(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -205,15 +258,18 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
 
     def test_weighted_route_selects_strategy_before_content_prompt(self) -> None:
-        payload = build_goal_payload_from_character_config(make_character_workflow_request(
-            self.repo_root,
-            self.kirby_config,
-            prompt="Kirby protects a glowing orb in a clear three-beat story",
-            rng=random.Random(0),
-            publish_after_generate=False,
-        ))
+        config = load_character_config(self.kirby_config)
+        config["generation"]["generation_type_weights"] = {"story_card": 1}
+        with patch("agentic.app.character_workflow.load_character_config", return_value=config):
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
+                self.repo_root,
+                self.kirby_config,
+                prompt="Kirby protects a glowing orb in a clear three-beat story",
+                rng=random.Random(0),
+                publish_after_generate=False,
+            ))
 
-        self.assertEqual(payload["source_generation_type"], "sticker_pack")
+        self.assertEqual(payload["source_generation_type"], "story_card")
         self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
         self.assertEqual(payload["constraints"]["routing_prompt_mode"], "weighted_random")
         self.assertEqual(payload["prompt"], "Kirby protects a glowing orb in a clear three-beat story")
@@ -715,6 +771,23 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
 
         self.assertEqual(result, image_paths)
+
+    def test_publish_review_collects_story_card_pages_without_anchor_or_summary(self) -> None:
+        anchor_path = r"C:\runs\story_card_anchor.png"
+        page_paths = [r"C:\runs\story_card_01.png", r"C:\runs\story_card_02.png"]
+        summary_path = r"C:\runs\story_card_summary.json"
+        result = collect_media_paths_from_run_result(
+            {
+                "state": {
+                    "node_outputs": {
+                        "story-card-anchor": {"saved_files": [anchor_path]},
+                        "story-card-compose": {"saved_files": [*page_paths, summary_path]},
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(result, page_paths)
 
     def test_publish_review_excludes_intermediate_frames_and_gif_preview_when_video_exists(self) -> None:
         video_path = r"C:\runs\Kirby_H3.mp4"

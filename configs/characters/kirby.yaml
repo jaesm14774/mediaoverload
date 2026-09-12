@@ -1,4 +1,8 @@
 character:
+  # This config is the concrete Kirby pack, not the whole Kirby-universe pool.
+  # Keeping the role fixed prevents a Krea2 image request from silently
+  # selecting Magolor, MetaKnight, or another group member.
+  name: Kirby
   group_name: Kirby
 
 generation:
@@ -18,19 +22,138 @@ generation:
     two_character_interaction: 5
   two_character_interaction:
     is_same_group: false
-  style_weights:
-    polished 2D anime: 4
-    cel-shaded animation: 2
-    hand-painted storybook anime: 1
+  # One creative profile is selected per run. The canvas selection is shared
+  # by every still and video node in that run; story cards keep their own
+  # editorial 4:5 layout contract below.
+  creative_profile:
+    canvas:
+      mode: random
+      fixed: landscape_16_9
+      random_weights:
+        landscape_16_9: 3
+        portrait_4_5: 2
+        square_1_1: 2
+      profiles:
+        landscape_16_9:
+          aspect_ratio: "16:9"
+          width: 640
+          height: 360
+        portrait_4_5:
+          aspect_ratio: "4:5"
+          width: 512
+          height: 640
+        square_1_1:
+          aspect_ratio: "1:1"
+          width: 512
+          height: 512
+    style:
+      mode: random
+      fixed: painterly_atmosphere
+      random_weights:
+        clean_cel_action: 2
+        painterly_atmosphere: 2
+        storybook_watercolor: 2
+        dynamic_ensemble: 2
+        graphic_color_pop: 1
+        tactile_tabletop: 1
+      profiles:
+        clean_cel_action:
+          label: clean cel-shaded action
+          prompt: >-
+            polished cel-shaded animation with confident line weight, expressive squash-and-stretch,
+            crisp shapes, and a designed background rather than an empty studio field
+          composition: >-
+            use foreground, midground, and background layers with a clear diagonal or depth cue;
+            keep the selected subject readable while the setting participates in the action
+          palette: saturated primary accents against two or three supporting colors with controlled contrast
+          motion: readable anticipation, contact, recoil, and a settled graphic pose
+          avoid: sterile white voids, sticker-only isolation, and flat icon composition
+        painterly_atmosphere:
+          label: painterly atmospheric adventure
+          prompt: >-
+            hand-painted anime background with luminous sky or water, visible brush texture,
+            atmospheric perspective, soft edge variation, and a small subject embedded in a believable world
+          composition: >-
+            build a deep landscape with a foreground framing element, a middle action plane, and a distant horizon;
+            use scale contrast without losing the character silhouette
+          palette: layered blue, teal, and warm light with reflected color and natural tonal transitions
+          motion: wind, water, drifting light, or weather should visibly respond to the main action
+          avoid: blank backgrounds, isolated cutouts, and generic gradient-only scenery
+        storybook_watercolor:
+          label: tactile storybook watercolor
+          prompt: >-
+            charming hand-painted storybook illustration with watercolor bloom, colored-pencil accents,
+            paper grain, imperfect organic edges, and warm narrative detail
+          composition: >-
+            use a full-page scene with small environmental discoveries, a readable central gesture,
+            and layered framing details that feel drawn rather than tiled
+          palette: warm cream, coral, leaf green, and sky blue with gentle pigment variation
+          motion: paper texture, cloth, leaves, crumbs, or tiny environmental reactions echo the action
+          avoid: empty cream backdrops, printed captions, copied lettering, and rigid vector geometry
+        dynamic_ensemble:
+          label: dynamic ensemble adventure
+          prompt: >-
+            energetic animated ensemble staging with the selected characters interacting inside a rich environment,
+            strong gesture drawing, overlapping silhouettes, and a sense of coordinated motion
+          composition: >-
+            stage a foreground-to-background action chain with varied scale, a diagonal camera angle,
+            and secondary configured forms that support the same physical cause and effect
+          palette: bold complementary color groups with clear subject separation and a lively horizon
+          motion: bodies, props, particles, and background layers travel along different readable paths
+          avoid: unrequested characters, clone duplicates, lineup portraits, and evenly spaced sticker rows
+        graphic_color_pop:
+          label: graphic color-pop fantasy
+          prompt: >-
+            high-energy graphic anime fantasy with saturated neon color blocks, luminous accents,
+            playful geometric shapes, controlled bloom, and a bold poster-like silhouette
+          composition: >-
+            use a strong off-center focal point, large-to-small shape rhythm, and layered glow trails
+            that lead through the frame instead of leaving unused empty space
+          palette: electric cyan, magenta, violet, and warm yellow with deliberate dark anchors
+          motion: sparks, ribbons, glow, and geometric bursts amplify the visible action and resolve cleanly
+          avoid: monochrome minimalism, random symbols, interface elements, and fake text
+        tactile_tabletop:
+          label: warm tactile tabletop comedy
+          prompt: >-
+            richly textured tabletop food or craft scene with warm practical light, visible crumbs and materials,
+            expressive small characters, and cozy physical scale contrast
+          composition: >-
+            use a close but spacious tabletop perspective with foreground objects, a usable middle surface,
+            and a soft environmental background that makes the gag feel situated
+          palette: toasted orange, cream, berry red, leafy green, and deep brown with appetizing highlights
+          motion: steam, wobbling food, utensils, cloth, and crumbs react to the central physical beat
+          avoid: empty white tableaus, generic product renders, and unreadable clutter
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: krea2_turbo_img2img
+  # Writing-first Traditional-Chinese story cards. Every page is generated
+  # independently from one shared visual contract before Pillow places text.
+  story_card:
+    page_stage:
+      workflow_name: krea2_turbo
+    # Auto keeps a short thought on one card and splits anything over 50
+    # characters into the smallest coherent set of pages.
+    page_count: auto
+    width: 1080
+    height: 1350
+    overlay_opacity: 224
+    brand_label: CHARACTER NOTE
+    # This is a group-level visual language. The resolved selected character
+    # remains the only protagonist; these are optional supporting-cast cues.
+    visual:
+      scene_style: "warm paper stage, clear horizon depth, tactile ground, playful color blocks"
+      supporting_cast:
+        - "tiny blue paper bird, triangular beak, round goggles, crooked cap, distinct from protagonist"
+        - "tiny tangerine square creature, floppy ears, tiny messenger bag, distinct from protagonist"
+      companion_pages: [2, 4]
   # Longvideo stories are generated from the current brief/news context. A
   # static meadow preset here silently replaced unrelated news prompts.
   visual_style_contract: >-
     Tactile pastel 2D anime gag animation: keep one selected character readable inside
     one dominant news mechanism or oversized physical environment, with a clear
-    focal silhouette, generous negative space, one dominant palette, and a close
-    readable reaction.
+    focal silhouette and a readable causal reaction. Build a designed world around
+    the gag when the selected visual profile calls for it: foreground, midground,
+    background, material texture, and supporting configured forms are welcome when
+    they strengthen the same action instead of competing with it.
     Use squash-and-stretch, wobble, recoil, or elastic snap only when caused by
     the visible action. Prefer a stable ending image that echoes the opening
     prop or pose so a short clip can replay cleanly after its payoff. Choose one
@@ -39,29 +162,30 @@ generation:
     saturated sky/firework spectacle; do not stack them all together.
     For still images and opening keyframes, make one visual thesis dominant:
     one readable subject-mechanism relationship, one decisive visible state,
-    explicit scale/attachment/layer geometry when it carries the joke, and a
-    small set of observable material cues. Keep secondary details subordinate
-    to the focal read and avoid vague quality-adjective stacking.
+    explicit scale/attachment/layer geometry when it carries the joke, and
+    observable material cues. Use intentional negative space only where it helps
+    hierarchy; otherwise use depth, overlap, and environmental storytelling.
+    Keep secondary details subordinate to the focal read and avoid vague
+    quality-adjective stacking.
   native_h3_quality:
     creative_brief: >-
-      Make this a highly shareable cute micro-gag, not an action-film lore scene:
-      one selected character, one dominant news mechanism, one readable setback, and one
-      visible reversal/payoff. The first second must already contain motion and
-      a clear expressive reaction. Prefer a close readable face or body
-      reaction, exaggerated but charming timing, a small absurd surprise, a
-      strong small-versus-large scale contrast, and a final visual joke that
-      lands without dialogue. Translate every news item through three visible
-      layers: source context, active mechanism, and physical consequence. A
-      prop is optional; use architecture, environmental force, spatial
+      Make this a highly shareable cute micro-gag with a designed setting:
+      one clear causal mechanism, one readable setback, and one visible
+      reversal/payoff. The first second must already contain motion and a clear
+      expressive reaction. Use environmental depth, configured interaction pairs,
+      supporting physical forms, and small material discoveries when the selected
+      visual profile calls for them. Translate every news item through three
+      visible layers: source context, active mechanism, and physical consequence.
+      A prop is optional; use architecture, environmental force, spatial
       relationship, synchronized change, or a prop only when it is the best
       expression of the news mechanism. Avoid defaulting to an orb, ball,
       balloon, wallet, ribbon, or seal when the source event does not require
       that shape. End with a concrete settled result that can echo the opening
       for a loop.
-      Do not show
-      the selected character fighting a duplicate, multiple characters, readable interfaces,
+      Do not show an unrequested character, a duplicate, unreadable interfaces,
       GitHub/web text, abstract symbols, or the selected character standing still while looking
-      at a portal.
+      at a portal. A configured interaction pair or supporting physical form may appear when
+      it participates in the same causal beat.
   native_h3_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
@@ -71,8 +195,6 @@ generation:
     require_human_review: true
     semantic_qa_required: true
     use_last_frame: false
-    width: 608
-    height: 352
     length: 362
     steps: 16
     frame_rate: 24
@@ -84,8 +206,6 @@ generation:
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_t2v
     semantic_qa_required: true
-    width: 608
-    height: 352
     length: 362
     steps: 16
     frame_rate: 24
@@ -97,12 +217,10 @@ generation:
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
     keyframe_workflow_name: krea2_turbo
-    keyframe_candidate_count: 1
+    keyframe_candidate_count: 6
     require_human_review: true
     semantic_qa_required: true
     use_last_frame: true
-    width: 608
-    height: 352
     length: 362
     steps: 16
     frame_rate: 24
@@ -118,8 +236,6 @@ generation:
     require_human_review: true
     semantic_qa_required: true
     last_frame_only: true
-    width: 608
-    height: 352
     length: 362
     steps: 16
     frame_rate: 24
@@ -138,8 +254,6 @@ generation:
     reference_max_videos: 3
     model_profile: q4
     semantic_qa_required: true
-    width: 608
-    height: 352
     length: 362
     steps: 20
     frame_rate: 24
@@ -159,8 +273,6 @@ generation:
     model_profile: q2
     require_human_review: true
     semantic_qa_required: true
-    width: 608
-    height: 352
     length: 362
     steps: 20
     frame_rate: 24
@@ -168,8 +280,6 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   video_defaults:
-    width: 608
-    height: 352
     length: 248
     frame_rate: 24
     steps: 20
@@ -185,6 +295,7 @@ generation:
     native_h3_ref2va: 1
     text2image2native_h3_ref2va: 1
     sticker_pack: 2
+    story_card: 1
 
 social_media:
   # Hashtags are generated from the final article and visible media.

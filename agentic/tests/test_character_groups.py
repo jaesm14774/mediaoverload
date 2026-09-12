@@ -85,6 +85,30 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertNotIn("workflow_name", connection.cursor_instance.query)
         self.assertEqual(connection.cursor_instance.params, ["Kirby"])
 
+    def test_named_character_selection_preserves_configured_kirby_role(self) -> None:
+        rows = [
+            {"role_name_en": "Kirby", "role_description": "pink hero", "keywords": "pink, red feet", "status": 1, "weight": 1.0},
+            {"role_name_en": "MetaKnight", "role_description": "masked knight", "keywords": "mask, sword", "status": 1, "weight": 8.0},
+        ]
+        connection = _FakeConnection(rows)
+        service = CharacterGroupSelectionService()
+        with patch.dict(
+            os.environ,
+            {
+                "mysql_host": "localhost",
+                "mysql_port": "3306",
+                "mysql_user": "user",
+                "mysql_password": "password",
+                "mysql_db_name": "anime",
+            },
+            clear=False,
+        ), patch("pymysql.connect", return_value=connection):
+            selection = service.select_named_character("Kirby", "Kirby")
+
+        self.assertEqual(selection.selected_character, "Kirby")
+        self.assertEqual(selection.selection_source, "fixed_config_role")
+        self.assertEqual(selection.selected_profile["keywords"], "pink, red feet")
+
     def test_selected_group_character_replaces_config_identity_in_payload(self) -> None:
         selection = {
             "mode": "group",
@@ -280,6 +304,55 @@ class CharacterGroupSelectionTests(unittest.TestCase):
             {"single": 3.0, "two_character_interaction": 1.0},
         )
         self.assertEqual(resolved["subject_mode_selection_source"], "weighted_random")
+
+    def test_story_card_bypasses_random_subject_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "story-card-random.yaml"
+            config.write_text(
+                "character:\n"
+                "  name: Kirby\n"
+                "  group_name: Kirby\n"
+                "generation:\n"
+                "  subject_mode: random\n"
+                "  subject_mode_weights:\n"
+                "    single: 2\n"
+                "    two_character_interaction: 5\n",
+                encoding="utf-8",
+            )
+            named_result = Mock()
+            named_result.to_dict.return_value = {
+                "mode": "group",
+                "group_name": "Kirby",
+                "selected_character": "Kirby",
+                "candidate_count": 2,
+                "selected_profile": {"keywords": "pink, red feet"},
+                "selection_source": "fixed_config_role",
+            }
+            with patch.object(
+                CharacterGroupSelectionService,
+                "select_named_character",
+                return_value=named_result,
+            ) as select_named, patch.object(
+                CharacterGroupSelectionService,
+                "select_random_character",
+            ) as select_random, patch.object(
+                CharacterGroupSelectionService,
+                "select_pair",
+            ) as select_pair:
+                resolved = resolve_character_selection(
+                    make_character_workflow_request(
+                        self.repo_root,
+                        config,
+                        preferred_generation_type="story_card",
+                        rng=random.Random(0),
+                    )
+                )
+
+        select_named.assert_called_once_with("Kirby", "Kirby")
+        select_random.assert_not_called()
+        select_pair.assert_not_called()
+        self.assertEqual(resolved["selected_character"], "Kirby")
+        self.assertEqual(resolved["subject_mode"], "single")
 
     def test_reference_micro_gag_overrides_random_subject_mode_to_single(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

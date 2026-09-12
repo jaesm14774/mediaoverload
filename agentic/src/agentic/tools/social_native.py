@@ -161,7 +161,7 @@ class BaseConfigPlatform:
         return Path(self.config_folder_path) / self.prefix if self.prefix else Path(self.config_folder_path)
 
     def _prepare_reel_canvas(self, video_path: str) -> str:
-        """Normalize non-Reels video into one API-safe 9:16 canvas.
+        """Normalize every non-canonical video into one API-safe 9:16 canvas.
 
         H3 stays at its low-VRAM native size during inference. The platform
         adapter owns delivery formatting so Instagram and Facebook do not
@@ -172,8 +172,25 @@ class BaseConfigPlatform:
         height = int(probe.get("height") or 0)
         if width <= 0 or height <= 0:
             raise ValueError(f"Reels video has no readable dimensions: {Path(video_path).name}")
+        frame_rate = float(probe.get("frame_rate") or 0.0)
+        has_audio = bool(probe.get("has_audio"))
+        audio_is_safe = not has_audio or (
+            str(probe.get("audio_codec") or "").lower() == "aac"
+            and int(probe.get("sample_rate") or 0) == 48000
+        )
         aspect = width / height
-        if (9 / 16) <= aspect <= 1.91:
+        video_is_safe = (
+            Path(video_path).suffix.lower() == ".mp4"
+            and abs(aspect - (9 / 16)) < 0.001
+            and width <= 1920
+            and height <= 1920
+            and (
+                not str(probe.get("video_codec") or "").strip()
+                or str(probe.get("video_codec") or "").lower() in {"h264", "hevc"}
+            )
+            and (frame_rate == 0.0 or 23 <= frame_rate <= 60)
+        )
+        if video_is_safe and audio_is_safe:
             return video_path
         vertical_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         vertical_path = vertical_file.name
@@ -765,14 +782,17 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         container_id = response.json().get("id")
         if not container_id:
             raise RuntimeError(f"Instagram Graph did not return an image container id for {Path(image_path).name}")
-        media_id = self._publish_container(str(container_id))
+        container_id = str(container_id)
+        if not self._wait_container_ready(container_id):
+            raise RuntimeError(f"Instagram Graph image container was not ready: {container_id}")
+        media_id = self._publish_container(container_id)
         self._record_publish_receipt(
             platform="instagram_graph",
             external_id=media_id,
             status="published",
             verified=True,
             visibility="published",
-            details={"container_id": str(container_id)},
+            details={"container_id": container_id},
         )
         return True
 
@@ -890,6 +910,8 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         container_id = str(response.json().get("id", ""))
         if not container_id:
             raise RuntimeError(f"Instagram Graph did not return a carousel image container id for {Path(media_path).name}")
+        if not self._wait_container_ready(container_id):
+            raise RuntimeError(f"Instagram Graph carousel image container was not ready: {container_id}")
         return container_id
 
     def _publish_container(self, container_id: str) -> str:
@@ -904,15 +926,19 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             raise RuntimeError(f"Instagram Graph publish did not return a media id for container={container_id}")
         return media_id
 
-    def _wait_container_ready(self, container_id: str, max_wait: int = 120) -> bool:
+    def _wait_container_ready(self, container_id: str, max_wait: int = 300) -> bool:
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{container_id}"
         for _ in range(max_wait):
-            response = requests.get(url, params={"fields": "status_code", "access_token": self.access_token}, timeout=30)
+            response = requests.get(
+                url,
+                params={"fields": "status_code,status", "access_token": self.access_token},
+                timeout=30,
+            )
             response.raise_for_status()
             status = str(response.json().get("status_code", ""))
             if status == "FINISHED":
                 return True
-            if status == "ERROR":
+            if status in {"ERROR", "EXPIRED"}:
                 return False
             time.sleep(2)
         return False

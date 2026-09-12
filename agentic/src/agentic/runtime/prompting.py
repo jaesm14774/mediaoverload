@@ -22,7 +22,7 @@ Non-negotiable rules:
 - Do not recreate a headline literally or stage a newsroom/documentary frame unless explicitly requested.
 - The named character must remain the hero, while the news-derived element gives the hero a concrete objective, obstacle, or consequence.
 - For news-grounded workflows, preserve one recognizable news anchor across the hook, a later causal beat, and the payoff.
-- Default to one named protagonist, one dominant news mechanism, and one readable obstacle or prop; do not add supporting characters, crowds, or a duplicate protagonist unless the user explicitly requires an interaction.
+- Default to one named protagonist and one readable causal mechanism, but let the selected visual profile build a layered setting, configured interaction pair, supporting physical forms, and background activity when they reinforce that mechanism. Never invent unrequested characters or duplicate the protagonist.
 - Do not introduce speech bubbles, signs, screens, interfaces, readable symbols, pseudo-text, or scribbles; when the source involves communication, translate it into an unmarked physical object or visible action unless literal text is explicitly required.
 - Prefer tangible visuals over abstract summaries: props, architecture, lighting, weather, symbols, motion.
 - Prefer substantial actions that can sustain a full clip, not tiny repetitive motions.
@@ -51,10 +51,10 @@ Response in English only.
 
 IMAGE_PROMPT_CONTRACT = """
 Image prompt contract:
-- Build one visual thesis: one focal subject, one dominant mechanism, and one readable relationship or emotional beat.
+- Build one visual thesis: one focal subject or configured interaction, one dominant mechanism, and one readable relationship or emotional beat.
 - Describe the decisive visible state, not a list of disconnected objects; translate abstract mood into a pose, prop interaction, deformation, trail, or lighting contrast.
 - Preserve the order Subject -> Scene -> Action or visual state -> Environment -> Composition and camera -> Style and lighting -> Quality.
-- Give the viewer a clear focal path and intentional negative space; state relative scale, containment, attachment, or layer order when those relationships carry the joke.
+- Give the viewer a clear focal path using intentional negative space or layered depth; state relative scale, containment, attachment, or layer order when those relationships carry the joke.
 - Choose one medium and surface language, then name a few observable material cues; do not stack contradictory style labels or vague quality adjectives.
 - Use small secondary details only after the main read works. Treat text, charts, panels, and multi-subject layouts as hard geometry constraints when explicitly requested; otherwise avoid them.
 - End with precise constraints and a short avoid list: no duplicate subject, accidental extra characters, clutter, watermark, logo, interface, or pseudo-text.
@@ -82,6 +82,9 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     continuity_directive = _continuity_directive(goal.media_type)
     style_contract = str(goal.constraints.get("visual_style_contract") or "").strip()
     style_direction = _style_directive(selected_style)
+    profile_direction = _style_profile_prompt(goal)
+    if profile_direction:
+        style_direction = "; ".join(part for part in (style_direction, profile_direction) if part)
     if style_contract:
         style_direction = "; ".join(part for part in (style_direction, style_contract) if part)
     visual_prompt = structured_visual_prompt(
@@ -96,14 +99,15 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     opening_scene = str(goal.prompt or "").split(";", 1)[0].strip()
     opening_keyframe_prompt = structured_visual_prompt(
         subject=subject_anchor,
-        scene=opening_scene or "one uncluttered scene at the start of the gag",
+        scene=opening_scene or "one coherent scene at the start of the gag with visible foreground, middle action plane, and background",
         action=(
             "single still opening moment only: show the protagonist already beginning the one physical action "
-            "with the dominant prop; no aftermath, no before-and-after sequence, no second pose, no duplicate"
+            "with the dominant mechanism, prop, or environmental force; no aftermath, no before-and-after sequence, "
+            "no second pose, no duplicate"
         ),
         environment=(
-            f"{_interaction_clause(goal)}; uncluttered background; one dominant prop; generous negative space; "
-            "the protagonist appears exactly once"
+            f"{_interaction_clause(goal)}; {_style_profile_composition(goal)}; "
+            "one dominant causal action; the protagonist appears exactly once"
         ),
         camera="single stable readable composition for the first frame of an image-to-video shot",
         style=style_direction,
@@ -709,6 +713,28 @@ def _interaction_clause(goal: GoalRequest) -> str:
         "preserve each identity, spatial position, and role; do not add an unrequested third subject"
         if contract.get("same_frame", True)
         else "two required subjects maintain stable identity and a visible mutual action relationship"
+    )
+
+
+def _style_profile_composition(goal: GoalRequest) -> str:
+    profile = goal.constraints.get("visual_style_profile")
+    if not isinstance(profile, dict):
+        return "coherent setting with readable foreground, middle action plane, and background"
+    return "; ".join(
+        str(profile.get(key) or "").strip()
+        for key in ("composition", "palette", "motion")
+        if str(profile.get(key) or "").strip()
+    ) or "coherent setting with readable foreground, middle action plane, and background"
+
+
+def _style_profile_prompt(goal: GoalRequest) -> str:
+    profile = goal.constraints.get("visual_style_profile")
+    if not isinstance(profile, dict):
+        return ""
+    return "; ".join(
+        str(profile.get(key) or "").strip()
+        for key in ("prompt", "composition", "palette", "motion")
+        if str(profile.get(key) or "").strip()
     )
 
 

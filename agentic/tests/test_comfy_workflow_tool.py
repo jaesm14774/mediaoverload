@@ -273,6 +273,35 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
         )
         self.assertEqual(toolset.adapter.last_generate_updates["seed"], 321)
 
+    def test_build_updates_can_override_img2img_denoise_for_story_card_motion(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            asset_registry = _FakeAssetRegistry(temp_root)
+            with patch.object(ComfyWorkflowToolset, "_build_specs", return_value={}):
+                toolset = ComfyWorkflowToolset(asset_registry=asset_registry, output_root=temp_root)
+            toolset.adapter = _FakeAdapter()
+            workflow_path = temp_root / "workflow.json"
+            workflow_path.write_text("{}", encoding="utf-8")
+            spec = ComfyWorkflowSpec(
+                name="comfy.workflow.image_to_image",
+                workflow_name="krea2_turbo_img2img",
+                output_folder="img2img",
+                file_prefix="story_card",
+                denoise_binding=NodeBinding(kind="denoise", node_type="KSampler", input_key="denoise"),
+            )
+
+            updates = toolset._build_updates(
+                spec,
+                workflow_path,
+                {"denoise": 0.4},
+                toolset.adapter.generator,
+            )
+
+        self.assertEqual(
+            updates,
+            [{"node_type": "KSampler", "node_index": 0, "inputs": {"denoise": 0.4}}],
+        )
+
     def test_execute_respects_requested_workflow_and_writes_summary(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

@@ -15,6 +15,7 @@ import yaml
 
 from agentic.assets.registry import AssetRegistry
 from agentic.app.character_requests import CharacterWorkflowRequest
+from agentic.app.creative_profiles import resolve_creative_profile
 from agentic.app.main import _build_prompt_summary, build_runtime
 from agentic.h3_reference import normalize_reference_manifest
 from agentic.runtime.llm_engine import LLMPromptEngine
@@ -22,6 +23,11 @@ from agentic.runtime.observability import RunRecorder
 from agentic.runtime.prompt_requests import GenerationRoutingRequest
 from agentic.runtime.route_selection import select_weighted_route
 from agentic.runtime.step_logger import create_run_logger
+from agentic.runtime.story_cards import (
+    STORY_CARD_DEFAULT_HEIGHT,
+    STORY_CARD_DEFAULT_WIDTH,
+    STORY_CARD_PAGE_COUNT_DEFAULT,
+)
 from agentic.tools.context_services import (
     CharacterGroupSelectionService,
     DiscordRunNotificationService,
@@ -33,10 +39,11 @@ from agentic.tools.social_services import record_facebook_profile_handoff_delive
 SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube", FACEBOOK_PROFILE_HANDOFF_PLATFORM}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
-IMAGE_ONLY_GENERATION_TYPES = {"text2img", "sticker_pack"}
+IMAGE_ONLY_GENERATION_TYPES = {"text2img", "story_card", "sticker_pack"}
 
 NEWS_GROUNDED_GENERATION_TYPES = frozenset(
     {
+        "story_card",
         "native_h3_story",
         "native_h3_t2v_story",
         "native_h3_fl2va_story",
@@ -53,6 +60,7 @@ CONCRETE_SUBJECT_MODES = frozenset({SUBJECT_MODE_SINGLE, SUBJECT_MODE_INTERACTIO
 SUPPORTED_SUBJECT_MODES = frozenset({*CONCRETE_SUBJECT_MODES, SUBJECT_MODE_RANDOM})
 
 CONFIG_MEDIA_TYPE_MAP = {
+    "story_card": "story_card",
     "text2img": "image",
     "text2video": "text2video",
     "text2image2video": "text2img2video",
@@ -355,10 +363,30 @@ def resolve_character_selection(
     configured_name = str(character.get("name") or Path(request.config_path).stem)
     group_name = str(character.get("group_name") or "").strip()
     configured_subject_mode = _subject_mode(loaded_config)
+    story_card_requested = (
+        str(request.generation.preferred_generation_type or "").strip().lower() == "story_card"
+    )
     reference_micro_gag_requested = (
         str(request.generation.preferred_generation_type or "").strip().lower() == "text2image2video"
         and bool(str(request.generation.reference_video_source or "").strip())
     )
+    if story_card_requested:
+        # Story cards are writing-first decorative Kirby cards. Random or
+        # two-character selection adds unrelated subjects and can change the
+        # character identity that the corner illustration is meant to keep.
+        if group_name:
+            selection = CharacterGroupSelectionService().select_named_character(
+                group_name,
+                configured_name,
+            ).to_dict()
+        else:
+            selection = _fixed_character_selection(configured_name)
+        return _annotate_subject_selection(
+            selection,
+            configured_subject_mode=configured_subject_mode,
+            effective_subject_mode=SUBJECT_MODE_SINGLE,
+            subject_mode_weights=None,
+        )
     if reference_micro_gag_requested:
         # A reference-derived micro-gag may borrow timing and physical grammar,
         # but its default contract is one readable protagonist. Do not let the
@@ -509,7 +537,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     )
     video_speed = _normalize_video_speed_config(generation.get("video_speed"))
 
-    style = _pick_primary_style(generation.get("style_weights"))
     configured_character_name = str(character.get("name") or "").strip()
     configured_group_name = str(character.get("group_name") or "").strip()
     configured_prompt_identity = configured_character_name or configured_group_name
@@ -548,6 +575,17 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         character_selection=character_selection,
         configured_group_name=str(character.get("group_name") or "").strip(),
     )
+    creative_rng = random.Random(int(requested_seed)) if requested_seed is not None else None
+    if creative_rng is None and rng is not None and hasattr(rng, "getstate"):
+        creative_rng = random.Random()
+        creative_rng.setstate(rng.getstate())
+    creative_profile = resolve_creative_profile(
+        dict(generation.get("creative_profile") or {}),
+        rng=creative_rng,
+    )
+    canvas_profile = dict(creative_profile["canvas"])
+    style_profile = dict(creative_profile["style"])
+    style = str(style_profile["label"])
     prompt = _replace_character_identity(
         prompt,
         configured_name=configured_prompt_identity,
@@ -648,7 +686,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         news_driven=effective_news_driven,
         news_history_path=news_history_path or _default_news_history_path(repo_root, character_name),
     )
-    if config_generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"} and (effective_news_driven or not str(prompt).strip()):
+    if config_generation_type in {"story_card", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"} and (effective_news_driven or not str(prompt).strip()):
         # Native H3 owns the news-to-story prompt contract. Do not create a
         # second autonomous scene prompt here and then carry it through the
         # routing summary as if it were a user brief.
@@ -727,6 +765,11 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         # Kirby's short-form 2x playback transform would otherwise compress it
         # to half length before the publish review.
         video_speed = {"enabled": False, "factor": 1.0}
+    if config_generation_type == "native_h3_fl2va_story":
+        # FL2VA's native workflow already owns the requested 15-second timing;
+        # applying the character-wide 2x post-process would turn it into a
+        # short preview before QA and review.
+        video_speed = {"enabled": False, "factor": 1.0}
 
     native_keyframe_candidate_count = max(1, int(native_recipe.get("keyframe_candidate_count") or 1))
     if (
@@ -776,6 +819,23 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         configured_name=configured_prompt_identity,
         selected_name=character_name,
     ).strip()
+    style_guidance = "; ".join(
+        part
+        for part in (
+            str(style_profile.get("prompt") or "").strip(),
+            str(style_profile.get("composition") or "").strip(),
+            str(style_profile.get("palette") or "").strip(),
+            str(style_profile.get("motion") or "").strip(),
+            f"Avoid: {style_profile['avoid']}" if style_profile.get("avoid") else "",
+        )
+        if part
+    )
+    native_h3_visual_style_contract = "; ".join(
+        part for part in (native_h3_visual_style_contract, style_guidance) if part
+    )
+    native_h3_creative_brief = "; ".join(
+        part for part in (native_h3_creative_brief, f"Selected visual style: {style_guidance}") if part
+    )
     selected_profile = dict(character_selection.get("selected_profile") or {})
     role_description = str(selected_profile.get("role_description") or "").strip()
     role_keywords = str(selected_profile.get("keywords") or "").strip()
@@ -799,6 +859,8 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         native_h3_visual_style_contract = "; ".join(
             item for item in (native_h3_visual_style_contract, profile_block) if item
         )
+    story_card_config = dict(generation.get("story_card", {}) or {})
+    story_card_visual = dict(story_card_config.get("visual") or {})
     constraints = {
         "character": character_name,
         "subject_mode": subject_mode,
@@ -808,10 +870,25 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         "interaction_contract": dict(subject_context.get("interaction_contract") or {}),
         "character_selection": character_selection,
         "character_profile": selected_profile,
+        "creative_profile": creative_profile,
+        "canvas_profile": canvas_profile,
+        "canvas_aspect_ratio": str(canvas_profile["aspect_ratio"]),
+        "canvas_width": int(canvas_profile["width"]),
+        "canvas_height": int(canvas_profile["height"]),
+        "visual_style_profile": style_profile,
         "seed": int(requested_seed) if requested_seed is not None else None,
         "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
         "video_speed": video_speed,
+        "story_card_page_count": str(
+            story_card_config.get("page_count", STORY_CARD_PAGE_COUNT_DEFAULT)
+        ).strip() or STORY_CARD_PAGE_COUNT_DEFAULT,
+        "story_card_width": int(story_card_config.get("width", STORY_CARD_DEFAULT_WIDTH)),
+        "story_card_height": int(story_card_config.get("height", STORY_CARD_DEFAULT_HEIGHT)),
+        "story_card_overlay_opacity": int(story_card_config.get("overlay_opacity", 202)),
+        "story_card_brand_label": str(story_card_config.get("brand_label", "STORY NOTE")),
+        "story_card_font_path": str(story_card_config.get("font_path", "")),
+        "story_card_visual": story_card_visual,
         "keyframe_workflow_name": str(generation.get("keyframe_workflow_name") or ""),
         "identity_refine_workflow_name": str(generation.get("identity_refine_workflow_name") or ""),
         "storyboard_path": str(generation.get("storyboard_path") or ""),
@@ -960,8 +1037,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
                 or ""
             ),
             "native_h3_duration_seconds": int(native_recipe.get("duration_seconds") or duration_seconds),
-            "native_h3_width": int(native_recipe.get("width") or dict(generation.get("video_defaults", {}) or {}).get("width", 608)),
-            "native_h3_height": int(native_recipe.get("height") or dict(generation.get("video_defaults", {}) or {}).get("height", 352)),
             "native_h3_length": int(native_recipe.get("length") or dict(generation.get("video_defaults", {}) or {}).get("length", 362)),
             "native_h3_steps": int(native_recipe.get("steps") or dict(generation.get("video_defaults", {}) or {}).get("steps", 16)),
             "native_h3_frame_rate": int(native_recipe.get("frame_rate") or dict(generation.get("video_defaults", {}) or {}).get("frame_rate", 24)),
@@ -1037,6 +1112,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         effective_longvideo_config=longvideo_config,
     )
     character_config_summary["subject_context"] = subject_context
+    character_config_summary["creative_profile"] = creative_profile
     return {
         "prompt": resolved_prompt,
         "media_type": agentic_media_type,
@@ -1235,6 +1311,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     "selection_limit": _publish_selection_limit(
                         media_paths,
                         payload["constraints"].get("review_selection_limit"),
+                        source_generation_type=str(payload.get("source_generation_type") or ""),
                     ),
                     "review_notes": review_notes,
                     # Every publishable media artifact must be explicitly
@@ -1519,6 +1596,7 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
         return [speed_candidates[-1]]
 
     preferred_package_nodes = (
+        "story-card-compose",
         "native-h3-package",
         "package-outputs",
         "collect-longvideo-outputs",
@@ -1536,7 +1614,10 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             append_media(outputs.get("final_video_path"))
             if collected:
                 return collected
-        for key in ("media_paths", "final_video_path", "video_path", "image_path", "final_image_path"):
+        package_keys = ("media_paths", "final_video_path", "video_path", "image_path", "final_image_path")
+        if node_id == "story-card-compose":
+            package_keys = (*package_keys, "saved_files")
+        for key in package_keys:
             append_media(outputs.get(key))
         if collected:
             return collected
@@ -1565,10 +1646,17 @@ def _publish_review_scope(media_paths: list[str]) -> str:
     return "final_media"
 
 
-def _publish_selection_limit(media_paths: list[str], configured_limit: Any) -> int:
-    """Keep video publish review single-select while allowing image media sets."""
+def _publish_selection_limit(
+    media_paths: list[str],
+    configured_limit: Any,
+    *,
+    source_generation_type: str = "",
+) -> int:
+    """Resolve the publish-review cap without splitting a story-card carousel."""
     if _publish_review_scope(media_paths) == "final_video":
         return 1
+    if str(source_generation_type).strip().lower() == "story_card":
+        return len(media_paths)
     try:
         limit = int(configured_limit or 0)
     except (TypeError, ValueError):
@@ -1710,20 +1798,6 @@ def _build_publish_story_context(
 
 def dumps_result(payload: dict[str, Any]) -> str:
     return json.dumps(payload, indent=2, ensure_ascii=False)
-
-
-def _pick_primary_style(style_weights: Any) -> str:
-    if not isinstance(style_weights, dict) or not style_weights:
-        return "cinematic surreal"
-    ranked = [
-        (str(style), float(weight))
-        for style, weight in style_weights.items()
-        if str(style).strip()
-    ]
-    if not ranked:
-        return "cinematic surreal"
-    ranked.sort(key=lambda item: item[1], reverse=True)
-    return ranked[0][0]
 
 
 def _weighted_choice(weights: dict[str, Any], rng: random.Random | None = None) -> str:
@@ -2136,7 +2210,17 @@ def _collect_workflow_stage_candidates(
             explicit = {}
 
         inferred: dict[str, list[Any]] = {}
-        if generation_type == "sticker_pack":
+        if generation_type == "story_card":
+            story_card_config = dict(generation.get("story_card", {}) or {})
+            page_stage = dict(story_card_config.get("page_stage", {}) or {})
+            inferred = {
+                "image_workflow_name": [
+                    page_stage.get("workflow_name"),
+                    page_stage.get("workflow_path"),
+                    generation_workflows.get("text2img"),
+                ],
+            }
+        elif generation_type == "sticker_pack":
             inferred = {
                 "image_workflow_name": [
                     _nested_get(strategy, "static_config", "workflow_name"),
@@ -2512,6 +2596,7 @@ def _resolve_workflow_name_from_reference(
 
 def _primary_workflow_name(generation_type: str, workflow_plan: dict[str, str]) -> str:
     stage_priority = {
+        "story_card": ("image_workflow_name",),
         "text2img": ("image_workflow_name",),
         "text2video": ("video_workflow_name", "image_workflow_name"),
         "text2image2video": ("image_workflow_name", "video_workflow_name", "upscale_workflow_name"),
@@ -2534,6 +2619,8 @@ def _primary_workflow_name(generation_type: str, workflow_plan: dict[str, str]) 
 
 
 def _native_recipe_for_generation(generation: dict[str, Any], generation_type: str) -> dict[str, Any]:
+    if generation_type == "story_card":
+        return dict(generation.get("story_card", {}) or {})
     if generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
         selected = dict(generation.get(generation_type, {}) or {})
         if selected:
@@ -2763,7 +2850,7 @@ def _resolve_autonomous_prompt(
     if news_driven and not news_context:
         raise RuntimeError("News-driven generation did not receive a usable news context.")
 
-    if generation_type in {"native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
+    if generation_type in {"story_card", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}:
         return {
             "prompt": "",
             "source": "news",
@@ -2848,7 +2935,14 @@ def _summarize_character_config(
         "subject_mode_weights": dict(generation.get("subject_mode_weights", {}) or {}),
         "output_dir": str(generation.get("output_dir") or ""),
         "generation_type_weights": dict(generation.get("generation_type_weights", {}) or {}),
-        "style_count": len(dict(generation.get("style_weights", {}) or {})),
+        "style_count": len(
+            dict(
+                dict(generation.get("creative_profile", {}) or {})
+                .get("style", {})
+                .get("profiles", {})
+                or {}
+            )
+        ),
         "default_hashtags": [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag],
         "enabled_platforms": list(platform_configs.keys()),
         "platform_config_folders": {

@@ -17,6 +17,7 @@ routing:
     # canonical name for the text2img2img strategy.
     # - text2image2image
     - sticker_pack
+    - story_card
 
   # Image-conditioned routes use a human-reviewed image gate before video
   # render. Pure T2V routes remain prompt-only. Ref2VA may bind several
@@ -41,8 +42,6 @@ routing:
     workflow_names:
       - minimax_h3_lowvram_i2v
       - minimax_h3_lowvram_15s_fl2va_i2v
-    width: 608
-    height: 352
     length: 120
     steps: 16
     model_profile: q2
@@ -82,6 +81,11 @@ routing:
       minimax_h3_native_t2v: 1
 
   workflow_stage_candidates:
+    # Writing-first route. Kirby's character YAML gives it an explicit
+    # generation_type_weights entry so bare CLI runs can select it.
+    story_card:
+      image_workflow_name:
+        - krea2_turbo
     text2img:
       image_workflow_name:
         - krea2_turbo
@@ -202,6 +206,13 @@ routing:
         - minimax_h3_lowvram_i2v
 
   count_policies:
+    story_card:
+      image_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
     text2img:
       image_count:
         min: 1
@@ -422,6 +433,8 @@ routing:
       reference_manifest_error_code: "Runtime status: auto_generation_available, missing_file, invalid, or empty string when validated."
       routing_policy: "native_h3_ref2va uses existing references when available; with an empty manifest it expands into the same six-candidate Discord review contract as text2image2native_h3_ref2va."
     workflow_stage_contracts:
+      story_card:
+        image_workflow_name: "Required style-locked text-to-image stage for each static story page; prompts must preserve the resolved selected character while changing visual beat, expression, pose, and optional supporting cast without blocking typography."
       text2img:
         image_workflow_name: "Required static-image stage. It may produce one image or the configured candidate count; no video stage is implied."
       text2video:
@@ -510,6 +523,20 @@ routing:
         - looping motion
         - dynamic shot
     strategy_descriptions:
+      story_card:
+        summary: "寫作優先的 1–6 頁繁中故事字卡；多頁每頁約 36–70 字、以 42–65 字為目標，超過 70 字按意思分頁，使用當輪解析出的角色做連續動作與表情節拍，可選一名可愛配角，文字由 Pillow 精確疊字，不產生影片。"
+        best_for:
+          - "需求重點是安靜、細膩、讓人讀完後重新理解一件日常小事的文字。"
+          - "新聞關鍵字只作情緒入口，成品要改寫成日常人物、物件與無聲照顧。"
+          - "需要背景有角色辨識度但不能搶走文字注意力。"
+        avoid_when:
+          - "需求是影片、鏡頭運動、旁白或需要動態節奏；改用影片策略。"
+          - "需求是單張主視覺或貼圖批次；改用 text2img 或 sticker_pack。"
+        hard_rules:
+          - "背景不得含可讀文字、新聞現場、logo 或 watermark；中央留白優先。"
+          - "主角必須是當輪 resolved selected character；不可寫死 Kirby、不可在角色解析失敗時 fallback。"
+          - "每頁主角要有可見的姿勢、位置或表情變化；配角只能由角色包設定，最多一名且必須從屬。"
+          - "每頁必須使用精確繁中正文，不能依賴圖片模型產字。"
       native_h3_t2v_story:
         summary: "純文字驅動的 15 秒單一連續影片；沒有輸入圖、沒有指定首幀、沒有指定尾幀，也沒有 reference manifest。"
         best_for:
@@ -641,6 +668,7 @@ routing:
         avoid_when:
           - "目標是單張高完成度插圖或完整故事影片。"
     selection_rules:
+      - "若使用者明確要求多頁故事字卡、心靈雞湯式感性文字或 writing-first carousel，優先選 story_card。"
       - "先判斷控制素材：有多張或多種既有參考素材且必須保留身份／風格／鏡頭語言時，reference manifest 非空且可讀取才選 native_h3_ref2va。"
       - "若需要多參考控制但沒有既有 reference manifest，canonical 命名是 text2image2native_h3_ref2va，先產生六張候選圖，再經 Discord 選擇後送入 Ref2VA；直接選 native_h3_ref2va 也會走同一個空 manifest 自動 gate。"
       - "再判斷結尾控制：需求同時明確描述可驗證的第一畫面與最後畫面，或必須完成 A 到 B 的視覺狀態轉換時，選 native_h3_fl2va_story。"
