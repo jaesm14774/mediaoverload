@@ -112,6 +112,7 @@ class RoutingContractTests(unittest.TestCase):
                 "native_h3_ref2va": 1,
                 "text2image2native_h3_ref2va": 1,
                 "sticker_pack": 2,
+                "story_card": 1,
             },
         )
 

@@ -150,6 +150,9 @@ class PromptEngine:
     ) -> dict[str, Any]:
         return self.llm_engine.build_carousel_prompt_set(goal, segments, style)
 
+    def build_story_card(self, goal: GoalRequest) -> dict[str, Any]:
+        return self.llm_engine.build_story_card(goal)
+
     def prepare_publish_caption(
         self,
         goal: GoalRequest,

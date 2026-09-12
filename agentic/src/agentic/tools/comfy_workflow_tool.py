@@ -67,6 +67,7 @@ class ComfyWorkflowSpec:
     reference_conditioning_node_type: str | None = None
     reference_image_size_binding: NodeBinding | None = None
     seed_enabled: bool = True
+    denoise_binding: NodeBinding | None = None
     default_payload: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: int | None = None
     required_node_types: tuple[str, ...] = ()
@@ -287,6 +288,8 @@ class ComfyWorkflowToolset:
             updates.append(self._binding_update(spec.timeline_binding, timeline_data, str(workflow_path)))
         if spec.steps_binding and payload.get("steps") is not None:
             updates.append(self._binding_update(spec.steps_binding, int(payload["steps"]), str(workflow_path)))
+        if spec.denoise_binding and payload.get("denoise") is not None:
+            updates.append(self._binding_update(spec.denoise_binding, float(payload["denoise"]), str(workflow_path)))
 
         if spec.reference_conditioning_node_type:
             updates.extend(self._build_reference_updates(spec, payload, workflow_path, generator))
@@ -652,6 +655,7 @@ class ComfyWorkflowToolset:
                 negative_prompt_binding=NodeBinding(kind="negative_prompt", node_type="PrimitiveString", title="negative"),
                 image_binding=NodeBinding(kind="image", node_type="LoadImage", input_key="image"),
                 steps_binding=NodeBinding(kind="steps", node_type="KSampler", input_key="steps"),
+                denoise_binding=NodeBinding(kind="denoise", node_type="KSampler", input_key="denoise"),
             ),
             "comfy.workflow.image_upscale": ComfyWorkflowSpec(
                 name="comfy.workflow.image_upscale",

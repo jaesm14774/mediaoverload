@@ -41,6 +41,8 @@ class NewsSelection:
     keyword: str
     category: str = ""
     created_at: str = ""
+    content: str = ""
+    url: str = ""
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -48,6 +50,8 @@ class NewsSelection:
             "keyword": self.keyword,
             "category": self.category,
             "created_at": self.created_at,
+            "content": self.content,
+            "url": self.url,
         }
 
 
@@ -145,7 +149,7 @@ class NewsContextService:
         date_filter = (datetime.now() - timedelta(days=max(1, int(lookback_days)))).strftime("%Y-%m-%d %H:%M:%S")
         placeholders = ", ".join(["%s"] * len(categories))
         query = f"""
-            SELECT title, keyword, category, created_at
+            SELECT title, keyword, category, created_at, content, article_url AS url
             FROM news_ch.news
             WHERE category NOT IN ({placeholders})
               AND COALESCE(keyword, '') != ''
@@ -202,6 +206,8 @@ class NewsContextService:
             keyword=str(selected.get("keyword") or "").strip(),
             category=str(selected.get("category") or "").strip(),
             created_at=str(selected.get("created_at") or "").strip(),
+            content=str(selected.get("content") or "").strip(),
+            url=str(selected.get("url") or "").strip(),
         )
 
 
@@ -460,6 +466,35 @@ class CharacterGroupSelectionService:
             group_name=normalized_group,
             selected_character=selected.name,
             candidates=candidates,
+        )
+
+    def select_named_character(
+        self,
+        group_name: str,
+        character_name: str,
+    ) -> CharacterGroupSelection:
+        """Resolve the configured role without applying the group's random weights."""
+
+        normalized_group = str(group_name or "").strip()
+        normalized_name = str(character_name or "").strip()
+        candidates = self.get_candidates(normalized_group)
+        if not normalized_name:
+            raise CharacterGroupSelectionError(
+                f"Character group '{normalized_group}' requires a configured character name"
+            )
+        selected = next(
+            (candidate for candidate in candidates if candidate.name.casefold() == normalized_name.casefold()),
+            None,
+        )
+        if selected is None:
+            raise CharacterGroupSelectionError(
+                f"Character '{normalized_name}' is not an active role in group '{normalized_group}'"
+            )
+        return CharacterGroupSelection(
+            group_name=normalized_group,
+            selected_character=selected.name,
+            candidates=candidates,
+            selection_source="fixed_config_role",
         )
 
     def select_pair(

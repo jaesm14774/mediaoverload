@@ -68,6 +68,8 @@ generation:
 
 `enabled: false` 會保留原始速度；`factor: 1.5`、`2.0` 等值分別代表 1.5 倍、2 倍速。影片輸出時長會變成原始時長除以倍率，FPS 與畫布尺寸不變。
 
+Native H3 FL2VA 由原生 workflow 固定產生 15 秒故事影片，不套用角色層級的 speed transform。
+
 ---
 
 ## 生成策略總覽
@@ -82,15 +84,36 @@ generation:
 | `text2longvideo` | `long_video` | 文字→關鍵圖／reference→多段 I2V→轉場→合成；不是純 T2V，也非固定 15 秒 |
 | `native_h3_story` | `native_h3_story` | Native H3 I2VA：單一 approved opening image 進連續故事 |
 | `native_h3_t2v_story` | `native_h3_t2v_story` | Native H3 T2VA：純文字直接生影片 |
-| `native_h3_fl2va_story` | `native_h3_fl2va_story` | Native H3 FL2VA：opening + landing 兩端 conditioning |
+| `native_h3_fl2va_story` | `native_h3_fl2va_story` | Native H3 FL2VA：opening + landing 兩端 conditioning；兩端各產生候選圖供人工選擇 |
 | `native_h3_l2va_story` | `native_h3_l2va_story` | Native H3 L2VA：只使用 landing frame conditioning |
 | `native_h3_ref2va` | `native_h3_ref2va` | Native H3 Ref2VA：有效 manifest 直接使用；空 manifest 自動六張候選圖→Discord 選擇 |
+| `story_card` | `story_card` | 寫作優先的繁中故事字卡：每頁用共同視覺契約獨立生圖，最後由 Pillow 疊上精確文字 |
 | `text2image2image` | `text2img2img` | 先圖後 img2img refine |
 | `sticker_pack` | `sticker_pack` | 多表情貼圖批次 |
 | `image2image` | `image` | 單純 img2img 路線（路由需納入候選時才會被選到） |
 
 **LLM 路由**（未指定 `--generation-type` 時）會讀取 `configs/routing.yaml` 的 `routing.strategy_candidates`、`workflow_stage_candidates`、`count_policies`、`routing_hints`，並回傳結構化結果（鍵：`generation_type`、`workflow_plan`、`count_plan`、`reason`）。  
 **手動指定策略**時：CLI 傳 `--generation-type <策略名>` 或程式傳 `preferred_generation_type=...`，會略過 LLM，並對各階 workflow 取該策略在設定檔中的**第一個候選**，數量則取各 `count_key` 的 **policy 最小值**。
+
+`story_card` 已加入全域策略候選與角色設定的加權策略池。它從新聞的具體事實提出人性看點，依處境選擇反思、感性、深思或其他文風。選題會帶入資料庫已有的正文節錄與網址；只有標題時，限制在標題範圍作反思，不虛構新聞細節。中文文章與英文背景 prompt 使用完全分離的契約。圖像模型會使用當輪解析出的 selected character 作為唯一主角，依每頁的動作、位置與表情節拍維持身份連續性；角色包可選擇加入一名從屬配角。每頁使用同一套 style-locked `krea2_turbo` text-to-image 視覺契約，避免 img2img 把錨點角色複製到畫面中；最終文字由 Pillow 使用可驗證的繁中 font 疊字，因此不能把圖片模型產生的假字當成成品。
+
+### `story_card` — 新聞觀點與感性字卡
+
+這個模式的核心順序是：`agent.story_card.write` → 每頁 style-locked text-to-image 背景 → `media.story_card.compose`。預設自動決定最少頁數：50 字以內才輸出 1 張，超過 50 字就按意思拆成 2–6 張；明確指定時仍可固定頁數，但每張都必須推進同一個事件，不能用感受與形容詞湊頁數。背景會以暖色繪本小劇場呈現，讓 selected character 在不同頁面產生可見的移動、姿勢與表情變化；配角只在角色包設定時出現，最多一名，且不得搶走文字與主角。文章先依事件、本質、情緒與文風選定看點，核對來源依據，再把來源內化成對讀者有新價值的知識、感受或提醒；`evidence_anchor` 只保存內部定位，不要求逐字引用，也不應把原文轉述成正文。保留原新聞的看點，允許有根據的評論；不強迫父愛故事、誤會反轉或勵志結尾。模型失敗不回落固定故事，template 模式不支援此路徑；背景 prompt 必須是英文，字卡 `text` 必須是繁體中文。仍只輸出靜態 PNG；若要單張卡內真正動畫，另立影片路由。
+
+```powershell
+python run_media_interface.py `
+  --character kirby `
+  --prompt "從今天的新聞提出一個具體的人性看點，寫成有感情的繁中字卡" `
+  --generation-type story_card `
+  --news-driven `
+  --no-review `
+  --no-publish
+```
+
+不指定 `--generation-type` 時，bare CLI 會依 `configs/characters/kirby.yaml` 的 `generation_type_weights` 加權選策略；指定 `--generation-type story_card` 則是直接固定使用這個策略，不消耗 routing shuffle-bag。
+
+分類、鋪陳、Prompt 與驗收見 [`docs/story_card_editorial_guide.md`](docs/story_card_editorial_guide.md)。原本的本地來源閱讀與 11 篇故事寫作拆解見 [`docs/story_card_research_11_03215.md`](docs/story_card_research_11_03215.md)。
 
 ### 各階 workflow 鍵（`workflow_plan`）
 
@@ -492,11 +515,14 @@ python run_media_interface.py --character kirby --prompt '保留構圖與角色�
 
 # 11. 貼圖包：krea2_turbo -> minimax_h3_lowvram_i2v（動態貼圖階段）
 python run_media_interface.py --character kirby --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
+
+# 12. 心靈故事字卡：安靜角落背景 -> 依 50 字規則自動分頁
+python run_media_interface.py --character kirby --generation-type story_card --news-driven --no-review --no-publish
 ```
 
 ### 自動路由與加權隨機
 
-角色流程先選角色，再選策略，最後才生成內容：scheduler/runtime 先依 YAML 的 `character.group_name` 從 DB 做 group weighted selection，再讀取 `generation.generation_type_weights` 做 strategy weighted selection，並把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不決定角色或 scheduler 要走哪一種 strategy。scheduler 會把候選 route 放進持久化 shuffle bag（狀態預設在 `agentic/state/routing_selection/<config>.json`），所以短窗口不會因隨機抽樣連續撞到同一路由，但整體仍遵守 YAML 權重。Kirby 目前的 strategy 權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`。
+角色流程先選角色，再選策略，最後才生成內容：scheduler/runtime 先依 YAML 的 `character.group_name` 從 DB 做 group weighted selection，再讀取 `generation.generation_type_weights` 做 strategy weighted selection，並把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不決定角色或 scheduler 要走哪一種 strategy。scheduler 會把候選 route 放進持久化 shuffle bag（狀態預設在 `agentic/state/routing_selection/<config>.json`），所以短窗口不會因隨機抽樣連續撞到同一路由，但整體仍遵守 YAML 權重。Kirby 目前的 strategy 權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`、`story_card: 1`。
 
 固定 route 的 image/refine/transition workflow 會先經過 `AssetRegistry` 的 required-asset readiness，再依 `configs/routing.yaml` 的 `workflow_selection_weights` 選擇；空的 required-asset manifest 只代表未驗證，不會被當成 ready。當前這台 ComfyUI 只有 Krea 的 image assets 被明確驗證，因此 Krea 集中是資產可用性結果，不是機率失效；先補齊並登錄其他 workflow assets，權重才會在它們之間生效。explicit generation-type override 只固定策略家族，若 scheduler 有 RNG，stage workflow 仍會依權重抽樣。若要指定 routing bag 檔案，可設定 `SCHEDULER_ROUTING_HISTORY_PATH`。
 

@@ -6,7 +6,7 @@ import socket
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -77,6 +77,26 @@ class FFmpegAdapterTests(unittest.TestCase):
         self.assertIn("fps=24", command_text)
         self.assertIn("atempo=2", command_text)
         self.assertIn("-map [v] -map [a]", command_text)
+
+    @patch.object(FFmpegAdapter, "_run")
+    def test_pad_video_to_aspect_emits_instagram_safe_audio_and_frame_rate(self, run_mock) -> None:
+        adapter = FFmpegAdapter()
+        adapter._checked = True
+
+        adapter.pad_video_to_aspect(
+            "input.mp4",
+            "output.mp4",
+            target_width=720,
+            target_height=1280,
+        )
+
+        command_text = " ".join(run_mock.call_args.args[0])
+        self.assertIn("scale=720:1280:force_original_aspect_ratio=decrease", command_text)
+        self.assertIn("pad=720:1280", command_text)
+        self.assertIn("format=yuv420p,fps=30", command_text)
+        self.assertIn("-ar 48000", command_text)
+        self.assertIn("-ac 2", command_text)
+        self.assertIn("-b:a 128k", command_text)
 
     @patch.object(FFmpegAdapter, "_run")
     def test_trim_video_keeps_video_and_optional_audio(self, run_mock) -> None:
@@ -770,6 +790,160 @@ class InstagramGraphPlatformTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "configure Cloudinary or IG_GRAPH_MEDIA_BASE_URL"):
             platform._publish_image_url("sample.jpg", "caption")
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_prepare_reel_canvas_normalizes_noncanonical_video(self, load_config_mock, authenticate_mock) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ffmpeg.probe_media = lambda _path: {
+            "width": 608,
+            "height": 352,
+            "frame_rate": 24.0,
+            "video_codec": "h264",
+            "has_audio": True,
+            "audio_codec": "aac",
+            "sample_rate": 32000,
+        }  # type: ignore[method-assign]
+        captured: dict[str, object] = {}
+
+        def fake_pad(_source: str, target: str, *, target_width: int, target_height: int) -> str:
+            captured.update({"target": target, "width": target_width, "height": target_height})
+            return target
+
+        platform.ffmpeg.pad_video_to_aspect = fake_pad  # type: ignore[method-assign]
+        self.addCleanup(platform._cleanup_temp)
+
+        normalized = platform._prepare_reel_canvas("input.mp4")
+
+        self.assertNotEqual(normalized, "input.mp4")
+        self.assertEqual(captured["width"], 720)
+        self.assertEqual(captured["height"], 1280)
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_publish_image_waits_for_finished_container_before_publishing(
+        self, load_config_mock, authenticate_mock
+    ) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ig_user_id = "123"
+        platform.access_token = "token"
+        platform.cloudinary = type(
+            "CloudinaryStub", (), {"upload": staticmethod(lambda _: "https://cdn.example/image.jpg")}
+        )()
+        events: list[str] = []
+
+        def response(body: dict[str, str]) -> Mock:
+            mocked = Mock()
+            mocked.json.return_value = body
+            mocked.raise_for_status.return_value = None
+            return mocked
+
+        post_responses = [response({"id": "container-1"}), response({"id": "media-1"})]
+        get_responses = [response({"status_code": "IN_PROGRESS"}), response({"status_code": "FINISHED"})]
+
+        def post_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"post:{args[0].rsplit('/', 1)[-1]}")
+            return post_responses.pop(0)
+
+        def get_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"get:{args[0].rsplit('/', 1)[-1]}")
+            return get_responses.pop(0)
+
+        with patch("agentic.tools.social_native.requests.post", side_effect=post_side_effect), patch(
+            "agentic.tools.social_native.requests.get", side_effect=get_side_effect
+        ), patch("agentic.tools.social_native.time.sleep"):
+            result = platform._publish_image_url("sample.jpg", "caption")
+
+        self.assertTrue(result)
+        self.assertEqual(events, ["post:media", "get:container-1", "get:container-1", "post:media_publish"])
+        self.assertEqual(platform.last_publish_receipt["external_id"], "media-1")  # type: ignore[index]
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_publish_video_waits_for_finished_container_before_publishing(
+        self, load_config_mock, authenticate_mock
+    ) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ig_user_id = "123"
+        platform.access_token = "token"
+        platform._prepare_reel_canvas = lambda path: path  # type: ignore[method-assign]
+        platform.cloudinary = type(
+            "CloudinaryStub", (), {"upload": staticmethod(lambda _: "https://cdn.example/video.mp4")}
+        )()
+        events: list[str] = []
+
+        def response(body: dict[str, str]) -> Mock:
+            mocked = Mock()
+            mocked.json.return_value = body
+            mocked.raise_for_status.return_value = None
+            return mocked
+
+        post_responses = [response({"id": "container-2"}), response({"id": "media-2"})]
+        get_responses = [response({"status_code": "IN_PROGRESS"}), response({"status_code": "FINISHED"})]
+
+        def post_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"post:{args[0].rsplit('/', 1)[-1]}")
+            return post_responses.pop(0)
+
+        def get_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"get:{args[0].rsplit('/', 1)[-1]}")
+            return get_responses.pop(0)
+
+        with patch("agentic.tools.social_native.requests.post", side_effect=post_side_effect), patch(
+            "agentic.tools.social_native.requests.get", side_effect=get_side_effect
+        ), patch("agentic.tools.social_native.time.sleep"):
+            result = platform._publish_video_url("sample.mp4", "caption")
+
+        self.assertTrue(result)
+        self.assertEqual(events, ["post:media", "get:container-2", "get:container-2", "post:media_publish"])
+        self.assertEqual(platform.last_publish_receipt["external_id"], "media-2")  # type: ignore[index]
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_carousel_image_waits_for_finished_child_container(
+        self, load_config_mock, authenticate_mock
+    ) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ig_user_id = "123"
+        platform.access_token = "token"
+        platform.cloudinary = type(
+            "CloudinaryStub", (), {"upload": staticmethod(lambda _: "https://cdn.example/image.jpg")}
+        )()
+        events: list[str] = []
+
+        def response(body: dict[str, str]) -> Mock:
+            mocked = Mock()
+            mocked.json.return_value = body
+            mocked.raise_for_status.return_value = None
+            return mocked
+
+        get_responses = [response({"status_code": "IN_PROGRESS"}), response({"status_code": "FINISHED"})]
+
+        def post_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"post:{args[0].rsplit('/', 1)[-1]}")
+            return response({"id": "child-image-1"})
+
+        def get_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"get:{args[0].rsplit('/', 1)[-1]}")
+            return get_responses.pop(0)
+
+        with patch("agentic.tools.social_native.requests.post", side_effect=post_side_effect), patch(
+            "agentic.tools.social_native.requests.get", side_effect=get_side_effect
+        ), patch("agentic.tools.social_native.time.sleep"):
+            result = platform._create_carousel_item("sample.jpg")
+
+        self.assertEqual(result, "child-image-1")
+        self.assertEqual(events, ["post:media", "get:child-image-1", "get:child-image-1"])
 
     @patch.object(InstagramGraphPlatform, "authenticate")
     @patch.object(InstagramGraphPlatform, "load_config")

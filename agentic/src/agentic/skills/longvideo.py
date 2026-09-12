@@ -438,8 +438,8 @@ class LongVideoSkills:
                     )
                 )
 
-        width = context.node.inputs.get("width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
-        height = context.node.inputs.get("height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
+        width = context.node.inputs.get("width") or constraints.get("canvas_width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
+        height = context.node.inputs.get("height") or constraints.get("canvas_height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
         length = context.node.inputs.get("length") or constraints.get("longvideo_length") or constraints.get("longvideo_h3_length")
         steps = context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps")
         if workflow_name.startswith("minimax_h3_"):
@@ -546,13 +546,13 @@ class LongVideoSkills:
             "character": str(context.plan.goal.constraints.get("character") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
-                context.node.inputs.get("width") or context.plan.goal.constraints.get("native_h3_width") or 608,
+                context.node.inputs.get("width") or context.plan.goal.constraints.get("canvas_width") or 608,
                 name="width",
                 minimum=256,
                 maximum=1024,
             ),
             "height": _bounded_int(
-                context.node.inputs.get("height") or context.plan.goal.constraints.get("native_h3_height") or 352,
+                context.node.inputs.get("height") or context.plan.goal.constraints.get("canvas_height") or 352,
                 name="height",
                 minimum=256,
                 maximum=1024,
@@ -738,13 +738,13 @@ class LongVideoSkills:
             "character": str(context.plan.goal.constraints.get("character") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
-                context.node.inputs.get("width") or context.plan.goal.constraints.get("native_h3_width") or 608,
+                context.node.inputs.get("width") or context.plan.goal.constraints.get("canvas_width") or 608,
                 name="width",
                 minimum=256,
                 maximum=1024,
             ),
             "height": _bounded_int(
-                context.node.inputs.get("height") or context.plan.goal.constraints.get("native_h3_height") or 352,
+                context.node.inputs.get("height") or context.plan.goal.constraints.get("canvas_height") or 352,
                 name="height",
                 minimum=256,
                 maximum=1024,
@@ -828,13 +828,13 @@ class LongVideoSkills:
                 or "q4"
             ),
             "width": _bounded_int(
-                context.node.inputs.get("width") or context.plan.goal.constraints.get("native_h3_width") or 608,
+                context.node.inputs.get("width") or context.plan.goal.constraints.get("canvas_width") or 608,
                 name="width",
                 minimum=256,
                 maximum=1024,
             ),
             "height": _bounded_int(
-                context.node.inputs.get("height") or context.plan.goal.constraints.get("native_h3_height") or 352,
+                context.node.inputs.get("height") or context.plan.goal.constraints.get("canvas_height") or 352,
                 name="height",
                 minimum=256,
                 maximum=1024,
@@ -896,16 +896,16 @@ class LongVideoSkills:
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
                 context.node.inputs.get("width")
-                or constraints.get("native_h3_t2v_width")
-                or (512 if lowvram_t2v else constraints.get("native_h3_width") or 608),
+                or constraints.get("canvas_width")
+                or (512 if lowvram_t2v else 608),
                 name="width",
                 minimum=256,
                 maximum=1024,
             ),
             "height": _bounded_int(
                 context.node.inputs.get("height")
-                or constraints.get("native_h3_t2v_height")
-                or (288 if lowvram_t2v else constraints.get("native_h3_height") or 352),
+                or constraints.get("canvas_height")
+                or (288 if lowvram_t2v else 352),
                 name="height",
                 minimum=256,
                 maximum=1024,
@@ -989,13 +989,13 @@ class LongVideoSkills:
         duration_tolerance = float(context.node.inputs.get("duration_tolerance") or 0.75)
         expected_width = int(
             context.node.inputs.get("expected_width")
-            or constraints.get("native_h3_width")
+            or constraints.get("canvas_width")
             or native_recipe.get("width")
             or 608
         )
         expected_height = int(
             context.node.inputs.get("expected_height")
-            or constraints.get("native_h3_height")
+            or constraints.get("canvas_height")
             or native_recipe.get("height")
             or 352
         )

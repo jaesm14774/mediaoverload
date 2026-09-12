@@ -10,6 +10,13 @@ from agentic.runtime.drama import DramaPlan, DramaPlanError, compile_drama_plan
 from agentic.runtime.editing import EDIT_PROFILES, IMAGE_SUFFIXES, EditPlan
 from agentic.assets.registry import AssetRegistry, WorkflowManifest
 from agentic.runtime.creativity import IdeaDirector
+from agentic.runtime.story_cards import (
+    STORY_CARD_DEFAULT_HEIGHT,
+    STORY_CARD_DEFAULT_WIDTH,
+    STORY_CARD_PAGE_COUNT_DEFAULT,
+    resolve_story_card_canvas_dimension,
+    resolve_story_card_page_count,
+)
 
 PUBLISH_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 
@@ -108,12 +115,20 @@ class TaskPlanner:
     def _native_h3_render_config(goal: GoalRequest, manifest: WorkflowManifest, *, default_steps: int = 16) -> dict[str, int]:
         defaults = dict(manifest.recommended_defaults or {})
         return {
-            "width": int(goal.constraints.get("native_h3_width") or defaults.get("width", 608)),
-            "height": int(goal.constraints.get("native_h3_height") or defaults.get("height", 352)),
+            "width": int(goal.constraints.get("canvas_width") or defaults.get("width", 608)),
+            "height": int(goal.constraints.get("canvas_height") or defaults.get("height", 352)),
             "length": int(goal.constraints.get("native_h3_length") or defaults.get("length", 362)),
             "steps": int(goal.constraints.get("native_h3_steps") or defaults.get("steps", default_steps)),
             "video_count": TaskPlanner._constraint_int(goal, "video_count", 1),
         }
+
+    @staticmethod
+    def _canvas_dimensions(goal: GoalRequest, manifest: WorkflowManifest) -> tuple[int, int]:
+        defaults = dict(manifest.recommended_defaults or {})
+        return (
+            int(goal.constraints.get("canvas_width") or defaults.get("width", 1024)),
+            int(goal.constraints.get("canvas_height") or defaults.get("height", 1024)),
+        )
 
     @staticmethod
     def _video_qa_inputs(goal: GoalRequest, manifest: WorkflowManifest) -> dict[str, object]:
@@ -124,8 +139,8 @@ class TaskPlanner:
         if target_duration in {None, ""} and length not in {None, ""} and fps > 0:
             target_duration = float(length) / fps
         return {
-            "expected_width": defaults.get("width"),
-            "expected_height": defaults.get("height"),
+            "expected_width": goal.constraints.get("canvas_width") or defaults.get("width"),
+            "expected_height": goal.constraints.get("canvas_height") or defaults.get("height"),
             "expected_fps": fps,
             "target_duration": target_duration,
             "duration_tolerance": 0.6,
@@ -343,6 +358,8 @@ class TaskPlanner:
             return self._build_animated_sticker_plan(goal)
         if goal.media_type == "carousel":
             return self._build_carousel_plan(goal)
+        if goal.media_type == "story_card":
+            return self._build_story_card_plan(goal)
         if goal.media_type == "sticker_pack":
             return self._build_sticker_pack_plan(goal)
         if goal.media_type == "text2img2img":
@@ -408,10 +425,14 @@ class TaskPlanner:
             goal.media_type == "native_h3_fl2va_story"
             and video_manifest.name.startswith("minimax_h3_lowvram_")
         )
-        width = int(goal.constraints.get("native_h3_fl2va_width") or (512 if lowvram_fl2va else render_config["width"]))
-        height = int(goal.constraints.get("native_h3_fl2va_height") or (288 if lowvram_fl2va else render_config["height"]))
-        length = int(goal.constraints.get("native_h3_fl2va_length") or (124 if lowvram_fl2va else render_config["length"]))
-        steps = int(goal.constraints.get("native_h3_fl2va_steps") or (16 if lowvram_fl2va else render_config["steps"]))
+        # The low-VRAM FL2VA graph is still the full 15-second workflow. Its
+        # manifest defaults (608x352, 362 frames) are the source of truth;
+        # silently replacing them with a 124-frame preview made the output
+        # disagree with the configured story duration.
+        width = render_config["width"]
+        height = render_config["height"]
+        length = int(goal.constraints.get("native_h3_fl2va_length") or render_config["length"])
+        steps = int(goal.constraints.get("native_h3_fl2va_steps") or render_config["steps"])
         video_count = render_config["video_count"]
         model_profile = str(
             goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_fl2va else "q4")
@@ -531,13 +552,14 @@ class TaskPlanner:
                     inputs={
                         "workflow_name": image_manifest.name,
                         "prompt_key": "ending_keyframe_prompt",
+                        "use_prior_frame": False,
                         "width": width,
                         "height": height,
-                        "image_count": 1,
+                        "image_count": keyframe_candidate_count,
                         "suffix": "native_h3_ending",
                     },
                     depends_on=[opening_source_node, "native-story-prompt", "native-image-asset-check"],
-                    tags=["render", "image", "continuity", "native-h3"],
+                    tags=["render", "image", "last-frame", "native-h3"],
                     tool_name="comfy.workflow.text_to_image",
                     stage="render",
                 )
@@ -658,16 +680,8 @@ class TaskPlanner:
         )
         render_config = self._native_h3_render_config(goal, video_manifest)
         lowvram_t2v = video_manifest.name.startswith("minimax_h3_lowvram_")
-        width = int(
-            goal.constraints.get("native_h3_t2v_width")
-            or goal.constraints.get("native_h3_width")
-            or (512 if lowvram_t2v else render_config["width"])
-        )
-        height = int(
-            goal.constraints.get("native_h3_t2v_height")
-            or goal.constraints.get("native_h3_height")
-            or (288 if lowvram_t2v else render_config["height"])
-        )
+        width = render_config["width"]
+        height = render_config["height"]
         length = int(
             goal.constraints.get("native_h3_t2v_length")
             or goal.constraints.get("native_h3_length")
@@ -793,10 +807,14 @@ class TaskPlanner:
         )
         render_config = self._native_h3_render_config(goal, video_manifest)
         lowvram_l2va = video_manifest.name.startswith("minimax_h3_lowvram_")
-        width = int(goal.constraints.get("native_h3_l2va_width") or (512 if lowvram_l2va else render_config["width"]))
-        height = int(goal.constraints.get("native_h3_l2va_height") or (288 if lowvram_l2va else render_config["height"]))
-        length = int(goal.constraints.get("native_h3_l2va_length") or (124 if lowvram_l2va else render_config["length"]))
-        steps = int(goal.constraints.get("native_h3_l2va_steps") or (16 if lowvram_l2va else render_config["steps"]))
+        # L2VA uses the configured 15-second H3 workflow in production. Do
+        # not silently downgrade it to the 124-frame low-VRAM preview; the
+        # post-render speed node is responsible for the requested 2x timing
+        # transform after the full source clip has been rendered.
+        width = render_config["width"]
+        height = render_config["height"]
+        length = int(goal.constraints.get("native_h3_l2va_length") or render_config["length"])
+        steps = int(goal.constraints.get("native_h3_l2va_steps") or render_config["steps"])
         video_count = render_config["video_count"]
         model_profile = str(
             goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_l2va else "q4")
@@ -1350,8 +1368,16 @@ class TaskPlanner:
         )
 
         image_defaults = image_manifest.recommended_defaults if image_manifest else {}
-        frame_width = int(goal.constraints.get("longvideo_frame_width") or image_defaults.get("width", 1024))
-        frame_height = int(goal.constraints.get("longvideo_frame_height") or image_defaults.get("height", 1024))
+        frame_width = int(
+            goal.constraints.get("canvas_width")
+            or goal.constraints.get("longvideo_frame_width")
+            or image_defaults.get("width", 1024)
+        )
+        frame_height = int(
+            goal.constraints.get("canvas_height")
+            or goal.constraints.get("longvideo_frame_height")
+            or image_defaults.get("height", 1024)
+        )
         frame_candidate_count = max(
             1,
             int(
@@ -1763,8 +1789,14 @@ class TaskPlanner:
                 "continuation": recipe.continuation,
                 "continuity_mode": continuity_mode,
                 "production_profile": production_profile,
-                "width": self._longvideo_int(goal, "longvideo_width", int(goal.constraints.get("longvideo_h3_width") or 512), 2048),
-                "height": self._longvideo_int(goal, "longvideo_height", int(goal.constraints.get("longvideo_h3_height") or 288), 2048),
+                "width": int(
+                    goal.constraints.get("canvas_width")
+                    or self._longvideo_int(goal, "longvideo_width", int(goal.constraints.get("longvideo_h3_width") or 512), 2048)
+                ),
+                "height": int(
+                    goal.constraints.get("canvas_height")
+                    or self._longvideo_int(goal, "longvideo_height", int(goal.constraints.get("longvideo_h3_height") or 288), 2048)
+                ),
                 "length": self._longvideo_int(
                     goal,
                     "longvideo_length",
@@ -1881,8 +1913,8 @@ class TaskPlanner:
                     skill_name="media.video.compose_timeline",
                     inputs={
                         "profile": longvideo_edit_profile,
-                        "output_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
-                        "output_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
+                        "output_width": int(goal.constraints.get("canvas_width") or goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
+                        "output_height": int(goal.constraints.get("canvas_height") or goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
                         "fps": segment_frame_rate,
                         "target_duration_seconds": float(goal.duration_seconds),
                         "variant_seed": int(goal.constraints.get("edit_variant_seed") or variant_seed),
@@ -1963,8 +1995,8 @@ class TaskPlanner:
         final_video_node = preview_dependency
 
         longvideo_qa_inputs = self._scaled_video_qa_inputs(goal, {
-            "expected_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
-            "expected_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
+            "expected_width": int(goal.constraints.get("canvas_width") or goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
+            "expected_height": int(goal.constraints.get("canvas_height") or goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
             "expected_fps": segment_frame_rate,
             "target_duration": float(goal.duration_seconds) if goal.duration_seconds > 0 else None,
             "duration_tolerance": 0.6,
@@ -2070,8 +2102,8 @@ class TaskPlanner:
                         skill_name="media.video.compose_timeline",
                         inputs={
                             "profile": longvideo_edit_profile,
-                            "output_width": int(goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
-                            "output_height": int(goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
+                        "output_width": int(goal.constraints.get("canvas_width") or goal.constraints.get("longvideo_width") or goal.constraints.get("longvideo_h3_width") or 512),
+                        "output_height": int(goal.constraints.get("canvas_height") or goal.constraints.get("longvideo_height") or goal.constraints.get("longvideo_h3_height") or 288),
                             "fps": segment_frame_rate,
                             "target_duration_seconds": float(goal.duration_seconds),
                             "variant_seed": int(goal.constraints.get("edit_variant_seed") or variant_seed) + 1,
@@ -2496,6 +2528,7 @@ class TaskPlanner:
             constraint_keys=("image_workflow_name", "workflow_name"),
             allowed_media_types={"image"},
         )
+        image_width, image_height = self._canvas_dimensions(goal, image_manifest)
         use_upscale_for_i2v = not bool(goal.constraints.get("skip_upscale_for_i2v", False))
         upscale_manifest = (
             self._manifest_from_goal_constraints(
@@ -2553,8 +2586,8 @@ class TaskPlanner:
                     skill_name="image.render",
                     inputs={
                         "workflow_name": image_manifest.name,
-                        "width": image_manifest.recommended_defaults.get("width", 1024),
-                        "height": image_manifest.recommended_defaults.get("height", 1024),
+                        "width": image_width,
+                        "height": image_height,
                         "image_count": image_count,
                     },
                     depends_on=["idea-brief", "image-asset-check"],
@@ -2636,6 +2669,8 @@ class TaskPlanner:
                     skill_name="image.animate",
                     inputs={
                         "workflow_name": video_manifest.name,
+                        "width": image_width,
+                        "height": image_height,
                         "video_count": self._constraint_int(goal, "video_count", 1),
                         **(
                             {
@@ -2727,8 +2762,8 @@ class TaskPlanner:
                         skill_name="image.render",
                         inputs={
                             "workflow_name": image_manifest.name,
-                            "width": image_manifest.recommended_defaults.get("width", 1024),
-                            "height": image_manifest.recommended_defaults.get("height", 1024),
+                            "width": image_width,
+                            "height": image_height,
                             "image_count": image_count,
                             **(
                                 {"seed": int(goal.constraints["seed"])}
@@ -2755,6 +2790,8 @@ class TaskPlanner:
                         skill_name="image.animate",
                         inputs={
                             "workflow_name": video_manifest.name,
+                            "width": self._canvas_dimensions(goal, image_manifest)[0],
+                            "height": self._canvas_dimensions(goal, image_manifest)[1],
                             "video_count": self._constraint_int(goal, "video_count", 1),
                             **(
                                 {
@@ -2923,8 +2960,7 @@ class TaskPlanner:
         )
 
     def _build_image_plan(self, goal: GoalRequest, workflow_manifest: WorkflowManifest) -> ExecutionPlan:
-        width = workflow_manifest.recommended_defaults.get("width", 1024)
-        height = workflow_manifest.recommended_defaults.get("height", 1024)
+        width, height = self._canvas_dimensions(goal, workflow_manifest)
         image_count = self._constraint_int(goal, "image_count", 1)
         stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         nodes = [
@@ -3065,8 +3101,8 @@ class TaskPlanner:
                     inputs={
                         "image_path": input_image_path,
                         "prompt": constraints.get("text", "") or goal.prompt,
-                        "width": constraints.get("width"),
-                        "height": constraints.get("height"),
+                        "width": constraints.get("canvas_width") or constraints.get("width"),
+                        "height": constraints.get("canvas_height") or constraints.get("height"),
                     },
                     depends_on=["prompt-prepare", "asset-check"],
                     tags=["render", "video"],
@@ -3128,8 +3164,8 @@ class TaskPlanner:
                 skill_name="image.render",
                 inputs={
                     "workflow_name": image_manifest.name,
-                    "width": image_manifest.recommended_defaults.get("width", 1024),
-                    "height": image_manifest.recommended_defaults.get("height", 1024),
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "image_count": image_count,
                 },
                 depends_on=["idea-brief", "image-asset-check"],
@@ -3245,8 +3281,8 @@ class TaskPlanner:
                 skill_name="image.render",
                 inputs={
                     "workflow_name": image_manifest.name,
-                    "width": image_manifest.recommended_defaults.get("width", 1024),
-                    "height": image_manifest.recommended_defaults.get("height", 1024),
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "image_count": image_count,
                 },
                 depends_on=["idea-brief", "image-asset-check"],
@@ -3291,6 +3327,8 @@ class TaskPlanner:
                 skill_name="media.image.animate",
                 inputs={
                     "workflow_name": video_manifest.name,
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "video_count": self._constraint_int(goal, "video_count", 1),
                 },
                 depends_on=animate_dependencies,
@@ -3351,8 +3389,8 @@ class TaskPlanner:
                         skill_name="image.render",
                         inputs={
                             "workflow_name": image_manifest.name,
-                            "width": image_manifest.recommended_defaults.get("width", 1024),
-                            "height": image_manifest.recommended_defaults.get("height", 1024),
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                             "image_count": image_count,
                         },
                         depends_on=["review-refine-prompt", "image-asset-check"],
@@ -3364,6 +3402,8 @@ class TaskPlanner:
                         skill_name="media.image.animate",
                         inputs={
                             "workflow_name": video_manifest.name,
+                            "width": self._canvas_dimensions(goal, image_manifest)[0],
+                            "height": self._canvas_dimensions(goal, image_manifest)[1],
                             "video_count": self._constraint_int(goal, "video_count", 1),
                         },
                         depends_on=["review-refine-prompt", "review-render-image", "video-asset-check"],
@@ -3474,8 +3514,8 @@ class TaskPlanner:
                 skill_name="media.image.render_batch",
                 inputs={
                     "workflow_name": image_manifest.name,
-                    "width": image_manifest.recommended_defaults.get("width", 1024),
-                    "height": image_manifest.recommended_defaults.get("height", 1024),
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "images_per_prompt": images_per_prompt,
                     "suffix": "stickers",
                 },
@@ -3555,8 +3595,8 @@ class TaskPlanner:
                 skill_name="media.image.render_batch",
                 inputs={
                     "workflow_name": image_manifest.name,
-                    "width": image_manifest.recommended_defaults.get("width", 1024),
-                    "height": image_manifest.recommended_defaults.get("height", 1024),
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "images_per_prompt": images_per_prompt,
                     "suffix": "animated_stickers",
                 },
@@ -3586,6 +3626,8 @@ class TaskPlanner:
                 skill_name="media.image.animate",
                 inputs={
                     "workflow_name": video_manifest.name,
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "video_count": self._constraint_int(goal, "video_count", 1),
                 },
                 depends_on=["motion-prompt", "video-asset-check"],
@@ -3635,6 +3677,8 @@ class TaskPlanner:
                         skill_name="media.image.animate",
                         inputs={
                             "workflow_name": video_manifest.name,
+                            "width": self._canvas_dimensions(goal, image_manifest)[0],
+                            "height": self._canvas_dimensions(goal, image_manifest)[1],
                             "video_count": self._constraint_int(goal, "video_count", 1),
                         },
                         depends_on=["review-refine-prompt", "render-stickers", "video-asset-check"],
@@ -3688,6 +3732,95 @@ class TaskPlanner:
             description=f"Agentic animated sticker chain for goal '{goal.prompt}'",
         )
 
+    def _build_story_card_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        requested_page_count = goal.constraints.get(
+            "story_card_page_count",
+            STORY_CARD_PAGE_COUNT_DEFAULT,
+        )
+        page_count = resolve_story_card_page_count(requested_page_count)
+        planned_page_count = page_count if page_count is not None else STORY_CARD_PAGE_COUNT_DEFAULT
+        width = resolve_story_card_canvas_dimension(
+            goal.constraints.get("story_card_width"), STORY_CARD_DEFAULT_WIDTH, name="story_card_width"
+        )
+        height = resolve_story_card_canvas_dimension(
+            goal.constraints.get("story_card_height"), STORY_CARD_DEFAULT_HEIGHT, name="story_card_height"
+        )
+        image_manifest = self._manifest_from_goal_constraints(
+            goal,
+            *self.DEFAULT_IMAGE_WORKFLOWS,
+            constraint_keys=("image_workflow_name", "workflow_name"),
+            allowed_media_types={"image"},
+        )
+        nodes = [
+            ExecutionNode(
+                node_id="story-card-write",
+                skill_name="agent.story_card.write",
+                inputs={"page_count": planned_page_count},
+                tags=["creative", "story-card", "writing-first"],
+                stage="prompting",
+            ),
+            ExecutionNode(
+                node_id="story-card-image-asset-check",
+                skill_name="image.ensure_workflow",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                    "auto_download": goal.auto_download_assets,
+                },
+                depends_on=["story-card-write"],
+                tags=["assets", "story-card"],
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="story-card-backgrounds",
+                skill_name="media.story_card.backgrounds",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                    "render_tool": "comfy.workflow.text_to_image",
+                    "width": width,
+                    "height": height,
+                    "story_node": "story-card-write",
+                },
+                depends_on=["story-card-write", "story-card-image-asset-check"],
+                tags=["render", "story-card", "text-to-image", "background"],
+                stage="render",
+            ),
+            ExecutionNode(
+                node_id="story-card-compose",
+                skill_name="media.story_card.compose",
+                inputs={
+                    "width": width,
+                    "height": height,
+                    "story_node": "story-card-write",
+                    "background_node": "story-card-backgrounds",
+                    "overlay_opacity": int(goal.constraints.get("story_card_overlay_opacity", 202)),
+                    "brand_label": str(goal.constraints.get("story_card_brand_label", "STORY NOTE")),
+                    "font_path": str(goal.constraints.get("story_card_font_path", "")),
+                },
+                depends_on=["story-card-write", "story-card-backgrounds"],
+                tags=["compose", "story-card", "text-primary"],
+                stage="package",
+            ),
+        ]
+        metadata = {
+            "selected_workflows": [image_manifest.name],
+            "required_assets": [
+                *[asset.to_dict() for asset in image_manifest.required_assets],
+            ],
+            "graph_overview": [node.node_id for node in nodes],
+            "page_count": planned_page_count,
+            "width": width,
+            "height": height,
+            "text_primary": True,
+            "background_generation": "style_locked_text_to_image",
+        }
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name="story_card_v1",
+            nodes=nodes,
+            metadata=metadata,
+            description=f"Writing-first story-card chain for goal '{goal.prompt}'",
+        )
+
     def _build_carousel_plan(self, goal: GoalRequest) -> ExecutionPlan:
         image_manifest = self._manifest_from_goal_constraints(
             goal,
@@ -3738,8 +3871,8 @@ class TaskPlanner:
                 skill_name="media.image.render_batch",
                 inputs={
                     "workflow_name": image_manifest.name,
-                    "width": image_manifest.recommended_defaults.get("width", 1024),
-                    "height": image_manifest.recommended_defaults.get("height", 1024),
+                    "width": self._canvas_dimensions(goal, image_manifest)[0],
+                    "height": self._canvas_dimensions(goal, image_manifest)[1],
                     "images_per_prompt": images_per_prompt,
                     "suffix": "carousel",
                 },

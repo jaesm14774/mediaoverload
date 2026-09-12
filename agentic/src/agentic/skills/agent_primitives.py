@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from agentic.assets.kirby_input import assert_kirby_input, inspect_kirby_input
@@ -8,6 +10,13 @@ from agentic.minimax_prompting import subject_identity_lock
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.reference_video import format_reference_video_directive
+from agentic.runtime.story_cards import (
+    STORY_CARD_DEFAULT_HEIGHT,
+    STORY_CARD_DEFAULT_WIDTH,
+    render_story_card_images,
+    story_card_visual_beat,
+    validate_story_card_payload,
+)
 from agentic.runtime.prompting import (
     build_segment_prompt,
     validate_story_segments,
@@ -201,6 +210,24 @@ class AgentPlanningSkills:
             logs=["Prepared a reusable carousel prompt set."],
         )
 
+    def write_story_card(self, context: SkillContext) -> SkillResult:
+        goal = context.plan.goal
+        if "page_count" in context.node.inputs:
+            goal = replace(
+                goal,
+                constraints={
+                    **goal.constraints,
+                    "story_card_page_count": context.node.inputs["page_count"],
+                },
+            )
+        bundle = self.prompt_engine.build_story_card(goal)
+        return SkillResult(
+            status="success",
+            outputs=bundle,
+            metrics={"page_count": int(bundle.get("page_count", len(bundle.get("pages", []))))},
+            logs=["Wrote a dedicated writing-first story-card draft."],
+        )
+
     def refine_prompt_after_review(self, context: SkillContext) -> SkillResult:
         source = context.state[context.node.depends_on[0]] if context.node.depends_on else {}
         original_prompt = str(source.get("prompt") or context.node.inputs.get("prompt") or context.plan.goal.prompt)
@@ -284,8 +311,9 @@ class AgentMediaSkills:
         )
 
     def generate_keyframe(self, context: SkillContext) -> SkillResult:
+        use_prior_frame = bool(context.node.inputs.get("use_prior_frame", True))
         prior_frame_path = context.node.inputs.get("prior_frame_path")
-        if not prior_frame_path:
+        if use_prior_frame and not prior_frame_path:
             prior_frame_path = resolve_dependency_value(
                 context,
                 ("prior_frame_path", "frame_path", "selected_frame_path", "selected_assets", "saved_files"),
@@ -755,6 +783,127 @@ class AgentMediaSkills:
             outputs={"run_dir": str(run_dir), "saved_files": saved_files, "items": item_runs},
             metrics={"image_count": len(saved_files)},
             logs=[f"Rendered {len(saved_files)} images as a reusable batch primitive."],
+        )
+
+    def render_story_card_backgrounds(self, context: SkillContext) -> SkillResult:
+        """Render each page as an independent style-locked background."""
+
+        story_output = context.state[context.node.inputs.get("story_node", "story-card-write")]
+        story = validate_story_card_payload(dict(story_output))
+        workflow_name = str(context.node.inputs["workflow_name"])
+        render_tool = str(context.node.inputs.get("render_tool") or "comfy.workflow.text_to_image")
+        width = int(context.node.inputs.get("width", STORY_CARD_DEFAULT_WIDTH))
+        height = int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT))
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "story_card_backgrounds")
+        background_paths: list[str] = []
+        page_runs: list[dict[str, object]] = []
+        background_hashes: set[str] = set()
+        character = str(context.plan.goal.constraints.get("character") or "").strip()
+        if not character:
+            raise RuntimeError("Story-card background generation requires a resolved selected character")
+        profile = context.plan.goal.constraints.get("character_profile")
+        visual_config = context.plan.goal.constraints.get("story_card_visual")
+        seed_value = context.plan.goal.constraints.get("seed")
+        seed_base = int(seed_value) if seed_value is not None else 17041
+        for index, page in enumerate(story["pages"], start=1):
+            page_dir = run_dir / f"page_{index:02d}"
+            background_prompt = str(page["background_prompt"])
+            page_seed = seed_base + (index * 1009)
+            payload: dict[str, object] = {
+                "workflow_name": workflow_name,
+                "prompt": background_prompt,
+                "negative_prompt": str(story["negative_prompt"]),
+                "width": width,
+                "height": height,
+                "image_count": 1,
+                "run_dir": str(page_dir),
+                "seed": page_seed,
+            }
+            result = self.tools.call(render_tool, payload)
+            generated = [str(path) for path in result.get("saved_files", []) if str(path)]
+            if not generated:
+                raise RuntimeError(f"Story-card background render produced no image for page {index}")
+            generated_path = generated[0]
+            digest = hashlib.sha256(Path(generated_path).read_bytes()).hexdigest()
+            if digest in background_hashes:
+                raise RuntimeError(
+                    f"Story-card background page {index} duplicated an earlier page image; "
+                    "page-specific motif and seed did not produce visual variation"
+                )
+            background_hashes.add(digest)
+            background_paths.append(generated_path)
+            page_runs.append(
+                {
+                    "page": str(index),
+                    "style_anchor_prompt": story["anchor_prompt"],
+                    "prompt": background_prompt,
+                    "saved_file": generated_path,
+                    "seed": str(page_seed),
+                    "visual_beat": story_card_visual_beat(
+                        index,
+                        page_count=len(story["pages"]),
+                        visual_config=visual_config,
+                    ),
+                    "sha256": digest,
+                }
+            )
+        return SkillResult(
+            status="success",
+            outputs={
+                "run_dir": str(run_dir),
+                "anchor_path": "",
+                "style_anchor_prompt": story["anchor_prompt"],
+                "background_paths": background_paths,
+                "page_runs": page_runs,
+            },
+            metrics={"background_count": len(background_paths)},
+            logs=[f"Rendered {len(background_paths)} style-locked text-to-image page backgrounds."],
+        )
+
+    def compose_story_card(self, context: SkillContext) -> SkillResult:
+        story_output = context.state[context.node.inputs.get("story_node", "story-card-write")]
+        backgrounds_output = context.state[context.node.inputs.get("background_node", "story-card-backgrounds")]
+        story = validate_story_card_payload(dict(story_output))
+        background_paths = [
+            str(path) for path in backgrounds_output.get("background_paths", []) if str(path)
+        ]
+        output_dir = Path(str(backgrounds_output.get("run_dir") or self._build_run_dir(context.plan.goal.prompt, "story_card"))) / "cards"
+        render_result = render_story_card_images(
+            background_paths=background_paths,
+            story=story,
+            output_dir=output_dir,
+            width=int(context.node.inputs.get("width", STORY_CARD_DEFAULT_WIDTH)),
+            height=int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT)),
+            font_path=str(context.node.inputs.get("font_path") or context.plan.goal.constraints.get("story_card_font_path") or "") or None,
+            overlay_opacity=int(context.node.inputs.get("overlay_opacity", 202)),
+            brand_label=str(context.node.inputs.get("brand_label", "STORY NOTE")),
+        )
+        summary_path = output_dir / "story_card_summary.json"
+        summary = {
+            "goal": context.plan.goal.prompt,
+            "media_type": context.plan.goal.media_type,
+            "story": story,
+            "anchor_path": backgrounds_output.get("anchor_path", ""),
+            "background_paths": background_paths,
+            "render": render_result,
+            "prompt_lineage": self._collect_prompt_lineage(context),
+            "node_prompt_modes": self._collect_node_prompt_modes(context),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        saved_files = [*render_result["saved_files"], str(summary_path)]
+        return SkillResult(
+            status="success",
+            outputs={
+                **render_result,
+                "summary_path": str(summary_path),
+                "saved_files": saved_files,
+                "story": story,
+                "anchor_path": backgrounds_output.get("anchor_path", ""),
+                "prompt_lineage": summary["prompt_lineage"],
+                "node_prompt_modes": summary["node_prompt_modes"],
+            },
+            metrics={"page_count": len(render_result["saved_files"])},
+            logs=["Composed exact Traditional-Chinese text over subdued story-card backgrounds."],
         )
 
     def narrate_text(self, context: SkillContext) -> SkillResult:
@@ -1292,6 +1441,7 @@ def register_agent_primitive_skills(
     skill_registry.register("agent.sticker.prompt_set", planning.build_sticker_prompt_set, "Build sticker prompt sets")
     skill_registry.register("agent.sticker.motion_prompt", planning.build_sticker_motion_prompt, "Build an animated sticker motion prompt")
     skill_registry.register("agent.carousel.prompt_set", planning.build_slide_prompt_set, "Build carousel slide prompt sets")
+    skill_registry.register("agent.story_card.write", planning.write_story_card, "Write a dedicated story-card article")
     skill_registry.register("media.ensure_workflow", media.ensure_workflow, "Check workflow assets for any agent step")
     skill_registry.register("media.image.refine", media.refine_image, "Refine an image as an agent media primitive")
     skill_registry.register("media.image.generate_keyframe", media.generate_keyframe, "Generate a keyframe from text or a prior frame")
@@ -1300,6 +1450,8 @@ def register_agent_primitive_skills(
     skill_registry.register("media.image.upscale", media.upscale_image, "Upscale an image as an agent media primitive")
     skill_registry.register("media.image.animate", media.animate_image, "Animate an image as an agent media primitive")
     skill_registry.register("media.image.render_batch", media.render_image_batch, "Render a batch of images as an agent media primitive")
+    skill_registry.register("media.story_card.backgrounds", media.render_story_card_backgrounds, "Render style-locked story-card backgrounds per page")
+    skill_registry.register("media.story_card.compose", media.compose_story_card, "Compose exact story-card text over generated backgrounds")
     skill_registry.register("media.audio.narrate", media.narrate_text, "Generate narration audio as an agent media primitive")
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
