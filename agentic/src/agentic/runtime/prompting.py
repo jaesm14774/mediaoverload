@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import random
 import re
+import secrets
 from typing import Any
 
 from agentic.storyboard import build_storyboard_segments, load_storyboard, story_state_contract
@@ -73,6 +75,141 @@ Non-negotiable rules:
 - For animated stickers, use one anticipation -> impact -> settle cycle, with elastic deformation caused by the action and an ending pose that can return to the opening pose cleanly.
 - If news context exists, reduce it to tiny symbolic accents instead of literal reporting.
 """.strip()
+
+
+DYNAMIC_SPRITE_BACKGROUND_PALETTE = {
+    "cyan": "#00e5ff",
+    "green": "#18e06f",
+    "blue": "#2f6bff",
+    "yellow": "#ffe51f",
+    "violet": "#7a38ff",
+    "orange": "#ff9b2f",
+}
+DYNAMIC_SPRITE_BACKGROUND_ALIASES = {
+    "aqua": "cyan",
+    "teal": "cyan",
+    "emerald": "green",
+    "lime": "green",
+    "cobalt": "blue",
+    "azure": "blue",
+    "gold": "yellow",
+    "amber": "orange",
+    "purple": "violet",
+}
+DYNAMIC_SPRITE_DEFAULT_BACKGROUND = "random"
+
+
+def resolve_dynamic_sprite_background(value: object = None) -> str:
+    """Resolve one simple non-red chroma background for a sprite run."""
+
+    raw = str(value or "").strip().casefold()
+    if raw in DYNAMIC_SPRITE_BACKGROUND_PALETTE:
+        return DYNAMIC_SPRITE_BACKGROUND_PALETTE[raw]
+    if raw in DYNAMIC_SPRITE_BACKGROUND_PALETTE.values():
+        return raw
+    for alias, canonical in DYNAMIC_SPRITE_BACKGROUND_ALIASES.items():
+        if alias in raw:
+            return DYNAMIC_SPRITE_BACKGROUND_PALETTE[canonical]
+    return secrets.choice(tuple(DYNAMIC_SPRITE_BACKGROUND_PALETTE.values()))
+
+
+def dynamic_sprite_source_contract(background_color: str) -> str:
+    return (
+        f"isolated game-sprite source, one subject only, flat saturated chroma-key background {background_color}, "
+        "no red or magenta background, no floor, tabletop, ground plane, horizon, environment, cast shadow, "
+        "contact shadow, text, logo, watermark, panel, split screen, duplicate subject"
+    )
+
+
+def dynamic_sprite_video_contract(background_color: str) -> str:
+    return (
+        f"Keep the camera locked on the isolated subject against the flat saturated chroma-key background {background_color}; "
+        "do not introduce a red or magenta background, floor, tabletop, ground plane, horizon, environment, cast shadow, "
+        "or contact shadow. Keep the character recognizable and anatomically consistent while allowing any readable "
+        "continuous physical action, including changes in velocity, jumps, strikes, casts, celebrations, dodges, launches, "
+        "catches, or an invented action. Never morph the character into a prop, spring, symbol, or different creature, and "
+        "never let a prop replace the character. Keep the complete subject inside the central safe area on every beat: "
+        "no clipping, leaving frame, extreme scale change, enclosure, or prop occlusion; any prop stays separate and "
+        "secondary. Each beat must cause the next beat and the final beat must resolve from the preceding motion."
+    )
+
+
+DYNAMIC_SPRITE_SYSTEM_PROMPT = """
+You are a director for automatically generated game motion assets.
+
+Non-negotiable rules:
+- Never choose from or assume a fixed action vocabulary. Invent the motion concept from the user's request; jump, strike, cast, celebrate, dodge, dash, and completely new physical actions are examples, not a whitelist.
+- Generate a detailed choreography graph with four to eight causally connected beats. Every beat must begin from the previous beat's visible end state; never reset to an unrelated pose between beats.
+- Give the arc a readable opening, development, escalation or turn, peak/payoff, and resolution. Add one surprising but physically legible turn when the request allows it.
+- When resolved subject context is provided, its selected character and role profile are authoritative; a different character name appearing in the creative request must not replace the resolved subject.
+- Keep the subject recognizable and anatomically consistent throughout while allowing any readable body movement, change of velocity, contact, airborne travel, attack, casting, celebration, recoil, or invented physical behavior. Never turn the subject into a prop, spring, symbol, or different creature.
+- Keep the complete subject inside a central safe area in every sampled frame; do not clip, eject, enclose, or heavily occlude it, and keep any prop separate and secondary.
+- Prefer zero to two optional props. Props may be touched, launched, caught, or transformed independently, but must remain separate from the subject and never replace it.
+- Write every creative field in idiomatic English.
+- The still prompt must describe one clean source subject, not a contact sheet or a storyboard.
+- The video prompt and beats must describe a temporal arc from the initial state through development, peak, and outcome. Include concrete cause and transition language, not a list of disconnected poses.
+- Make the motion readable when reduced to sixteen sampled frames. The sprite camera is always locked; do not spend the motion on scenery, camera pushes, or atmospheric establishing shots.
+- Use one simple flat saturated chroma-key background from cyan, green, blue, yellow, violet, or orange. The color may vary per run and should suit the subject, but never use red or magenta and never put the background color on the subject.
+- The source must be an isolated cutout: no floor, tabletop, ground plane, horizon, environment, cast shadow, or contact shadow.
+- Decide whether the motion should loop from the requested idea. Do not force every idea into a loop.
+- Avoid text, logos, watermarks, panels, split screens, duplicated subjects, and unrelated props.
+""".strip()
+
+DYNAMIC_SPRITE_VIDEO_CONTRACT = dynamic_sprite_video_contract("#00e5ff")
+DYNAMIC_SPRITE_NEGATIVE_CONTRACT = (
+    "floor, tabletop, ground plane, horizon, environment, cast shadow, contact shadow, "
+    "storyboard, contact sheet, split screen, collage, duplicate subject, extra character, text, logo, watermark"
+)
+
+
+def build_game_sprite_reference_context(
+    goal: GoalRequest,
+    *,
+    limit: int = 8,
+) -> dict[str, Any]:
+    """Sample the selected game_sprite strategy's optional inspiration notes."""
+
+    strategy_context = goal.constraints.get("strategy_context") or {}
+    if not isinstance(strategy_context, dict):
+        strategy_context = {}
+    raw_references = strategy_context.get("creative_inspiration") or []
+    references: list[dict[str, str]] = []
+    if isinstance(raw_references, list):
+        for item in raw_references:
+            if not isinstance(item, dict):
+                continue
+            reference = {
+                "id": str(item.get("id") or "").strip(),
+                "source": str(item.get("source") or "").strip(),
+                "source_url": str(item.get("source_url") or "").strip(),
+                "inspiration": " ".join(str(item.get("inspiration") or "").split()).strip(),
+            }
+            if all(reference.values()):
+                references.append(reference)
+
+    sample_limit = max(0, min(int(limit), len(references)))
+    if sample_limit:
+        raw_seed = goal.constraints.get("sprite_reference_seed")
+        chooser = (
+            random.Random(str(raw_seed))
+            if raw_seed is not None and str(raw_seed) != ""
+            else secrets.SystemRandom()
+        )
+        selected = chooser.sample(references, sample_limit)
+    else:
+        selected = []
+    lines = [
+        "These notes are optional inspiration only. Do not copy named characters, signature move names, or plots; "
+        "do not assign or register abilities. Adapt the physical logic freely to the current request, and ignore "
+        "any note that does not fit.",
+    ]
+    lines.extend(f"- {item['source']}: {item['inspiration']}" for item in selected)
+    return {
+        "pack_version": str(strategy_context.get("reference_pack_version") or "strategy_context"),
+        "visual_contract": " ".join(str(strategy_context.get("visual_contract") or "").split()).strip(),
+        "references": selected,
+        "prompt_text": "\n".join(lines),
+    }
 
 
 def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list[dict[str, Any]]) -> dict[str, Any]:
@@ -532,6 +669,236 @@ def build_animated_sticker_motion_prompt(goal: GoalRequest) -> str:
         )
         if part
     )
+
+
+def _dynamic_sprite_fallback_beats(character: str, request: str) -> list[dict[str, Any]]:
+    """Build a structural fallback arc without choosing a fixed action."""
+
+    return [
+        {
+            "time_start": 0.00,
+            "time_end": 0.16,
+            "purpose": "opening",
+            "action": f"{character} holds the source pose and begins the requested motion: {request}.",
+            "body_change": "a small readable preparation changes the balance without changing identity",
+            "spatial_change": "the subject remains centered while its intended direction becomes clear",
+            "cause": "the preparation creates the force for the next movement",
+            "transition": "carry the preparation directly into the developing action",
+        },
+        {
+            "time_start": 0.16,
+            "time_end": 0.36,
+            "purpose": "development",
+            "action": f"{character} follows through on {request} with a visible change of position, velocity, or pose.",
+            "body_change": "the silhouette stretches or contracts according to the force of the action",
+            "spatial_change": "the motion follows one continuous readable path",
+            "cause": "the opening impulse drives this larger movement",
+            "transition": "the developing movement gathers into a decisive turn",
+        },
+        {
+            "time_start": 0.36,
+            "time_end": 0.62,
+            "purpose": "peak",
+            "action": f"{character} reaches the clearest and most surprising physical peak of {request} while staying recognizable.",
+            "body_change": "the main pose change is held long enough to read in a sampled frame",
+            "spatial_change": "the trajectory reaches one visible apex or contact point",
+            "cause": "the previous movement supplies the momentum for the peak",
+            "transition": "release the peak into a controlled recovery",
+        },
+        {
+            "time_start": 0.62,
+            "time_end": 0.84,
+            "purpose": "resolution",
+            "action": f"{character} resolves the consequence of {request} with a readable reaction and stable outcome.",
+            "body_change": "the body absorbs the force and returns toward a confident readable pose",
+            "spatial_change": "the subject settles without teleporting or changing scale",
+            "cause": "the peak naturally causes the recovery",
+            "transition": "echo the opening direction if the motion is periodic; otherwise prepare the final hold",
+        },
+        {
+            "time_start": 0.84,
+            "time_end": 1.00,
+            "purpose": "settle",
+            "action": f"{character} holds the earned final pose after completing {request}.",
+            "body_change": "a small after-motion confirms the action is finished",
+            "spatial_change": "the silhouette remains fully visible inside the frame",
+            "cause": "the resolution has completed the action",
+            "transition": "return cleanly to the opening direction only for a periodic loop",
+        },
+    ]
+
+
+def normalize_dynamic_sprite_beats(
+    raw_beats: object,
+    fallback_beats: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Normalize an LLM choreography graph while preserving its open vocabulary."""
+
+    if not isinstance(raw_beats, list) or not 4 <= len(raw_beats) <= 8:
+        return list(fallback_beats)
+    raw_ranges: list[tuple[float, float]] = []
+    for item in raw_beats:
+        if not isinstance(item, dict):
+            return list(fallback_beats)
+        try:
+            raw_ranges.append((float(item.get("time_start", 0.0)), float(item.get("time_end", 1.0))))
+        except (TypeError, ValueError):
+            return list(fallback_beats)
+    # JSON-schema validation can clamp a model's second-based values to 1.0,
+    # leaving several later beats with identical [1.0, 1.0] ranges. Once the
+    # order has collapsed, the original durations are unknowable; use evenly
+    # spaced choreography slots instead of hiding every beat at the end.
+    order_collapsed = any(
+        raw_ranges[index][0] <= raw_ranges[index - 1][0]
+        or raw_ranges[index][1] <= raw_ranges[index][0]
+        for index in range(1, len(raw_ranges))
+    ) or any(end <= start for start, end in raw_ranges)
+    if order_collapsed:
+        raw_ranges = [
+            (index / len(raw_ranges), (index + 1) / len(raw_ranges))
+            for index in range(len(raw_ranges))
+        ]
+    # Models sometimes return seconds (0..5) despite the normalized schema
+    # asking for fractions. Scale the entire timeline once, rather than
+    # clamping every beat independently and collapsing later beats at 1.0.
+    timeline_max = max(max(start, end) for start, end in raw_ranges)
+    timeline_scale = timeline_max if timeline_max > 1.0 else 1.0
+    normalized: list[dict[str, Any]] = []
+    previous_end = 0.0
+    for index, (item, raw_range) in enumerate(zip(raw_beats, raw_ranges)):
+        try:
+            raw_start, raw_end = raw_range
+            start = max(previous_end, min(1.0, raw_start / timeline_scale))
+            end = max(start + 0.01, min(1.0, raw_end / timeline_scale))
+        except (TypeError, ValueError):
+            return list(fallback_beats)
+        normalized.append(
+            {
+                "time_start": round(start, 4),
+                "time_end": round(end, 4),
+                "purpose": str(item.get("purpose") or f"beat_{index + 1:02d}").strip(),
+                "action": str(item.get("action") or "continue the same physical action").strip(),
+                "body_change": str(item.get("body_change") or "preserve a readable subject silhouette").strip(),
+                "spatial_change": str(item.get("spatial_change") or "continue the established path").strip(),
+                "cause": str(item.get("cause") or "the preceding beat supplies the force").strip(),
+                "transition": str(item.get("transition") or "continue directly into the next beat").strip(),
+            }
+        )
+        previous_end = end
+    normalized[-1]["time_end"] = 1.0
+    return normalized
+
+
+def dynamic_sprite_frame_map(beats: list[dict[str, Any]], frame_count: int = 16) -> list[dict[str, Any]]:
+    """Project the choreography graph onto sampled atlas frames for QA and lineage."""
+
+    output: list[dict[str, Any]] = []
+    for index in range(frame_count):
+        progress = (index + 0.5) / frame_count
+        beat = next(
+            (item for item in beats if float(item["time_start"]) <= progress <= float(item["time_end"])),
+            beats[-1],
+        )
+        output.append(
+            {
+                "index": index,
+                "beat": str(beat["purpose"]),
+                "description": (
+                    f"{beat['action']} Body change: {beat['body_change']}. "
+                    f"Spatial change: {beat['spatial_change']}. "
+                    f"Cause: {beat['cause']}. Transition: {beat['transition']}."
+                ),
+            }
+        )
+    return output
+
+
+def compile_dynamic_sprite_video_prompt(
+    creative_prompt: str,
+    beats: list[dict[str, Any]],
+    animation_kind: str,
+    background_color: str,
+) -> str:
+    """Compile an open-ended choreography graph into one temporal H3 prompt."""
+
+    beat_lines = [
+        (
+            f"Beat {index}: {item['purpose']} ({float(item['time_start']):.2f}-{float(item['time_end']):.2f}). "
+            f"Action: {item['action']} Body: {item['body_change']} Spatial path: {item['spatial_change']} "
+            f"Cause: {item['cause']} Transition: {item['transition']}"
+        )
+        for index, item in enumerate(beats, start=1)
+    ]
+    loop_instruction = (
+        "Echo the opening direction and energy for a clean periodic loop."
+        if animation_kind == "periodic"
+        else "End on the earned stable outcome; do not invent a second action after the resolution."
+    )
+    return " ".join(
+        part
+        for part in (
+            str(creative_prompt or "").strip(),
+            "Execute the following sequential choreography as one continuous shot with no pose reset:",
+            " ".join(beat_lines),
+            loop_instruction,
+            dynamic_sprite_video_contract(background_color),
+        )
+        if part
+    )
+
+
+def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
+    """Build a no-LLM emergency plan with the same continuous-action structure."""
+
+    character = str(goal.constraints.get("character") or "the featured subject").strip()
+    request = str(goal.prompt or "an original playful game-like motion").strip()
+    style = str(goal.style or "clean stylized game art").strip()
+    configured_fps = float(goal.constraints.get("sprite_fps") or 12)
+    fps = min(24.0, max(4.0, configured_fps))
+    configured_duration = float(
+        goal.duration_seconds
+        or goal.constraints.get("sprite_duration_seconds")
+        or 5
+    )
+    video_duration = min(8.0, max(4.0, configured_duration))
+    chroma_color = resolve_dynamic_sprite_background(
+        goal.constraints.get("sprite_chroma_color") or DYNAMIC_SPRITE_DEFAULT_BACKGROUND
+    )
+    chroma_threshold = int(goal.constraints.get("sprite_chroma_threshold") or 52)
+    loop = not any(token in request.lower() for token in ("one-shot", "one shot", "non-loop", "non loop"))
+    beats = _dynamic_sprite_fallback_beats(character, request)
+    creative_prompt = (
+        f"Animate the same {character} through an original, surprising but readable physical interpretation of: {request}."
+    )
+    return {
+        "motion_name": "llm_defined_motion",
+        "layout_mode": "single_motion",
+        "motion_plan_mode": "choreographed_action_graph",
+        "creative_twist": "one surprising but physically caused turn that remains readable in sixteen sampled frames",
+        "beats": beats,
+        "image_prompt": (
+            f"one single {character}, {request}, {style}, clean game asset source, full subject visible, "
+            f"strong readable silhouette, centered composition, stable three-quarter view, "
+            f"{dynamic_sprite_source_contract(chroma_color)}"
+        ),
+        "creative_video_prompt": creative_prompt,
+        "video_prompt": compile_dynamic_sprite_video_prompt(
+            creative_prompt,
+            beats,
+            "periodic" if loop else "one_shot",
+            chroma_color,
+        ),
+        "negative_prompt": f"{DYNAMIC_SPRITE_NEGATIVE_CONTRACT}, clutter, camera drift, identity drift",
+        "animation_kind": "periodic" if loop else "one_shot",
+        "fps": fps,
+        "video_duration_seconds": video_duration,
+        "grid": {"rows": 4, "columns": 4},
+        "frame_map": dynamic_sprite_frame_map(beats),
+        "chroma_color": chroma_color,
+        "background_color": chroma_color,
+        "chroma_threshold": chroma_threshold,
+        "identity_repair_applied": "none",
+    }
 
 
 def build_autonomous_scene_prompt(

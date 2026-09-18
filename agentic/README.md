@@ -84,6 +84,21 @@ agentic --goal "kirby explores a surreal city at night" \
 
 This chain now uses the default long-video contract to compose `segment prompt -> planned first/last story-state anchors -> H3 FL2VA segments -> concat -> trim -> technical QA/contact sheet`. The default is four roughly five-second segments for a 20-second output, with pure prompt-only T2V available only through an explicit recipe override. Add `--use-tts` if you also want per-segment narration generation and final mux.
 
+For an automatically invented game sprite motion:
+
+```bash
+agentic --goal "a jelly star folds into a paper plane and circles back" \
+        --media-type game_sprite \
+        --character "jelly star" \
+        --style "bright toy game art" \
+        --duration-seconds 5 \
+        --execute \
+        --comfy-host 127.0.0.1 \
+        --comfy-port 8188
+```
+
+`game_sprite` asks the LLM to freely direct one continuous motion from the goal; it does not select from fixed `idle`/`attack`/`jump`/`hurt` states. Each request receives a small, ephemeral sample of abstract 2D game-action references from the `game_sprite` strategy context in `configs/routing.yaml`. These references are inspiration only, not a character moveset, ability registry, or motion history. This is an additive route: it can be selected explicitly or by Kirby's weighted selector, without changing the existing strategies or their review settings. Krea creates one clean non-red chroma-key source image, H3 animates that subject, and the runtime samples the continuous clip into exactly sixteen frames for a transparent 4x4 atlas. Each run writes `atlas.png`, `animation.gif`, lossless `animation.webp`, individual PNG frames, and `manifest.json` under its run directory. The 4x4 grid is a packaging contract, not a restriction on the generated motion.
+
 For agent-controlled editing of generated images or video segments:
 
 ```bash
@@ -99,9 +114,9 @@ agentic --goal "turn these generated shots into a clean vertical reel" \
         --output-dir C:\\path\\to\\edit-output
 ```
 
-`image_sequence_edit` is the provider-neutral, OpenCut-inspired timeline surface. It records an ordered `EditPlan`, normalizes images/video to one canvas, adds bounded still-image motion, renders deterministic transitions, preserves/creates a stereo audio lane, emits an edit manifest and contact sheet, then runs technical QA and a GIF preview. Still-only input defaults to `motion_cut_v1`: bounded zoom/pan with clean hard cuts. Video-only input defaults to `baseline_concat`; transition profiles remain explicit opt-ins until they pass the independent repeat gate. Add `--edit-creative-review` to enable a blocking vision-LLM loop (up to four deterministic candidates); each rejected candidate keeps its rendered MP4, contact sheet, join evidence and review JSON, while only the best passing candidate is materialized to the requested output. The loop can change transition grammar and bounded pan/zoom/drift motion for generated video segments, so a static source clip can receive a controlled editorial treatment. If the vision review is unavailable or uncertain, the edit fails closed.
+`image_sequence_edit` is the provider-neutral, OpenCut-inspired timeline surface. It records an ordered `EditPlan`, normalizes images/video to one canvas, adds bounded still-image motion, renders deterministic transitions, preserves/creates a stereo audio lane, emits an edit manifest and contact sheet, then runs technical QA and a GIF preview. Still-only input defaults to `motion_cut_v1`: bounded zoom/pan with clean hard cuts. Video-only input defaults to `baseline_concat`; transition profiles are explicit options. Each edit renders once, passes technical QA, and is materialized for Discord human review. There is no LLM quality score or automatic creative re-edit loop.
 
-For example, run the creative gate explicitly when a clean default edit is not enough:
+For example, send the rendered result to Discord for human review when a clean default edit is not enough:
 
 ```bash
 agentic --goal "make the generated shots playful, readable and rhythmically varied" \
@@ -111,13 +126,11 @@ agentic --goal "make the generated shots playful, readable and rhythmically vari
         --edit-input C:\\path\\to\\shot-02.mp4 \
         --edit-input C:\\path\\to\\shot-03.mp4 \
         --edit-input-root C:\\path\\to \
-        --edit-creative-review \
-        --edit-creative-review-max-attempts 4 \
         --execute \
         --output-dir C:\\path\\to\\edit-output
 ```
 
-`editorial_kinetic_v1` also enables this review automatically. Technical QA alone is never a creative acceptance gate.
+`editorial_kinetic_v1` also enables the same deterministic render path. Technical QA reports hard media facts; Discord decides subjective pacing, composition, and story quality.
 
 For a declarative JSON plan, use the standalone editor entrypoint:
 
@@ -126,7 +139,7 @@ agentic-edit --edit-plan C:\\path\\to\\edit-plan.json \
              --output C:\\path\\to\\edit-output\\edited.mp4
 ```
 
-The plan contract contains ordered `clips`, an empty `transitions` list for hard-cut profiles or one transition per boundary for transition profiles, `output_width`, `output_height`, `fps`, optional `target_duration_seconds`, `profile`, and deterministic `variant_seed`. Input files must be under the repository, configured output root, `AGENTIC_ALLOWED_MEDIA_ROOTS`/`AGENTIC_ALLOWED_IMAGE_ROOTS`, or an explicit `--input-root`. Add `--creative-review --creative-review-max-attempts 4` to the standalone command to run the same blocking loop. Creative-review receipts include the exact candidate plans, LLM backend, scores, issues, next-change recommendation and selected output; no second LLM rewrite or social dispatch is implied.
+The plan contract contains ordered `clips`, an empty `transitions` list for hard-cut profiles or one transition per boundary for transition profiles, `output_width`, `output_height`, `fps`, optional `target_duration_seconds`, `profile`, and deterministic `variant_seed`. Input files must be under the repository, configured output root, `AGENTIC_ALLOWED_MEDIA_ROOTS`/`AGENTIC_ALLOWED_IMAGE_ROOTS`, or an explicit `--input-root`. Subjective pacing, composition, and story quality are reviewed in Discord.
 
 The same compositor can be inserted into a non-TTS `long_video` plan with `--longvideo-edit-profile xfade_clean_v1`. TTS long-video runs remain on the existing audio-owned packaging route until a separate audio-aware edit contract is validated.
 
@@ -172,6 +185,7 @@ The runtime is no longer limited to workflow-specific wrappers. It now exposes a
 - Goal and prompt skills: `agent.goal.expand`, `agent.prompt.compose`, `agent.story.segment`, `agent.segment.prepare`, `agent.sticker.expressions`
 - Media skills: `media.ensure_workflow`, `media.image.refine`, `media.image.upscale`, `media.image.animate`
 - Audio/video packaging skills: `media.audio.narrate`, `media.audio.concat`, `media.video.concat`, `media.video.compose_timeline`, `media.video.merge_audio`, `media.video.gif_preview`, `media.video.extract_last_frame`
+- Dynamic sprite skills: `agent.sprite.motion_plan`, `agent.sprite.package`, `media.video_to_sprite`
 
 Those skills are the default building blocks for composed capabilities instead of hard-coded strategy flow.
 
@@ -186,7 +200,8 @@ The following paths are covered by the checked-in runtime tests and local-adapte
 - `text2img2video`
 - `video_narrate`
 - `long_video` (default 20-second planned-anchor path with final technical QA; TTS remains optional)
-- `image_sequence_edit` (ordered image/video timeline, deterministic transitions, optional vision-LLM creative loop, manifest/contact sheet, technical QA)
+- `image_sequence_edit` (ordered image/video timeline, deterministic transitions, manifest/contact sheet, technical QA, Discord review)
+- `game_sprite` (LLM-invented continuous motion, Krea keyframe, H3 I2V, transparent 4x4 atlas/GIF/WebP packaging)
 
 The current development order should keep validating small primitives first, then reuse them inside more complex chains such as `long_video`.
 

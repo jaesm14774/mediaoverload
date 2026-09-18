@@ -1,6 +1,7 @@
 {
   "version": 1,
   "signature": [
+    "game_sprite=3",
     "native_h3_fl2va_story=1",
     "native_h3_l2va_story=1",
     "native_h3_ref2va=1",
@@ -14,34 +15,35 @@
     "text2longvideo=2"
   ],
   "bag": [
-    "text2longvideo",
-    "native_h3_story",
-    "text2longvideo"
+    "story_card",
+    "game_sprite",
+    "text2image2video",
+    "sticker_pack"
   ],
   "history": [
+    "text2image2video",
+    "native_h3_l2va_story",
     "text2image2native_h3_ref2va",
-    "text2longvideo",
-    "text2image2native_h3_ref2va",
-    "sticker_pack",
-    "story_card",
-    "native_h3_story",
-    "native_h3_fl2va_story",
-    "sticker_pack",
     "text2img",
+    "native_h3_fl2va_story",
+    "native_h3_story",
+    "sticker_pack",
+    "game_sprite",
+    "sticker_pack",
+    "game_sprite",
+    "native_h3_t2v_story",
+    "game_sprite",
+    "text2longvideo",
     "text2longvideo",
     "native_h3_ref2va",
-    "native_h3_l2va_story",
-    "text2image2video",
-    "native_h3_t2v_story",
+    "game_sprite",
+    "sticker_pack",
+    "native_h3_fl2va_story",
     "native_h3_t2v_story",
     "text2image2native_h3_ref2va",
-    "sticker_pack",
-    "text2image2video",
     "native_h3_l2va_story",
-    "sticker_pack",
+    "game_sprite",
     "text2img",
-    "story_card",
-    "native_h3_fl2va_story",
-    "native_h3_ref2va"
+    "native_h3_story"
   ]
 }

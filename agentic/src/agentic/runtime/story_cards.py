@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +42,10 @@ STORY_CARD_LANGUAGE_MODES = (
     "actionable_warning",
 )
 STORY_CARD_BACKGROUND_STYLE = (
-    "playful layered paper storybook scene with textured sky, visible horizon, tactile ground, "
-    "one large interaction prop and two pastel shapes, warm cream with coral, blue, yellow and green accents, "
-    "soft watercolor paper texture, clear diagonal action flow, 50 percent open space for typography, "
-    "clean vertical 4:5 composition, full-body three-quarter view with eyes visible, no literal news scene"
+    "subdued layered paper storybook illustration with a calm everyday setting, soft environmental depth, "
+    "low-contrast watercolor or gouache texture, a clear focal silhouette, 50 percent open space for typography, "
+    "clean vertical 4:5 composition, full-body three-quarter view with eyes visible, no literal news scene, "
+    "keep the selected setting, palette family, light direction and main prop distinct for this generation"
     ", no text, no letters, no logo, no watermark"
 )
 STORY_CARD_NEGATIVE_PROMPT = (
@@ -53,20 +55,6 @@ STORY_CARD_NEGATIVE_PROMPT = (
     "busy pattern, high contrast background, harsh neon, clutter, collage, split screen, multiple focal subjects, "
     "more than one supporting character, tiny unreadable details, "
     "blurry, low quality"
-)
-STORY_CARD_CORNER_MOTIFS = (
-    "peeking beside one tiny pale star",
-    "sitting beside a small unmarked cup",
-    "holding one blank cream envelope",
-    "resting against a small round cushion",
-    "watching one tiny sprout in a shallow pot",
-    "standing beside a single fallen leaf",
-    "tucked under a small translucent umbrella",
-    "holding a simple blank paper shape",
-    "sitting near one soft pool of morning light",
-    "leaning beside a tiny folded cloth",
-    "looking toward one small floating heart shape",
-    "resting beside a quiet little window shape"
 )
 STORY_CARD_VISUAL_BEATS: tuple[dict[str, str], ...] = (
     {
@@ -106,6 +94,157 @@ STORY_CARD_VISUAL_BEATS: tuple[dict[str, str], ...] = (
         "environment": "a sunny butter-yellow spotlight, tiny confetti shapes and the rescued prop at the feet",
     },
 )
+
+# These independent pools intentionally compose many quiet scenes instead of
+# selecting one closed template. Every component stays pale and subordinate to
+# the copy, while the combination can change the setting, medium and rhythm of
+# the background from one generation to the next.
+STORY_CARD_RENDERING_MODES = (
+    "airy watercolor environmental vignette",
+    "soft gouache cut-paper landscape fragment",
+    "minimal pastel ink-and-wash spatial study",
+    "quiet translucent paper collage with broad shapes",
+    "faded storybook background with tactile handmade edges",
+)
+STORY_CARD_SETTING_VARIANTS = (
+    "a quiet morning window ledge with a translucent curtain and one low stool",
+    "a small shaded courtyard with stepping stones and a low planter",
+    "a cozy kitchen corner with a ceramic mug and a folded linen towel",
+    "a rainy doorway with a translucent umbrella and a shallow puddle",
+    "a compact library reading nook with a low shelf and a rounded lamp",
+    "a simple balcony with a low railing and two small plant pots",
+    "a quiet neighborhood bench under a simple shelter",
+    "a small rooftop laundry corner with fabric lines and a potted sprout",
+    "a narrow garden path beside a low stone wall and one flowering branch",
+    "an open porch with a woven chair, a blank envelope and a pale curtain",
+    "a calm lakeside edge with flat stepping stones and distant reed shapes",
+    "an abstract paper horizon made from two broad translucent organic shapes",
+)
+STORY_CARD_BACKGROUND_MOTIFS = (
+    "a soft arch of distant hills",
+    "a few floating cloud-like paper forms",
+    "a low row of rounded shrubs",
+    "a narrow reflection band with feathered edges",
+    "two sparse vertical tree trunks at one side",
+    "a simple awning line fading toward the horizon",
+    "a small pool of reflected sky color",
+    "a few broad leaf silhouettes behind the midground",
+    "a quiet staircase of overlapping paper planes",
+    "a low wall with one open gate shape",
+    "a loose wash of drifting paper petals",
+    "a calm blank expanse with one distant geometric landmark",
+)
+STORY_CARD_PALETTE_VARIANTS = (
+    "misty cream, dusty blue and restrained apricot",
+    "warm ivory, sage green and muted terracotta",
+    "oatmeal cream, faded coral and quiet teal",
+    "foggy cream, powder blue and muted lilac",
+    "paper white, faded ochre and desaturated berry",
+    "chalk cream, soft sky blue and dusty rose",
+    "warm gray cream, faded mustard and muted blue",
+    "pale sand, washed denim blue and eucalyptus green",
+    "soft peach cream, pale olive and quiet lavender",
+    "washed butter, gray-green and a small faded vermilion accent",
+)
+STORY_CARD_LIGHT_VARIANTS = (
+    "cool window light from the upper left with a soft warm reflection near the ground",
+    "dappled afternoon light with soft leaf shadows and no hard contrast",
+    "late afternoon side light softened through a curtain",
+    "diffused overcast light with gentle blue reflections and no dramatic storm effects",
+    "a small pool of warm lamp light against a pale cool background",
+    "clear early-evening light with a long very soft shadow and no bright glare",
+    "soft morning haze with a single brighter opening behind the subject",
+    "low golden light filtered through fabric with soft layered shadows",
+    "quiet overcast light with a barely visible warm edge along one shape",
+    "even illumination with only a gentle tonal shift from foreground to background",
+)
+STORY_CARD_COMPOSITION_VARIANTS = (
+    "horizontal lines in the distance and a gentle crescent-shaped foreground path",
+    "a shallow foreground-to-midground path leading toward the protagonist without crowding the text area",
+    "one broad counter edge creates a low horizon while the upper half stays calm",
+    "a diagonal doorway frame and a small reflective foreground pool create depth",
+    "restrained shelf bands form the midground while the text area remains uncluttered",
+    "a calm horizontal railing anchors the scene while the prop sits to one side",
+    "a shallow roof frame leaves the center open for readable typography",
+    "overhead fabric lines add depth while a low parapet grounds the scene",
+    "overlapping planes create depth without a strong vanishing point",
+    "an off-center horizon balances the character and leaves a quiet reading field",
+)
+STORY_CARD_SURFACE_VARIANTS = (
+    "a few translucent paper leaves gathered only along the lower edge",
+    "two or three softly painted pebble shapes with generous gaps between them",
+    "a faint woven-paper band crossing one distant background plane",
+    "a small pool of reflected color under the main prop, with feathered edges",
+    "one loose ribbon of paper texture drifting near a side border",
+    "soft rounded cut-paper shadows layered behind the midground, never behind the text",
+    "a sparse line of tiny paper dots leading toward the focal action",
+    "a nearly invisible dry-brush wash that follows the chosen light direction",
+)
+
+
+def new_story_card_visual_seed() -> int:
+    """Return a fresh seed for an unpinned story-card visual generation."""
+
+    return secrets.randbelow(2_147_483_646) + 1
+
+
+def resolve_story_card_visual_seed(value: Any = None) -> int:
+    """Normalize an optional visual seed while keeping it inside sampler bounds."""
+
+    if value is None:
+        return new_story_card_visual_seed()
+    if isinstance(value, bool):
+        raise ValueError("story_card_visual_seed must be an integer")
+    try:
+        seed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("story_card_visual_seed must be an integer") from exc
+    return max(1, min(2_147_483_646, seed))
+
+
+def story_card_visual_signature(
+    payload: dict[str, Any],
+    editorial_brief: dict[str, Any] | None = None,
+) -> str:
+    """Hash the actual card idea without leaking Traditional Chinese into prompts."""
+
+    parts = [str(payload.get("title") or "").strip()]
+    brief = editorial_brief if isinstance(editorial_brief, dict) else payload.get("editorial_brief")
+    if isinstance(brief, dict):
+        parts.extend(str(brief.get(key) or "").strip() for key in (
+            "human_tension", "lens", "emotional_movement", "reader_reason", "reader_takeaway",
+        ))
+    for page in payload.get("pages") or []:
+        if isinstance(page, dict):
+            parts.append(str(page.get("text") or "").strip())
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def story_card_visual_variant(
+    story_signal: str = "",
+    page_number: int = 1,
+    visual_seed: int | None = None,
+) -> dict[str, str]:
+    """Compose a subdued environment from independent story-card variation pools."""
+
+    seed_text = "" if visual_seed is None else str(int(visual_seed))
+    page = max(1, int(page_number))
+    base_key = f"{story_signal}|{seed_text}|page:{page}"
+
+    def choose(label: str, options: tuple[str, ...] | list[str]) -> str:
+        digest = hashlib.sha256(f"{base_key}|{label}".encode("utf-8")).digest()
+        index = int.from_bytes(digest[:8], "big") % len(options)
+        return options[index]
+
+    return {
+        "mode": choose("mode", STORY_CARD_RENDERING_MODES),
+        "setting": choose("setting", STORY_CARD_SETTING_VARIANTS),
+        "motif": choose("motif", STORY_CARD_BACKGROUND_MOTIFS),
+        "palette": choose("palette", STORY_CARD_PALETTE_VARIANTS),
+        "light": choose("light", STORY_CARD_LIGHT_VARIANTS),
+        "composition": choose("composition", STORY_CARD_COMPOSITION_VARIANTS),
+        "surface_detail": choose("surface", STORY_CARD_SURFACE_VARIANTS),
+    }
 STORY_CARD_PLAN_PROMPT = """
 你替繁體中文新聞短箋選一個值得寫的看點。這一步只交編輯提要，不寫正文。
 
@@ -186,17 +325,10 @@ evidence_anchor 只是內部 grounding metadata，不是可貼上的文案；不
 
 _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _BANNED_MARKUP_RE = re.compile(r"[#*_`]")
-_COMPLETE_PAGE_ENDINGS = "。！？!?；;）」』】)]"
 # Catch common Simplified forms, excluding shared characters such as 后 in 皇后.
 # This limited check is not a complete script detector or a prose-quality test.
 _SIMPLIFIED_RE = re.compile(r"[着时发会过这为个么来与还说对从开见长气让进听问认实现业将样爱关门满]")
-_HUMANIZER_PATTERNS = {
-    "ai_connector": re.compile(r"此外|然而|總而言之|換句話說"),
-    "negative_parallel": re.compile(r"不僅[^。！？\n]{0,24}而且|這不只是|不只是[^。！？\n]{0,24}而是"),
-    "em_dash": re.compile(r"[—–]"),
-    "grand_claim": re.compile(r"至關重要|不可磨滅|彰顯|見證了|永恆|注定"),
-    "generic_hope": re.compile(r"未來會更好|一切都會好起來|迎接美好的明天"),
-}
+
 
 
 def resolve_story_card_page_count(value: Any = STORY_CARD_PAGE_COUNT_DEFAULT) -> int | None:
@@ -328,18 +460,26 @@ def story_card_anchor_prompt(
     character: str,
     profile: dict[str, Any] | None = None,
     visual_config: dict[str, Any] | None = None,
+    *,
+    story_signal: str = "",
+    visual_seed: int | None = None,
 ) -> str:
     """Build the first image prompt around the selected character's visual world."""
 
     visual = story_card_character_visual(character, profile)
     config = visual_config if isinstance(visual_config, dict) else {}
     beat = story_card_visual_beat(1, 1, config)
+    variant = story_card_visual_variant(story_signal, 1, visual_seed)
     scene_style = _ascii_visual_text(
         config.get("scene_style"),
-        "soft tactile storybook stage with a gentle horizon, clear depth and oversized pastel shapes",
+        "quiet low-contrast storybook environment with soft depth, clean edges and generous breathing room",
     )
     return (
         f"{STORY_CARD_BACKGROUND_STYLE}; {scene_style}; {visual}; "
+        f"generation-specific rendering mode: {variant['mode']}; environment: {variant['setting']}; "
+        f"background motif: {variant['motif']}; palette: {variant['palette']}; "
+        f"lighting: {variant['light']}; composition: {variant['composition']}; "
+        f"surface detail variation: {variant['surface_detail']}; "
         f"anchor action: {beat['action']}; expression: {beat['expression']}; {beat['environment']}; "
         "show exactly one selected protagonist as a readable full-body figure in the lower right area, "
         "large enough to read at thumbnail size but no larger than 28 percent of the canvas, "
@@ -354,16 +494,19 @@ def story_card_page_prompt(
     page_number: int,
     page_count: int | None = None,
     visual_config: dict[str, Any] | None = None,
+    *,
+    story_signal: str = "",
+    visual_seed: int | None = None,
 ) -> str:
     """Create a deterministic, varied page prompt without changing protagonist identity."""
 
     visual = story_card_character_visual(character, profile)
-    motif = STORY_CARD_CORNER_MOTIFS[(max(1, int(page_number)) - 1) % len(STORY_CARD_CORNER_MOTIFS)]
     beat = story_card_visual_beat(page_number, page_count, visual_config)
+    variant = story_card_visual_variant(story_signal, page_number, visual_seed)
     config = visual_config if isinstance(visual_config, dict) else {}
     scene_style = _ascii_visual_text(
         config.get("scene_style"),
-        "soft tactile storybook stage with a gentle horizon, clear depth and oversized pastel shapes",
+        "quiet low-contrast storybook environment with soft depth, clean edges and generous breathing room",
     )
     companion = (
         f" Include {beat['companion']} as exactly one small supporting character, clearly secondary, "
@@ -372,7 +515,11 @@ def story_card_page_prompt(
         else " Include exactly one character total: the selected protagonist, with no supporting character."
     )
     return (
-        f"{STORY_CARD_BACKGROUND_STYLE}; {scene_style}; {visual}; {motif}; "
+        f"{STORY_CARD_BACKGROUND_STYLE}; {scene_style}; {visual}; "
+        f"generation-specific rendering mode: {variant['mode']}; environment: {variant['setting']}; "
+        f"background motif: {variant['motif']}; palette: {variant['palette']}; "
+        f"lighting: {variant['light']}; composition: {variant['composition']}; "
+        f"surface detail variation: {variant['surface_detail']}; "
         f"visual beat: {beat['action']}; expression: {beat['expression']}; "
         f"place the protagonist in the {beat['position']} area; environmental beat: {beat['environment']};"
         " change pose, gaze and prop interaction from the previous page; preserve exact selected identity, "
@@ -442,17 +589,6 @@ def validate_story_card_evidence(payload: dict[str, Any], source: dict[str, str]
         raise ValueError("Story-card evidence_anchor requires a non-empty source_signal")
 
 
-def story_card_humanizer_warnings(text: str) -> list[str]:
-    """Report detectable AI-writing habits without forcing a synthetic voice."""
-
-    warnings: list[str] = []
-    for name, pattern in _HUMANIZER_PATTERNS.items():
-        count = len(pattern.findall(text))
-        if count:
-            warnings.extend([name] * count)
-    return warnings
-
-
 def validate_story_card_payload(
     payload: dict[str, Any],
     *,
@@ -483,7 +619,7 @@ def validate_story_card_payload(
         raise ValueError(
             f"Story-card expected exactly {expected_page_count} pages, received {page_count}"
         )
-    min_text_chars = STORY_CARD_MIN_TEXT_CHARS if page_count > 1 else 1
+    min_text_chars = 1
     max_text_chars = (
         STORY_CARD_MAX_SINGLE_PAGE_TEXT_CHARS
         if page_count == 1
@@ -501,12 +637,6 @@ def validate_story_card_payload(
             raise ValueError(
                 f"Story-card page {index} text must contain {min_text_chars}-{max_text_chars} characters"
             )
-        if page_count == 1 and text == title:
-            raise ValueError("Story-card body must contain prose beyond the repeated title")
-        if index == page_count and text[-1] in "，,：:；;、（(「『":
-            raise ValueError("Story-card final page ends with an unfinished clause")
-        if text[-1] not in _COMPLETE_PAGE_ENDINGS:
-            raise ValueError(f"Story-card page {index} must end with complete punctuation")
         if not _CJK_RE.search(text):
             raise ValueError(f"Story-card page {index} text must be Traditional Chinese prose")
         if _BANNED_MARKUP_RE.search(text) or "#" in text:
@@ -533,12 +663,7 @@ def validate_story_card_payload(
         }
     )
     normalized.setdefault("creative_note", "")
-    # Style signals inform the editor; they never stand in for human judgment.
-    normalized["editorial_warnings"] = [
-        warning for page in pages for warning in story_card_humanizer_warnings(page["text"])
-    ]
-    if any(_SIMPLIFIED_RE.search(page["text"]) for page in pages):
-        normalized["editorial_warnings"].append("simplified_character")
+    normalized["contains_simplified_characters"] = any(_SIMPLIFIED_RE.search(page["text"]) for page in pages)
     return normalized
 
 

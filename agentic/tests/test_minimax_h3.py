@@ -7,7 +7,6 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from agentic.assets.kirby_input import inspect_kirby_input
 from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile, minimax_h3_model_overrides
 from agentic.assets.registry import AssetRegistry
 from agentic.app.character_workflow import _prioritize_h3_profile
@@ -131,111 +130,11 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         h3_i2v = json.loads((repo_root / "configs" / "workflow" / "minimax_h3_lowvram_i2v.json").read_text(encoding="utf-8"))
         self.assertEqual(h3_i2v["5"]["inputs"]["first_frame"], ["16", 0])
 
-    def test_kirby_input_gate_rejects_generic_example_and_accepts_pink_red_keyframe(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            example = root / "example.png"
-            Image.new("RGB", (608, 352), (30, 80, 220)).save(example)
-            rejected = inspect_kirby_input(example)
-            self.assertFalse(rejected.passed)
-            keyframe = root / "kirby_keyframe.png"
-            image = Image.new("RGB", (608, 352), (255, 120, 170))
-            for x in range(150, 450):
-                for y in range(70, 285):
-                    image.putpixel((x, y), (255, 150, 190))
-            for x in range(220, 290):
-                for y in range(260, 330):
-                    image.putpixel((x, y), (220, 30, 30))
-            image.save(keyframe)
-            accepted = inspect_kirby_input(keyframe)
-            self.assertTrue(accepted.passed, accepted)
 
-    def test_kirby_input_gate_accepts_small_wide_shot_with_compact_pink_red_signal(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "wide_kirby.png"
-            image = Image.new("RGB", (608, 352), (92, 170, 78))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((294, 160, 326, 190), fill=(255, 145, 185))
-            draw.rectangle((300, 187, 307, 198), fill=(220, 30, 30))
-            draw.rectangle((315, 187, 322, 198), fill=(220, 30, 30))
-            image.save(path)
 
-            accepted = inspect_kirby_input(path)
-            self.assertTrue(accepted.passed, accepted)
-            self.assertLess(accepted.pink_ratio, 0.01)
-            self.assertGreaterEqual(accepted.pink_ratio, 0.0005)
-            self.assertGreaterEqual(accepted.red_ratio, 0.002)
 
-    def test_kirby_input_gate_accepts_muted_back_facing_wide_shot(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "muted_back_facing_kirby.png"
-            image = Image.new("RGB", (1024, 1024), (20, 120, 130))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((300, 300, 760, 820), fill=(150, 90, 130))
-            draw.ellipse((280, 740, 470, 920), fill=(150, 20, 55))
-            draw.ellipse((590, 740, 780, 920), fill=(150, 20, 55))
-            image.save(path)
 
-            accepted = inspect_kirby_input(path)
 
-            self.assertTrue(accepted.passed, accepted)
-            self.assertGreaterEqual(accepted.pink_ratio, 0.0025)
-            self.assertGreaterEqual(accepted.red_ratio, 0.001)
-
-    def test_kirby_input_gate_ignores_boundary_connected_pink_background(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "kirby_pink_sky.png"
-            image = Image.new("RGB", (608, 352), (214, 136, 203))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((300, 70, 540, 300), fill=(210, 100, 155))
-            draw.rectangle((345, 260, 420, 345), fill=(220, 30, 30))
-            image.save(path)
-
-            accepted = inspect_kirby_input(path)
-
-            self.assertTrue(accepted.passed, accepted)
-            self.assertFalse(accepted.duplicate_protagonist_detected)
-
-    def test_kirby_input_gate_blocks_multi_panel_outside_ref2va(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "kirby_collage.png"
-            image = Image.new("RGB", (608, 352), (255, 130, 180))
-            draw = ImageDraw.Draw(image)
-            draw.rectangle((304, 0, 607, 175), fill=(220, 170, 70))
-            draw.rectangle((0, 176, 303, 351), fill=(40, 100, 180))
-            draw.rectangle((304, 176, 607, 351), fill=(120, 50, 190))
-            draw.rectangle((150, 250, 280, 330), fill=(220, 30, 30))
-            image.save(path)
-
-            rejected = inspect_kirby_input(path)
-            self.assertFalse(rejected.passed, rejected)
-            self.assertTrue(rejected.multi_panel_detected)
-            self.assertTrue(any("multi-panel" in reason for reason in rejected.reasons))
-
-            allowed = inspect_kirby_input(path, allow_multipanel=True)
-            self.assertTrue(allowed.passed, allowed)
-            self.assertTrue(allowed.multi_panel_detected)
-
-    def test_kirby_input_gate_blocks_duplicate_protagonists_in_one_frame(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "duplicate_kirby.png"
-            image = Image.new("RGB", (608, 352), (250, 250, 250))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((70, 55, 285, 285), fill=(255, 145, 185))
-            draw.ellipse((330, 55, 545, 285), fill=(255, 145, 185))
-            draw.rectangle((130, 255, 205, 330), fill=(220, 30, 30))
-            draw.rectangle((400, 255, 475, 330), fill=(220, 30, 30))
-            image.save(path)
-
-            rejected = inspect_kirby_input(path)
-
-            self.assertFalse(rejected.passed, rejected)
-            self.assertTrue(rejected.duplicate_protagonist_detected)
-            self.assertTrue(any("duplicate Kirby" in reason for reason in rejected.reasons))
-
-            pair_allowed = inspect_kirby_input(path, allow_declared_subject_pair=True)
-            self.assertTrue(pair_allowed.passed, pair_allowed)
-            self.assertTrue(pair_allowed.duplicate_protagonist_detected)
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):

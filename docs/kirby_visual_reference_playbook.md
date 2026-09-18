@@ -48,7 +48,7 @@
 | H3 prompt | `compose_minimax_h3_prompt()` 加入 cute physical-comedy、scale-and-silhouette、replay 三個 contract。 |
 | 一般短片與貼圖 prompt | 5–6 秒改成單一完整 physical action；animated sticker 改成 anticipation → impact → settle，鎖定鏡頭與首尾可接。 |
 | Routing | 5–9 秒、食物／桌面互動、反應 loop、誇張伸縮、小角色對大物件等需求優先走 `text2image2video` 的首幀審核 + I2V，而不是 `text2longvideo`。 |
-| Semantic QA | 將小對大、觸感互動、變形／反彈、留白與 opening echo 設為正向品質訊號，但仍以可見 cause-and-effect、action completion、payoff 為硬證據。 |
+| Discord review | 人工判斷小對大、觸感互動、變形／反彈、留白與 opening echo；系統只驗證媒體格式、尺寸、時間與明確人物數量。 |
 
 ## 使用判準
 

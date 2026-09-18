@@ -8,7 +8,7 @@ from agentic.memory import PortfolioMemory, RunMemory
 from agentic.memory.run import MemoryEvent
 from agentic.memory.portfolio import PortfolioRecord
 from agentic.runtime.contracts import ExecutionPlan, RunRecord, RunState, SkillContext, SkillResult, WorkflowRunResult
-from agentic.runtime.creativity import FeedbackRanker, RetryPolicy
+from agentic.runtime.creativity import RetryPolicy
 from agentic.runtime.observability import RunRecorder
 from agentic.runtime.registry import SkillRegistry
 
@@ -20,7 +20,6 @@ class WorkflowRunner:
         run_memory: RunMemory | None = None,
         portfolio_memory: PortfolioMemory | None = None,
         retry_policy: RetryPolicy | None = None,
-        feedback_ranker: FeedbackRanker | None = None,
         logger: logging.Logger | None = None,
         recorder: RunRecorder | None = None,
     ) -> None:
@@ -28,7 +27,6 @@ class WorkflowRunner:
         self.run_memory = run_memory
         self.portfolio_memory = portfolio_memory
         self.retry_policy = retry_policy or RetryPolicy()
-        self.feedback_ranker = feedback_ranker
         self.logger = logger
         self.recorder = recorder or getattr(logger, "run_recorder", None)
 
@@ -108,10 +106,6 @@ class WorkflowRunner:
                             logs=result.logs,
                         )
                     )
-                if self.feedback_ranker:
-                    feedback = self.feedback_ranker.evaluate(node.node_id, result)
-                    if feedback:
-                        state.add_feedback(feedback)
                 self._capture_prompt_metadata(state, node.node_id, result.outputs, attempts)
                 if result.status == "success":
                     break
@@ -191,9 +185,6 @@ class WorkflowRunner:
             "rejected_asset_details",
             "selection_rationale",
             "regeneration_notes",
-            "failure_tags",
-            "retry_direction",
-            "retry_intensity",
             "publish_ready",
             "media_paths",
             "timeline_path",

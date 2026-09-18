@@ -179,7 +179,7 @@ generation:
     is_same_group: true
 ```
 
-`is_same_group: true` 讓兩個 slot 都從 `character.group_name`（或 interaction block 內明確指定的 `group_name`）依 weight 抽樣；`false` 則由該主 group 抽 primary，再從所有 `status=1` 且 `weight>0` 的角色中隨機抽 secondary。global pool 仍可能包含主 group，因此兩個 slot 允許抽到相同角色，不要求角色名稱不同。選角結果會以 `subject_context` 傳入 image prompt、storyboard/store prompt、video prompt 與共用 semantic QA；沒有 fallback，無法取得主 group 或 global active pool 時 run 直接失敗。
+`is_same_group: true` 讓兩個 slot 都從 `character.group_name`（或 interaction block 內明確指定的 `group_name`）依 weight 抽樣；`false` 則由該主 group 抽 primary，再從所有 `status=1` 且 `weight>0` 的角色中隨機抽 secondary。global pool 仍可能包含主 group，因此兩個 slot 允許抽到相同角色，不要求角色名稱不同。選角結果會以 `subject_context` 傳入 image prompt、storyboard/store prompt、video prompt 與硬性媒體檢查；沒有 fallback，無法取得主 group 或 global active pool 時 run 直接失敗。
 
 ### Random subject mode
 
@@ -195,7 +195,7 @@ generation:
     is_same_group: true
 ```
 
-權重按比例抽樣，並且只在選角階段抽一次；後續 image prompt、storyboard/store prompt、video prompt 與共用 semantic QA 都使用同一個已解析的 concrete mode。`constraints.subject_mode` 與 `character_selection.subject_mode` 會記錄實際選到的 mode，`configured_subject_mode` 會保留原本的 `random`。`subject_mode_weights` 缺少、含未知 mode、負數或全部為零時會直接失敗，不會 fallback。
+權重按比例抽樣，並且只在選角階段抽一次；後續 image prompt、storyboard/store prompt、video prompt 與硬性媒體檢查 都使用同一個已解析的 concrete mode。`constraints.subject_mode` 與 `character_selection.subject_mode` 會記錄實際選到的 mode，`configured_subject_mode` 會保留原本的 `random`。`subject_mode_weights` 缺少、含未知 mode、負數或全部為零時會直接失敗，不會 fallback。
 
 ### 1. `text2img` — 靜態圖
 
@@ -704,3 +704,9 @@ print(saved)
 ## 另見
 
 - 底層 runtime 設計與 **`agentic` CLI**（`--goal`、`--media-type` 等）：請讀 [`agentic/README.md`](agentic/README.md)。
+
+### 媒體輸出 DQ
+
+自動檢查只處理硬性契約：檔案可解碼、宣告的尺寸／長寬比、影片時長、幀率、音軌與 sprite 的幀數和透明度。`GoalRequest.constraints.expected_subject_count`（角色設定可用 `generation.expected_subject_count`，非負整數）可明確要求畫面中的人物／角色實例數；視覺模型只回報數量，由程式逐一比對。未指定時不從角色名稱猜測數量，避免誤擋配角、圖集或留白鏡頭；數量不明或回應格式錯誤不算通過。影片只驗證抽樣畫格，不能據此宣稱每一幀都合格。
+
+構圖、美感、角色造型、故事、節奏、可愛度、文風與提示詞符合度由 Discord 人工審核，不設 LLM 分數門檻或自動重剪。字卡的字數密度與句尾標點是寫作建議，不是通行條件；可排版的字數上限、頁數和語言仍依契約檢查。

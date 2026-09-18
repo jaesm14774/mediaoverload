@@ -20,10 +20,10 @@ shots, visible actions, contiguous timing, and safe visual prompt text. Missing
 titles, camera directions, state changes, keyframes, or audio are filled from
 the generated actions and the stable preset before prompt composition.
 
-News grounding and story quality are recorded as advisory scores at this stage,
-not as free-model generation gates. Beat boundaries must remain contiguous from
-0 to 15 seconds; post-render technical QA and any recipe-enabled semantic QA
-remain the authoritative checks for the actual media.
+News context and story metadata are retained for traceability only; no score or
+generation gate is produced from them. Beat boundaries must remain contiguous
+from 0 to 15 seconds; post-render hard media checks remain the authoritative
+checks for the actual media.
 
 The production route uses `configs/storyboards/native_h3_15s.yaml` as its
 identity and continuity contract. Direct H3 rendering is intentionally capped
@@ -60,7 +60,7 @@ selected Native H3 route
    -> FL2VA: opening + landing candidates -> Discord -> first+last-frame I2V
    -> L2VA: six landing candidates -> Discord -> last-frame I2V
    -> Ref2VA: valid manifest OR six T2I candidates -> Discord -> Ref2VA
-   -> shared technical QA + sampled-frame semantic QA
+   -> shared technical QA + explicitly requested subject counts
    -> contact sheet + GIF + packaged video
 ```
 
@@ -188,7 +188,7 @@ request mode in the YAML file: `structured` sends `response_format`,
 disables hidden reasoning when it otherwise consumes the answer budget. Native
 H3 story generation explicitly uses prompt-only JSON for every model, even if
 the catalog entry says `structured`; this avoids making a free-plan provider
-implement the old nested semantic schema. The application still normalizes and
+implement the old nested response schema. The application still normalizes and
 checks the small render/safety contract locally.
 
 The Nano 12B VL model is intentionally vision-only in the default snapshot:
@@ -198,7 +198,7 @@ low-cost healthcheck and is not allowed to slow down story planning.
 `AGENTIC_OPENROUTER_DISCOVER_MODELS=true` is an explicit diagnostic opt-in only;
 it is not used by the scheduler configuration. Keep
 `AGENTIC_OPENROUTER_MAX_*_MODELS_PER_CALL=0` to allow the complete fixed pool to
-participate in rotation. The legacy Gemini fallback is disabled by default.
+participate in rotation. Gemini rotation is disabled by default.
 
 The model pool is checked in as configuration and is used directly by the
 runtime. Diagnostics are intentionally kept out of the production generation
@@ -217,15 +217,16 @@ repair attempt, `nodes/*.json` with node outputs, workflow result JSON, and
 `run_manifest.json`. `logs/agentic_portfolio.jsonl` remains a compact
 cross-run memory and is not the source of truth for prompt debugging.
 
-The native H3 QA node delegates technical checks to the shared
-`media.video_qa` tool. It records file/stream/dimension/duration checks, audio
-warnings, and a duration-aware contact sheet in the run directory. When the
-recipe enables `semantic_qa_required`, the shared Prompt Engine sends that
-contact sheet to the configured vision model and records the full request and
-response under `logs/runs/<run_id>/llm/`. The semantic result is
-advisory evidence for human review and never blocks the run. Technical media QA
-remains the hard pre-publication check, and Discord approval remains the
-authority for subjective story and visual quality.
+The native H3 QA node delegates file, stream, dimension, frame-rate, duration,
+and declared audio requirements to `media.video_qa`. It saves a contact sheet
+for review. An explicit `expected_subject_count` constraint requests counts
+for each sampled frame; the vision model reports counts only, and Python
+compares them with the requested number. Unknown or malformed counts do not
+pass. Sampling does not establish the count in every frame of a video.
+
+No machine gate judges story, rhythm, identity, cuteness, composition, or
+prompt similarity. Discord owns those decisions. Approved media and captions
+are reused without a second editorial gate.
 
 ## Automated social publishing
 

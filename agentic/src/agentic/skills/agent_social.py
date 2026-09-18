@@ -263,10 +263,41 @@ class AgentSocialSkills:
             media_paths,
             key=lambda path: (0 if path.lower().endswith(preferred_extensions) else 1, path),
         )
+        # Apply image contracts before any Discord branch, and only offer eligible files.
+        image_paths = [path for path in ranked if Path(path).suffix.lower() in IMAGE_REVIEW_EXTENSIONS]
+        hard_review = None
+        if image_paths:
+            image_constraints = dict(context.plan.goal.constraints)
+            generation_type = str(image_constraints.get("source_generation_type") or context.plan.goal.media_type)
+            # Review can contain upscaled images and previews. Their output size
+            # differs from the generation canvas; preserve its aspect contract.
+            width = image_constraints.pop("canvas_width", None)
+            height = image_constraints.pop("canvas_height", None)
+            if width and height:
+                image_constraints["canvas_aspect_ratio"] = f"{width}:{height}"
+            if generation_type == "story_card":
+                image_constraints.pop("canvas_aspect_ratio", None)
+                for axis in ("width", "height"):
+                    image_constraints.pop(f"canvas_{axis}", None)
+                    if image_constraints.get(f"story_card_{axis}"):
+                        image_constraints[f"canvas_{axis}"] = image_constraints[f"story_card_{axis}"]
+            elif generation_type == "game_sprite":
+                # Atlas/cell/frame contracts are checked by the sprite packager.
+                for key in ("canvas_width", "canvas_height", "canvas_aspect_ratio"):
+                    image_constraints.pop(key, None)
+            if reference_review and not auto_select_for_probe:
+                # Conditioning references need not share the output canvas.
+                for key in ("canvas_width", "canvas_height", "canvas_aspect_ratio", "expected_subject_count"):
+                    image_constraints.pop(key, None)
+            hard_review = self.prompt_engine.validate_image_candidates(
+                replace(context.plan.goal, constraints=image_constraints),
+                media_paths=image_paths, review_notes="", selection_limit=len(image_paths),
+            )
+            eligible_images = set(hard_review["selected_assets"])
+            ranked = [path for path in ranked if path not in image_paths or path in eligible_images]
         heuristic_ranked = [
             {
                 "media_path": path,
-                "score": max(1, 100 - (index * 5)),
                 "rationale": f"Preferred extensions {preferred_extensions} with deterministic path ordering.",
             }
             for index, path in enumerate(ranked)
@@ -321,41 +352,12 @@ class AgentSocialSkills:
                 "prompt_mode": "final_media_deterministic",
             }
         else:
-            review_goal = context.plan.goal
-            if auto_select_for_probe:
-                story_output = context.state.node_outputs.get("native-story-prompt", {})
-                story_prompt = ""
-                if isinstance(story_output, dict):
-                    story_prompt = str(
-                        story_output.get("opening_keyframe_prompt")
-                        or story_output.get("prompt")
-                        or ""
-                    ).strip()
-                if story_prompt:
-                    review_goal = replace(context.plan.goal, prompt=story_prompt)
-            try:
-                bundle = self.prompt_engine.review_asset_candidates(
-                    review_goal,
-                    media_paths=ranked,
-                    review_notes=review_notes,
-                    selection_limit=limit,
-                )
-            except Exception as exc:
-                if not auto_select_for_probe:
-                    raise
-                if any(
-                    marker in str(exc)
-                    for marker in ("stage_probe_quality_gate:", "asset_review_hard_gate:")
-                ):
-                    raise
-                bundle = {
-                    "selected_assets": ranked[:limit],
-                    "ranked_candidates": heuristic_ranked,
-                    "selection_rationale": "Automatic candidate review timed out or was unavailable; used the deterministic ranked candidate.",
-                    "regeneration_notes": review_notes or "Retry vision review before human-facing publication.",
-                    "prompt_mode": "automatic_timeout_fallback",
-                    "fallback_reason": f"{type(exc).__name__}: {exc}",
-                }
+            bundle = {
+                "selected_assets": ranked[:limit],
+                "ranked_candidates": heuristic_ranked,
+                "selection_rationale": "Candidate order after hard checks; Discord owns creative selection.",
+                "prompt_mode": "hard_media_contract",
+            }
         selected = [path for path in bundle.get("selected_assets", []) if path in ranked][:limit]
         if not selected:
             selected = ranked[:limit]
@@ -600,24 +602,18 @@ class AgentSocialSkills:
             selection_logs.append(
                 "Discord review disabled for this run; selection was automatic. Use --no-review only when that is intentional."
             )
-        if str(bundle.get("prompt_mode") or "") == "automatic_timeout_fallback":
-            selection_logs.append(
-                "Automatic vision/text review timed out; deterministic selection was recorded as a stage fallback."
-            )
         return SkillResult(
             status="success",
             outputs={
                 "media_paths": selected,
                 "selected_assets": selected,
                 "selected_count": len(selected),
+                "hard_media_checks": hard_review or {},
                 "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
                 "rejected_assets": rejected,
-                "rejected_asset_details": bundle.get("rejected_asset_details", []),
+                "rejected_asset_details": (hard_review or {}).get("rejected_asset_details", []),
                 "selection_rationale": str(bundle.get("selection_rationale") or f"Preferred extensions {preferred_extensions} with deterministic path ordering."),
                 "regeneration_notes": str(bundle.get("regeneration_notes") or context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
-                "failure_tags": list(bundle.get("failure_tags", [])),
-                "retry_direction": str(bundle.get("retry_direction", "")),
-                "retry_intensity": str(bundle.get("retry_intensity", "medium")),
                 "publish_ready": bool(bundle.get("publish_ready", bool(selected))),
                 "review_notes": str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
                 "prompt_mode": str(bundle.get("prompt_mode", "template")),

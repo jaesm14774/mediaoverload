@@ -140,7 +140,7 @@ generation:
     # This is a group-level visual language. The resolved selected character
     # remains the only protagonist; these are optional supporting-cast cues.
     visual:
-      scene_style: "warm paper stage, clear horizon depth, tactile ground, playful color blocks"
+      scene_style: "quiet low-contrast storybook environment with soft depth, clean edges, and generous breathing room"
       supporting_cast:
         - "tiny blue paper bird, triangular beak, round goggles, crooked cap, distinct from protagonist"
         - "tiny tangerine square creature, floppy ears, tiny messenger bag, distinct from protagonist"
@@ -186,6 +186,25 @@ generation:
       GitHub/web text, abstract symbols, or the selected character standing still while looking
       at a portal. A configured interaction pair or supporting physical form may appear when
       it participates in the same causal beat.
+  # Additive game asset route. It remains separate from the story, sticker,
+  # and social-video recipes above while being available for explicit or
+  # weighted-random selection.
+  game_sprite:
+    keyframe_workflow_name: krea2_turbo
+    video_workflow_name: minimax_h3_lowvram_i2v
+    h3_model_profile: q2
+    duration_seconds: 8
+    source_width: 1024
+    source_height: 576
+    video_width: 608
+    video_height: 352
+    video_length: 192
+    video_steps: 16
+    fps: 12
+    cell_width: 64
+    cell_height: 64
+    chroma_color: random
+    chroma_threshold: 52
   native_h3_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
@@ -193,7 +212,6 @@ generation:
     keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 6
     require_human_review: true
-    semantic_qa_required: true
     use_last_frame: false
     length: 362
     steps: 16
@@ -205,7 +223,6 @@ generation:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     workflow_name: minimax_h3_lowvram_t2v
-    semantic_qa_required: true
     length: 362
     steps: 16
     frame_rate: 24
@@ -219,7 +236,6 @@ generation:
     keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 6
     require_human_review: true
-    semantic_qa_required: true
     use_last_frame: true
     length: 362
     steps: 16
@@ -234,7 +250,6 @@ generation:
     keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 1
     require_human_review: true
-    semantic_qa_required: true
     last_frame_only: true
     length: 362
     steps: 16
@@ -253,7 +268,6 @@ generation:
     reference_max_images: 9
     reference_max_videos: 3
     model_profile: q4
-    semantic_qa_required: true
     length: 362
     steps: 20
     frame_rate: 24
@@ -272,7 +286,6 @@ generation:
     reference_image_size: match
     model_profile: q2
     require_human_review: true
-    semantic_qa_required: true
     length: 362
     steps: 20
     frame_rate: 24
@@ -296,6 +309,7 @@ generation:
     text2image2native_h3_ref2va: 1
     sticker_pack: 2
     story_card: 1
+    game_sprite: 3
 
 social_media:
   # Hashtags are generated from the final article and visible media.

@@ -10,7 +10,7 @@ reference video
     -> existing agent.goal.expand with extracted keyframes
     -> existing Krea2 text-to-image first frame
     -> existing MiniMax H3 low-VRAM I2V
-    -> existing technical video QA + optional vision semantic QA
+    -> existing technical video QA + explicitly requested subject-count checks
     -> existing run manifest / prompt lineage
 ```
 
@@ -52,8 +52,7 @@ python scripts/run_reference_micro_gag_e2e.py `
   --max-retries 3
 ```
 
-The runner never publishes. A result with unavailable vision QA still requires
-manual contact-sheet inspection; an explicit semantic failure is not promoted
-to a pass. The reference profile also hard-fails when an intermediate frame
-has severe identity morphing, stretched geometry, melted props, ghost
-duplicates, or another temporal artifact that obscures the gag.
+The runner never publishes. Hard media checks cover technical requirements
+and any explicit subject-count contract. Story alignment, motion, visual
+identity, and gag quality belong to the human reviewer in Discord; no LLM
+score accepts, rejects, or regenerates a candidate.

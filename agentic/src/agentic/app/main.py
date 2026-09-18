@@ -11,7 +11,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from agentic.assets.registry import AssetRegistry
 from agentic.memory import PortfolioMemory, RunMemory
-from agentic.runtime.creativity import FeedbackRanker, IdeaDirector, RetryPolicy
+from agentic.runtime.creativity import IdeaDirector, RetryPolicy
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.observability import RunRecorder
 from agentic.runtime.prompt_engine import PromptEngine
@@ -88,7 +88,6 @@ def build_runtime(
         skill_registry,
         tool_registry,
         resolved_output_root,
-        prompt_engine=prompt_engine,
     )
     register_longvideo_skills(
         skill_registry,
@@ -105,14 +104,12 @@ def build_runtime(
 
     idea_director = IdeaDirector()
     retry_policy = RetryPolicy(max_attempts=3)
-    feedback_ranker = FeedbackRanker()
     planner = TaskPlanner(asset_registry=asset_registry, idea_director=idea_director)
     runner = WorkflowRunner(
         skill_registry=skill_registry,
         run_memory=run_memory,
         portfolio_memory=portfolio_memory,
         retry_policy=retry_policy,
-        feedback_ranker=feedback_ranker,
         logger=logger,
         recorder=recorder,
     )
@@ -206,8 +203,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--edit-variant-seed", type=int, help="Deterministic variation seed for timeline editing")
     parser.add_argument("--edit-require-audio", action="store_true", help="Require an audio stream in image_sequence_edit QA")
     parser.add_argument("--edit-analyze-audio", action="store_true", help="Run loudness/silence analysis in image_sequence_edit QA")
-    parser.add_argument("--edit-creative-review", action="store_true", help="Run a blocking vision-LLM creative review loop for edit candidates")
-    parser.add_argument("--edit-creative-review-max-attempts", type=int, help="Maximum deterministic edit candidates reviewed by the vision LLM (1-4)")
     parser.add_argument(
         "--longvideo-edit-profile",
         choices=("baseline_concat", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
@@ -302,8 +297,6 @@ def main() -> None:
             "edit_variant_seed": args.edit_variant_seed,
             "edit_require_audio": args.edit_require_audio,
             "edit_analyze_audio": args.edit_analyze_audio,
-            "edit_creative_review": args.edit_creative_review,
-            "edit_creative_review_max_attempts": args.edit_creative_review_max_attempts,
             "longvideo_edit_profile": args.longvideo_edit_profile,
             "longvideo_production_profile": args.longvideo_production_profile,
             "longvideo_steps": args.longvideo_steps,

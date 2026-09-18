@@ -154,7 +154,6 @@ class RunState:
     goal: dict[str, Any]
     metadata: dict[str, Any]
     node_outputs: dict[str, Any] = field(default_factory=dict)
-    feedback: list[dict[str, Any]] = field(default_factory=list)
     prompt_lineage: list[dict[str, Any]] = field(default_factory=list)
     node_prompt_modes: dict[str, str] = field(default_factory=dict)
 
@@ -168,9 +167,6 @@ class RunState:
     def __setitem__(self, key: str, value: Any) -> None:
         self.node_outputs[key] = value
 
-    def add_feedback(self, payload: dict[str, Any]) -> None:
-        self.feedback.append(payload)
-
     def add_prompt_lineage(self, payload: dict[str, Any]) -> None:
         self.prompt_lineage.append(payload)
 
@@ -182,7 +178,6 @@ class RunState:
             "goal": self.goal,
             "metadata": self.metadata,
             "node_outputs": self.node_outputs,
-            "feedback": self.feedback,
             "prompt_lineage": self.prompt_lineage,
             "node_prompt_modes": self.node_prompt_modes,
         }

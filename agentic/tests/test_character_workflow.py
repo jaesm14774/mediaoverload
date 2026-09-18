@@ -629,31 +629,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
         self.assertEqual(source, "native_h3_story")
 
-    def test_publish_visual_grounding_keeps_caption_claims_inside_video_evidence(self) -> None:
-        grounding = _extract_publish_visual_grounding(
-            {
-                "state": {
-                    "node_outputs": {
-                        "native-h3-qa": {
-                            "semantic_qa": {
-                                "enabled": True,
-                                "status": "fail",
-                                "passed": False,
-                                "observed_story": "Kirby crosses a storm-lit meadow.",
-                                "caption_guidance": "Mention only Kirby, the meadow, and the storm light.",
-                                "issues": ["The news anchor is not visible."],
-                                "checks": {"news_anchor_visible": False},
-                            }
-                        }
-                    }
-                }
-            }
-        )
-
-        self.assertEqual(grounding["status"], "fail")
-        self.assertFalse(grounding["passed"])
-        self.assertEqual(grounding["issues"], ["The news anchor is not visible."])
-
     def test_publish_prompt_falls_back_when_generation_has_no_native_story(self) -> None:
         prompt, source = _resolve_publish_prompt({"state": {"node_outputs": {}}}, fallback_prompt="News brief")
 

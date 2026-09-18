@@ -16,8 +16,6 @@ from agentic.runtime.prompting import LONG_VIDEO_SYSTEM_PROMPT
 from agentic.skills.agent_primitives import AgentMediaSkills
 from agentic.skills.longvideo import LongVideoSkills
 from agentic.storyboard import (
-    evaluate_native_h3_news_grounding,
-    evaluate_native_h3_story_quality,
     format_native_h3_prompt,
     ground_native_h3_ending_keyframe_prompt,
     load_storyboard,
@@ -60,21 +58,25 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(goal.media_type, "native_h3_story")
         self.assertEqual(goal.duration_seconds, 15)
         self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_15s_fl2va_i2v")
+        node_ids = [node.node_id for node in plan.nodes]
+        expected_node_ids = [
+            "native-story-prompt",
+            "native-image-asset-check",
+            "native-video-asset-check",
+            "native-opening-keyframe",
+            "native-opening-review",
+            "native-keyframe-gate",
+            "native-h3-render",
+            "native-h3-speed",
+            "native-h3-qa",
+            "native-h3-preview",
+            "native-h3-package",
+        ]
+        if "native-h3-canvas" in node_ids:
+            expected_node_ids.insert(8, "native-h3-canvas")
         self.assertEqual(
-            [node.node_id for node in plan.nodes],
-            [
-                "native-story-prompt",
-                "native-image-asset-check",
-                "native-video-asset-check",
-                "native-opening-keyframe",
-                "native-opening-review",
-                "native-keyframe-gate",
-                "native-h3-render",
-                "native-h3-speed",
-                "native-h3-qa",
-                "native-h3-preview",
-                "native-h3-package",
-            ],
+            node_ids,
+            expected_node_ids,
         )
         opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
         opening_review = next(node for node in plan.nodes if node.node_id == "native-opening-review")
@@ -96,8 +98,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("native-keyframe-gate", render.depends_on)
         self.assertFalse(render.inputs["use_last_frame"])
         self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
-        self.assertEqual(qa.inputs["mode"], "technical_and_semantic_qa_before_optional_discord_review")
-        self.assertEqual(qa.inputs["video_node"], "native-h3-speed")
+        self.assertEqual(qa.inputs["mode"], "hard_media_checks_before_discord_review")
+        self.assertEqual(qa.inputs["video_node"], "native-h3-canvas" if "native-h3-canvas" in node_ids else "native-h3-speed")
         self.assertEqual(qa.inputs["target_duration"], 7.5)
         self.assertEqual(qa.inputs["expected_fps"], 24.0)
         self.assertIsNone(qa.tool_name)
@@ -236,8 +238,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                     "source": "news",
                     "creative_seed": "news-seed",
                     "news_context": kwargs["news_context"],
-                    "story_quality": {},
-                    "news_grounding": {},
                 }
 
         context = SimpleNamespace(
@@ -426,30 +426,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("duplicate Kirby", pair_merged["negative_prompt"])
         self.assertIn("unrequested third subject", pair_merged["negative_prompt"])
 
-    def test_native_gag_card_quality_rejects_missing_content(self) -> None:
-        story = {
-            "story_spine": {
-                "premise": "A cushion escapes Kirby.",
-                "objective": "Kirby must catch the cushion.",
-                "obstacle": "The cushion springs away.",
-                "stakes": "Kirby loses his nap.",
-                "climax": "Kirby lets the cushion bounce into him.",
-                "resolution": "The cushion hugs Kirby.",
-            },
-            "gag_card": {"hook_frame": "Kirby is dragged by a cushion"},
-            "native_shots": [
-                {"action": "The cushion springs away and drags Kirby.", "camera": "Follow the slide.", "state_change": "Kirby chases the cushion."},
-                {"action": "The cushion bounces Kirby into the grass.", "camera": "Push into Kirby's reaction.", "state_change": "Kirby loses his nap."},
-                {"action": "The cushion hugs Kirby.", "camera": "Pull out on the cozy pile.", "state_change": "Kirby gets his nap."},
-            ],
-        }
-
-        quality = evaluate_native_h3_story_quality(story)
-
-        self.assertFalse(quality["passed"])
-        self.assertFalse(quality["checks"]["gag_card_complete"])
-        self.assertTrue(any("gag_card" in error for error in quality["errors"]))
-
     def test_character_route_builds_direct_t2v_story_graph(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -583,33 +559,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("golden star seed", prompt.lower())
         self.assertNotIn("dark sky rift", prompt.lower())
 
-    def test_native_h3_news_grounding_rejects_generic_story_without_trace(self) -> None:
-        generic_story = {
-            "name": "Kirby Seed Storm",
-            "story_spine": {
-                "premise": "A storm threatens a glowing seed.",
-                "objective": "Kirby must protect the seed.",
-                "obstacle": "The wind tears the seed away.",
-                "stakes": "The meadow will wither.",
-                "climax": "Kirby plants the seed.",
-                "resolution": "The meadow blooms again.",
-            },
-            "native_shots": [
-                {"action": "A storm tears a seed loose.", "camera": "Follow the seed.", "state_change": "The seed is lost."},
-                {"action": "Kirby chases the seed through wind.", "camera": "Track Kirby.", "state_change": "Kirby reaches the seed."},
-                {"action": "Kirby plants the seed and the meadow blooms.", "camera": "Pull out wide.", "state_change": "The meadow is restored."},
-            ],
-        }
-
-        quality = evaluate_native_h3_news_grounding(
-            generic_story,
-            {"title": "AI companion robot arrives", "keyword": "AI;robot"},
-            creative_brief="Kirby protects one glowing seed",
-        )
-
-        self.assertFalse(quality["passed"])
-        self.assertFalse(quality["checks"]["news_trace_present"])
-
     def test_native_h3_ending_keyframe_prompt_locks_news_scene_and_payoff(self) -> None:
         story = {
             "ending_keyframe_prompt": "Magolor remains suspended in the foreground.",
@@ -630,96 +579,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("scanning arch traps the subject", prompt)
         self.assertIn("sealed bubble leaves the lab route blocked", prompt)
 
-    def test_native_h3_news_grounding_accepts_small_anchor_wording_variations(self) -> None:
-        story = {
-            "name": "Kirby and the Typhoon Seed",
-            "story_spine": {
-                "premise": "Kirby protects a glowing seed from a typhoon vortex.",
-                "objective": "Protect the glowing seed.",
-            },
-            "news_trace": {
-                "contract_version": 2,
-                "source_title": "Typhoon warning",
-                "source_concepts": ["typhoon"],
-                "visual_translation": "A typhoon vortex funnel threatens the meadow.",
-                "news_mechanism": "the typhoon vortex pulls the glowing seed across the meadow",
-                "news_consequence": "the typhoon vortex still pulls the glowing seed across the meadow in the payoff",
-                "visual_anchors": ["typhoon vortex funnel", "glowing seed", "meadow"],
-                "anchor_roles": ["context", "mechanism", "consequence"],
-                "integration": "The typhoon vortex threatens the glowing seed and forces Kirby to protect it.",
-            },
-            "native_shots": [
-                {
-                    "action": "A typhoon vortex pulls at the glowing seed across the meadow.",
-                    "camera": "Follow the seed.",
-                    "state_change": "The seed is displaced.",
-                }
-                for _ in range(5)
-            ],
-        }
-        quality = evaluate_native_h3_news_grounding(
-            story,
-            {"title": "Typhoon warning", "keyword": "typhoon", "category": "weather"},
-            creative_brief="Kirby protects the glowing seed",
-        )
-
-        self.assertTrue(quality["passed"], quality)
-
-    def test_native_h3_news_contract_requires_mechanism_and_consequence(self) -> None:
-        story = {
-            "name": "Kirby and the Lantern Outage",
-            "story_spine": {
-                "premise": "A city lantern system begins shutting down in sequence.",
-                "objective": "Kirby must reopen the canal path before the last light disappears.",
-                "obstacle": "A synchronized blackout closes the path and reverses Kirby's route.",
-                "stakes": "The canal becomes impassable when the final lantern goes dark.",
-                "climax": "Kirby redirects the last beam and reopens the canal path.",
-                "resolution": "Warm lantern light returns and the canal path is open again.",
-            },
-            "news_trace": {
-                "contract_version": 2,
-                "source_title": "city lantern outage",
-                "source_concepts": ["outage", "lantern"],
-                "visual_translation": "The outage becomes a synchronized lantern blackout that blocks a canal path and can be reversed by Kirby.",
-                "news_mechanism": "synchronized lantern blackout blocks the canal path",
-                "news_consequence": "the canal path reopens into warm light",
-                "visual_anchors": ["city lanterns", "synchronized lantern blackout", "canal path reopens"],
-                "anchor_roles": ["context", "mechanism", "consequence"],
-                "integration": "The outage makes the canal path close, so Kirby must restore the lantern sequence before the route disappears.",
-            },
-            "native_shots": [
-                {"action": "Kirby runs beneath the city lanterns as every light flickers in sequence."},
-                {"action": "The synchronized lantern blackout blocks the canal path and forces Kirby to reverse."},
-                {"action": "Kirby redirects the last lantern beam and the canal path reopens into warm light."},
-            ],
-        }
-        quality = evaluate_native_h3_news_grounding(
-            story,
-            {"title": "city lantern outage", "keyword": "outage;lantern", "category": "city"},
-        )
-        self.assertTrue(quality["passed"], quality)
-        self.assertTrue(quality["checks"]["news_mechanism_reaches_story"])
-        self.assertTrue(quality["checks"]["news_consequence_reaches_payoff"])
-
-        collapsed = json.loads(json.dumps(story))
-        collapsed["news_trace"]["visual_anchors"] = ["glowing orb", "glowing orb", "glowing orb"]
-        collapsed["news_trace"]["anchor_roles"] = ["prop", "prop", "prop"]
-        collapsed["news_trace"]["news_mechanism"] = "the orb floats"
-        collapsed["news_trace"]["news_consequence"] = "the orb glows steadily"
-        collapsed["native_shots"] = [
-            {"action": "Kirby catches the glowing orb."},
-            {"action": "The glowing orb slips and Kirby catches it again."},
-            {"action": "The glowing orb glows steadily in Kirby's hands."},
-        ]
-        rejected = evaluate_native_h3_news_grounding(
-            collapsed,
-            {"title": "city lantern outage", "keyword": "outage;lantern", "category": "city"},
-        )
-        self.assertFalse(rejected["passed"])
-        self.assertFalse(rejected["checks"]["news_anchor_roles_complete"])
-        self.assertFalse(rejected["checks"]["news_anchor_diversity"])
-        self.assertFalse(rejected["checks"]["news_anchor_not_default_object_loop"])
-
     def test_native_h3_render_prompt_carries_news_mechanism_contract(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["news_trace"] = {
@@ -733,39 +592,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("News mechanism contract", prompt)
         self.assertIn("synchronized lights shut down", prompt)
         self.assertIn("Do not replace the mechanism with a generic floating object", prompt)
-
-    def test_native_h3_news_grounding_keeps_compound_anchor_in_payoff(self) -> None:
-        story = {
-            "name": "Kirby and the Shadow Agent",
-            "story_spine": {
-                "premise": "Kirby confronts a rogue autonomous energy entity.",
-                "objective": "Kirby must neutralize the aggressive energy source.",
-                "resolution": "The monolith is destroyed and a stable glow remains.",
-            },
-            "news_trace": {
-                "contract_version": 2,
-                "source_title": "AI agent attack from abroad",
-                "source_concepts": ["AI自主攻擊"],
-                "visual_translation": "The AI自主攻擊 becomes a featureless black monolith that attacks autonomously.",
-                "news_mechanism": "the featureless black monolith attacks Kirby with dark energy",
-                "news_consequence": "the stable glow remains after Kirby destroys the featureless black monolith",
-                "visual_anchors": ["Featureless black monolith", "dark energy", "stable glow"],
-                "anchor_roles": ["context", "mechanism", "consequence"],
-                "integration": "The AI自主攻擊 becomes the featureless black monolith that Kirby must neutralize.",
-            },
-            "native_shots": [
-                {"action": "A featureless black monolith lashes out at Kirby."},
-                {"action": "The featureless black monolith pulls Kirby toward it."},
-                {"action": "Kirby destroys the monolith and a stable glow remains."},
-            ],
-        }
-
-        quality = evaluate_native_h3_news_grounding(
-            story,
-            {"title": "AI agent attack from abroad", "keyword": "AI自主攻擊", "category": "news"},
-        )
-
-        self.assertTrue(quality["passed"], quality)
 
     def test_native_h3_safety_contract_rejects_readable_text_without_semantic_repair(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
@@ -1014,7 +840,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(all(shot["title"] for shot in result["story"]["native_shots"]))
         self.assertTrue(all(shot["camera"] for shot in result["story"]["native_shots"]))
         self.assertTrue(all(shot["state_change"] for shot in result["story"]["native_shots"]))
-        self.assertFalse(result["news_grounding"]["passed"])
+        self.assertNotIn("news_grounding", result)
 
     def test_native_h3_risky_creative_brief_is_sanitized(self) -> None:
         sanitized = LLMPromptEngine._sanitize_native_h3_creative_brief(
@@ -1052,7 +878,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                     news_context={"title": "test", "keyword": "test"},
                 )
 
-    def test_native_h3_qa_reads_story_quality_from_run_state(self) -> None:
+    def test_native_h3_qa_uses_hard_media_checks(self) -> None:
         class FakeTools:
             def call(self, tool_name: str, payload: dict[str, object]) -> dict[str, object]:
                 self.tool_name = tool_name
@@ -1080,7 +906,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             goal={},
             metadata={},
             node_outputs={
-                "native-story-prompt": {"story_quality": {"passed": False, "score": 42}},
                 "native-h3-render": {"saved_files": [str(self.repo_root / ".tmp-tests" / "clip.mp4")], "run_dir": "run"},
             },
         )
@@ -1098,7 +923,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertTrue(result.outputs["passed"])
-        self.assertEqual(result.outputs["story_quality"]["score"], 42)
+        self.assertNotIn("story_quality", result.outputs)
         self.assertFalse(result.outputs["technical_qa"]["bypassed"])
         self.assertTrue(result.outputs["technical_qa"]["checks"]["duration"])
 

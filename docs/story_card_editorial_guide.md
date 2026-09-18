@@ -314,3 +314,5 @@ JSON 修復後仍須有完整提要與有效來源依據，才可交給寫作者
 - Tom Ehrenfeld 整理 Clark 的寫作工具，涉及長短句、節奏與結尾：[A Sampling of Clark's 50 Writing Tools](https://niemanreports.org/a-sampling-of-clarks-50-writing-tools/)。用於修稿，不當成篇篇照用的結構公式。
 
 本地參考：[原始逐篇研究筆記](story_card_research_11_03215.md)。來源作品只用於分析一般寫作技巧，不複製作者用語、品牌、辨識度高的情節或完整結構。
+
+上述密度、標點與文風是寫作建議，由 Discord 人工審閱；自動 DQ 不因篇幅偏短、句尾形式或重複標題拒絕成品。硬性檢查保留可排版上限、頁數、欄位與輸出語言。

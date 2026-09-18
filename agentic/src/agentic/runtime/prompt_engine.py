@@ -122,10 +122,6 @@ class PromptEngine:
             review_notes=review_notes,
             media_paths=media_paths,
         )
-        failure_tags = self._derive_failure_tags(review_notes, media_paths or [])
-        bundle["failure_tags"] = failure_tags
-        bundle["retry_direction"] = self._derive_retry_direction(review_notes, failure_tags)
-        bundle["retry_intensity"] = self._derive_retry_intensity(review_notes, failure_tags)
         return bundle
 
     def build_sticker_motion_prompt(
@@ -141,6 +137,9 @@ class PromptEngine:
             character=character,
             selected_expression=selected_expression,
         )
+
+    def build_dynamic_sprite_motion_plan(self, goal: GoalRequest) -> dict[str, Any]:
+        return self.llm_engine.build_dynamic_sprite_motion_plan(goal)
 
     def build_carousel_prompt_set(
         self,
@@ -197,129 +196,16 @@ class PromptEngine:
         bundle["dispatch_ready"] = bool(media_paths) and bool(bundle.get("caption"))
         return bundle
 
-    def evaluate_video_contact_sheet(
-        self,
-        *,
-        contact_sheet_path: str,
-        character: str,
-        subject_context: dict[str, Any] | None = None,
-        story_spine: dict[str, Any],
-        native_shots: list[dict[str, Any]],
-        news_context: dict[str, Any],
-        rendered_prompt: str,
-        news_anchor_terms: list[str] | None = None,
-        duration_seconds: int | float | None = None,
-        contract_profile: str = "",
+    def evaluate_media_subjects(
+        self, *, image_path: str, expected_count: int | None, frame_count: int = 1,
     ) -> dict[str, Any]:
-        return self.llm_engine.evaluate_video_contact_sheet(
-            contact_sheet_path=contact_sheet_path,
-            character=character,
-            subject_context=dict(subject_context or {}),
-            story_spine=story_spine,
-            native_shots=native_shots,
-            news_context=news_context,
-            rendered_prompt=rendered_prompt,
-            news_anchor_terms=news_anchor_terms,
-            duration_seconds=duration_seconds,
-            contract_profile=contract_profile,
+        return self.llm_engine.evaluate_media_subjects(
+            image_path=image_path, expected_count=expected_count, frame_count=frame_count,
         )
 
-    def evaluate_edit_contact_sheet(
-        self,
-        *,
-        contact_sheet_path: str,
-        evidence_paths: list[str] | None,
-        goal: str,
-        style: str,
-        plan: dict[str, Any],
-        candidate_attempt: int,
-        previous_review: dict[str, Any] | None = None,
+    def validate_image_candidates(
+        self, goal: GoalRequest, media_paths: list[str], review_notes: str, selection_limit: int,
     ) -> dict[str, Any]:
-        return self.llm_engine.evaluate_edit_contact_sheet(
-            contact_sheet_path=contact_sheet_path,
-            evidence_paths=evidence_paths,
-            goal=goal,
-            style=style,
-            plan=plan,
-            candidate_attempt=candidate_attempt,
-            previous_review=previous_review,
+        return self.llm_engine.validate_image_candidates(
+            goal, media_paths=media_paths, review_notes=review_notes, selection_limit=selection_limit,
         )
-
-    def review_asset_candidates(
-        self,
-        goal: GoalRequest,
-        media_paths: list[str],
-        review_notes: str,
-        selection_limit: int,
-    ) -> dict[str, Any]:
-        bundle = self.llm_engine.review_asset_candidates(
-            goal,
-            media_paths=media_paths,
-            review_notes=review_notes,
-            selection_limit=selection_limit,
-        )
-        selected_assets = [str(path) for path in bundle.get("selected_assets", []) if str(path)]
-        rejected_assets = [path for path in media_paths if path not in selected_assets]
-        failure_tags = self._derive_failure_tags(review_notes, rejected_assets)
-        ranked = bundle.get("ranked_candidates", [])
-        rejected_details: list[dict[str, Any]] = []
-        for path in rejected_assets:
-            rationale = "Rejected after shortlist ranking."
-            for item in ranked:
-                if isinstance(item, dict) and str(item.get("media_path", "")) == path:
-                    rationale = str(item.get("rationale") or rationale)
-                    break
-            rejected_details.append(
-                {
-                    "media_path": path,
-                    "reason": rationale,
-                    "failure_tags": failure_tags,
-                }
-            )
-        bundle["rejected_assets"] = rejected_assets
-        bundle["rejected_asset_details"] = rejected_details
-        bundle["failure_tags"] = failure_tags
-        bundle["retry_direction"] = self._derive_retry_direction(review_notes, failure_tags)
-        bundle["retry_intensity"] = self._derive_retry_intensity(review_notes, failure_tags)
-        bundle["publish_ready"] = bool(selected_assets)
-        return bundle
-
-    @staticmethod
-    def _derive_failure_tags(review_notes: str, rejected_assets: list[str]) -> list[str]:
-        note_text = (review_notes or "").lower()
-        tags: list[str] = []
-        tag_rules = {
-            "motion_weak": ("motion", "action", "static", "stiff"),
-            "composition_weak": ("composition", "framing", "empty space", "crop"),
-            "subject_unclear": ("clarity", "readability", "subject", "identity"),
-            "publish_risk": ("publish", "suitable", "thumbnail", "platform"),
-        }
-        for tag, keywords in tag_rules.items():
-            if any(keyword in note_text for keyword in keywords):
-                tags.append(tag)
-        if rejected_assets and "publish_risk" not in tags:
-            tags.append("publish_risk")
-        return tags or ["generic_quality"]
-
-    @staticmethod
-    def _derive_retry_direction(review_notes: str, failure_tags: list[str]) -> str:
-        directions: list[str] = []
-        note_text = (review_notes or "").strip()
-        if "motion_weak" in failure_tags:
-            directions.append("increase visible action and kinetic staging")
-        if "composition_weak" in failure_tags:
-            directions.append("tighten framing and strengthen focal hierarchy")
-        if "subject_unclear" in failure_tags:
-            directions.append("reinforce character identity and readability")
-        if not directions and note_text:
-            directions.append(note_text)
-        return "; ".join(directions) or "raise overall quality while preserving intent"
-
-    @staticmethod
-    def _derive_retry_intensity(review_notes: str, failure_tags: list[str]) -> str:
-        note_text = (review_notes or "").lower()
-        if any(token in note_text for token in ("major", "stronger", "dramatic", "aggressive")):
-            return "high"
-        if "generic_quality" not in failure_tags or note_text:
-            return "medium"
-        return "low"

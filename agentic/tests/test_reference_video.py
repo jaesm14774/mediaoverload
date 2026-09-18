@@ -109,7 +109,7 @@ class ReferenceVideoTests(unittest.TestCase):
         self.assertEqual(idea.depends_on, ["reference-video-analysis"])
         self.assertEqual(image.inputs["seed"], 1234)
         self.assertEqual(animate.inputs["seed"], 1234)
-        self.assertEqual(qa.inputs["semantic_qa_profile"], "reference_micro_gag_v1")
+        self.assertNotIn("semantic_qa_profile", qa.inputs)
         self.assertIn("reference-video-analysis", qa.depends_on)
 
     def test_reference_analyzer_writes_structural_brief_and_visual_evidence(self) -> None:

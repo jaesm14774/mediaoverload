@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
 from agentic.runtime.drama import DramaPlan, compile_drama_plan
 from agentic.runtime.editing import EditPlan, build_edit_plan
-from agentic.runtime.llm_engine import LLMPromptEngine
-from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import ToolRegistry
 from agentic.skills.editing import EditingSkills
 from agentic.tools.media_services import register_media_service_tools
@@ -35,8 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transition-duration", type=float, default=0.10)
     parser.add_argument("--goal", default="Create an engaging short-form edit from generated media")
     parser.add_argument("--style", default="fashion short-form")
-    parser.add_argument("--creative-review", action="store_true", help="Run the blocking vision-LLM creative review loop")
-    parser.add_argument("--creative-review-max-attempts", type=int, default=3, help="Maximum creative-review candidates (1-4)")
     return parser.parse_args()
 
 
@@ -71,17 +66,13 @@ def main() -> None:
             transition_duration_seconds=args.transition_duration,
         )
     output = Path(args.output).expanduser().resolve()
-    review_enabled = args.creative_review or plan.profile == "editorial_kinetic_v1"
     tool_registry = ToolRegistry()
     register_media_service_tools(
         tool_registry,
         output.parent,
         input_roots=[Path(root) for root in args.input_roots or []],
     )
-    prompt_engine = PromptEngine(
-        llm_engine=LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
-    ) if review_enabled else PromptEngine()
-    skills = EditingSkills(tool_registry, output.parent, prompt_engine=prompt_engine)
+    skills = EditingSkills(tool_registry, output.parent)
     goal = GoalRequest(prompt=args.goal, media_type="image_sequence_edit", duration_seconds=0, style=args.style)
     node = ExecutionNode(
         node_id="compose-edit",
@@ -90,8 +81,6 @@ def main() -> None:
             "output_path": str(output),
             "contact_sheet_path": str(output.with_suffix(".contact_sheet.jpg")),
             "manifest_path": str(output.with_suffix(".edit_manifest.json")),
-            "creative_review": review_enabled,
-            "creative_review_max_attempts": args.creative_review_max_attempts,
             "require_audio": plan.profile != "baseline_concat",
             "require_stereo_audio": plan.profile != "baseline_concat",
         },

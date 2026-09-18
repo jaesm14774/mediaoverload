@@ -31,9 +31,10 @@ from agentic.runtime.story_cards import (
     render_story_card_images,
     story_card_anchor_prompt,
     story_card_source,
+    story_card_visual_signature,
     story_card_visual_beat,
+    story_card_visual_variant,
     validate_story_card_evidence,
-    story_card_humanizer_warnings,
     story_card_page_prompt,
     resolve_story_card_canvas_dimension,
     resolve_story_card_page_count,
@@ -135,11 +136,10 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertEqual(result["writing_process"]["writer_passes"], 1)
         self.assertGreater(len(result["pages"][1]["background_prompt"]), 1600)
 
-    def test_single_card_cannot_mistake_a_repeated_title_for_body_copy(self) -> None:
+    def test_repeated_title_is_a_human_editorial_decision(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = payload["title"]
-        with self.assertRaisesRegex(ValueError, "beyond the repeated title"):
-            validate_story_card_payload(payload)
+        self.assertEqual(validate_story_card_payload(payload)["pages"][0]["text"], payload["pages"][0]["text"])
 
     def test_story_card_page_count_accepts_one_card_and_a_deeper_opt_in(self) -> None:
         for page_count in (STORY_CARD_PAGE_COUNT_MIN, STORY_CARD_PAGE_COUNT_MAX):
@@ -164,18 +164,16 @@ class StoryCardContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "1-70 characters"):
             validate_story_card_payload(payload)
 
-    def test_multi_page_copy_cannot_be_visually_sparse(self) -> None:
+    def test_short_copy_is_a_human_editorial_decision(self) -> None:
         payload = sample_payload(self.make_goal(), 2)
         payload["pages"][0]["text"] = "這是一句太短的說明。"
 
-        with self.assertRaisesRegex(ValueError, "36-70 characters"):
-            validate_story_card_payload(payload)
+        self.assertEqual(validate_story_card_payload(payload)["pages"][0]["text"], payload["pages"][0]["text"])
 
-    def test_page_cannot_be_cut_off_without_sentence_punctuation(self) -> None:
+    def test_punctuation_is_a_human_editorial_decision(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = "讀到這則新聞，我想到還有一些話沒有說完"
-        with self.assertRaisesRegex(ValueError, "complete punctuation"):
-            validate_story_card_payload(payload)
+        self.assertEqual(validate_story_card_payload(payload)["pages"][0]["text"], payload["pages"][0]["text"])
 
     def test_canvas_dimensions_have_a_bounded_integer_contract(self) -> None:
         self.assertEqual(resolve_story_card_canvas_dimension(None, 1080, name="story_card_width"), 1080)
@@ -196,32 +194,25 @@ class StoryCardContractTests(unittest.TestCase):
         text = payload["pages"][0]["text"]
         self.assertLessEqual(len(text), STORY_CARD_MAX_TEXT_CHARS)
         self.assertEqual(STORY_CARD_MAX_SINGLE_PAGE_TEXT_CHARS, STORY_CARD_MAX_TEXT_CHARS)
-        self.assertEqual(normalized["editorial_warnings"], [])
+        self.assertFalse(normalized["contains_simplified_characters"])
 
-    def test_humanizer_signals_are_reported_without_rewriting(self) -> None:
-        text = "然而，這不只是一次告別，而是未來會更好。"
-        warnings = story_card_humanizer_warnings(text)
-
-        self.assertIn("ai_connector", warnings)
-        self.assertIn("negative_parallel", warnings)
-        self.assertIn("generic_hope", warnings)
 
     def test_simplified_chinese_is_reported_for_llm_correction(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = "他看着窗外，直到媽媽回來。"
 
         normalized = validate_story_card_payload(payload)
-        self.assertIn("simplified_character", normalized["editorial_warnings"])
+        self.assertTrue(normalized["contains_simplified_characters"])
 
     def test_reflection_does_not_require_parent_twist_or_household_prop(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = "醫院公布照護人力調整計畫。有人多了一個班可以交接，生活就多了一點能自己安排的時間。"
-        self.assertEqual(validate_story_card_payload(payload)["editorial_warnings"], [])
+        self.assertFalse(validate_story_card_payload(payload)["contains_simplified_characters"])
 
-    def test_style_signals_do_not_reject_prose_or_force_a_rewrite(self) -> None:
+    def test_prose_is_validated_only_for_hard_text_contracts(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = "然而，這不只是一次告別，而是未來會更好。總而言之，一切都會好起來。"
-        self.assertGreaterEqual(len(validate_story_card_payload(payload)["editorial_warnings"]), 4)
+        self.assertFalse(validate_story_card_payload(payload)["contains_simplified_characters"])
 
     def test_our_visual_core_keeps_character_in_corner_and_varies_pages(self) -> None:
         profile = {"keywords": "Kirby, pink, spherical body, red feet"}
@@ -253,6 +244,38 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertIn("one tiny unnamed orange side character", second)
         self.assertEqual(story_card_visual_beat(1, 3, config)["companion"], "")
         self.assertIn("one tiny unnamed orange side character", story_card_visual_beat(2, 3, config)["companion"])
+
+    def test_background_variation_uses_story_signal_and_generation_seed(self) -> None:
+        profile = {"keywords": "Kirby, pink, spherical body, red feet"}
+        first_story = {
+            "title": "豪雨前的提醒",
+            "pages": [{"text": "雨還沒下大，先把回家的路看清楚。"}],
+        }
+        second_story = {
+            "title": "圖書館多開一盞燈",
+            "pages": [{"text": "有人把晚一點回家的時間，留給還在找書的人。"}],
+        }
+        first = story_card_page_prompt(
+            "Kirby", profile, 1, 1,
+            story_signal=story_card_visual_signature(first_story), visual_seed=101,
+        )
+        second = story_card_page_prompt(
+            "Kirby", profile, 1, 1,
+            story_signal=story_card_visual_signature(second_story), visual_seed=202,
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.isascii() and second.isascii())
+        self.assertIn("generation-specific rendering mode:", first)
+        self.assertIn("50 percent open space", first)
+
+    def test_background_variation_composes_many_faded_scenes_instead_of_fixed_scene_packs(self) -> None:
+        variants = {
+            tuple(story_card_visual_variant(f"story-{index}", 1, 1000 + index).items())
+            for index in range(32)
+        }
+
+        self.assertGreaterEqual(len(variants), 24)
 
     def test_unresolved_selected_character_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "resolved selected character"):
@@ -308,6 +331,37 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertEqual(result.outputs["page_runs"][0]["visual_beat"]["companion"], "")
         self.assertIn("orange side character", result.outputs["page_runs"][1]["visual_beat"]["companion"])
 
+    def test_background_executor_uses_story_visual_seed_instead_of_fixed_default(self) -> None:
+        goal = self.make_goal(character="Meta Knight", character_profile={"keywords": "masked, caped"})
+        story = sample_payload(goal, 1)
+        story["visual_seed"] = 24680
+
+        calls: list[dict[str, object]] = []
+
+        class FakeTools:
+            def call(self, name, payload):
+                calls.append(payload)
+                output = Path(str(payload["run_dir"])) / "page.png"
+                output.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (8, 8), (20, 40, 80)).save(output)
+                return {"saved_files": [str(output)]}
+
+        node = ExecutionNode(
+            node_id="story-card-backgrounds",
+            skill_name="media.story_card.backgrounds",
+            inputs={"workflow_name": "krea2_turbo", "render_tool": "comfy.workflow.text_to_image"},
+        )
+        plan = ExecutionPlan(goal=goal, workflow_name="story_card_v1", nodes=[node], metadata={})
+        state = RunState(goal={}, metadata={}, node_outputs={"story-card-write": story})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            AgentMediaSkills(FakeTools(), Path(temp_dir) / "runs").render_story_card_backgrounds(
+                SkillContext(plan, node, state),
+            )
+
+        self.assertEqual(calls[0]["seed"], 24680 + 1009)
+        self.assertNotEqual(calls[0]["seed"], 17041 + 1009)
+
     def test_source_preserves_article_evidence_and_distinguishes_headline_only(self) -> None:
         source = story_card_source(self.make_goal(news_context={
             "title": "金融業更新加密", "summary": "業者須盤點供應商。", "url": "https://example.org/source",
@@ -344,11 +398,10 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertEqual(source["evidence_scope"], "supplied_article_excerpt")
         connection.close.assert_called_once()
 
-    def test_final_page_cannot_stop_at_a_comma_after_schema_truncation(self) -> None:
+    def test_final_clause_is_a_human_editorial_decision(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = "這並非只是行政公文的堆疊，"
-        with self.assertRaisesRegex(ValueError, "unfinished clause"):
-            validate_story_card_payload(payload)
+        self.assertEqual(validate_story_card_payload(payload)["pages"][0]["text"], payload["pages"][0]["text"])
 
     def test_long_database_article_does_not_break_other_news_routes(self) -> None:
         source = {"title": "燈光修復", "keyword": "照明", "content": "報導細節" * 1500}
@@ -414,7 +467,7 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertEqual(set(chat.call_args_list[1].kwargs["schema"]["properties"]), {"title", "pages"})
         self.assertEqual(chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["minItems"], 1)
         self.assertEqual(chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["maxItems"], 6)
-        self.assertIn("pattern", chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["items"]["properties"]["text"])
+        self.assertNotIn("pattern", chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["items"]["properties"]["text"])
         self.assertIn("多頁時每頁至少36字", chat.call_args_list[1].args[2])
         self.assertIn("headline_only", chat.call_args_list[1].args[2])
         self.assertIn("10歲孩子聽得懂", chat.call_args_list[1].args[2])
@@ -491,7 +544,7 @@ class StoryCardContractTests(unittest.TestCase):
         ):
             result = engine.build_story_card(goal)
         self.assertEqual(result["pages"][0]["text"], final["pages"][0]["text"])
-        self.assertNotIn("simplified_character", result["editorial_warnings"])
+        self.assertFalse(result["contains_simplified_characters"])
 
     def test_json_repair_cannot_send_an_empty_plan_to_the_writer(self) -> None:
         goal = self.make_goal(news_context={"title": "金融業準備後量子加密"})

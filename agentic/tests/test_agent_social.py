@@ -18,6 +18,12 @@ class AgentSocialSkillTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.project_root = Path(__file__).resolve().parents[2]
 
+    def setUp(self) -> None:
+        # These tests isolate Discord decisions; real file/count checks are covered in test_media_dq.
+        image_check = patch("agentic.runtime.media_dq.check_image_contract", return_value={"passed": True})
+        image_check.start()
+        self.addCleanup(image_check.stop)
+
     def test_publish_social_blocks_when_platform_bundle_is_not_ready(self) -> None:
         tool_registry = ToolRegistry()
         invoked = {"count": 0}
@@ -213,9 +219,9 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         with patch.object(
             skills.prompt_engine,
-            "review_asset_candidates",
+            "validate_image_candidates",
             return_value={
-                "selected_assets": ["C:\\frame_a.png"],
+                "selected_assets": ["C:\\frame_a.png", "C:\\frame_b.png"],
                 "ranked_candidates": [
                     {"media_path": "C:\\frame_a.png", "score": 90, "rationale": "good"},
                     {"media_path": "C:\\frame_b.png", "score": 80, "rationale": "okay"},
@@ -337,9 +343,9 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         with patch.object(
             skills.prompt_engine,
-            "review_asset_candidates",
+            "validate_image_candidates",
             return_value={
-                "selected_assets": ["C:\\frame_a.png"],
+                "selected_assets": ["C:\\frame_a.png", "C:\\frame_b.png"],
                 "ranked_candidates": [
                     {"media_path": "C:\\frame_a.png", "score": 90, "rationale": "good"},
                     {"media_path": "C:\\frame_b.png", "score": 80, "rationale": "okay"},
@@ -534,7 +540,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertNotIn("Candidates attached", captured["text"])
         self.assertNotIn("Choose one opening frame", captured["text"])
 
-    def test_stage_probe_uses_prompt_engine_for_automatic_candidate_selection(self) -> None:
+    def test_stage_probe_checks_all_candidates_before_deterministic_selection(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests")
         candidate_paths = [f"C:\\probe_frame_{index}.png" for index in range(1, 7)]
@@ -571,7 +577,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         captured: dict[str, object] = {}
 
         class FakePromptEngine:
-            def review_asset_candidates(self, goal, media_paths, review_notes, selection_limit):
+            def validate_image_candidates(self, goal, media_paths, review_notes, selection_limit):
                 captured.update(
                     goal_prompt=goal.prompt,
                     media_paths=media_paths,
@@ -590,8 +596,8 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertEqual(result.outputs["selected_assets"], [candidate_paths[2]])
-        self.assertEqual(captured["selection_limit"], 1)
-        self.assertIn("locked mint-green straw dispenser", captured["goal_prompt"])
+        self.assertEqual(captured["selection_limit"], 6)
+        self.assertEqual(captured["goal_prompt"], plan.goal.prompt)
         self.assertTrue(result.outputs["auto_select_for_probe"])
 
     def test_final_video_review_filters_frames_and_disables_asset_picker(self) -> None:
@@ -649,7 +655,7 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         with patch.object(
             skills.prompt_engine,
-            "review_asset_candidates",
+            "validate_image_candidates",
             side_effect=AssertionError("final video review must not invoke asset shortlist LLM"),
         ), patch.object(
             skills.prompt_engine,

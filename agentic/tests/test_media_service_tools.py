@@ -79,6 +79,47 @@ class FFmpegAdapterTests(unittest.TestCase):
         self.assertIn("-map [v] -map [a]", command_text)
 
     @patch.object(FFmpegAdapter, "_run")
+    def test_normalize_video_canvas_preserves_aspect_ratio_and_audio(self, run_mock) -> None:
+        adapter = FFmpegAdapter()
+        adapter._checked = True
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.mp4"
+            output_path = Path(directory) / "output_640x360.mp4"
+            input_path.write_bytes(b"fixture")
+
+            result = adapter.normalize_video_canvas(
+                str(input_path),
+                str(output_path),
+                target_width=640,
+                target_height=360,
+            )
+
+        self.assertEqual(result, str(output_path))
+        command_text = " ".join(run_mock.call_args.args[0])
+        self.assertIn("scale=640:360:force_original_aspect_ratio=decrease", command_text)
+        self.assertIn("pad=640:360", command_text)
+        self.assertIn("setsar=1,format=yuv420p", command_text)
+        self.assertIn("-map 0:v:0 -map 0:a?", command_text)
+        self.assertIn("-shortest", command_text)
+
+    def test_normalize_video_canvas_rejects_filter_injection_in_background(self) -> None:
+        adapter = FFmpegAdapter()
+        adapter._checked = True
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.mp4"
+            output_path = Path(directory) / "output.mp4"
+            input_path.write_bytes(b"fixture")
+
+            with self.assertRaisesRegex(ValueError, "background"):
+                adapter.normalize_video_canvas(
+                    str(input_path),
+                    str(output_path),
+                    target_width=640,
+                    target_height=360,
+                    background="red,format=yuv444p",
+                )
+
+    @patch.object(FFmpegAdapter, "_run")
     def test_pad_video_to_aspect_emits_instagram_safe_audio_and_frame_rate(self, run_mock) -> None:
         adapter = FFmpegAdapter()
         adapter._checked = True
@@ -904,6 +945,88 @@ class InstagramGraphPlatformTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(events, ["post:media", "get:container-2", "get:container-2", "post:media_publish"])
         self.assertEqual(platform.last_publish_receipt["external_id"], "media-2")  # type: ignore[index]
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_publish_video_reconciles_transient_error_before_publishing(
+        self, load_config_mock, authenticate_mock
+    ) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ig_user_id = "123"
+        platform.access_token = "token"
+        platform._prepare_reel_canvas = lambda path: path  # type: ignore[method-assign]
+        platform.cloudinary = type(
+            "CloudinaryStub", (), {"upload": staticmethod(lambda _: "https://cdn.example/video.mp4")}
+        )()
+        events: list[str] = []
+
+        def response(body: dict[str, str]) -> Mock:
+            mocked = Mock()
+            mocked.json.return_value = body
+            mocked.raise_for_status.return_value = None
+            return mocked
+
+        post_responses = [response({"id": "container-3"}), response({"id": "media-3"})]
+        get_responses = [
+            response({"status_code": "ERROR", "status": "Temporary processing failure"}),
+            response({"status_code": "IN_PROGRESS", "status": "Media is still being processed"}),
+            response({"status_code": "FINISHED", "status": "Media is ready"}),
+        ]
+
+        def post_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"post:{args[0].rsplit('/', 1)[-1]}")
+            return post_responses.pop(0)
+
+        def get_side_effect(*args, **kwargs):
+            del kwargs
+            events.append(f"get:{args[0].rsplit('/', 1)[-1]}")
+            return get_responses.pop(0)
+
+        with patch("agentic.tools.social_native.requests.post", side_effect=post_side_effect), patch(
+            "agentic.tools.social_native.requests.get", side_effect=get_side_effect
+        ), patch("agentic.tools.social_native.time.sleep"):
+            result = platform._publish_video_url("sample.mp4", "caption")
+
+        self.assertTrue(result)
+        self.assertEqual(
+            events,
+            ["post:media", "get:container-3", "get:container-3", "get:container-3", "post:media_publish"],
+        )
+        self.assertEqual(platform.last_publish_receipt["external_id"], "media-3")  # type: ignore[index]
+
+    @patch.object(InstagramGraphPlatform, "authenticate")
+    @patch.object(InstagramGraphPlatform, "load_config")
+    def test_publish_video_reports_last_container_status(
+        self, load_config_mock, authenticate_mock
+    ) -> None:
+        del load_config_mock, authenticate_mock
+        platform = InstagramGraphPlatform("configs/social_media/credentials/kirby")
+        platform.ig_user_id = "123"
+        platform.access_token = "token"
+        platform._prepare_reel_canvas = lambda path: path  # type: ignore[method-assign]
+        platform.cloudinary = type(
+            "CloudinaryStub", (), {"upload": staticmethod(lambda _: "https://cdn.example/video.mp4")}
+        )()
+
+        response = Mock()
+        response.json.return_value = {
+            "status_code": "EXPIRED",
+            "status": "Expired: the container is no longer available",
+        }
+        response.raise_for_status.return_value = None
+        with patch(
+            "agentic.tools.social_native.requests.post", return_value=Mock(
+                json=Mock(return_value={"id": "container-4"}),
+                raise_for_status=Mock(return_value=None),
+            )
+        ), patch("agentic.tools.social_native.requests.get", return_value=response):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"container-4 .*status_code=EXPIRED status=Expired: the container is no longer available",
+            ):
+                platform._publish_video_url("sample.mp4", "caption")
 
     @patch.object(InstagramGraphPlatform, "authenticate")
     @patch.object(InstagramGraphPlatform, "load_config")

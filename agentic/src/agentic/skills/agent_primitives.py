@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from agentic.runtime.media_dq import expected_subject_count
+
 import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 
-from agentic.assets.kirby_input import assert_kirby_input, inspect_kirby_input
+from agentic.assets.image_input import assert_image_input, inspect_image_input
 from agentic.minimax_prompting import subject_identity_lock
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
@@ -13,6 +15,7 @@ from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.story_cards import (
     STORY_CARD_DEFAULT_HEIGHT,
     STORY_CARD_DEFAULT_WIDTH,
+    new_story_card_visual_seed,
     render_story_card_images,
     story_card_visual_beat,
     validate_story_card_payload,
@@ -197,6 +200,18 @@ class AgentPlanningSkills:
                 "prompt_mode": str(prompt_bundle.get("prompt_mode", "template")),
             },
             logs=["Prepared an animated sticker motion prompt from the rendered sticker batch."],
+        )
+
+    def build_dynamic_sprite_motion_plan(self, context: SkillContext) -> SkillResult:
+        plan = self.prompt_engine.build_dynamic_sprite_motion_plan(context.plan.goal)
+        frame_map = list(plan.get("frame_map") or [])
+        if len(frame_map) != 16:
+            raise ValueError("Dynamic sprite motion plan must contain exactly sixteen frame-map entries")
+        return SkillResult(
+            status="success",
+            outputs=plan,
+            metrics={"frame_count": len(frame_map)},
+            logs=[f"Generated open-ended sprite motion plan '{plan.get('motion_name', '')}'."],
         )
 
     def build_slide_prompt_set(self, context: SkillContext) -> SkillResult:
@@ -474,9 +489,8 @@ class AgentMediaSkills:
                 reports = [
                     (
                         path,
-                        inspect_kirby_input(
+                        inspect_image_input(
                             path,
-                            allow_declared_subject_pair=interaction_required,
                         ),
                     )
                     for path in candidate_paths
@@ -576,10 +590,8 @@ class AgentMediaSkills:
                             "validation": "human_selected_immutable",
                         }
                     elif character == "kirby":
-                        report = assert_kirby_input(
+                        report = assert_image_input(
                             frame_path,
-                            allow_external=False,
-                            allow_declared_subject_pair=interaction_required,
                         ).to_dict()
                     else:
                         report = {"path": frame_path, "passed": Path(frame_path).is_file()}
@@ -591,7 +603,7 @@ class AgentMediaSkills:
                 except (OSError, ValueError) as exc:
                     last_error = str(exc)
                     if attempt >= int(context.node.inputs.get("max_regenerations", 0)):
-                        raise ValueError(f"{label} character continuity gate failed after {attempt} regenerations: {last_error}") from exc
+                        raise ValueError(f"{label} image input gate failed after {attempt} regenerations: {last_error}") from exc
                     prompt = self._resolve_prompt_with_identity_lock(
                         context,
                         str(story.get(prompt_key) or context.plan.goal.prompt),
@@ -633,7 +645,7 @@ class AgentMediaSkills:
         frame_node = str(context.node.inputs.get("frame_node") or context.node.depends_on[0])
         frame_path = self._first_output_path(context.state.node_outputs.get(frame_node, {}))
         if not frame_path:
-            raise ValueError("Native H3 L2VA continuity gate requires a last-frame output")
+            raise ValueError("Native H3 L2VA input gate requires a last-frame output")
         if not Path(frame_path).is_file():
             raise ValueError(f"Native H3 L2VA last-frame file is missing: {frame_path}")
 
@@ -654,10 +666,8 @@ class AgentMediaSkills:
                 "validation": "human_selected_immutable",
             }
         elif character == "kirby":
-            report = assert_kirby_input(
+            report = assert_image_input(
                 frame_path,
-                allow_external=False,
-                allow_declared_subject_pair=interaction_required,
             ).to_dict()
         else:
             report = {"path": frame_path, "passed": True, "validation": "file_exists"}
@@ -721,6 +731,8 @@ class AgentMediaSkills:
             )
         elif workflow_name.startswith("minimax_h3_") and context.node.inputs.get("length") is not None:
             payload["length"] = int(context.node.inputs["length"])
+        if workflow_name.startswith("minimax_h3_") and context.node.inputs.get("steps") is not None:
+            payload["steps"] = int(context.node.inputs["steps"])
         result = self.tools.call(
             "comfy.workflow.image_to_video",
             payload,
@@ -804,7 +816,10 @@ class AgentMediaSkills:
         profile = context.plan.goal.constraints.get("character_profile")
         visual_config = context.plan.goal.constraints.get("story_card_visual")
         seed_value = context.plan.goal.constraints.get("seed")
-        seed_base = int(seed_value) if seed_value is not None else 17041
+        if seed_value is not None:
+            seed_base = int(seed_value)
+        else:
+            seed_base = int(story.get("visual_seed") or new_story_card_visual_seed())
         for index, page in enumerate(story["pages"], start=1):
             page_dir = run_dir / f"page_{index:02d}"
             background_prompt = str(page["background_prompt"])
@@ -855,6 +870,7 @@ class AgentMediaSkills:
                 "style_anchor_prompt": story["anchor_prompt"],
                 "background_paths": background_paths,
                 "page_runs": page_runs,
+                "visual_seed": seed_base,
             },
             metrics={"background_count": len(background_paths)},
             logs=[f"Rendered {len(background_paths)} style-locked text-to-image page backgrounds."],
@@ -977,6 +993,36 @@ class AgentMediaSkills:
             logs=[f"Rendered final video at {speed:g}x playback speed."],
         )
 
+    def normalize_video_canvas(self, context: SkillContext) -> SkillResult:
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "video_canvas")
+        video_dir = run_dir / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        video_path = str(
+            context.node.inputs.get("video_path")
+            or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
+            or ""
+        )
+        if not video_path:
+            raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
+        width = int(context.node.inputs["target_width"])
+        height = int(context.node.inputs["target_height"])
+        result = self.tools.call(
+            "media.normalize_video_canvas",
+            {
+                "video_path": video_path,
+                "output_path": str(video_dir / f"{Path(video_path).stem}_{width}x{height}.mp4"),
+                "target_width": width,
+                "target_height": height,
+                "background": str(context.node.inputs.get("background", "#15151f")),
+            },
+        )
+        return SkillResult(
+            status="success",
+            outputs=result,
+            metrics={"width": width, "height": height},
+            logs=[f"Normalized final video canvas to {width}x{height} without changing its aspect ratio."],
+        )
+
     def trim_video(self, context: SkillContext) -> SkillResult:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "video_trim")
         video_dir = run_dir / "video"
@@ -1063,58 +1109,22 @@ class AgentMediaSkills:
         }
         result = self.tools.call("media.video_qa", payload)
         passed = bool(result.get("passed", False))
-        semantic_required = bool(context.node.inputs.get("semantic_qa_required", False))
-        if semantic_required:
-            contact_sheet_path = str(result.get("contact_sheet_path") or payload["contact_sheet_path"])
-            idea_output = context.state.node_outputs.get("idea-brief", {})
-            reference_analysis = context.state.node_outputs.get("reference-video-analysis", {})
-            reference_structure = (
-                reference_analysis.get("structure_analysis", {})
-                if isinstance(reference_analysis, dict)
-                else {}
-            )
-            reference_guidance = (
-                reference_analysis.get("replication_guidance", {})
-                if isinstance(reference_analysis, dict)
-                else {}
-            )
-            semantic = self.prompt_engine.evaluate_video_contact_sheet(
-                contact_sheet_path=contact_sheet_path,
-                character=str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or ""),
-                subject_context=dict(context.node.inputs.get("subject_context") or {}),
-                story_spine={
-                    "goal": context.plan.goal.prompt,
-                    "profile": str(context.node.inputs.get("semantic_qa_profile") or ""),
-                    "reference_structure": reference_structure,
-                    "reference_guidance": reference_guidance,
-                },
-                native_shots=[],
-                news_context={},
-                rendered_prompt=str(
-                    idea_output.get("prompt")
-                    or idea_output.get("creative_brief")
-                    or context.plan.goal.prompt
-                )
-                if isinstance(idea_output, dict)
-                else context.plan.goal.prompt,
-                duration_seconds=context.plan.goal.duration_seconds,
-                contract_profile=str(context.node.inputs.get("semantic_qa_profile") or ""),
-            )
-            result["semantic_qa"] = semantic
-            result["semantic_qa_required"] = True
+        subject_count = self.prompt_engine.evaluate_media_subjects(
+            image_path=str(result.get("contact_sheet_path") or payload["contact_sheet_path"]),
+            expected_count=expected_subject_count(context.plan.goal.constraints),
+            frame_count=payload["frame_count"],
+        ) if passed else {"required": False, "passed": False, "status": "not_run"}
+        result["subject_count"] = subject_count
+        passed = passed and subject_count["passed"] is True
+        result["passed"] = passed
         return SkillResult(
             status="success" if passed else "failed",
             outputs=result,
             metrics={
                 "passed": passed,
                 "duration": result.get("duration", 0),
-                "semantic_qa_enabled": int(semantic_required),
-                "semantic_qa_passed": int(
-                    isinstance(result.get("semantic_qa"), dict)
-                    and result["semantic_qa"].get("passed") is True
-                ),
             },
-            logs=["Technical video QA passed." if passed else "Technical video QA failed."],
+            logs=["Hard video checks passed." if passed else "Hard video checks failed."],
         )
 
     def extract_last_frame(self, context: SkillContext) -> SkillResult:
@@ -1190,9 +1200,6 @@ class AgentMediaSkills:
                 "rejected_assets": review_outputs.get("rejected_assets", []),
                 "rejected_asset_details": review_outputs.get("rejected_asset_details", []),
                 "selection_rationale": review_outputs.get("selection_rationale", ""),
-                "failure_tags": review_outputs.get("failure_tags", []),
-                "retry_direction": review_outputs.get("retry_direction", ""),
-                "retry_intensity": review_outputs.get("retry_intensity", ""),
             },
             "prompt_lineage": self._collect_prompt_lineage(context),
             "node_prompt_modes": self._collect_node_prompt_modes(context),
@@ -1273,6 +1280,78 @@ class AgentMediaSkills:
             },
             metrics={"slide_count": len(items)},
             logs=["Packaged carousel outputs for downstream agent use."],
+        )
+
+    def package_game_sprite_outputs(self, context: SkillContext) -> SkillResult:
+        motion_node = str(context.node.inputs.get("motion_node") or "sprite-motion-plan")
+        video_node = str(context.node.inputs.get("video_node") or "sprite-motion-video")
+        image_node = str(context.node.inputs.get("image_node") or "sprite-master-image")
+        motion_plan = context.state.node_outputs.get(motion_node, {})
+        video_output = context.state.node_outputs.get(video_node, {})
+        image_output = context.state.node_outputs.get(image_node, {})
+        if not isinstance(motion_plan, dict) or not isinstance(video_output, dict):
+            raise RuntimeError("Game sprite packaging requires motion-plan and video outputs")
+
+        video_paths = [
+            str(path)
+            for path in video_output.get("saved_files", [])
+            if Path(str(path)).suffix.lower() in {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
+        ]
+        video_path = video_paths[0] if video_paths else str(video_output.get("video_path") or "")
+        if not video_path:
+            raise RuntimeError("Game sprite packaging could not resolve a generated motion video")
+
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "game_sprite")
+        result = self.tools.call(
+            "media.video_to_sprite",
+            {
+                "video_path": video_path,
+                "output_dir": str(run_dir),
+                "cell_width": int(context.node.inputs.get("cell_width", 64)),
+                "cell_height": int(context.node.inputs.get("cell_height", 64)),
+                "fps": float(context.node.inputs.get("fps", motion_plan.get("fps", 12))),
+                "loop": str(motion_plan.get("animation_kind") or "periodic") == "periodic",
+                "key_color": motion_plan.get("chroma_color", "magenta"),
+                "chroma_threshold": int(motion_plan.get("chroma_threshold", 52)),
+                "frame_map": motion_plan.get("frame_map", []),
+            },
+        )
+        image_paths = [
+            str(path)
+            for path in image_output.get("saved_files", [])
+            if Path(str(path)).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        ] if isinstance(image_output, dict) else []
+        summary_path = run_dir / "game_sprite_summary.json"
+        summary = {
+            "asset_kind": "game_sprite",
+            "goal": context.plan.goal.prompt,
+            "style": context.plan.goal.style,
+            "motion_plan": motion_plan,
+            "master_image_path": image_paths[0] if image_paths else "",
+            "source_video": video_path,
+            "outputs": result,
+            "prompt_lineage": self._collect_prompt_lineage(context),
+            "node_prompt_modes": self._collect_node_prompt_modes(context),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        saved_files = [str(summary_path), video_path, *[str(item) for item in result.get("saved_files", [])]]
+        if image_paths:
+            saved_files.insert(1, image_paths[0])
+        saved_files = list(dict.fromkeys(path for path in saved_files if path))
+        return SkillResult(
+            status="success",
+            outputs={
+                **result,
+                "video_path": video_path,
+                "master_image_path": image_paths[0] if image_paths else "",
+                "summary_path": str(summary_path),
+                "saved_files": saved_files,
+                "motion_plan": motion_plan,
+                "prompt_lineage": summary["prompt_lineage"],
+                "node_prompt_modes": summary["node_prompt_modes"],
+            },
+            metrics={"frame_count": len(result.get("frame_paths", []))},
+            logs=["Packaged an automatically generated dynamic motion into a transparent 4x4 game sprite atlas."],
         )
 
     def package_animated_sticker_outputs(self, context: SkillContext) -> SkillResult:
@@ -1440,6 +1519,7 @@ def register_agent_primitive_skills(
     skill_registry.register("agent.sticker.expressions", planning.generate_sticker_expressions, "Generate sticker expression ideas")
     skill_registry.register("agent.sticker.prompt_set", planning.build_sticker_prompt_set, "Build sticker prompt sets")
     skill_registry.register("agent.sticker.motion_prompt", planning.build_sticker_motion_prompt, "Build an animated sticker motion prompt")
+    skill_registry.register("agent.sprite.motion_plan", planning.build_dynamic_sprite_motion_plan, "Generate an open-ended game sprite motion plan")
     skill_registry.register("agent.carousel.prompt_set", planning.build_slide_prompt_set, "Build carousel slide prompt sets")
     skill_registry.register("agent.story_card.write", planning.write_story_card, "Write a dedicated story-card article")
     skill_registry.register("media.ensure_workflow", media.ensure_workflow, "Check workflow assets for any agent step")
@@ -1456,6 +1536,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
     skill_registry.register("media.video.change_speed", media.change_video_speed, "Change final video playback speed")
+    skill_registry.register("media.video.normalize_canvas", media.normalize_video_canvas, "Normalize a final video to the requested canvas")
     skill_registry.register("media.video.trim", media.trim_video, "Trim final video to the requested duration")
     skill_registry.register("media.video.merge_audio", media.merge_audio_video, "Mux audio and video as an agent media primitive")
     skill_registry.register("media.video.gif_preview", media.video_to_gif, "Create a GIF preview as an agent media primitive")
@@ -1463,6 +1544,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.video.extract_last_frame", media.extract_last_frame, "Extract the last frame as an agent media primitive")
     skill_registry.register("agent.sticker.package", media.package_sticker_outputs, "Package sticker artifacts for downstream agent use")
     skill_registry.register("agent.sticker.animate.package", media.package_animated_sticker_outputs, "Package animated sticker artifacts for downstream agent use")
+    skill_registry.register("agent.sprite.package", media.package_game_sprite_outputs, "Package dynamic game sprite artifacts")
     skill_registry.register("agent.carousel.package", media.package_carousel_outputs, "Package carousel artifacts for downstream agent use")
     skill_registry.register("agent.output.collect", media.collect_outputs, "Collect upstream artifacts for downstream agent steps")
     skill_registry.register("agent.summary.persist", media.persist_workflow_summary, "Persist a structured workflow summary artifact")

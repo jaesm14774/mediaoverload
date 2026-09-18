@@ -49,7 +49,7 @@ python scripts/verify_h3_e2e_outputs.py
 
 The P2 gate checks file existence, video stream, exact 608x352 canvas, 24 fps,
 target duration, native generated audio, stereo channels, audio/video duration
-alignment, mean loudness, peak clipping, sustained silence, and a contact
-sheet for visual inspection. The production Kirby recipes enable the same
-audio checks through `native_h3_recipe`; human review remains separate from
-the technical gate.
+alignment, and a contact sheet for visual inspection. Loudness and silence
+measurements are recorded; they block only when explicit numeric limits are
+supplied. The production recipes enable audio measurements through
+`native_h3_recipe`; Discord owns subjective quality decisions.

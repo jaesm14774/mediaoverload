@@ -18,6 +18,7 @@ routing:
     # - text2image2image
     - sticker_pack
     - story_card
+    - game_sprite
 
   # Image-conditioned routes use a human-reviewed image gate before video
   # render. Pure T2V routes remain prompt-only. Ref2VA may bind several
@@ -79,6 +80,196 @@ routing:
       minimax_h3_lowvram_15s_fl2va_i2v: 3
       minimax_h3_ref2va: 2
       minimax_h3_native_t2v: 1
+
+  # Optional LLM inspiration belongs to the strategy contract, not to a
+  # character config or a separate runtime registry. The motion planner may
+  # sample these notes per request; it never assigns, persists, or validates
+  # character abilities against them.
+  strategy_contexts:
+    game_sprite:
+      reference_pack_version: game_sprite_action_references_v1
+      visual_contract: >-
+        Crisp 2D pixel-art game asset: hard pixel clusters, a limited readable
+        palette, clean silhouette edges, deliberate pose exaggeration, and
+        nearest-neighbor-friendly shapes; never painterly, photoreal, tabletop,
+        soft 3D, or cinematic concept art.
+      creative_inspiration:
+        - id: celeste-air-momentum
+          source: Celeste
+          source_url: https://store.steampowered.com/app/504230/Celeste/
+          inspiration: >-
+            A limited directional burst can be readable when anticipation,
+            travel, braking, and recovery each change the silhouette; walls
+            can become a reason to redirect momentum rather than a static
+            backdrop.
+        - id: celeste-climb-redirection
+          source: Celeste
+          source_url: https://store.steampowered.com/app/504230/Celeste/
+          inspiration: >-
+            A movement sequence can alternate between contact, cling, push-off,
+            and mid-air correction, making the next direction visibly caused by
+            the previous contact.
+        - id: dead-cells-roll-counter
+          source: Dead Cells
+          source_url: https://store.steampowered.com/app/588650/Dead_Cells/
+          inspiration: >-
+            A defensive roll becomes expressive when the character passes
+            through danger, emerges on a new line, and immediately converts
+            the saved momentum into a counter-movement.
+        - id: dead-cells-skill-recoil
+          source: Dead Cells
+          source_url: https://store.steampowered.com/app/588650/Dead_Cells/
+          inspiration: >-
+            A compact tool or deployable effect can change the subject's
+            timing: place it, react to its result, then use the opening it
+            creates instead of stacking unrelated effects.
+        - id: hollow-knight-dive-rebound
+          source: Hollow Knight
+          source_url: https://store.steampowered.com/app/367520/Hollow_Knight/
+          inspiration: >-
+            A descending strike can create a strong vertical arc: suspension,
+            plunge, contact, rebound, and a brief grounded recovery all read
+            as one action.
+        - id: hollow-knight-dash-through
+          source: Hollow Knight
+          source_url: https://store.steampowered.com/app/367520/Hollow_Knight/
+          inspiration: >-
+            A fast pass-through works best when the entry line, crossing
+            moment, exit spacing, and turn-back decision remain visible in the
+            silhouette.
+        - id: shovel-knight-pogo
+          source: "Shovel Knight: Treasure Trove"
+          source_url: https://store.steampowered.com/app/250760/Shovel_Knight_Treasure_Trove/
+          inspiration: >-
+            A downward contact can become a spring-like traversal beat without
+            changing the character into a spring: impact compresses the pose,
+            then the same contact launches a new arc.
+        - id: shovel-knight-charge-release
+          source: "Shovel Knight: Treasure Trove"
+          source_url: https://store.steampowered.com/app/250760/Shovel_Knight_Treasure_Trove/
+          inspiration: >-
+            A held wind-up followed by a committed release gives a short clip
+            contrast between restraint, stored force, extension, and a physical
+            follow-through.
+        - id: pizza-tower-sprint-chain
+          source: Pizza Tower
+          source_url: https://store.steampowered.com/app/2231450/Pizza_Tower/
+          inspiration: >-
+            Acceleration can visibly build across several steps, then turn into
+            a wall run, skid, crash, or sudden direction change whose
+            consequence determines the ending pose.
+        - id: pizza-tower-grab-throw
+          source: Pizza Tower
+          source_url: https://store.steampowered.com/app/2231450/Pizza_Tower/
+          inspiration: >-
+            A separate prop or target can be approached, seized, carried
+            briefly, and released; the character's balance should react to the
+            changing load while the prop stays independent.
+        - id: katana-zero-time-beat
+          source: Katana ZERO
+          source_url: https://store.steampowered.com/app/460950/Katana_ZERO/
+          inspiration: >-
+            A sharp action can use a deliberate pause before commitment, then
+            a compact burst and a quiet return; the contrast comes from timing
+            and body control rather than extra visual effects.
+        - id: katana-zero-object-throw
+          source: Katana ZERO
+          source_url: https://store.steampowered.com/app/460950/Katana_ZERO/
+          inspiration: >-
+            A grabbed object can redirect the action: reach, pivot, throw along
+            a readable line, watch the result, and let the reaction determine
+            the final pose.
+        - id: hyper-light-drifter-dash-strike
+          source: Hyper Light Drifter
+          source_url: https://store.steampowered.com/app/257850/Hyper_Light_Drifter/
+          inspiration: >-
+            A diagonal burst paired with a close-range hit gives a strong
+            slash-shaped trajectory, with a visible landing or slide that
+            explains where the subject ends.
+        - id: hyper-light-drifter-charge-release
+          source: Hyper Light Drifter
+          source_url: https://store.steampowered.com/app/257850/Hyper_Light_Drifter/
+          inspiration: >-
+            A charged ranged action can make the body act as a counterweight:
+            gather energy, brace, release, then absorb the recoil or chase the
+            released force.
+        - id: spelunky-whip-interaction
+          source: Spelunky
+          source_url: https://store.steampowered.com/app/239350/Spelunky/
+          inspiration: >-
+            A long tool creates a readable extension of reach: test distance,
+            snap toward a separate object, pull or deflect it, then react to
+            the altered spacing.
+        - id: spelunky-rope-commitment
+          source: Spelunky
+          source_url: https://store.steampowered.com/app/239350/Spelunky/
+          inspiration: >-
+            A traversal aid can be thrown first and used second; the visual
+            story comes from committing to the new route and the body hanging,
+            climbing, or swinging from it.
+        - id: metroid-dread-dash-melee
+          source: Metroid Dread
+          source_url: https://metroid.nintendo.com/dread/news/metroid-dread-report-vol-9/
+          inspiration: >-
+            A defensive movement can become an attack at the moment of
+            contact: evade, reverse direction, meet the threat, and let the
+            impact carry the subject into recovery.
+        - id: metroid-dread-slide-counter
+          source: Metroid Dread
+          source_url: https://metroid.nintendo.com/dread/news/metroid-dread-report-vol-9/
+          inspiration: >-
+            A low slide can create a distinct lower-body silhouette, then flow
+            into a rise, turn, or counter instead of returning immediately to a
+            neutral stance.
+        - id: broforce-recoil-launch
+          source: Broforce
+          source_url: https://store.steampowered.com/app/274190/Broforce/
+          inspiration: >-
+            The force of a tool can move the user as much as the target: fire
+            or strike, show recoil, travel with that recoil, and land in a new
+            physical situation.
+        - id: enter-the-gungeon-dodge-roll
+          source: Enter the Gungeon
+          source_url: https://store.steampowered.com/app/311690/Enter_the_Gungeon/
+          inspiration: >-
+            A roll can be a compact punctuation mark between two decisions: the
+            subject lowers, clears a threat, changes facing, and resumes with a
+            different line of attack or escape.
+        - id: the-messenger-cloudstep
+          source: The Messenger
+          source_url: https://store.steampowered.com/app/764790/The_Messenger/
+          inspiration: >-
+            A brief contact with an airborne object can reset vertical momentum
+            and produce a chained ascent, with each bounce visibly caused by
+            the previous touch.
+        - id: cave-story-charge-shot
+          source: Cave Story+
+          source_url: https://store.steampowered.com/app/200900/Cave_Story/
+          inspiration: >-
+            A held ranged action can be expressed through growing body tension,
+            a focused release, and a small recoil or pursuit that gives the
+            projectile a physical consequence.
+        - id: iconoclasts-tool-combo
+          source: Iconoclasts
+          source_url: https://store.steampowered.com/app/393520/Iconoclasts/
+          inspiration: >-
+            A tool can serve two adjacent purposes in one beat: make contact,
+            alter position or orientation, then immediately use the changed
+            geometry to continue moving.
+        - id: freedom-planet-boost-return
+          source: Freedom Planet 2
+          source_url: https://store.steampowered.com/app/595500/Freedom_Planet_2/
+          inspiration: >-
+            A high-speed rush is more readable when the entry acceleration,
+            sustained line, interruption, and return path are distinct,
+            allowing the endpoint to be caused by the interruption.
+        - id: terraria-grapple-swing
+          source: Terraria
+          source_url: https://store.steampowered.com/app/105600/Terraria/
+          inspiration: >-
+            A tether changes movement from a straight path into an arc: reach,
+            attach, swing or pull, release at a chosen angle, and let the
+            landing settle the action.
 
   workflow_stage_candidates:
     # Writing-first route. Kirby's character YAML gives it an explicit
@@ -202,6 +393,13 @@ routing:
         - z_image_plus_nova_model
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
+      video_workflow_name:
+        - minimax_h3_lowvram_i2v
+    # Additive game asset route. Its stage contract is separate from the
+    # existing strategies while the route remains available to selection.
+    game_sprite:
+      image_workflow_name:
+        - krea2_turbo
       video_workflow_name:
         - minimax_h3_lowvram_i2v
 
@@ -423,6 +621,16 @@ routing:
       images_per_prompt:
         min: 1
         max: 4
+    game_sprite:
+      image_count:
+        min: 1
+        max: 1
+      video_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
 
   routing_hints:
     runtime_context_schema:
@@ -469,6 +677,9 @@ routing:
         video_workflow_name: "Required native H3 Ref2VA stage. It receives only the references explicitly selected by the user in Discord; reference audio is forbidden."
       sticker_pack:
         image_workflow_name: "Required batch image stage. Generate the configured expression candidates with transparent-background and sticker-safe composition rules. The sticker_pack planner ends after packaging; any optional video candidate belongs to the separate explicit animated_sticker route."
+      game_sprite:
+        image_workflow_name: "Required Krea source-image stage for one generated game subject; the output is a single subject on a sprite-safe background, not a storyboard or action sheet."
+        video_workflow_name: "Required H3 I2V stage for one continuous generated motion; the clip is sampled into a fixed 4x4 atlas after rendering."
     strategy_preferences:
       sticker_pack:
         - sticker

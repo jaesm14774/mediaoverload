@@ -185,14 +185,14 @@ class FFmpegAdapter:
         columns = max(1, min(int(columns), frame_count))
         rows = max(1, (frame_count + columns - 1) // columns)
         duration = float(duration_seconds or 0.0)
-        interval = max(0.5, (duration if duration > 0 else 15.0) / frame_count)
+        interval = (duration if duration > 0 else 15.0) / frame_count
         self._run(
             [
                 "ffmpeg",
                 "-i",
                 video_path,
                 "-vf",
-                f"fps=1/{interval:.3f},scale={int(scale_width)}:-2,tile={columns}x{rows}",
+                f"fps=1/{interval:.9f},scale={int(scale_width)}:-2,tile={columns}x{rows}:nb_frames={frame_count}",
                 "-frames:v",
                 "1",
                 "-q:v",
@@ -272,6 +272,60 @@ class FFmpegAdapter:
             ]
         )
         self._run(command)
+        return output_path
+
+    def normalize_video_canvas(
+        self,
+        video_path: str,
+        output_path: str,
+        *,
+        target_width: int,
+        target_height: int,
+        background: str = "#15151f",
+    ) -> str:
+        """Fit a video inside an exact canvas while preserving its aspect ratio and FPS."""
+
+        self._ensure_binaries()
+        width = int(target_width)
+        height = int(target_height)
+        if width <= 0 or height <= 0:
+            raise ValueError("target_width and target_height must be greater than zero")
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?", str(background)):
+            raise ValueError("background must be a six- or eight-digit hex color")
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"Input video does not exist: {video_path}")
+        self._ensure_parent(output_path)
+        if os.path.abspath(video_path) == os.path.abspath(output_path):
+            raise ValueError("output_path must be different from video_path")
+
+        self._run(
+            [
+                "ffmpeg",
+                "-i",
+                video_path,
+                "-vf",
+                (
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background},"
+                    "setsar=1,format=yuv420p"
+                ),
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                "-shortest",
+                "-y",
+                output_path,
+            ]
+        )
         return output_path
 
     def trim_video(

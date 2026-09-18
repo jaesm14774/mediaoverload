@@ -157,10 +157,6 @@ class OpenCutEditAdapter:
             "schema_version": 1,
             "renderer": "mediaoverload.ffmpeg.opencut_edit",
             "plan": canonical_plan.to_dict(),
-            "creative_review": {
-                "required": canonical_plan.profile == "editorial_kinetic_v1",
-                "status": "unreviewed",
-            },
             "sources": source_records,
             "output": {"path": str(output), "sha256": self._sha256(output), "probe": output_probe},
             "render_metrics": {
@@ -179,7 +175,6 @@ class OpenCutEditAdapter:
             "manifest_path": str(manifest_file),
             "contact_sheet_path": str(contact_file) if contact_file else "",
             "review_evidence_paths": evidence_paths,
-            "creative_review_required": canonical_plan.profile == "editorial_kinetic_v1",
             "plan": canonical_plan.to_dict(),
             "probe": output_probe,
             "source_records": source_records,
@@ -192,7 +187,6 @@ class OpenCutEditAdapter:
         output_path: str,
         manifest_path: str | None = None,
         contact_sheet_path: str | None = None,
-        creative_review: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Copy a selected candidate to the caller's requested artifact paths."""
 
@@ -239,8 +233,6 @@ class OpenCutEditAdapter:
             "sha256": self._sha256(output),
             "probe": final_probe,
         }
-        if creative_review is not None:
-            manifest_data["creative_review"] = creative_review
         self._write_json_atomic(manifest_file, manifest_data)
 
         if contact_file:
@@ -255,8 +247,6 @@ class OpenCutEditAdapter:
                 "probe": final_probe,
             }
         )
-        if creative_review is not None:
-            materialized["creative_review"] = creative_review
         return materialized
 
     def _write_json_atomic(self, path: Path, payload: dict[str, object]) -> None:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agentic.assets.registry import AssetRegistry
-from agentic.assets.kirby_input import assert_kirby_input
+from agentic.assets.image_input import assert_image_input
 from agentic.assets.minimax_h3 import minimax_h3_model_overrides
 from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
 from agentic.runtime.registry import ToolRegistry
@@ -19,14 +19,6 @@ from agentic.tools.comfy_adapter import ComfyAdapter
 
 
 MAX_REFERENCE_IMAGE_SLOTS = 9
-
-
-def _payload_requires_declared_subject_pair(payload: dict[str, Any]) -> bool:
-    context = payload.get("subject_context")
-    if not isinstance(context, dict):
-        return False
-    contract = context.get("interaction_contract")
-    return bool(isinstance(contract, dict) and contract.get("required", False))
 
 
 MAX_REFERENCE_VIDEO_SLOTS = 3
@@ -296,21 +288,11 @@ class ComfyWorkflowToolset:
 
         image_path = payload.get("image_path") or payload.get("input_image_path")
         requested_workflow = str(payload.get("workflow_name") or spec.workflow_name)
-        generic_to_h3 = {
-            "anchor_first": "i2va",
-            "anchor_first_last": "fl2va",
-            "anchor_last": "l2va",
-            "reference_bundle": "ref2va",
-        }
-        normalized_h3_mode = generic_to_h3.get(str(payload.get("h3_mode") or ""), str(payload.get("h3_mode") or "")).strip().lower()
         if image_path and spec.name == "comfy.workflow.image_to_video" and requested_workflow.startswith("minimax_h3_"):
             prompt_text = str(payload.get("prompt") or "").lower()
             if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
-                assert_kirby_input(
+                assert_image_input(
                     image_path,
-                    allow_external=bool(payload.get("allow_external_reference", False)),
-                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or normalized_h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
-                    allow_declared_subject_pair=_payload_requires_declared_subject_pair(payload),
                 )
         image_binding = spec.image_binding
         if image_path and requested_workflow.endswith("_15s_fl2va_i2v") and image_binding:
@@ -332,11 +314,8 @@ class ComfyWorkflowToolset:
         if last_image_path and spec.last_image_binding and requested_workflow.startswith("minimax_h3_"):
             prompt_text = str(payload.get("prompt") or "").lower()
             if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
-                assert_kirby_input(
+                assert_image_input(
                     last_image_path,
-                    allow_external=bool(payload.get("allow_external_reference", False)),
-                    allow_multipanel=requested_workflow == "minimax_h3_ref2va" or normalized_h3_mode in {"ref2va", "reference_to_video", "native_h3_ref2va"},
-                    allow_declared_subject_pair=_payload_requires_declared_subject_pair(payload),
                 )
             last_image_filename = generator.upload_image(str(last_image_path))
             updates.append(self._binding_update(spec.last_image_binding, last_image_filename, str(workflow_path)))

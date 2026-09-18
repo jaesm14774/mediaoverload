@@ -33,8 +33,7 @@ logs/
 
 # 暫存文件
 tmp/
-temp/ 
-.cursor/
+temp/
 .claude/
 .ipynb_checkpoints/
 .pytest_cache/
@@ -45,4 +44,3 @@ dmypy.json
 .spyderproject
 .spyproject
 .ropeproject
-.pytest_cache/

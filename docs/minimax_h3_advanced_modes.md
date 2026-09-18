@@ -21,7 +21,7 @@ L2VA 是 FL2VA workflow 的明確變形，不是把一張「ending image」誤�
 2. 人工 review（預設開啟）。
 3. `media.image.validate_last_frame` 驗證檔案並固定 selected asset。
 4. Comfy binding 清掉 `MiniMaxH3ImageToVideo.first_frame`，只保留 `last_frame`。
-5. 完成同一套 technical QA、semantic QA、GIF preview、package。
+5. 完成同一套 technical QA、明確指定的人物數檢查、GIF preview、package。
 
 執行：
 
@@ -61,7 +61,7 @@ manifest 會直接送入 Ref2VA；空 manifest 會自動產生六張 T2I candida
         type: image
         role: identity
         retention: identity_and_appearance
-        notes: preserve the approved pink/red silhouette and face proportions
+        notes: preserve the approved subject silhouette and face proportions for Discord review
       - path: D:/MediaOverload/references/storm_camera.mp4
         type: video
         role: camera

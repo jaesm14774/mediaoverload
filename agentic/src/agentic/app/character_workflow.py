@@ -74,6 +74,7 @@ CONFIG_MEDIA_TYPE_MAP = {
     "image2image": "image",
     "text2image2image": "text2img2img",
     "sticker_pack": "sticker_pack",
+    "game_sprite": "game_sprite",
 }
 
 
@@ -370,6 +371,9 @@ def resolve_character_selection(
         str(request.generation.preferred_generation_type or "").strip().lower() == "text2image2video"
         and bool(str(request.generation.reference_video_source or "").strip())
     )
+    game_sprite_requested = (
+        str(request.generation.preferred_generation_type or "").strip().lower() == "game_sprite"
+    )
     if story_card_requested:
         # Story cards are writing-first decorative Kirby cards. Random or
         # two-character selection adds unrelated subjects and can change the
@@ -387,13 +391,12 @@ def resolve_character_selection(
             effective_subject_mode=SUBJECT_MODE_SINGLE,
             subject_mode_weights=None,
         )
-    if reference_micro_gag_requested:
-        # A reference-derived micro-gag may borrow timing and physical grammar,
-        # but its default contract is one readable protagonist. Do not let the
-        # general Kirby config's random interaction weighting add an unrelated
-        # second subject to every I2V candidate.
+    if reference_micro_gag_requested or game_sprite_requested:
+        # Reference-derived micro-gags and game sprites use one readable
+        # protagonist. Do not let the general Kirby config's random interaction
+        # weighting add an unrelated second subject to these routes.
         configured_subject_mode = SUBJECT_MODE_SINGLE
-    if reference_micro_gag_requested:
+    if reference_micro_gag_requested or game_sprite_requested:
         subject_mode, subject_mode_weights = SUBJECT_MODE_SINGLE, None
     else:
         subject_mode, subject_mode_weights = _resolve_subject_mode(
@@ -631,6 +634,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     # it expands into the six-candidate T2I plus Discord reference gate.
     pre_video_review_enabled = bool(
         pre_video_review_config.get("enabled", False)
+        and config_generation_type != "game_sprite"
         and config_generation_type not in {"text2video", "native_h3_t2v_story"}
         and not (no_review and config_generation_type == "text2image2video")
         and (
@@ -861,6 +865,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         )
     story_card_config = dict(generation.get("story_card", {}) or {})
     story_card_visual = dict(story_card_config.get("visual") or {})
+    game_sprite_config = dict(generation.get("game_sprite", {}) or {})
     constraints = {
         "character": character_name,
         "subject_mode": subject_mode,
@@ -965,7 +970,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             if not no_review and not stage_probe
             else False
         ),
-        "native_h3_semantic_qa_required": bool(native_recipe.get("semantic_qa_required", False)),
         "reference_micro_gag_profile": "reference_micro_gag_v1" if reference_micro_gag_profile else "",
         "native_h3_creative_brief": native_h3_creative_brief,
         "native_h3_visual_style_contract": native_h3_visual_style_contract,
@@ -1003,6 +1007,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         "routing_reason": routing.get("reason", ""),
         "routing_selection_source": routing.get("selection_source", ""),
         "routing_runtime_context": dict(routing.get("routing_runtime_context", {}) or {}),
+        "strategy_context": dict(routing.get("strategy_context", {}) or {}),
         "routing_prompt_mode": routing.get("prompt_mode", ""),
         "workflow_stage_candidates": routing.get("workflow_stage_candidates", {}),
         "generation_type_candidates": routing.get("generation_type_candidates", []),
@@ -1023,6 +1028,35 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             and config_generation_type in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}
         ),
     }
+    if config_generation_type == "game_sprite":
+        requested_sprite_length = (
+            max(1, round(float(duration_seconds) * 24.0))
+            if requested_duration_seconds is not None
+            else None
+        )
+        configured_sprite_length = int(game_sprite_config.get("video_length", round(float(duration_seconds) * 24.0)))
+        constraints.update(
+            {
+                "game_sprite": game_sprite_config,
+                "sprite_source_width": int(game_sprite_config.get("source_width", 1024)),
+                "sprite_source_height": int(game_sprite_config.get("source_height", 576)),
+                "sprite_video_width": int(game_sprite_config.get("video_width", 608)),
+                "sprite_video_height": int(game_sprite_config.get("video_height", 352)),
+                "sprite_video_length": requested_sprite_length or configured_sprite_length,
+                "sprite_video_steps": int(game_sprite_config.get("video_steps", 16)),
+                "sprite_h3_model_profile": str(game_sprite_config.get("h3_model_profile", "q2")),
+                "sprite_fps": float(game_sprite_config.get("fps", 12)),
+                "sprite_chroma_color": str(game_sprite_config.get("chroma_color", "random")),
+                "sprite_chroma_threshold": int(game_sprite_config.get("chroma_threshold", 52)),
+                "sprite_cell_width": int(game_sprite_config.get("cell_width", 64)),
+                "sprite_cell_height": int(game_sprite_config.get("cell_height", 64)),
+            }
+        )
+    if "expected_subject_count" in generation:
+        count = generation["expected_subject_count"]
+        if type(count) is not int or count < 0:
+            raise ValueError("generation.expected_subject_count must be a non-negative integer")
+        constraints["expected_subject_count"] = count
     constraints.update(
         {
             "native_h3_workflow_name": str(native_recipe.get("workflow_name") or ""),
@@ -1113,6 +1147,8 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     )
     character_config_summary["subject_context"] = subject_context
     character_config_summary["creative_profile"] = creative_profile
+    if config_generation_type == "game_sprite":
+        character_config_summary["game_sprite"] = game_sprite_config
     return {
         "prompt": resolved_prompt,
         "media_type": agentic_media_type,
@@ -1279,10 +1315,19 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
     logger.info("generation.finished | status=%s", generation_result.status)
 
     publish_dict: dict[str, Any] | None = None
+    publish_gate_failure: str = ""
     if effective_publish_after_generate and generation_result.status == "success":
         media_paths = generation_media_paths
         platform_configs = payload["constraints"].get("platform_configs", {})
-        if media_paths and isinstance(platform_configs, dict) and platform_configs:
+        if not media_paths:
+            publish_gate_failure = (
+                "Final publish review was required, but generation produced no publishable media."
+            )
+        elif not isinstance(platform_configs, dict) or not platform_configs:
+            publish_gate_failure = (
+                "Final publish review was required, but no compatible publishing platform is configured."
+            )
+        else:
             logger.info("publish.start | media_count=%s | platforms=%s", len(media_paths), list(platform_configs.keys()))
             publish_prompt, publish_prompt_source = _resolve_publish_prompt(
                 generation_dict,
@@ -1295,6 +1340,15 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                 style=str(payload["style"]),
                 auto_download_assets=False,
                 constraints={
+                    **{
+                        key: payload["constraints"][key]
+                        for key in (
+                            "canvas_width", "canvas_height", "canvas_aspect_ratio",
+                            "story_card_width", "story_card_height", "source_generation_type",
+                            "expected_subject_count",
+                        )
+                        if key in payload["constraints"]
+                    },
                     "media_paths": media_paths,
                     "platforms": list(platform_configs.keys()),
                     "platform_configs": dict(platform_configs),
@@ -1363,6 +1417,14 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
             }
     failure_details = _extract_failure_details(generation_dict)
     overall_status = "success" if generation_result.status == "success" else "failed"
+    if publish_gate_failure:
+        logger.error("publish.blocked | reason=%s", publish_gate_failure)
+        overall_status = "failed"
+        failure_details = {
+            "failure_reason": publish_gate_failure,
+            "failure_node": "final-publish-gate",
+            "failure_skill": "publish.review",
+        }
     if publish_dict:
         publish_result_status = str((publish_dict.get("result") or {}).get("status") or "").lower()
         if publish_result_status not in {"success"}:
@@ -1695,9 +1757,9 @@ def _publish_stage_status(
     if generation_status != "success":
         return "not_run_generation_failed"
     if not media_paths:
-        return "skipped_no_media"
+        return "failed_missing_final_media"
     if not isinstance(platform_configs, dict) or not platform_configs:
-        return "skipped_no_compatible_platform"
+        return "failed_missing_platform_config"
     if not publish_result:
         return "not_run"
     result = publish_result.get("result") if isinstance(publish_result, dict) else None
@@ -1760,18 +1822,7 @@ def _extract_publish_visual_grounding(run_result: dict[str, Any]) -> dict[str, A
     node_outputs = state.get("node_outputs") if isinstance(state, dict) else {}
     qa = node_outputs.get("native-h3-qa") if isinstance(node_outputs, dict) else None
     contact_sheet_path = str(qa.get("contact_sheet_path") or "").strip() if isinstance(qa, dict) else ""
-    semantic_qa = qa.get("semantic_qa") if isinstance(qa, dict) else None
-    if not isinstance(semantic_qa, dict) or not semantic_qa.get("enabled"):
-        return {"contact_sheet_path": contact_sheet_path} if contact_sheet_path else {}
-    return {
-        "contact_sheet_path": contact_sheet_path,
-        "status": str(semantic_qa.get("status") or "unknown"),
-        "passed": semantic_qa.get("passed"),
-        "observed_story": str(semantic_qa.get("observed_story") or ""),
-        "caption_guidance": str(semantic_qa.get("caption_guidance") or ""),
-        "issues": [str(item) for item in (semantic_qa.get("issues") or []) if str(item)],
-        "checks": dict(semantic_qa.get("checks") or {}) if isinstance(semantic_qa.get("checks"), dict) else {},
-    }
+    return {"contact_sheet_path": contact_sheet_path} if contact_sheet_path else {}
 
 
 def _build_publish_story_context(
@@ -1995,6 +2046,7 @@ def _route_generation_from_character_config(
             "routing_runtime_context": routing_runtime_context,
             "pre_video_review": dict(merged_routing.get("pre_video_review", {}) or {}),
             "longvideo_config": dict(merged_routing.get("longvideo_config", {}) or {}),
+            "strategy_context": _strategy_context_for_route(merged_routing, selected_generation_type),
         }
 
     if preferred_generation_type:
@@ -2068,6 +2120,7 @@ def _route_generation_from_character_config(
         "routing_runtime_context": routing_runtime_context,
         "pre_video_review": dict(merged_routing.get("pre_video_review", {}) or {}),
         "longvideo_config": dict(merged_routing.get("longvideo_config", {}) or {}),
+        "strategy_context": _strategy_context_for_route(merged_routing, selected_generation_type),
     }
 
 
@@ -2187,6 +2240,19 @@ def _collect_generation_type_candidates(
     return ordered
 
 
+def _strategy_context_for_route(
+    routing_config: dict[str, Any],
+    generation_type: str,
+) -> dict[str, Any]:
+    """Return the selected strategy's runtime creative context."""
+
+    contexts = routing_config.get("strategy_contexts", {}) or {}
+    if not isinstance(contexts, dict):
+        return {}
+    context = contexts.get(generation_type, {})
+    return dict(context) if isinstance(context, dict) else {}
+
+
 def _collect_workflow_stage_candidates(
     repo_root: Path,
     generation: dict[str, Any],
@@ -2249,6 +2315,18 @@ def _collect_workflow_stage_candidates(
                 "upscale_workflow_name": [
                     _nested_get(strategy, "first_stage", "upscale_workflow_name"),
                     _nested_get(strategy, "first_stage", "upscale_workflow_path"),
+                ],
+            }
+        elif generation_type == "game_sprite":
+            sprite_config = dict(generation.get("game_sprite", {}) or {})
+            inferred = {
+                "image_workflow_name": [
+                    sprite_config.get("keyframe_workflow_name"),
+                    sprite_config.get("image_workflow_name"),
+                ],
+                "video_workflow_name": [
+                    sprite_config.get("video_workflow_name"),
+                    sprite_config.get("workflow_name"),
                 ],
             }
         elif generation_type == "text2image2image":
@@ -2609,6 +2687,7 @@ def _primary_workflow_name(generation_type: str, workflow_plan: dict[str, str]) 
         "native_h3_ref2va": ("video_workflow_name",),
         "text2image2native_h3_ref2va": ("video_workflow_name", "image_workflow_name"),
         "sticker_pack": ("image_workflow_name", "video_workflow_name"),
+        "game_sprite": ("video_workflow_name", "image_workflow_name"),
         "image2image": ("refine_workflow_name",),
     }
     for key in stage_priority.get(generation_type, ("image_workflow_name", "video_workflow_name", "refine_workflow_name")):
@@ -2626,6 +2705,8 @@ def _native_recipe_for_generation(generation: dict[str, Any], generation_type: s
         if selected:
             return selected
         return dict(generation.get("native_h3_story", {}) or {})
+    if generation_type == "game_sprite":
+        return dict(generation.get("game_sprite", {}) or {})
     return dict(generation.get("native_h3_story", {}) or {})
 
 
@@ -2662,6 +2743,10 @@ def _resolve_duration_seconds(
         # so the short-action contract is applied unless the caller opts in
         # to a different duration explicitly.
         return requested or 5
+    if config_generation_type == "game_sprite":
+        sprite_config = dict((generation or {}).get("game_sprite", {}) or {})
+        configured_duration = int(sprite_config.get("duration_seconds", 8))
+        return max(4, min(8, requested or configured_duration))
     if config_generation_type != "text2longvideo":
         return requested or 30
     configured_longvideo = dict(longvideo_config or {})
@@ -2674,7 +2759,7 @@ def _resolve_duration_seconds(
         and requested is not None
     ):
         # Production duration is an explicit user contract. Do not replace
-        # 30s/45s with the legacy routing count multiplied by one segment.
+        # The requested total duration must not be multiplied by the segment count.
         return requested
     default_duration = configured_longvideo.get("default_duration_seconds")
     if default_duration not in (None, ""):

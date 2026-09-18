@@ -213,6 +213,46 @@ class TaskPlanner:
         return node_id
 
     @staticmethod
+    def _native_h3_canvas_dimensions(goal: GoalRequest) -> tuple[int, int]:
+        recipe = dict(goal.constraints.get("native_h3_recipe") or {})
+        return (
+            int(goal.constraints.get("canvas_width") or recipe.get("width") or 608),
+            int(goal.constraints.get("canvas_height") or recipe.get("height") or 352),
+        )
+
+    @classmethod
+    def _native_h3_needs_canvas_normalization(cls, goal: GoalRequest) -> bool:
+        width, height = cls._native_h3_canvas_dimensions(goal)
+        return width % 32 != 0 or height % 32 != 0
+
+    @classmethod
+    def _append_native_h3_canvas_node(
+        cls,
+        goal: GoalRequest,
+        nodes: list[ExecutionNode],
+        *,
+        source_node: str,
+        node_id: str,
+    ) -> str:
+        width, height = cls._native_h3_canvas_dimensions(goal)
+        nodes.append(
+            ExecutionNode(
+                node_id=node_id,
+                skill_name="media.video.normalize_canvas",
+                inputs={
+                    "target_width": width,
+                    "target_height": height,
+                    "background": "#15151f",
+                },
+                depends_on=[source_node],
+                tags=["package", "video", "canvas", "native-h3"],
+                tool_name="media.normalize_video_canvas",
+                stage="package",
+            )
+        )
+        return node_id
+
+    @staticmethod
     def _native_h3_storyboard_path(goal: GoalRequest, media_type: str) -> str:
         storyboard_path = str(
             goal.constraints.get("native_h3_storyboard_path")
@@ -282,6 +322,13 @@ class TaskPlanner:
             source_node="native-h3-render",
             node_id="native-h3-speed",
         )
+        if self._native_h3_needs_canvas_normalization(goal):
+            video_node = self._append_native_h3_canvas_node(
+                goal,
+                nodes,
+                source_node=video_node,
+                node_id="native-h3-canvas",
+            )
         final_qa_inputs = dict(qa_inputs or {})
         if final_qa_inputs.get("expected_fps") in {None, ""}:
             final_qa_inputs["expected_fps"] = float(
@@ -289,9 +336,9 @@ class TaskPlanner:
             )
         final_qa_inputs = self._scaled_video_qa_inputs(goal, final_qa_inputs)
         final_qa_inputs.update({"render_node": "native-h3-render", "video_node": video_node})
-        qa_tags = ["technical-qa", "semantic-qa", "manual-review", *tags]
+        qa_tags = ["technical-qa", "hard-media-dq", "manual-review", *tags]
         preview_tags = ["preview", *tags]
-        package_dependencies = ["native-h3-render", "native-h3-qa", "native-h3-preview"]
+        package_dependencies = ["native-h3-render", video_node, "native-h3-qa", "native-h3-preview"]
         if include_keyframe_gate:
             package_dependencies.append(frame_gate_node_id)
         nodes.extend(
@@ -300,7 +347,7 @@ class TaskPlanner:
                     node_id="native-h3-qa",
                     skill_name="longvideo.qa_native_h3",
                     inputs={
-                        "mode": "technical_and_semantic_qa_before_optional_discord_review",
+                        "mode": "hard_media_checks_before_discord_review",
                         **final_qa_inputs,
                     },
                     depends_on=[video_node],
@@ -354,6 +401,8 @@ class TaskPlanner:
     def build_plan(self, goal: GoalRequest) -> ExecutionPlan:
         if goal.media_type == "publish_review":
             return self._build_publish_review_plan(goal)
+        if goal.media_type == "game_sprite":
+            return self._build_game_sprite_plan(goal)
         if goal.media_type == "animated_sticker":
             return self._build_animated_sticker_plan(goal)
         if goal.media_type == "carousel":
@@ -2409,9 +2458,6 @@ class TaskPlanner:
             qa_target_duration = compiled_drama_plan.target_duration_seconds or round(natural_duration, 3)
         else:
             qa_target_duration = float(goal.duration_seconds) if goal.duration_seconds > 0 else None
-        creative_review_max_attempts = int(goal.constraints.get("edit_creative_review_max_attempts") or 3)
-        if creative_review_max_attempts < 1 or creative_review_max_attempts > 4:
-            raise ValueError("edit_creative_review_max_attempts must be between 1 and 4")
         compose_inputs: dict[str, Any] = {
             "profile": effective_profile,
             "output_width": explicit_plan.output_width if explicit_plan else compiled_drama_plan.output_width if compiled_drama_plan else int(goal.constraints.get("edit_width") or goal.constraints.get("width") or 576),
@@ -2420,9 +2466,6 @@ class TaskPlanner:
             "target_duration_seconds": qa_target_duration,
             "variant_seed": explicit_plan.variant_seed if explicit_plan else compiled_drama_plan.variant_seed if compiled_drama_plan else int(goal.constraints.get("edit_variant_seed") or 0),
             "transition_duration_seconds": float(goal.constraints.get("edit_transition_duration") or 0.10),
-            "creative_review": bool(goal.constraints.get("edit_creative_review", False))
-            or effective_profile == "editorial_kinetic_v1",
-            "creative_review_max_attempts": creative_review_max_attempts,
             "require_audio": bool(goal.constraints.get("edit_require_audio", False)) or effective_profile != "baseline_concat",
             "require_stereo_audio": bool(goal.constraints.get("edit_require_audio", False)) or effective_profile != "baseline_concat",
             "analyze_audio": bool(goal.constraints.get("edit_analyze_audio", False)),
@@ -2698,8 +2741,6 @@ class TaskPlanner:
                     skill_name="media.video.qa",
                     inputs={
                         **self._video_qa_inputs(goal, video_manifest),
-                        "semantic_qa_required": bool(reference_micro_gag_profile),
-                        "semantic_qa_profile": reference_micro_gag_profile,
                         "character": str(goal.constraints.get("character") or ""),
                         "subject_context": dict(goal.constraints.get("subject_context") or {}),
                     },
@@ -3544,6 +3585,137 @@ class TaskPlanner:
             nodes=nodes,
             metadata=metadata,
             description=f"Agentic sticker pack chain for goal '{goal.prompt}'",
+        )
+
+    def _build_game_sprite_plan(self, goal: GoalRequest) -> ExecutionPlan:
+        """Build one fully automatic, open-ended motion-to-sprite run.
+
+        The LLM owns the motion concept. The planner owns only the technical
+        output contract: one continuous clip sampled into a 4x4 atlas.
+        """
+
+        image_manifest = self._manifest_from_goal_constraints(
+            goal,
+            *self.DEFAULT_IMAGE_WORKFLOWS,
+            constraint_keys=("image_workflow_name", "workflow_name"),
+            allowed_media_types={"image"},
+        )
+        video_manifest = self._manifest_from_goal_constraints(
+            goal,
+            *self.DEFAULT_I2V_WORKFLOWS,
+            constraint_keys=("video_workflow_name", "workflow_name"),
+            allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
+        )
+        image_width, image_height = self._canvas_dimensions(goal, image_manifest)
+        if goal.constraints.get("sprite_source_width") not in {None, ""}:
+            image_width = int(goal.constraints["sprite_source_width"])
+        if goal.constraints.get("sprite_source_height") not in {None, ""}:
+            image_height = int(goal.constraints["sprite_source_height"])
+        video_defaults = dict(video_manifest.recommended_defaults or {})
+        video_width = int(goal.constraints.get("sprite_video_width") or video_defaults.get("width", 608))
+        video_height = int(goal.constraints.get("sprite_video_height") or video_defaults.get("height", 352))
+        target_duration_seconds = max(4, min(8, int(goal.duration_seconds or 8)))
+        video_length = int(
+            goal.constraints.get("sprite_video_length")
+            or round(target_duration_seconds * 24)
+        )
+        video_steps = int(goal.constraints.get("sprite_video_steps") or 16)
+        cell_width = self._constraint_int(goal, "sprite_cell_width", 64)
+        cell_height = self._constraint_int(goal, "sprite_cell_height", 64)
+        nodes = [
+            ExecutionNode(
+                node_id="sprite-motion-plan",
+                skill_name="agent.sprite.motion_plan",
+                inputs={},
+                tags=["creative", "sprite", "dynamic-motion"],
+                stage="prompting",
+            ),
+            ExecutionNode(
+                node_id="sprite-image-assets",
+                skill_name="media.ensure_workflow",
+                inputs={"workflow_name": image_manifest.name, "auto_download": goal.auto_download_assets},
+                depends_on=["sprite-motion-plan"],
+                tags=["assets", "sprite", "krea"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="sprite-master-image",
+                skill_name="media.image.generate_keyframe",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                    "prompt_key": "image_prompt",
+                    "use_prior_frame": False,
+                    "width": image_width,
+                    "height": image_height,
+                    "image_count": 1,
+                    "suffix": "sprite_master",
+                },
+                depends_on=["sprite-motion-plan", "sprite-image-assets"],
+                tags=["render", "image", "sprite", "krea"],
+                tool_name="comfy.workflow.text_to_image",
+                stage="render",
+            ),
+            ExecutionNode(
+                node_id="sprite-video-assets",
+                skill_name="media.ensure_workflow",
+                inputs={"workflow_name": video_manifest.name, "auto_download": goal.auto_download_assets},
+                depends_on=["sprite-master-image"],
+                tags=["assets", "sprite", "h3"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            ),
+            ExecutionNode(
+                node_id="sprite-motion-video",
+                skill_name="media.image.animate",
+                inputs={
+                    "workflow_name": video_manifest.name,
+                    "prompt_key": "video_prompt",
+                    "width": video_width,
+                    "height": video_height,
+                    "length": video_length,
+                    "steps": video_steps,
+                    "model_profile": str(goal.constraints.get("sprite_h3_model_profile") or "q2"),
+                    "video_count": 1,
+                },
+                depends_on=["sprite-motion-plan", "sprite-master-image", "sprite-video-assets"],
+                tags=["render", "video", "sprite", "h3"],
+                tool_name="comfy.workflow.image_to_video",
+                stage="render",
+            ),
+            ExecutionNode(
+                node_id="sprite-package",
+                skill_name="agent.sprite.package",
+                inputs={
+                    "motion_node": "sprite-motion-plan",
+                    "image_node": "sprite-master-image",
+                    "video_node": "sprite-motion-video",
+                    "cell_width": cell_width,
+                    "cell_height": cell_height,
+                    "fps": float(goal.constraints.get("sprite_fps") or 12),
+                },
+                depends_on=["sprite-motion-plan", "sprite-master-image", "sprite-motion-video"],
+                tags=["artifact", "sprite", "gif", "atlas"],
+                stage="package",
+            ),
+        ]
+        metadata = {
+            "selected_workflows": [image_manifest.name, video_manifest.name],
+            "required_assets": [
+                *[asset.to_dict() for asset in image_manifest.required_assets],
+                *[asset.to_dict() for asset in video_manifest.required_assets],
+            ],
+            "graph_overview": [node.node_id for node in nodes],
+            "grid": {"rows": 4, "columns": 4},
+            "motion_source": "llm_dynamic",
+            "human_review": False,
+        }
+        return ExecutionPlan(
+            goal=goal,
+            workflow_name="game_sprite_v1",
+            nodes=nodes,
+            metadata=metadata,
+            description=f"Automatic open-ended game sprite chain for goal '{goal.prompt}'",
         )
 
     def _build_animated_sticker_plan(self, goal: GoalRequest) -> ExecutionPlan:

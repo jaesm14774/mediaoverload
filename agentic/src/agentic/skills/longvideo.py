@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from agentic.runtime.media_dq import expected_subject_count
+
 from dataclasses import dataclass, field, replace
 import json
 import re
@@ -306,8 +308,6 @@ class LongVideoSkills:
                 "story_source": str(story_payload["source"]),
                 "creative_seed": str(story_payload["creative_seed"]),
                 "news_context": dict(story_payload["news_context"]),
-                "story_quality": dict(storyboard.get("story_quality") or story_payload.get("story_quality") or {}),
-                "news_grounding": dict(story_payload.get("news_grounding") or {}),
                 "generated_storyboard": storyboard,
                 "creative_brief": creative_brief,
                 "reference_video_analysis": reference_analysis if isinstance(reference_analysis, dict) else {},
@@ -594,8 +594,6 @@ class LongVideoSkills:
             "story_source": story.get("story_source", "news_llm"),
             "creative_seed": story.get("creative_seed", ""),
             "news_context": story.get("news_context", {}),
-            "story_quality": dict(story.get("story_quality") or {}),
-            "news_grounding": dict(story.get("news_grounding") or {}),
             "generated_storyboard": story.get("generated_storyboard", {}),
         }
         return SkillResult(
@@ -951,8 +949,6 @@ class LongVideoSkills:
             "story_source": story.get("story_source", "news_llm"),
             "creative_seed": story.get("creative_seed", ""),
             "news_context": story.get("news_context", {}),
-            "story_quality": dict(story.get("story_quality") or {}),
-            "news_grounding": dict(story.get("news_grounding") or {}),
             "generated_storyboard": story.get("generated_storyboard", {}),
             "render_mode": render_mode,
         }
@@ -977,7 +973,6 @@ class LongVideoSkills:
         if not saved_files:
             raise RuntimeError("Native H3 QA requires at least one generated video")
         video_path = saved_files[0]
-        story_quality = dict((context.state["native-story-prompt"] or {}).get("story_quality") or {})
         constraints = dict(getattr(context.plan.goal, "constraints", {}) or {})
         native_recipe = dict(constraints.get("native_h3_recipe") or {})
         h3_mode = str(render.get("h3_mode") or constraints.get("native_h3_mode") or "")
@@ -1034,72 +1029,30 @@ class LongVideoSkills:
                 "scale_width": int(context.node.inputs.get("scale_width") or 320),
             },
         )
-        story = dict(context.state["native-story-prompt"] or {})
-        semantic_qa_required = bool(
-            context.node.inputs.get(
-                "semantic_qa_required",
-                constraints.get("native_h3_semantic_qa_required", native_recipe.get("semantic_qa_required", False)),
-            )
-        )
-        require_human_review = bool(constraints.get("require_human_review", False))
-        semantic_qa: dict[str, object]
-        if not semantic_qa_required:
-            semantic_qa = {
-                "enabled": False,
-                "required": False,
-                "status": "disabled",
-                "passed": None,
-                "reason": "semantic QA is not enabled by the native H3 recipe",
-                "contact_sheet_path": str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
-            }
-        else:
-            storyboard = dict(story.get("generated_storyboard") or {})
-            semantic_qa = self.prompt_engine.evaluate_video_contact_sheet(
-                contact_sheet_path=str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
-                character=str(constraints.get("character") or "the protagonist"),
-                subject_context=dict(constraints.get("subject_context") or {}),
-                story_spine=dict(story.get("story_spine") or storyboard.get("story_spine") or {}),
-                native_shots=[item for item in (storyboard.get("native_shots") or []) if isinstance(item, dict)],
-                news_context=dict(story.get("news_context") or {}),
-                rendered_prompt=str(story.get("prompt") or render.get("native_h3_prompt") or ""),
-                duration_seconds=int(context.plan.goal.duration_seconds or 0),
-                news_anchor_terms=[
-                    str(item)
-                    for item in (dict(storyboard.get("news_trace") or {}).get("visual_anchors") or [])
-                    if str(item).strip()
-                ],
-            )
-            semantic_qa["enabled"] = True
-            semantic_qa["required"] = semantic_qa_required
-            semantic_qa["blocking"] = False
-            semantic_qa["blocking_policy"] = "advisory"
-
-        technical_passed = bool(technical_qa.get("passed"))
-        passed = technical_passed
+        technical_passed = technical_qa.get("passed") is True
+        subject_count = self.prompt_engine.evaluate_media_subjects(
+            image_path=str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
+            expected_count=expected_subject_count(constraints),
+            frame_count=int(context.node.inputs.get("frame_count") or 6),
+        ) if technical_passed else {"required": False, "passed": False, "status": "not_run"}
+        passed = technical_passed and subject_count["passed"] is True
         failures = [str(item) for item in (technical_qa.get("errors") or []) if str(item)]
-        log_message = (
-            "Native H3 technical and semantic media QA completed before publication."
-            if passed
-            else "Native H3 QA failed: " + ", ".join(failures)
-        )
-        if semantic_qa_required and require_human_review and semantic_qa.get("passed") is not True:
-            log_message += " Semantic result is advisory because Discord human review remains authoritative."
+        if subject_count["passed"] is not True:
+            failures.append("subject count could not be verified against the declared contract")
+        log_message = "Native H3 hard media checks passed." if passed else "Native H3 QA failed: " + ", ".join(failures)
         return SkillResult(
             status="success" if passed else "failed",
             outputs={
                 "passed": passed,
                 "video_path": video_path,
                 "h3_mode": h3_mode,
-                "story_quality": story_quality,
                 "technical_qa": {**technical_qa, "bypassed": False, "failures": failures},
-                "semantic_qa": semantic_qa,
+                "subject_count": subject_count,
                 "contact_sheet_path": str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
             },
             metrics={
                 "video_count": len(saved_files),
                 "technical_qa_passed": int(technical_passed),
-                "semantic_qa_enabled": int(bool(semantic_qa.get("enabled"))),
-                "semantic_qa_passed": int(semantic_qa.get("passed") is True),
             },
             logs=[log_message],
         )
@@ -1129,8 +1082,6 @@ class LongVideoSkills:
                 "story_source": str(render.get("story_source") or ""),
                 "creative_seed": str(render.get("creative_seed") or ""),
                 "news_context": dict(render.get("news_context") or {}),
-                "story_quality": dict(render.get("story_quality") or qa.get("story_quality") or {}),
-                "news_grounding": dict(render.get("news_grounding") or {}),
                 "generated_storyboard": dict(render.get("generated_storyboard") or {}),
                 "reference_manifest": list(render.get("reference_manifest") or []),
                 "reference_lineage": list(render.get("reference_lineage") or []),

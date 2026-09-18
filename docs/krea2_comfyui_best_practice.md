@@ -42,7 +42,7 @@ continuity repair. It uses the same Krea2 model family and denoise 0.25. This
 is a local img2img adaptation of the official Krea2 T2I graph, not a claim that
 the official Krea2 template is an img2img workflow.
 
-The strict Kirby semantic test must pass the original name and scene prompt
+Character rendering must pass the resolved name and scene prompt
 through `positive_prompt` without adding a hidden appearance description. The
 default graph placeholder is only a manual example; runtime prompt binding is
 the source of truth. The prompt enhancer is not part of the active graph,
@@ -64,7 +64,7 @@ uses `UnetLoaderGGUF` and `CLIPLoaderGGUF`. The official FP8 ComfyUI template
 uses `krea2_turbo_fp8_scaled.safetensors` and the official Qwen3-VL text
 encoder; that path is not selected here because its memory requirement is a
 poor fit for an 8GB GPU. Q4_0 is the first practical point, not a quality
-guarantee: final identity scores must be measured after the first local
+guarantee: final identity and appearance are reviewed by a human after the local
 render.
 
 Do not jump directly to 1344x768. First validate one 1024x576 image, then

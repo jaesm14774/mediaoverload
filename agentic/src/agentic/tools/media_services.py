@@ -7,6 +7,7 @@ from agentic.runtime.registry import ToolRegistry
 from agentic.runtime.editing import EditPlan
 from agentic.tools.editing_adapter import OpenCutEditAdapter
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+from agentic.tools.sprite_adapter import SpriteAdapter
 from agentic.tools.tts_adapter import TTSAdapter
 
 
@@ -16,6 +17,7 @@ class MediaServiceTools:
         self.input_roots = tuple(input_roots)
         self.output_root.mkdir(parents=True, exist_ok=True)
         self._ffmpeg: FFmpegAdapter | None = None
+        self._sprite: SpriteAdapter | None = None
         self._editing: OpenCutEditAdapter | None = None
         self._tts: TTSAdapter | None = None
 
@@ -42,6 +44,22 @@ class MediaServiceTools:
                 speed=speed,
             ),
             "speed": speed,
+        }
+
+    def normalize_video_canvas(self, payload: dict[str, object]) -> dict[str, object]:
+        service = self._ffmpeg_service()
+        width = int(payload["target_width"])
+        height = int(payload["target_height"])
+        return {
+            "video_path": service.normalize_video_canvas(
+                video_path=str(payload["video_path"]),
+                output_path=str(payload["output_path"]),
+                target_width=width,
+                target_height=height,
+                background=str(payload.get("background", "#15151f")),
+            ),
+            "width": width,
+            "height": height,
         }
 
     def trim_video(self, payload: dict[str, object]) -> dict[str, object]:
@@ -130,12 +148,11 @@ class MediaServiceTools:
                 if require_stereo and has_audio
                 else True
             ),
-            "loudness": True,
-            "silence": True,
             "duration_alignment": True,
         }
         audio_analysis: dict[str, object] = {}
-        should_analyze_audio = bool(payload.get("analyze_audio", require_audio)) and has_audio
+        audio_limits_requested = any(key in payload for key in ("min_mean_volume_db", "max_peak_db", "max_silence_ratio"))
+        should_analyze_audio = (bool(payload.get("analyze_audio", require_audio)) or audio_limits_requested) and has_audio
         if should_analyze_audio:
             try:
                 audio_analysis = service.analyze_audio(
@@ -143,24 +160,31 @@ class MediaServiceTools:
                     silence_threshold_db=float(payload.get("silence_threshold_db", -50.0)),
                     silence_min_seconds=float(payload.get("silence_min_seconds", 0.4)),
                 )
-                mean_volume = audio_analysis.get("mean_volume_db")
-                max_volume = audio_analysis.get("max_volume_db")
-                silence_ratio = float(audio_analysis.get("silence_ratio") or 0.0)
-                audio_checks["loudness"] = mean_volume is not None and float(mean_volume) >= float(payload.get("min_mean_volume_db", -45.0))
-                audio_checks["silence"] = silence_ratio <= float(payload.get("max_silence_ratio", 0.98))
-                if max_volume is not None and float(max_volume) >= float(payload.get("max_peak_db", -0.1)):
-                    errors.append(f"audio peak {float(max_volume):.2f} dBFS is at or above clipping threshold")
-                    audio_checks["loudness"] = False
-                if not audio_checks["loudness"]:
-                    errors.append("audio mean level is too quiet or could not be measured")
-                if not audio_checks["silence"]:
-                    errors.append("audio is silent for too much of the rendered duration")
+                # Loudness and silence are measured, but only explicit numeric
+                # requirements may turn these observations into a blocking check.
+                for metric, limit_key, compare in (
+                    ("mean_volume_db", "min_mean_volume_db", lambda value, limit: value >= limit),
+                    ("max_volume_db", "max_peak_db", lambda value, limit: value < limit),
+                    ("silence_ratio", "max_silence_ratio", lambda value, limit: value <= limit),
+                ):
+                    if limit_key not in payload:
+                        continue
+                    value = audio_analysis.get(metric)
+                    valid = value is not None and compare(float(value), float(payload[limit_key]))
+                    audio_checks[limit_key] = valid
+                    if not valid:
+                        errors.append(f"audio {metric}={value} violates {limit_key}={payload[limit_key]}")
             except (OSError, RuntimeError, ValueError) as exc:
-                audio_checks["loudness"] = False
-                audio_checks["silence"] = False
-                errors.append(f"audio analysis failed: {exc}")
+                if audio_limits_requested:
+                    audio_checks["analysis_available"] = False
+                    errors.append(f"required audio measurement failed: {exc}")
+                else:
+                    warnings.append(f"optional audio measurement unavailable: {exc}")
         elif require_audio and not has_audio:
             errors.append("audio stream is required but missing")
+        if audio_limits_requested and not has_audio:
+            audio_checks["analysis_available"] = False
+            errors.append("explicit audio measurements require an audio stream")
         if require_stereo and has_audio and not audio_checks["stereo"]:
             errors.append("stereo audio is required but the output is not stereo")
         video_duration = float(probe.get("video_duration") or duration)
@@ -228,6 +252,19 @@ class MediaServiceTools:
             )
         }
 
+    def video_to_sprite(self, payload: dict[str, object]) -> dict[str, object]:
+        return self._sprite_service().video_to_sprite(
+            video_path=str(payload["video_path"]),
+            output_dir=str(payload["output_dir"]),
+            cell_width=int(payload.get("cell_width", 64)),
+            cell_height=int(payload.get("cell_height", 64)),
+            fps=float(payload.get("fps", 12)),
+            loop=bool(payload.get("loop", True)),
+            key_color=payload.get("key_color", "magenta"),
+            chroma_threshold=int(payload.get("chroma_threshold", 52)),
+            frame_map=payload.get("frame_map") if isinstance(payload.get("frame_map"), list) else None,
+        )
+
     def compose_edit(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._editing_service()
         raw_plan = payload.get("edit_plan")
@@ -247,14 +284,11 @@ class MediaServiceTools:
         raw_result = payload.get("result")
         if not isinstance(raw_result, dict):
             raise ValueError("media.materialize_edit requires a rendered result object")
-        raw_review = payload.get("creative_review")
-        creative_review = raw_review if isinstance(raw_review, dict) else None
         return service.materialize_result(
             raw_result,
             output_path=str(payload["output_path"]),
             manifest_path=str(payload["manifest_path"]) if payload.get("manifest_path") else None,
             contact_sheet_path=str(payload["contact_sheet_path"]) if payload.get("contact_sheet_path") else None,
-            creative_review=creative_review,
         )
 
     def generate_tts(self, payload: dict[str, object]) -> dict[str, object]:
@@ -273,6 +307,11 @@ class MediaServiceTools:
         if self._ffmpeg is None:
             self._ffmpeg = FFmpegAdapter()
         return self._ffmpeg
+
+    def _sprite_service(self) -> SpriteAdapter:
+        if self._sprite is None:
+            self._sprite = SpriteAdapter(self._ffmpeg_service())
+        return self._sprite
 
     def _editing_service(self) -> OpenCutEditAdapter:
         if self._editing is None:
@@ -294,8 +333,10 @@ def register_media_service_tools(
     tool_registry.register("media.extract_last_frame", tools.extract_last_frame, "Extract the last frame from a video")
     tool_registry.register("media.concat_videos", tools.concat_videos, "Concatenate multiple videos")
     tool_registry.register("media.change_video_speed", tools.change_video_speed, "Change video and audio playback speed")
+    tool_registry.register("media.normalize_video_canvas", tools.normalize_video_canvas, "Fit video inside an exact canvas while preserving aspect ratio")
     tool_registry.register("media.trim_video", tools.trim_video, "Trim a packaged video to an explicit duration")
     tool_registry.register("media.video_to_gif", tools.video_to_gif, "Convert a video to a GIF")
+    tool_registry.register("media.video_to_sprite", tools.video_to_sprite, "Convert a generated motion video to a transparent game sprite atlas")
     tool_registry.register("media.video_qa", tools.video_qa, "Probe duration/streams and create a video contact sheet")
     tool_registry.register("media.merge_audio_video", tools.merge_audio_video, "Merge one audio track into a video")
     tool_registry.register("audio.concat_tracks", tools.concat_audio, "Concatenate multiple audio tracks")

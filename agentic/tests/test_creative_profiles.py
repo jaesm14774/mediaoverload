@@ -169,9 +169,15 @@ class CreativeProfileTests(unittest.TestCase):
         plan = self.planner.build_plan(goal)
         opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
         video = next(node for node in plan.nodes if node.node_id == "native-h3-render")
+        canvas = next(node for node in plan.nodes if node.node_id == "native-h3-canvas")
+        qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
 
         self.assertEqual((opening.inputs["width"], opening.inputs["height"]), (640, 360))
         self.assertEqual((video.inputs["width"], video.inputs["height"]), (640, 360))
+        self.assertEqual(canvas.inputs["target_width"], 640)
+        self.assertEqual(canvas.inputs["target_height"], 360)
+        self.assertEqual(canvas.depends_on, ["native-h3-render"])
+        self.assertEqual(qa.inputs["video_node"], "native-h3-canvas")
 
     def test_long_video_segments_and_qa_use_shared_canvas(self) -> None:
         goal = GoalRequest(

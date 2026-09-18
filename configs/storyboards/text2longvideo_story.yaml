@@ -249,12 +249,12 @@ segments:
     action: The protagonist makes one final contained gesture or reaction that reinforces the completed objective.
     action_beats:
       - Keep the gesture subordinate to the completed result.
-      - Hold on the stable final state long enough for semantic QA to read it.
+      - Hold on the stable final state long enough for human review to read it.
     effect: The film ends with a complete state, clear continuity, and no unresolved quest.
     must_show:
       - the final resolved state and completed objective
       - stable protagonist identity and world geography
-      - a clean hold suitable for the rendered-tail and semantic QA checks
+      - a clean hold suitable for the rendered-tail and human review checks
     start_state: The story's consequence and visual echo are already visible.
     end_state: The protagonist and world settle into the final reviewable composition.
     next_hook: Replay may return to the opening motif, but the resolved state remains authoritative.

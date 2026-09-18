@@ -99,7 +99,8 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
         self.assertEqual(speed_nodes, [])
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
-        self.assertEqual(qa.inputs["video_node"], "native-h3-render")
+        canvas_nodes = [node for node in plan.nodes if node.node_id == "native-h3-canvas"]
+        self.assertEqual(qa.inputs["video_node"], "native-h3-canvas" if canvas_nodes else "native-h3-render")
         self.assertEqual(qa.inputs["target_duration"], 362 / 24)
 
     def test_ref2va_plan_records_manifest_and_disables_reference_audio(self) -> None:
@@ -344,7 +345,7 @@ class H3ModePlanTests(unittest.TestCase):
             state=SimpleNamespace(node_outputs={}),
         )
         report = SimpleNamespace(passed=True, reasons=[])
-        with patch("agentic.skills.agent_primitives.inspect_kirby_input", return_value=report) as inspect:
+        with patch("agentic.skills.agent_primitives.inspect_image_input", return_value=report) as inspect:
             result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "batch-qa").generate_keyframe(context)
         self.assertEqual(result.status, "success")
         self.assertEqual(inspect.call_count, 2)
@@ -412,7 +413,7 @@ class H3ModePlanTests(unittest.TestCase):
         rejected = SimpleNamespace(passed=False, reasons=("duplicate Kirby protagonist silhouettes are blocked",))
         accepted = SimpleNamespace(passed=True, reasons=())
         with patch(
-            "agentic.skills.agent_primitives.inspect_kirby_input",
+            "agentic.skills.agent_primitives.inspect_image_input",
             side_effect=[rejected, accepted, accepted],
         ):
             result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "partial-batch").generate_keyframe(context)
@@ -496,7 +497,7 @@ class H3ModePlanTests(unittest.TestCase):
             ),
         )
         report = SimpleNamespace(passed=True, reasons=[])
-        with patch("agentic.skills.agent_primitives.inspect_kirby_input", return_value=report):
+        with patch("agentic.skills.agent_primitives.inspect_image_input", return_value=report):
             result = AgentMediaSkills(
                 FakeTools(), self.repo_root / ".tmp-tests" / "independent-ending"
             ).generate_keyframe(context)
@@ -546,7 +547,7 @@ class H3ModePlanTests(unittest.TestCase):
             ),
         )
         report = SimpleNamespace(passed=True, reasons=[])
-        with patch("agentic.skills.agent_primitives.inspect_kirby_input", return_value=report):
+        with patch("agentic.skills.agent_primitives.inspect_image_input", return_value=report):
             result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "landing-anchor").generate_keyframe(context)
 
         self.assertEqual(result.status, "success")

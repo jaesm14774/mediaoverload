@@ -3,7 +3,7 @@
 This is an execution benchmark, not a second rendering pipeline. Every case
 uses ``run_character_workflow`` with the existing ``text2image2video`` route:
 reference-video analysis -> LLM brief -> Krea2 first frame -> MiniMax H3 I2V
--> technical/semantic QA. Retries change only the prompt direction and keep a
+-> hard media QA. Retries change only the prompt direction and keep a
 stable per-case seed so the result is auditable.
 """
 
@@ -130,35 +130,11 @@ def _case_sources(sources: list[Path], limit: int) -> list[Path]:
 
 
 def _retry_direction(qa: dict[str, Any], attempt: int, failure_reason: str = "") -> str:
-    semantic = qa.get("semantic_qa") if isinstance(qa.get("semantic_qa"), dict) else {}
-    issues = [str(item).strip() for item in semantic.get("issues", []) if str(item).strip()]
-    checks = semantic.get("checks") if isinstance(semantic.get("checks"), dict) else {}
-    failed_checks = [
-        key
-        for key, value in checks.items()
-        if value is False and key != "news_anchor_visible"
-    ]
-    technical = [str(item).strip() for item in qa.get("errors", []) if str(item).strip()]
-    failure_text = str(failure_reason or "").strip()
-    details = [*issues, *(f"failed visual check: {key}" for key in failed_checks), *technical]
-    if failure_text:
-        details.append(failure_text)
-    if not details:
-        details = [
-            "make the opening action visible immediately",
-            "show one decisive physical cause-and-effect change",
-            "finish with a readable cute reaction and settled payoff",
-        ]
-    unique = list(dict.fromkeys(details))[:5]
-    if "stage_probe_quality_gate" in failure_text or "asset_review_hard_gate" in failure_text:
-        unique.insert(0, "the pre-video image gate rejected the candidates; enforce exactly one visible protagonist with no duplicate or extra character")
-        unique = list(dict.fromkeys(unique))[:5]
-    return (
-        f"Retry direction for attempt {attempt}: preserve the same protagonist, palette, and one-prop gag. "
-        "Change only the weakest visual lever and keep the reference as timing/framing grammar, not copied content. "
-        f"Fix these observed problems: {'; '.join(unique)}. "
-        "The first frame must already contain the hook, and the final sampled frames must show the completed physical result."
-    )
+    details = [str(item).strip() for item in qa.get("errors", []) if str(item).strip()]
+    if failure_reason:
+        details.append(failure_reason)
+    return f"Attempt {attempt}: correct only the failed hard output requirements: {'; '.join(details)}"
+
 
 
 def _extract_attempt_evidence(result: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +143,6 @@ def _extract_attempt_evidence(result: dict[str, Any]) -> dict[str, Any]:
     state = generation_result.get("state") if isinstance(generation_result.get("state"), dict) else {}
     node_outputs = state.get("node_outputs") if isinstance(state.get("node_outputs"), dict) else {}
     qa = node_outputs.get("video-qa") if isinstance(node_outputs.get("video-qa"), dict) else {}
-    semantic = qa.get("semantic_qa") if isinstance(qa.get("semantic_qa"), dict) else {}
     artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), dict) else {}
     video_paths = [
         str(path)
@@ -175,21 +150,11 @@ def _extract_attempt_evidence(result: dict[str, Any]) -> dict[str, Any]:
         if Path(str(path)).is_file()
     ]
     technical_pass = bool(qa.get("passed")) and bool(video_paths)
-    semantic_status = str(semantic.get("status") or "unavailable")
-    semantic_pass = semantic.get("passed") is True
-    # If the vision backend is unavailable, technical QA plus later human
-    # contact-sheet inspection is the honest acceptance boundary. Never turn
-    # an explicit semantic fail into a pass.
-    accepted = technical_pass and (semantic_pass or semantic_status == "unavailable")
+    accepted = technical_pass
     return {
         "workflow_status": str(result.get("status") or "failed"),
         "technical_pass": technical_pass,
-        "semantic_pass": semantic_pass,
-        "semantic_status": semantic_status,
-        "semantic_score": semantic.get("score"),
-        "semantic_checks": dict(semantic.get("checks") or {}) if isinstance(semantic.get("checks"), dict) else {},
-        "semantic_issues": [str(item) for item in semantic.get("issues", []) if str(item)],
-        "contact_sheet_path": str(qa.get("contact_sheet_path") or semantic.get("contact_sheet_path") or ""),
+        "contact_sheet_path": str(qa.get("contact_sheet_path") or ""),
         "video_paths": video_paths,
         "accepted_before_manual_review": accepted,
         "failure_reason": str(result.get("failure_reason") or ""),

@@ -65,31 +65,6 @@ class PromptEngineTests(unittest.TestCase):
         self.assertEqual(result["prompt_count"], 2)
         self.assertEqual(result["prompt_mode"], "llm")
 
-    def test_review_asset_candidates_adds_retry_metadata(self) -> None:
-        engine = PromptEngine(
-            LLMPromptEngine(
-                mode="llm",
-                manager=_FakeManager(
-                    [
-                        '{"selected_assets":["C:\\\\clip_b.mp4"],"ranked_candidates":[{"media_path":"C:\\\\clip_b.mp4","score":96,"rationale":"best motion"},{"media_path":"C:\\\\clip_a.png","score":80,"rationale":"weak still"}],"selection_rationale":"Best matches stronger motion.","regeneration_notes":"Push action harder."}',
-                    ]
-                ),
-            )
-        )
-        goal = GoalRequest(prompt="review kirby assets", media_type="publish_review", style="social promo")
-
-        result = engine.review_asset_candidates(
-            goal,
-            media_paths=["C:\\clip_a.png", "C:\\clip_b.mp4"],
-            review_notes="needs stronger motion and tighter framing",
-            selection_limit=1,
-        )
-
-        self.assertEqual(result["rejected_assets"], ["C:\\clip_a.png"])
-        self.assertIn("motion_weak", result["failure_tags"])
-        self.assertIn("composition_weak", result["failure_tags"])
-        self.assertEqual(result["retry_intensity"], "high")
-        self.assertTrue(result["publish_ready"])
 
     def test_prepare_publish_caption_adds_platform_bundle_and_dispatch_ready(self) -> None:
         engine = PromptEngine(

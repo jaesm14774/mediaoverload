@@ -76,7 +76,7 @@ class H3P2VideoQualityTests(unittest.TestCase):
         tools._fixture_path = video  # type: ignore[attr-defined]
         return tools
 
-    def test_strict_gate_checks_audio_stereo_loudness_and_alignment(self) -> None:
+    def test_strict_gate_checks_declared_audio_and_records_loudness(self) -> None:
         tools = self._tools()
         result = tools.video_qa(
             {
@@ -92,7 +92,8 @@ class H3P2VideoQualityTests(unittest.TestCase):
         )
         self.assertTrue(result["passed"])
         self.assertTrue(result["checks"]["stereo"])
-        self.assertTrue(result["checks"]["loudness"])
+        self.assertNotIn("loudness", result["checks"])
+        self.assertIn("mean_volume_db", result["audio_analysis"])
         self.assertTrue(result["checks"]["duration_alignment"])
 
     def test_strict_gate_rejects_missing_audio(self) -> None:

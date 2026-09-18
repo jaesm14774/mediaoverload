@@ -88,7 +88,7 @@ class AgenticPlannerTests(unittest.TestCase):
         plan = self.planner.build_plan(goal)
 
         self.assertEqual(plan.nodes[0].inputs["profile"], "motion_cut_v1")
-        self.assertFalse(plan.nodes[0].inputs["creative_review"])
+        self.assertNotIn("creative_review", plan.nodes[0].inputs)
 
     def test_image_sequence_edit_defaults_to_hard_cut_for_video_segments(self) -> None:
         goal = self.planner.create_goal(
@@ -105,7 +105,7 @@ class AgenticPlannerTests(unittest.TestCase):
         plan = self.planner.build_plan(goal)
 
         self.assertEqual(plan.nodes[0].inputs["profile"], "baseline_concat")
-        self.assertFalse(plan.nodes[0].inputs["creative_review"])
+        self.assertNotIn("creative_review", plan.nodes[0].inputs)
 
     def test_explicit_edit_plan_drives_render_and_qa_contract(self) -> None:
         goal = self.planner.create_goal(

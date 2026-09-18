@@ -690,6 +690,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
     GRAPH_API_VERSION = "v25.0"
     GRAPH_API_BASE = "https://graph.instagram.com"
     CAPTION_MAX = 2200
+    CONTAINER_ERROR_GRACE_SECONDS = 120.0
 
     def __init__(self, config_folder_path: str, prefix: str = "") -> None:
         super().__init__(config_folder_path, prefix)
@@ -699,6 +700,8 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         self.cloudinary = CloudinaryUploadService()
         self.temp_files: list[str] = []
         self._url_cache: dict[str, str] = {}
+        self.last_container_status: dict[str, Any] = {}
+        self.last_container_wait_seconds = 0.0
         self.load_config()
         self.authenticate()
 
@@ -784,7 +787,10 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             raise RuntimeError(f"Instagram Graph did not return an image container id for {Path(image_path).name}")
         container_id = str(container_id)
         if not self._wait_container_ready(container_id):
-            raise RuntimeError(f"Instagram Graph image container was not ready: {container_id}")
+            raise RuntimeError(
+                f"Instagram Graph image container was not ready: {container_id} "
+                f"({self._container_status_summary()})"
+            )
         media_id = self._publish_container(container_id)
         self._record_publish_receipt(
             platform="instagram_graph",
@@ -815,7 +821,10 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         if not container_id:
             raise RuntimeError(f"Instagram Graph did not return a video container id for {Path(video_path).name}")
         if not self._wait_container_ready(container_id):
-            raise RuntimeError(f"Instagram Graph video container was not ready: {container_id}")
+            raise RuntimeError(
+                f"Instagram Graph video container was not ready: {container_id} "
+                f"({self._container_status_summary()})"
+            )
         if not publish:
             self._record_publish_receipt(
                 platform="instagram_graph",
@@ -862,7 +871,10 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         if not container_id:
             raise RuntimeError("Instagram Graph did not return a carousel container id")
         if not self._wait_container_ready(container_id):
-            raise RuntimeError(f"Instagram Graph carousel container was not ready: {container_id}")
+            raise RuntimeError(
+                f"Instagram Graph carousel container was not ready: {container_id} "
+                f"({self._container_status_summary()})"
+            )
         media_id = self._publish_container(container_id)
         self._record_publish_receipt(
             platform="instagram_graph",
@@ -898,7 +910,10 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             if not container_id:
                 raise RuntimeError(f"Instagram Graph did not return a carousel video container id for {Path(media_path).name}")
             if not self._wait_container_ready(container_id):
-                raise RuntimeError(f"Instagram Graph carousel video container was not ready: {container_id}")
+                raise RuntimeError(
+                    f"Instagram Graph carousel video container was not ready: {container_id} "
+                    f"({self._container_status_summary()})"
+                )
             return container_id
         media_url = self._require_media_url(media_path)
         response = requests.post(
@@ -926,8 +941,20 @@ class InstagramGraphPlatform(BaseConfigPlatform):
             raise RuntimeError(f"Instagram Graph publish did not return a media id for container={container_id}")
         return media_id
 
+    def _container_status_summary(self) -> str:
+        status = self.last_container_status
+        if not status:
+            return f"status_code=unknown status=unknown elapsed={self.last_container_wait_seconds:.1f}s"
+        status_code = str(status.get("status_code") or "unknown")
+        detail = str(status.get("status") or "unknown").replace("\n", " ").strip()
+        return f"status_code={status_code} status={detail[:300]} elapsed={self.last_container_wait_seconds:.1f}s"
+
     def _wait_container_ready(self, container_id: str, max_wait: int = 300) -> bool:
         url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{container_id}"
+        started_at = time.monotonic()
+        self.last_container_status = {}
+        self.last_container_wait_seconds = 0.0
+        error_started_at: float | None = None
         for _ in range(max_wait):
             response = requests.get(
                 url,
@@ -935,11 +962,23 @@ class InstagramGraphPlatform(BaseConfigPlatform):
                 timeout=30,
             )
             response.raise_for_status()
-            status = str(response.json().get("status_code", ""))
+            body = response.json()
+            self.last_container_status = dict(body) if isinstance(body, dict) else {}
+            self.last_container_wait_seconds = time.monotonic() - started_at
+            status = str(self.last_container_status.get("status_code", "")).upper()
             if status == "FINISHED":
                 return True
-            if status in {"ERROR", "EXPIRED"}:
+            if status == "EXPIRED":
                 return False
+            if status == "ERROR":
+                # Meta has returned ERROR for containers that later became
+                # FINISHED. Give that transient state a bounded reconciliation
+                # window, but never keep an expired container alive.
+                error_started_at = error_started_at or time.monotonic()
+                if time.monotonic() - error_started_at >= self.CONTAINER_ERROR_GRACE_SECONDS:
+                    return False
+            else:
+                error_started_at = None
             time.sleep(2)
         return False
 

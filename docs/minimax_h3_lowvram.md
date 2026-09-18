@@ -48,7 +48,7 @@ Kirby 的短片 I2V 鏈路固定為：
 
 ```text
 krea2_turbo
-  -> Kirby input gate（pink/red silhouette + generic-example block）
+  -> Image input gate（可解碼、H3 最小尺寸 256×192）
   -> minimax_h3_lowvram_i2v
   -> extract last frame
   -> krea2_turbo_img2img（denoise 0.25）
@@ -68,7 +68,7 @@ reference；後續段落固定用上一段實際渲染出的最後一幀進行
 python run_media_interface.py --character kirby --generation-type native_h3_story --comfy-host 127.0.0.1 --comfy-port 8188 --comfy-root D:\ComfyUI_windows_portable --no-publish
 ```
 
-這個 script 會把通過驗證的第一張 keyframe 複製到 `D:\ComfyUI_windows_portable\ComfyUI\input\kirby_keyframe_seed.png`。若 H3 tool 收到 `example.png` 或沒有 Kirby pink/red signal 的圖，會直接拒絕，不會浪費數分鐘跑錯影片。
+H3 輸入檢查保留影像可解碼與最小尺寸要求；角色造型、色彩與構圖交由 Discord 人工判斷。
 
 ## Workflow 結構
 
