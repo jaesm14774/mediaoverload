@@ -227,13 +227,18 @@ class AgenticComfyCommunicator:
                     history_response = self.get_history(prompt_id, timeout=min(5.0, max(0.1, remaining)))
                     history = history_response.get(prompt_id, history_response)
                     status = history.get("status", {}) if isinstance(history, dict) else {}
-                    if isinstance(status, dict) and status.get("completed"):
+                    if isinstance(status, dict):
                         status_str = str(status.get("status_str") or "").lower()
-                        if status_str == "success":
+                        if status_str == "success" and status.get("completed"):
                             return
-                        raise RuntimeError(
-                            f"ComfyUI execution failed for prompt {prompt_id}: {status_str or 'unknown status'}"
-                        )
+                        if status_str in {"error", "failed", "failure"}:
+                            raise RuntimeError(
+                                f"ComfyUI execution failed for prompt {prompt_id}: {status_str}"
+                            )
+                        if status.get("completed"):
+                            raise RuntimeError(
+                                f"ComfyUI execution failed for prompt {prompt_id}: {status_str or 'unknown status'}"
+                            )
                 except RuntimeError:
                     raise
                 except Exception:

@@ -1,0 +1,14 @@
+{
+  "fox_scarf": {
+    "prompt": "A polished 2D anime short about a small orange fox finding a blue scarf in a snowy forest. [0s-2s] the scarf lifts from a tree branch and blows toward a frozen stream while snow swirls. [2s-4s] the fox runs across the snow, leaps, and catches the scarf before it touches the ice. [4s-5s] the fox wraps the scarf around its neck; a warm lantern glow spreads through the trees as snow settles. Use a clear beginning, middle, and payoff, a readable subject silhouette, continuous action, a gentle camera push-in, and native stereo audio with wind, a soft landing, and a warm musical resolve.",
+    "seed": 20260919
+  },
+  "paper_boat": {
+    "prompt": "A polished 2D anime short about a red paper boat carrying a tiny yellow flower down a rain-filled gutter beside a garden. [0s-2s] the boat spins toward a storm drain as raindrops ripple the water. [2s-4s] a small blue bird pecks a twig aside and nudges the boat away from the drain. [4s-5s] the boat reaches a calm puddle; sunlight breaks through the clouds and the flower opens. Use a clear beginning, middle, and payoff, readable silhouettes, continuous motion, a gentle tracking camera, and native stereo audio with rain, a water splash, a bird chirp, and an uplifting musical resolve.",
+    "seed": 20260920
+  },
+  "robot_flower": {
+    "prompt": "A polished 2D anime short about a tiny blue robot watering a wilted red flower on a rooftop at sunrise. [0s-2s] the robot notices the flower bending in a hot wind and rolls toward it with a small water can. [2s-4s] the robot lifts the can and pours water onto the soil while the wind pushes its antenna. [4s-5s] the flower straightens and opens; warm sunlight spreads across the rooftop as the wind calms. Use a clear beginning, middle, and payoff, a readable subject silhouette, continuous motion, a gentle camera move, and native stereo audio with wind, a water trickle, a tiny chime, and a warm musical resolve.",
+    "seed": 20260921
+  }
+}

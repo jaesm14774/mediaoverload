@@ -1,0 +1,35 @@
+{
+  "1": {
+    "inputs": {"unet_name": "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors", "weight_dtype": "default"},
+    "class_type": "UNETLoader",
+    "_meta": {"title": "FastVideo FastH3 V2 official INT8 diffusion"}
+  },
+  "2": {
+    "inputs": {"clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "type": "minimax"},
+    "class_type": "CLIPLoader",
+    "_meta": {"title": "MiniMax H3 official INT8 text encoder"}
+  },
+  "3": {"inputs": {"vae_name": "minimax_h3_video_vae_fp16.safetensors"}, "class_type": "VAELoader", "_meta": {"title": "MiniMax H3 video VAE"}},
+  "4": {"inputs": {"vae_name": "minimax_h3_audio_vae_fp32.safetensors"}, "class_type": "VAELoader", "_meta": {"title": "MiniMax H3 audio VAE"}},
+  "5": {
+    "inputs": {"clip": ["2", 0], "vae": ["3", 0], "prompt": "A polished 2D anime short with readable action and native stereo audio.", "width": 608, "height": 352, "length": 124},
+    "class_type": "MiniMaxH3ImageToVideo",
+    "_meta": {"title": "FastH3 V2 prompt / T2AV"}
+  },
+  "6": {"inputs": {"model": ["1", 0], "shift_video": 10.0, "shift_audio": 3.0}, "class_type": "MiniMaxH3SigmaShift", "_meta": {"title": "FastH3 V2 trained sigma shift"}},
+  "16": {"inputs": {"model": ["6", 0], "attention": "comfy kitchen attention"}, "class_type": "ModelAttentionBackend", "_meta": {"title": "FastH3 dense attention fallback"}},
+  "17": {
+    "inputs": {"model": ["16", 0], "selection": "vsa", "selection.keep_percent": 10.0, "start_percent": 0.2, "end_percent": 1.0, "dense_blocks": "", "min_tokens": 12288, "extra_tokens": 256, "sink_conditioning": "exact_kv_and_rows", "verbose": false},
+    "class_type": "BlockSparseAttention",
+    "_meta": {"title": "FastH3 V2 VSA 80% sparse attention"}
+  },
+  "7": {"inputs": {"model": ["17", 0], "scheduler": "simple", "steps": 8, "denoise": 1.0}, "class_type": "BasicScheduler", "_meta": {"title": "FastH3 V2 8-step scheduler"}},
+  "8": {"inputs": {"sampler_name": "res_multistep"}, "class_type": "KSamplerSelect", "_meta": {"title": "FastH3 V2 sampler"}},
+  "9": {"inputs": {"noise_seed": 1}, "class_type": "RandomNoise", "_meta": {"title": "FastH3 V2 seed"}},
+  "10": {"inputs": {"model": ["17", 0], "conditioning": ["5", 0]}, "class_type": "BasicGuider", "_meta": {"title": "FastH3 V2 guider"}},
+  "11": {"inputs": {"noise": ["9", 0], "guider": ["10", 0], "sampler": ["8", 0], "sigmas": ["7", 0], "latent_image": ["5", 1]}, "class_type": "SamplerCustomAdvanced", "_meta": {"title": "FastH3 V2 sampler"}},
+  "12": {"inputs": {"samples": ["11", 0], "vae": ["3", 0]}, "class_type": "VAEDecode", "_meta": {"title": "FastH3 V2 video decode"}},
+  "13": {"inputs": {"samples": ["11", 0], "vae": ["4", 0]}, "class_type": "VAEDecodeAudio", "_meta": {"title": "FastH3 V2 audio decode"}},
+  "14": {"inputs": {"images": ["12", 0], "fps": 24.0, "audio": ["13", 0], "bit_depth": 8}, "class_type": "CreateVideo", "_meta": {"title": "FastH3 V2 video + stereo audio"}},
+  "15": {"inputs": {"video": ["14", 0], "filename_prefix": "video/MediaOverload_FastH3_V2", "format": "auto", "codec": "auto"}, "class_type": "SaveVideo", "_meta": {"title": "Save FastH3 V2 video"}}
+}

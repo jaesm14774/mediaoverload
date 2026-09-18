@@ -106,6 +106,8 @@ _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
     "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_native_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_native_int8_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_fasth3_v2_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 8},
     "minimax_h3_ref2va": {
         "width": 608,
         "height": 352,
@@ -177,7 +179,7 @@ def _synthetic_manifest(
         summary=str(values.get("summary") or ""),
         required_assets=required_assets,
         recommended_defaults=dict(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
-        asset_extra_roots=[],
+        asset_extra_roots=[str(item) for item in values.get("asset_extra_roots", []) if str(item).strip()],
         conditioning=dict(values.get("conditioning") or {}),
     )
 
@@ -207,7 +209,7 @@ def _minimax_h3_manifest(
         summary=str(payload["summary"]),
         required_assets=[AssetRequirement.from_dict(item) for item in payload["required_assets"]],
         recommended_defaults=recommended_defaults,
-        asset_extra_roots=[],
+        asset_extra_roots=[str(item) for item in values.get("asset_extra_roots", []) if str(item).strip()],
         conditioning=dict(values.get("conditioning") or {}),
     )
 
