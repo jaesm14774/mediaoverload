@@ -12,11 +12,16 @@ from agentic.tools.tts_adapter import TTSAdapter
 
 
 class MediaServiceTools:
-    def __init__(self, output_root: Path, input_roots: Iterable[Path] = ()) -> None:
+    def __init__(
+        self,
+        output_root: Path,
+        input_roots: Iterable[Path] = (),
+        ffmpeg: FFmpegAdapter | None = None,
+    ) -> None:
         self.output_root = output_root
         self.input_roots = tuple(input_roots)
         self.output_root.mkdir(parents=True, exist_ok=True)
-        self._ffmpeg: FFmpegAdapter | None = None
+        self._ffmpeg = ffmpeg
         self._sprite: SpriteAdapter | None = None
         self._editing: OpenCutEditAdapter | None = None
         self._tts: TTSAdapter | None = None

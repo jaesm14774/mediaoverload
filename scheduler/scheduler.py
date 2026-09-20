@@ -5,6 +5,7 @@ import os
 import random
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -146,7 +147,12 @@ def load_scheduler_config() -> SchedulerConfig:
     )
 
 
-def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = None) -> dict[str, Any]:
+def run_scheduled_job(
+    config: SchedulerConfig,
+    *,
+    rng: random.Random | None = None,
+    workflow_runner: Callable[[CharacterWorkflowRequest], dict[str, Any]] = run_character_workflow,
+) -> dict[str, Any]:
     if config.config_path is None:
         raise ValueError("Scheduler requires SCHEDULER_CHARACTER or SCHEDULER_CONFIG")
     if rng is None:
@@ -191,7 +197,7 @@ def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = No
             auto_download_assets=config.auto_download_assets,
         ),
     )
-    result = run_character_workflow(request)
+    result = workflow_runner(request)
     LOGGER.info(
         "scheduler.result | status=%s | strategy=%s | publish=%s",
         result.get("status"),
@@ -201,13 +207,19 @@ def run_scheduled_job(config: SchedulerConfig, *, rng: random.Random | None = No
     return result
 
 
-def _run_scheduled_job_safe(config: SchedulerConfig, *, rng: random.Random | None = None) -> dict[str, Any]:
-    local_hour = time.localtime().tm_hour
+def _run_scheduled_job_safe(
+    config: SchedulerConfig,
+    *,
+    rng: random.Random | None = None,
+    current_hour: int | None = None,
+    job_runner: Callable[..., dict[str, Any]] = run_scheduled_job,
+) -> dict[str, Any]:
+    local_hour = time.localtime().tm_hour if current_hour is None else current_hour
     if local_hour < QUIET_HOURS_END:
         LOGGER.info("scheduler.skip | reason=quiet_hours | local_hour=%s", local_hour)
         return {"status": "skipped", "reason": "quiet_hours"}
     try:
-        return run_scheduled_job(config, rng=rng)
+        return job_runner(config, rng=rng)
     except Exception:
         LOGGER.exception("scheduler.run.failed | config=%s", config.config_path)
         return {"status": "failed", "source_generation_type": "", "error": "scheduled job failed"}

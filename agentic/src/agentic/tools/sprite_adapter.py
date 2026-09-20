@@ -118,12 +118,30 @@ class SpriteAdapter:
         frames_dir = root / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
         keyed_frames: list[Image.Image] = []
+        edge_contacts: list[dict[str, int]] = []
         for frame_path in frame_paths:
             source = Path(frame_path).resolve()
             if not source.is_file():
                 raise FileNotFoundError(f"Sprite frame does not exist: {source}")
             with Image.open(source) as image:
-                keyed_frames.append(_chroma_key(image.convert("RGBA"), chroma, threshold))
+                raw = image.convert("RGBA")
+                keyed = _chroma_key(raw, chroma, threshold)
+                keyed_frames.append(keyed)
+                edge_contacts.append(_edge_contact(keyed, raw=raw, chroma=chroma, threshold=threshold))
+        clipped = [
+            (index, contact)
+            for index, contact in enumerate(edge_contacts)
+            if any(contact[side] > 0 for side in ("top", "left", "right"))
+        ]
+        if clipped:
+            details = ", ".join(
+                f"frame-{index + 1:02d}({', '.join(f'{side}={contact[side]}' for side in ('top', 'left', 'right') if contact[side] > 0)})"
+                for index, contact in clipped
+            )
+            raise ValueError(
+                "Sprite source touches the top/left/right frame edge; refusing a clipped game sprite: "
+                f"{details}. Increase the source canvas or keep the subject inside the safe area."
+            )
         shared_bbox = _union_bbox(keyed_frames)
         if shared_bbox is None:
             raise ValueError("Sprite frames became fully transparent after chroma removal")
@@ -199,8 +217,13 @@ class SpriteAdapter:
                 "binary_alpha": all(_has_binary_alpha(frame) for frame in normalized_frames),
                 "motion_present": len({_sha256(Path(record["path"])) for record in frame_records}) >= 2,
                 "nonempty_frames": all(count > 0 for count in alpha_counts),
+                "non_floor_edge_contact": not any(
+                    any(contact[side] > 0 for side in ("top", "left", "right"))
+                    for contact in edge_contacts
+                ),
             },
             "opaque_pixel_count": alpha_counts,
+            "edge_contacts": edge_contacts,
         }
         manifest = {
             "schema_version": 1,
@@ -390,6 +413,79 @@ def _union_bbox(images: list[Image.Image]) -> tuple[int, int, int, int] | None:
 
 def _alpha_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
     return image.getchannel("A").getbbox()
+
+
+def _edge_contact(
+    image: Image.Image,
+    *,
+    raw: Image.Image | None = None,
+    chroma: tuple[int, int, int] | None = None,
+    threshold: int = SPRITE_DEFAULT_CHROMA_THRESHOLD,
+    margin: int = 4,
+) -> dict[str, int]:
+    """Count opaque or likely-subject pixels touching non-floor edges."""
+
+    alpha = image.getchannel("A")
+    width, height = alpha.size
+    pixels = alpha.load()
+    band = max(1, min(int(margin), width, height))
+    contacts = {
+        "top": sum(
+            1
+            for y in range(band)
+            for x in range(width)
+            if pixels[x, y] > 0
+        ),
+        "left": sum(
+            1
+            for x in range(band)
+            for y in range(height)
+            if pixels[x, y] > 0
+        ),
+        "right": sum(
+            1
+            for x in range(width - band, width)
+            for y in range(height)
+            if pixels[x, y] > 0
+        ),
+    }
+    if raw is None or chroma is None:
+        return contacts
+
+    raw_pixels = raw.convert("RGB").load()
+    corner_points = (
+        (0, 0),
+        (width - 1, 0),
+        (0, height - 1),
+        (width - 1, height - 1),
+    )
+    background = tuple(
+        round(sum(raw_pixels[x, y][channel] for x, y in corner_points) / len(corner_points))
+        for channel in range(3)
+    )
+    threshold_sq = max(1, threshold) ** 2
+
+    def likely_subject(x: int, y: int) -> bool:
+        color = raw_pixels[x, y]
+        distance_sq = sum((color[channel] - background[channel]) ** 2 for channel in range(3))
+        if distance_sq <= threshold_sq:
+            return False
+        key_distance_sq = sum((color[channel] - chroma[channel]) ** 2 for channel in range(3))
+        return key_distance_sq > threshold_sq
+
+    contacts["top"] = max(
+        contacts["top"],
+        sum(1 for y in range(band) for x in range(width) if likely_subject(x, y)),
+    )
+    contacts["left"] = max(
+        contacts["left"],
+        sum(1 for x in range(band) for y in range(height) if likely_subject(x, y)),
+    )
+    contacts["right"] = max(
+        contacts["right"],
+        sum(1 for x in range(width - band, width) for y in range(height) if likely_subject(x, y)),
+    )
+    return contacts
 
 
 def _binary_alpha(image: Image.Image) -> Image.Image:

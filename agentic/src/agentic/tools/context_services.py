@@ -8,6 +8,7 @@ import os
 import random
 import textwrap
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -570,11 +571,17 @@ class HumanReviewDecision:
 
 
 class DiscordHumanReviewService:
-    def __init__(self, output_root: Path) -> None:
+    def __init__(
+        self,
+        output_root: Path,
+        feedback_process: Callable[..., Awaitable[tuple[str | None, str | None, str | None, list[int] | None, dict[str, Any]]]]
+        | None = None,
+    ) -> None:
         _load_env_once()
         self.output_root = output_root
         self.review_root = output_root / "review_sessions"
         self.review_root.mkdir(parents=True, exist_ok=True)
+        self.feedback_process = feedback_process or _run_discord_file_feedback_process
 
     def is_configured(self) -> bool:
         token = os.getenv("discord_review_bot_token")
@@ -647,7 +654,7 @@ class DiscordHumanReviewService:
         )
         try:
             decision = asyncio.run(
-                _run_discord_file_feedback_process(
+                self.feedback_process(
                     token=str(os.getenv("discord_review_bot_token")),
                     channel_id=int(str(os.getenv("discord_review_channel_id"))),
                     text=discord_text,

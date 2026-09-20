@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 from agentic.runtime.llm_engine import LLMPromptEngine
@@ -15,9 +16,11 @@ class NativeH3StoryService:
         self,
         llm_engine: LLMPromptEngine | None = None,
         news_service: NewsContextService | None = None,
+        storyboard_merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] = merge_native_h3_storyboard,
     ) -> None:
         self.llm_engine = llm_engine or LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
         self.news_service = news_service or NewsContextService()
+        self.storyboard_merger = storyboard_merger
 
     def resolve(
         self,
@@ -59,4 +62,4 @@ class NativeH3StoryService:
             creative_brief=creative_brief,
             reference_analysis=dict(reference_analysis or {}),
         )
-        return merge_native_h3_storyboard(base_storyboard, payload["story"]), payload
+        return self.storyboard_merger(base_storyboard, payload["story"]), payload

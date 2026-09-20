@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import textwrap
 from dataclasses import replace
 from pathlib import Path
-import textwrap
+from typing import Any
 
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.platform_content import (
@@ -21,12 +22,18 @@ IMAGE_REVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
 class AgentSocialSkills:
-    def __init__(self, tools: ToolRegistry, output_root: Path, prompt_engine: PromptEngine | None = None) -> None:
+    def __init__(
+        self,
+        tools: ToolRegistry,
+        output_root: Path,
+        prompt_engine: PromptEngine | None = None,
+        discord_review: Any | None = None,
+    ) -> None:
         self.tools = tools
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.prompt_engine = prompt_engine or PromptEngine()
-        self.discord_review = DiscordHumanReviewService(output_root=self.output_root)
+        self.discord_review = discord_review or DiscordHumanReviewService(output_root=self.output_root)
 
     def prepare_caption(self, context: SkillContext) -> SkillResult:
         prefix = str(context.node.inputs.get("prefix", "")).strip()

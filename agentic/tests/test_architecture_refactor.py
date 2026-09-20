@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
 from agentic.runtime.story_service import NativeH3StoryService
@@ -34,15 +34,15 @@ class SharedSkillHelperTests(unittest.TestCase):
         return SkillContext(plan=plan, node=node, state=state)
 
     def test_run_directory_helper_preserves_canonical_variants(self) -> None:
-        with patch("agentic.skills.shared.datetime") as datetime_class:
-            datetime_class.now.return_value.strftime.return_value = "20260809_120000"
-            image_path = build_run_dir(Path("output"), "A rainy Kirby scene", default_slug="comfy-image", max_slug_length=40)
-            workflow_path = build_run_dir(
-                Path("output"), "A rainy Kirby scene", "img2img", default_slug="workflow", suffix_first=True
-            )
+        image_path = build_run_dir(Path("output"), "A rainy Kirby scene", default_slug="comfy-image", max_slug_length=40)
+        workflow_path = build_run_dir(
+            Path("output"), "A rainy Kirby scene", "img2img", default_slug="workflow", suffix_first=True
+        )
 
-        self.assertEqual(image_path, Path("output/20260809_120000_a-rainy-kirby-scene"))
-        self.assertEqual(workflow_path, Path("output/20260809_120000_img2img_a-rainy-kirby-scene"))
+        self.assertRegex(image_path.name, r"^\d{8}_\d{6}_a-rainy-kirby-scene$")
+        self.assertRegex(workflow_path.name, r"^\d{8}_\d{6}_img2img_a-rainy-kirby-scene$")
+        self.assertEqual(image_path.parent, Path("output"))
+        self.assertEqual(workflow_path.parent, Path("output"))
 
     def test_dependency_collector_can_preserve_first_matching_key_contract(self) -> None:
         context = self._context({"render": {"saved_files": ["first.mp4"], "video_path": "fallback.mp4"}})
@@ -129,23 +129,26 @@ class NativeH3StoryServiceTests(unittest.TestCase):
                 calls.append(kwargs)
                 return {"story": {"name": "generated"}}
 
-        with patch(
-            "agentic.runtime.story_service.merge_native_h3_storyboard",
-            return_value={"name": "merged"},
-        ) as merge_story:
-            service = NativeH3StoryService(llm_engine=FakeLLM(), news_service=FakeNewsService())  # type: ignore[arg-type]
-            merged, payload = service.resolve(
-                {"name": "base"},
-                character="Kirby",
-                style="anime",
-                duration_seconds=15,
-                news_context={},
-            )
+        def merge_story(base: dict[str, object], story: dict[str, object]) -> dict[str, object]:
+            return {"base": base, "story": story}
 
-        self.assertEqual(merged, {"name": "merged"})
+        service = NativeH3StoryService(
+            llm_engine=FakeLLM(),
+            news_service=FakeNewsService(),
+            storyboard_merger=merge_story,
+        )  # type: ignore[arg-type]
+        merged, payload = service.resolve(
+            {"name": "base"},
+            character="Kirby",
+            style="anime",
+            duration_seconds=15,
+            news_context={},
+        )
+
+        self.assertEqual(merged["story"], {"name": "generated"})
         self.assertEqual(payload["story"], {"name": "generated"})
         self.assertEqual(calls[0]["news_context"], {"title": "rain warning", "keyword": "weather"})
-        merge_story.assert_called_once_with({"name": "base"}, {"name": "generated"})
+        self.assertEqual(merged["base"], {"name": "base"})
 
     def test_service_replaces_brand_unsafe_injected_news_context(self) -> None:
         calls: list[dict[str, object]] = []
@@ -159,18 +162,18 @@ class NativeH3StoryServiceTests(unittest.TestCase):
                 calls.append(kwargs)
                 return {"story": {"name": "generated"}}
 
-        with patch(
-            "agentic.runtime.story_service.merge_native_h3_storyboard",
-            return_value={"name": "merged"},
-        ):
-            service = NativeH3StoryService(llm_engine=FakeLLM(), news_service=FakeNewsService())  # type: ignore[arg-type]
-            service.resolve(
-                {"name": "base"},
-                character="Kirby",
-                style="anime",
-                duration_seconds=15,
-                news_context={"title": "AI性愛機器人新產品", "keyword": "AI;性愛機器人"},
-            )
+        service = NativeH3StoryService(
+            llm_engine=FakeLLM(),
+            news_service=FakeNewsService(),
+            storyboard_merger=lambda base, story: {"base": base, "story": story},
+        )  # type: ignore[arg-type]
+        service.resolve(
+            {"name": "base"},
+            character="Kirby",
+            style="anime",
+            duration_seconds=15,
+            news_context={"title": "AI性愛機器人新產品", "keyword": "AI;性愛機器人"},
+        )
 
         self.assertEqual(calls[0]["news_context"], {"title": "rain warning", "keyword": "weather"})
 

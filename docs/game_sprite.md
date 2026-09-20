@@ -95,6 +95,10 @@ art quality, silhouette readability, and game feel.
 ## Output checks
 
 The packager checks 16 frames, configured cell and atlas dimensions, binary
-alpha, nonempty frames, and at least two distinct frames. Subject size changes,
-identity, choreography, and appearance are reviewed in Discord. A pixel-area
-ratio is not a proxy for character quality.
+alpha, nonempty frames, at least two distinct frames, and non-floor edge
+contact. A source frame with opaque or likely-subject pixels in the top, left,
+or right four-pixel edge band is rejected with per-frame counts; the bottom
+edge remains allowed for grounded motion. This prevents a clipped generated
+subject from being published as a valid atlas. Subject size changes, identity,
+choreography, and appearance are still reviewed in Discord. A pixel-area ratio
+is not a proxy for character quality.
