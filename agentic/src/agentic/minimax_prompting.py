@@ -4,46 +4,11 @@ from collections.abc import Mapping, Sequence
 import re
 from typing import Any
 
-
-SHORT_FORM_VIDEO_TYPES = frozenset(
-    {
-        "text2video",
-        "text2img2video",
-        "image_to_video",
-        "animated_sticker",
-    }
-)
+from agentic.runtime.visual_action_contract import visual_action_contract
 
 
 def clean_prompt_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip().rstrip(".")
-
-
-def short_action_contract(
-    duration_seconds: int | float,
-    *,
-    media_type: str | None = None,
-    subject_count: int = 1,
-) -> str:
-    """Return the shared, topic-neutral contract for a short causal clip."""
-    duration = max(1, int(duration_seconds or 0))
-    if duration > 6:
-        return ""
-    if media_type and media_type not in SHORT_FORM_VIDEO_TYPES:
-        return ""
-    subject_rule = (
-        "keep one protagonist"
-        if int(subject_count or 1) <= 1
-        else "keep the declared subject slots together with stable individual identities"
-    )
-    return (
-        f"Short-action contract for this {duration}-second clip: use one clear physical action only; {subject_rule}, one dominant physical "
-        "mechanism, and one clear objective. Show a readable start state immediately, then anticipation or an "
-        "attempt, one decisive cause-and-effect change, a visible reaction or deformation, and a completed end state "
-        "with payoff before the end. Tie each camera move to the physical change it reveals. End in a settled visual "
-        "state that echoes the opening enough to feel loopable, without hiding the payoff. Do not add a second "
-        "plot, unrelated prop, extra protagonist, static pose, abstract action, or montage."
-    )
 
 
 def subject_identity_lock(
@@ -133,6 +98,7 @@ def compose_minimax_h3_prompt(
     continuity_rules: Sequence[Any] = (),
     subject_context: Mapping[str, Any] | None = None,
     official_shot_syntax: bool = False,
+    media_type: str | None = None,
 ) -> str:
     """Compose the local H3 prompt in MiniMax's documented multimodal shape."""
     spine = dict(story_spine or {})
@@ -234,8 +200,13 @@ def compose_minimax_h3_prompt(
             f"overall_soundscape: {soundscape}.",
             "non_diegetic_music: restrained motif rises with obstacle, tightens at reversal, resolves with payoff.",
             "Motion contract: visible motion starts in the first half-second; every shot changes composition, action, and mission state; preserve physical cause and effect.",
-            short_action_contract(duration_seconds, subject_count=subject_count)
-            or "Cute gag: one prop causes reaction/payoff; causal deformation; loop the opening.",
+            visual_action_contract(
+                duration_seconds,
+                media_type=media_type or render_mode,
+                subject_count=subject_count,
+                loop=bool(media_type == "game_sprite"),
+            )
+            or "Use one visible physical cause, a readable state change, a reaction, and a settled payoff.",
             (
                 "Continuity gate: keep both required subject slots, their identities, shared world, dominant prop, and news mechanism across shots; "
                 "show the interaction causing the payoff; no identity swap, unrequested third subject, new room, device, spectacle, or generic substitute."

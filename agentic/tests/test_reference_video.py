@@ -91,7 +91,7 @@ class ReferenceVideoTests(unittest.TestCase):
                     "reference_video_source": "C:/references/clip.mp4",
                     "reference_video_depth": "deep",
                     "reference_video_max_keyframes": 12,
-                    "reference_micro_gag_profile": "reference_micro_gag_v1",
+                    "reference_video_source": "C:/references/clip.mp4",
                     "seed": 1234,
                     "duration_override_seconds": 6,
                     "video_frame_rate": 24,

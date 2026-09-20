@@ -35,6 +35,10 @@ from agentic.tools.context_services import (
 )
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.tools.social_services import record_facebook_profile_handoff_delivery
+from agentic.runtime.visual_action_contract import (
+    default_visual_action_contract,
+    visual_action_contract,
+)
 
 SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube", FACEBOOK_PROFILE_HANDOFF_PLATFORM}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
@@ -367,7 +371,7 @@ def resolve_character_selection(
     story_card_requested = (
         str(request.generation.preferred_generation_type or "").strip().lower() == "story_card"
     )
-    reference_micro_gag_requested = (
+    reference_video_requested = (
         str(request.generation.preferred_generation_type or "").strip().lower() == "text2image2video"
         and bool(str(request.generation.reference_video_source or "").strip())
     )
@@ -391,12 +395,12 @@ def resolve_character_selection(
             effective_subject_mode=SUBJECT_MODE_SINGLE,
             subject_mode_weights=None,
         )
-    if reference_micro_gag_requested or game_sprite_requested:
-        # Reference-derived micro-gags and game sprites use one readable
-        # protagonist. Do not let the general Kirby config's random interaction
-        # weighting add an unrelated second subject to these routes.
+    if reference_video_requested or game_sprite_requested:
+        # Reference-driven I2V and game sprites use one readable protagonist.
+        # Do not let the general Kirby config's interaction weighting add an
+        # unrelated second subject to these technical routes.
         configured_subject_mode = SUBJECT_MODE_SINGLE
-    if reference_micro_gag_requested or game_sprite_requested:
+    if reference_video_requested or game_sprite_requested:
         subject_mode, subject_mode_weights = SUBJECT_MODE_SINGLE, None
     else:
         subject_mode, subject_mode_weights = _resolve_subject_mode(
@@ -431,8 +435,35 @@ def resolve_character_selection(
         group_name,
         rng=request.generation.rng,
     )
+    selection_payload = selection.to_dict()
+    prompt_text = str(request.generation.prompt or "").casefold()
+    if prompt_text and isinstance(selection_payload.get("candidates"), list):
+        named_candidate = next(
+            (
+                candidate
+                for candidate in sorted(
+                    selection_payload["candidates"],
+                    key=lambda item: (
+                        len(str(item.get("name") or ""))
+                        if isinstance(item, dict)
+                        else 0
+                    ),
+                    reverse=True,
+                )
+                if isinstance(candidate, dict)
+                and str(candidate.get("name") or "").strip().casefold() in prompt_text
+            ),
+            None,
+        )
+        if named_candidate is not None:
+            selection_payload["selected_character"] = str(named_candidate["name"])
+            selection_payload["selected_profile"] = {
+                "role_description": str(named_candidate.get("role_description") or ""),
+                "keywords": str(named_candidate.get("keywords") or ""),
+            }
+            selection_payload["selection_source"] = "prompt_named_role"
     return _annotate_subject_selection(
-        selection.to_dict(),
+        selection_payload,
         configured_subject_mode=configured_subject_mode,
         effective_subject_mode=subject_mode,
         subject_mode_weights=subject_mode_weights,
@@ -487,6 +518,8 @@ def choose_media_type(
     weights = dict(generation.get("generation_type_weights", {}) or {})
     normalized_preference = _normalize_generation_type(preferred_generation_type)
     if normalized_preference:
+        if normalized_preference not in CONFIG_MEDIA_TYPE_MAP:
+            raise ValueError(f"Unsupported generation type: {normalized_preference}")
         config_generation_type = normalized_preference
     else:
         config_generation_type = _weighted_choice(weights, rng=rng)
@@ -725,13 +758,9 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         raise ValueError("reference_video_depth must be 'standard' or 'deep'")
     if not 2 <= reference_video_max_keyframes <= 20:
         raise ValueError("reference_video_max_keyframes must be an integer between 2 and 20")
-    reference_micro_gag_profile = bool(
-        config_generation_type == "text2image2video" and reference_video_source
-    )
-    if reference_micro_gag_profile:
-        # The collection's clips already encode their intended short-form
-        # rhythm. Do not apply Kirby's general 2x playback transform to this
-        # profile or the generated payoff will be compressed out of the clip.
+    if config_generation_type == "text2image2video" and reference_video_source:
+        # Reference-driven action clips already encode their intended rhythm in
+        # the prompt. Do not compress the generated payoff with a speed pass.
         video_speed = {"enabled": False, "factor": 1.0}
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
@@ -866,6 +895,14 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     story_card_config = dict(generation.get("story_card", {}) or {})
     story_card_visual = dict(story_card_config.get("visual") or {})
     game_sprite_config = dict(generation.get("game_sprite", {}) or {})
+    visual_subject_count = len(subject_context.get("subjects") or []) or 1
+    resolved_visual_action_contract = visual_action_contract(
+        duration_seconds,
+        media_type=config_generation_type,
+        subject_count=visual_subject_count,
+        loop=config_generation_type == "game_sprite",
+        segment=config_generation_type == "text2longvideo",
+    )
     constraints = {
         "character": character_name,
         "subject_mode": subject_mode,
@@ -970,7 +1007,14 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             if not no_review and not stage_probe
             else False
         ),
-        "reference_micro_gag_profile": "reference_micro_gag_v1" if reference_micro_gag_profile else "",
+        "visual_action_profile": config_generation_type,
+        "visual_action_contract": resolved_visual_action_contract,
+        "visual_action_contract_spec": default_visual_action_contract(
+            duration_seconds,
+            media_type=config_generation_type,
+            subject_count=visual_subject_count,
+            loop=config_generation_type == "game_sprite",
+        ),
         "native_h3_creative_brief": native_h3_creative_brief,
         "native_h3_visual_style_contract": native_h3_visual_style_contract,
         "visual_style_contract": native_h3_visual_style_contract,
@@ -990,8 +1034,11 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         "duration_override_seconds": (
             max(1, int(requested_duration_seconds)) if requested_duration_seconds is not None else None
         ),
-        "duration_profile": _duration_profile(requested_duration_seconds),
+        "duration_profile": _duration_profile(
+            requested_duration_seconds
+        ),
         "video_frame_rate": int(dict(generation.get("video_defaults", {}) or {}).get("frame_rate", 24)),
+        "max_i2v_frames": int(dict(generation.get("video_defaults", {}) or {}).get("max_i2v_frames", 240)),
         "workflow_name": routing.get("workflow_name", ""),
         "image_workflow_name": routing.get("workflow_plan", {}).get("image_workflow_name", ""),
         "video_workflow_name": routing.get("workflow_plan", {}).get("video_workflow_name", ""),
@@ -1657,6 +1704,24 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
     if speed_candidates:
         return [speed_candidates[-1]]
 
+    # A final transform node is authoritative even when the route has no
+    # package node. This prevents raw and normalized copies from both reaching
+    # the final Discord review.
+    final_video_candidates: list[str] = []
+    for outputs in node_outputs.values():
+        if not isinstance(outputs, dict):
+            continue
+        candidates = outputs.get("final_video_path") or []
+        if isinstance(candidates, str):
+            candidates = [candidates]
+        final_video_candidates.extend(
+            path
+            for path in candidates
+            if isinstance(path, str) and Path(path).suffix.lower() in VIDEO_EXTENSIONS
+        )
+    if final_video_candidates:
+        return [final_video_candidates[-1]]
+
     preferred_package_nodes = (
         "story-card-compose",
         "native-h3-package",
@@ -2224,7 +2289,10 @@ def _collect_generation_type_candidates(
     explicit = routing_config.get("strategy_candidates") or routing_config.get("allowed_generation_types") or []
     candidates: list[str] = []
     if preferred_generation_type:
-        candidates.append(str(preferred_generation_type).strip())
+        candidate = str(preferred_generation_type).strip()
+        if candidate not in CONFIG_MEDIA_TYPE_MAP:
+            raise ValueError(f"Unsupported generation type: {candidate}")
+        candidates.append(candidate)
     elif isinstance(explicit, list):
         candidates.extend(str(item).strip() for item in explicit if str(item).strip())
     if not preferred_generation_type and isinstance(routing_runtime_context, dict):
@@ -2494,7 +2562,7 @@ def _prioritize_h3_profile(
     profile = str(generation.get("h3_profile") or "balanced-lowvram").strip().lower()
     slug = profile_to_slug.get(profile, profile_to_slug["balanced-lowvram"])
     for generation_type in generation_type_candidates:
-        if generation_type not in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va", "sticker_pack"}:
+        if generation_type not in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va", "sticker_pack", "game_sprite"}:
             continue
         if generation_type in {"text2video", "native_h3_t2v_story"}:
             suffix = "t2v"
@@ -2734,15 +2802,14 @@ def _resolve_duration_seconds(
         if requested is not None and requested != native_duration:
             raise ValueError(
                 f"{config_generation_type} supports duration_seconds={native_duration}; "
-                "use text2image2video for a 5-second clip."
+                "use text2image2video for a 10-second source clip."
             )
         return native_duration
     if config_generation_type == "text2image2video":
-        # The default I2V workflow is a short 124-frame clip at 24 fps.
-        # Keep prompt planning aligned with that effective ~5-second render
-        # so the short-action contract is applied unless the caller opts in
-        # to a different duration explicitly.
-        return requested or 5
+        # The default I2V source clip is 10 seconds at 24 fps. A configured 2x
+        # playback transform can then produce the intended ~5-second final
+        # social clip without collapsing the generated action to ~2 seconds.
+        return requested or 10
     if config_generation_type == "game_sprite":
         sprite_config = dict((generation or {}).get("game_sprite", {}) or {})
         configured_duration = int(sprite_config.get("duration_seconds", 8))

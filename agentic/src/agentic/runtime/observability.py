@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 import re
 import threading
@@ -47,6 +48,8 @@ class RunRecorder:
         self.manifest_path = self.run_dir / "run_manifest.json"
         self._lock = threading.Lock()
         self._sequence = 0
+        self._finalized = False
+        atexit.register(self.finalize_if_open)
         self.record_event("run.created")
 
     def _next_sequence(self) -> int:
@@ -228,6 +231,9 @@ class RunRecorder:
         return result_path
 
     def finalize(self, payload: dict[str, Any]) -> Path:
+        if self._finalized and self.manifest_path.exists():
+            return self.manifest_path
+        self._finalized = True
         manifest = {
             "run_id": self.run_id,
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -245,3 +251,26 @@ class RunRecorder:
         )
         self.record_event("run.finalized", manifest_path=str(self.manifest_path), status=payload.get("status", ""))
         return self.manifest_path
+
+    def finalize_if_open(self) -> Path | None:
+        """Close a process-exited run that never reached the normal workflow epilogue."""
+
+        if self._finalized or self.manifest_path.exists():
+            return None
+        try:
+            self.record_event(
+                "run.aborted",
+                reason="Process exited before workflow finalization.",
+            )
+            return self.finalize(
+                {
+                    "status": "failed",
+                    "failure_reason": (
+                        "Process exited before workflow finalization; inspect events.jsonl and llm/*.json "
+                        "for the last pending operation."
+                    ),
+                    "failure_node": "workflow.lifecycle",
+                }
+            )
+        except Exception:
+            return None

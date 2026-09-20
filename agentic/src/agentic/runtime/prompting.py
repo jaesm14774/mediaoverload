@@ -8,7 +8,8 @@ from typing import Any
 from agentic.storyboard import build_storyboard_segments, load_storyboard, story_state_contract
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.minimax_prompting import compose_minimax_h3_prompt, short_action_contract, structured_visual_prompt
+from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt
+from agentic.runtime.visual_action_contract import visual_action_contract
 
 
 LONG_VIDEO_SYSTEM_PROMPT = """
@@ -216,6 +217,15 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     subject_anchor = _subject_anchor_clause(goal)
     news_context = _news_context(goal)
     action_directive = _action_directive(goal.media_type, goal.duration_seconds)
+    subject_count = len(
+        [item for item in (_subject_context(goal).get("subjects") or []) if isinstance(item, dict)]
+    ) or 1
+    action_contract = visual_action_contract(
+        goal.duration_seconds,
+        media_type=goal.media_type,
+        subject_count=subject_count,
+        loop=goal.media_type == "game_sprite",
+    )
     continuity_directive = _continuity_directive(goal.media_type)
     style_contract = str(goal.constraints.get("visual_style_contract") or "").strip()
     style_direction = _style_directive(selected_style)
@@ -233,6 +243,8 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
         style=style_direction,
         quality=_quality_clause(goal.media_type),
     )
+    if action_contract:
+        visual_prompt = f"{visual_prompt}\nVisual action contract: {action_contract}"
     opening_scene = str(goal.prompt or "").split(";", 1)[0].strip()
     opening_keyframe_prompt = structured_visual_prompt(
         subject=subject_anchor,
@@ -278,7 +290,14 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
         ]
     )
     return {
-        "creative_brief": f"{goal.prompt} translated into an executable {goal.media_type} workflow with strict subject continuity",
+        "creative_brief": "\n".join(
+            part
+            for part in (
+                f"{goal.prompt} translated into an executable {goal.media_type} workflow with strict subject continuity",
+                f"Visual action contract: {action_contract}" if action_contract else "",
+            )
+            if part
+        ),
         "prompt": visual_prompt,
         "opening_keyframe_prompt": opening_keyframe_prompt,
         "negative_prompt": negative_prompt,
@@ -322,6 +341,12 @@ def build_story_segments(
         if str(production_profile or "").strip().lower() == "text2longvideo":
             segment_duration = max(1.0, float(goal.duration_seconds) / max(1, int(segment_count)))
             for segment in storyboard_segments:
+                segment["action_contract"] = visual_action_contract(
+                    segment_duration,
+                    media_type="long_video",
+                    subject_count=len(_subject_names(goal)) or 1,
+                    segment=True,
+                )
                 segment["shots"] = build_timed_shot_plan(
                     segment,
                     duration_seconds=segment_duration,
@@ -336,6 +361,7 @@ def build_story_segments(
     news_context = _news_context(goal)
     motif_pool = _visual_motif_pool(news_context)
     planned_states = _fallback_story_states(goal, subject_anchor, segment_count)
+    segment_duration = max(1.0, float(goal.duration_seconds) / max(1, int(segment_count)))
     segments: list[dict[str, Any]] = []
     for index in range(segment_count):
         stage = _story_stage(index, segment_count)
@@ -370,10 +396,15 @@ def build_story_segments(
                 "cause": f"{subject_anchor} takes the next physical action because the previous state creates a clear immediate objective",
                 "effect": f"The changed state opens the {('next' if index < segment_count - 1 else 'resolved')} story beat",
                 "creative_brief": creative_brief,
+                "action_contract": visual_action_contract(
+                    segment_duration,
+                    media_type="long_video",
+                    subject_count=len(_subject_names(goal)) or 1,
+                    segment=True,
+                ),
             }
         )
     if str(production_profile or "").strip().lower() == "text2longvideo":
-        segment_duration = max(1.0, float(goal.duration_seconds) / max(1, int(segment_count)))
         for segment in segments:
             segment["shots"] = build_timed_shot_plan(
                 segment,
@@ -546,6 +577,9 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
         style=str(goal.style or "stylized cinematic animation"),
         quality="clear motion path, strong silhouette, spatial depth, no documentary text overlays",
     )
+    action_contract = str(segment.get("action_contract") or "").strip()
+    if action_contract:
+        prompt = f"{prompt}\nVisual action contract: {action_contract}"
     outputs = {
         "segment_id": segment["segment_id"],
         "prompt": prompt,
@@ -606,6 +640,7 @@ def build_minimax_h3_prompt(
         prior_frame=bool(prior_frame),
         subject_context=_subject_context(goal),
         official_shot_syntax=official_shot_syntax,
+        media_type=goal.media_type,
     )
     prompt = "\n".join(
         [
@@ -617,13 +652,6 @@ def build_minimax_h3_prompt(
                 else "Character lock: preserve the same protagonist from the supplied identity anchor."
             ),
             "Motion direction: advance from the declared start state to the declared end state with one continuous readable primary event.",
-            (
-                "Long-segment action contract: begin moving within the first half-second; sustain a visible motion path; "
-                "include anticipation, a decisive cause-and-effect change, a readable reaction, and a settled result. "
-                "Do not spend the segment standing still, watching, waiting, posing, or only making a slow camera push."
-            )
-            if goal.media_type == "long_video" and duration >= 7
-            else "",
             f"Audio direction: {audio_direction}",
         ]
     )
@@ -662,6 +690,12 @@ def build_animated_sticker_motion_prompt(goal: GoalRequest) -> str:
             _core_scene_clause(goal.prompt, goal.media_type, news_context),
             _news_fusion_clause(news_context),
             _style_directive(goal.style),
+            visual_action_contract(
+                goal.duration_seconds,
+                media_type="animated_sticker",
+                subject_count=1,
+                loop=True,
+            ),
             "simple loopable full-body motion with one anticipation, one impact or peak, and one settle; expressive bounce, squash-and-stretch, wobble, or elastic recoil must be caused by the visible action",
             "the final pose or prop position should echo the opening so the loop seam is gentle while the emotion remains readable",
             "minimal uncluttered background, locked camera, clear silhouette preservation",
@@ -840,6 +874,12 @@ def compile_dynamic_sprite_video_prompt(
             str(creative_prompt or "").strip(),
             "Execute the following sequential choreography as one continuous shot with no pose reset:",
             " ".join(beat_lines),
+            visual_action_contract(
+                8,
+                media_type="game_sprite",
+                subject_count=1,
+                loop=animation_kind == "periodic",
+            ),
             loop_instruction,
             dynamic_sprite_video_contract(background_color),
         )
@@ -940,17 +980,26 @@ def _action_directive(media_type: str, duration_seconds: int) -> str:
             "one decisive visual state or pose that makes the central idea immediately readable; any prop interaction "
             "must show a clear physical relationship and visible consequence"
         )
-    if media_type in {"long_video", "native_h3_story", "text2video", "text2img2video", "animated_sticker", "image_to_video"}:
-        short_contract = short_action_contract(duration_seconds, media_type=media_type)
-        if short_contract:
-            return short_contract
-        if int(duration_seconds or 0) <= 15:
-            return (
-                "one compact causal mini-story in one to three strong action beats: each beat changes the visible "
-                "state, one simple prop or force remains the visual anchor, the protagonist has one readable reaction, "
-                "and the final beat delivers one memorable physical payoff; if loopable, echo the opening composition"
-            )
-        return f"meaningful action sequence that can sustain {duration_seconds} seconds"
+    if media_type in {
+        "long_video",
+        "native_h3_story",
+        "native_h3_t2v_story",
+        "native_h3_fl2va_story",
+        "native_h3_l2va_story",
+        "native_h3_ref2va",
+        "text2image2native_h3_ref2va",
+        "text2video",
+        "text2img2video",
+        "animated_sticker",
+        "image_to_video",
+        "game_sprite",
+    }:
+        return visual_action_contract(
+            duration_seconds,
+            media_type=media_type,
+            loop=media_type == "game_sprite",
+            segment=media_type == "long_video",
+        )
     return "clear action and visual intent"
 
 

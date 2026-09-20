@@ -26,7 +26,7 @@
       "prompt": "A playful Kirby short film with clear subject identity, readable action, expressive timing, and native stereo audio.",
       "width": 608,
       "height": 352,
-      "length": 124,
+      "length": 240,
       "first_frame": ["16", 0]
     },
     "class_type": "MiniMaxH3ImageToVideo",

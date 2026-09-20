@@ -169,7 +169,7 @@ generation:
     quality-adjective stacking.
   native_h3_quality:
     creative_brief: >-
-      Make this a highly shareable cute micro-gag with a designed setting:
+      Make this a highly shareable compact causal story with a designed setting:
       one clear causal mechanism, one readable setback, and one visible
       reversal/payoff. The first second must already contain motion and a clear
       expressive reaction. Use environmental depth, configured interaction pairs,
@@ -293,9 +293,12 @@ generation:
     require_stereo_audio: true
     analyze_audio: true
   video_defaults:
-    length: 248
+    length: 240
     frame_rate: 24
     steps: 20
+    # The default I2V source is 10 seconds at 24 fps. The post-render 2x
+    # transform produces a final clip of about 5 seconds.
+    max_i2v_frames: 240
     draft_acceleration: spectrum
   generation_type_weights:
     text2img: 1

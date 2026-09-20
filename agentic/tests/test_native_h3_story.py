@@ -248,7 +248,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                     constraints={
                         "character": "Kirby",
                         "prompt_source": "news",
-                        "native_h3_creative_brief": "cute micro-gag with one prop and a visible payoff",
+                        "native_h3_creative_brief": "compact causal story with one prop and a visible payoff",
                         "news_context": {"title": "AI companion robot arrives", "keyword": "AI;robot"},
                     },
                 )
@@ -268,7 +268,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         ).prepare_native_h3_story(context)
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(captured["creative_brief"], "cute micro-gag with one prop and a visible payoff")
+        self.assertEqual(captured["creative_brief"], "compact causal story with one prop and a visible payoff")
         ending_prompt = str(result.outputs["ending_keyframe_prompt"])
         self.assertIn("high-tech semiconductor laboratory", ending_prompt)
         self.assertIn("scanning arch traps the subject", ending_prompt)
@@ -334,8 +334,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("Hook", prompt)
         self.assertNotIn("??", prompt)
         self.assertIn("15-second", prompt)
-        self.assertIn("Cute gag:", prompt)
-        self.assertIn("loop the opening", prompt)
+        self.assertIn("Causal-motion contract", prompt)
+        self.assertIn("payoff", prompt)
 
     def test_native_prompt_carries_the_single_visual_gag_contract(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
@@ -851,13 +851,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
     def test_native_h3_negative_visual_constraints_do_not_erase_creative_brief(self) -> None:
         brief = (
-            "Make a cute micro-gag with one dominant mechanism and a readable payoff. "
+            "Make a compact causal story with one dominant mechanism and a readable payoff. "
             "Do not show readable interfaces or abstract symbols."
         )
 
         sanitized = LLMPromptEngine._sanitize_native_h3_creative_brief(brief)
 
-        self.assertIn("cute micro-gag", sanitized)
+        self.assertIn("compact causal story", sanitized)
         self.assertIn("Do not show readable interfaces", sanitized)
 
     def test_shared_video_system_prompt_does_not_downgrade_news_grounding(self) -> None:

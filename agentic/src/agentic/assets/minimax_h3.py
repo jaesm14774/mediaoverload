@@ -178,12 +178,12 @@ PROFILES: dict[str, MiniMaxH3Profile] = {
         workflow_name="minimax_h3_lowvram_i2v",
         summary=(
             "RTX 4060 8GB default: community Q4 diffusion + Q4 text encoder, "
-            "native H3 audio/video nodes, system-RAM offload, 0.2MP and ~5s draft."
+            "native H3 audio/video nodes, system-RAM offload, 0.2MP and ~10s source draft."
         ),
         assets=(_H3_FL2VA_Q4, _H3_TEXT_Q4, _VIDEO_VAE, _AUDIO_VAE),
         width=608,
         height=352,
-        length=124,
+        length=240,
         steps=20,
         sampler="res_multistep",
         use_spectrum_for_draft=True,
@@ -199,7 +199,7 @@ PROFILES: dict[str, MiniMaxH3Profile] = {
         assets=(_H3_FL2VA_Q4, _H3_TEXT_Q2, _VIDEO_VAE, _AUDIO_VAE),
         width=608,
         height=352,
-        length=124,
+        length=240,
         steps=20,
         sampler="res_multistep",
         use_spectrum_for_draft=True,

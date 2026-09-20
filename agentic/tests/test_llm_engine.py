@@ -57,7 +57,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["negative_prompt"], "llm negative")
         self.assertEqual(result["prompt_mode"], "llm")
 
-    def test_expand_goal_injects_topic_neutral_short_action_contract(self) -> None:
+    def test_expand_goal_injects_shared_visual_action_contract(self) -> None:
         manager = _FakeManager(
             [
                 '{"creative_brief":"llm brief","prompt":"llm prompt","negative_prompt":"llm negative"}',
@@ -74,14 +74,14 @@ class LLMEngineTests(unittest.TestCase):
         engine.expand_goal(goal, "storybook animation", [])
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Short-action contract", user_prompt)
+        self.assertIn("Short causal-action contract", user_prompt)
         self.assertIn("one dominant physical mechanism", user_prompt)
         self.assertIn("Image prompt contract", user_prompt)
         self.assertIn("one visual thesis", user_prompt)
         self.assertNotIn("9:16", user_prompt)
         self.assertNotIn("vertical", user_prompt.lower())
 
-    def test_expand_goal_injects_reference_micro_gag_contract(self) -> None:
+    def test_expand_goal_injects_reference_motion_contract(self) -> None:
         manager = _FakeManager(
             [
                 '{"creative_brief":"llm brief","prompt":"llm prompt","negative_prompt":"llm negative"}',
@@ -93,14 +93,13 @@ class LLMEngineTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=6,
             style="polished 2D anime",
-            constraints={"reference_micro_gag_profile": "reference_micro_gag_v1"},
         )
         engine.expand_goal(goal, "polished 2D anime", [], reference_analysis={"keyframes": []})
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Reference micro-gag contract", user_prompt)
-        self.assertIn("first frame must already show the hook", user_prompt)
+        self.assertIn("Reference motion contract", user_prompt)
+        self.assertIn("first frame must already contain the hook", user_prompt)
 
-    def test_compose_prompt_injects_topic_neutral_short_action_contract(self) -> None:
+    def test_compose_prompt_injects_shared_visual_action_contract(self) -> None:
         manager = _FakeManager(
             [
                 '{"prompt":"llm composed prompt","negative_prompt":"llm negative"}',
@@ -117,8 +116,8 @@ class LLMEngineTests(unittest.TestCase):
         engine.compose_prompt(goal, "a paper boat rides a sudden gust", "storybook animation")
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Short-action contract", user_prompt)
-        self.assertIn("completed end state", user_prompt)
+        self.assertIn("Short causal-action contract", user_prompt)
+        self.assertIn("settled payoff", user_prompt)
         self.assertIn("observable material cues", user_prompt)
         self.assertNotIn("Qixi", user_prompt)
 

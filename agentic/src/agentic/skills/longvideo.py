@@ -189,7 +189,17 @@ class LongVideoSkills:
     def segment_story(self, context: SkillContext) -> SkillResult:
         segment_count = int(context.node.inputs["segment_count"])
         brief = str(context.state["idea-brief"]["creative_brief"])
-        segments = build_story_segments(context.plan.goal, brief, segment_count, "playful cinematic escalation")
+        segments = build_story_segments(
+            context.plan.goal,
+            brief,
+            segment_count,
+            "playful cinematic escalation",
+            production_profile=str(
+                context.node.inputs.get("production_profile")
+                or context.plan.goal.constraints.get("longvideo_production_profile")
+                or ""
+            ),
+        )
         validate_story_segments(segments, segment_count)
         return SkillResult(
             status="success",

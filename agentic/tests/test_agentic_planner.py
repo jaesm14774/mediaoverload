@@ -654,6 +654,26 @@ class AgenticPlannerTests(unittest.TestCase):
         animate = next(node for node in plan.nodes if node.node_id == "animate-video")
         self.assertEqual(animate.inputs["length"], 120)
 
+    def test_user_given_default_i2v_when_speed_is_2x_then_source_is_10_seconds_and_final_target_is_5(self) -> None:
+        """User Given the default I2V route When speed is 2x Then it renders 10s before speed and targets 5s after."""
+        goal = self.planner.create_goal(
+            prompt="Kirby deflects one runaway toy scooter with a broom",
+            media_type="text2img2video",
+            duration_seconds=10,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={"video_speed": {"enabled": True, "factor": 2}},
+        )
+
+        plan = self.planner.build_plan(goal)
+
+        animate = next(node for node in plan.nodes if node.node_id == "animate-video")
+        speed = next(node for node in plan.nodes if node.node_id == "video-speed")
+        qa = next(node for node in plan.nodes if node.node_id == "video-qa")
+        self.assertEqual(animate.inputs["length"], 240)
+        self.assertEqual(speed.inputs["speed"], 2.0)
+        self.assertEqual(qa.inputs["target_duration"], 5.0)
+
     def test_native_h3_story_prompt_declares_first_frame_i2v(self) -> None:
         goal = self.planner.create_goal(
             prompt="Kirby protects one glowing orb from a sudden gust",

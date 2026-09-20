@@ -153,6 +153,25 @@ class TaskPlanner:
         }
 
     @staticmethod
+    def _text2img2video_length(goal: GoalRequest) -> int | None:
+        duration = goal.constraints.get("duration_override_seconds")
+        if duration in {None, ""}:
+            if str(goal.media_type or "").strip().lower() == "text2img2video":
+                duration = goal.duration_seconds
+            else:
+                return None
+        frames = round(int(duration) * float(goal.constraints.get("video_frame_rate") or 24))
+        if str(goal.media_type or "").strip().lower() == "text2img2video":
+            try:
+                safe_limit = int(goal.constraints.get("max_i2v_frames") or 240)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("max_i2v_frames must be a positive integer") from exc
+            if safe_limit <= 0:
+                raise ValueError("max_i2v_frames must be a positive integer")
+            frames = min(frames, safe_limit)
+        return frames
+
+    @staticmethod
     def _video_speed_config(goal: GoalRequest) -> dict[str, object]:
         raw = goal.constraints.get("video_speed")
         if raw is None:
@@ -207,6 +226,33 @@ class TaskPlanner:
                 depends_on=[source_node],
                 tags=["package", "video", "speed"] + (["retry"] if retry else []),
                 tool_name="media.change_video_speed",
+                stage="package",
+            )
+        )
+        return node_id
+
+    @staticmethod
+    def _append_video_canvas_node(
+        nodes: list[ExecutionNode],
+        *,
+        source_node: str,
+        node_id: str,
+        width: int,
+        height: int,
+        retry: bool = False,
+    ) -> str:
+        nodes.append(
+            ExecutionNode(
+                node_id=node_id,
+                skill_name="media.video.normalize_canvas",
+                inputs={
+                    "target_width": width,
+                    "target_height": height,
+                    "background": "#f8f5ef",
+                },
+                depends_on=[source_node],
+                tags=["package", "video", "canvas"] + (["retry"] if retry else []),
+                tool_name="media.normalize_video_canvas",
                 stage="package",
             )
         )
@@ -2560,11 +2606,9 @@ class TaskPlanner:
         pre_video_review = self._pre_video_review_enabled(goal)
         stage_probe_auto_select = bool(goal.constraints.get("stage_probe_auto_select", False))
         reference_node = self._reference_video_analysis_node(goal)
-        reference_micro_gag_profile = str(
-            goal.constraints.get("reference_micro_gag_profile") or ""
-        ).strip()
-        if reference_micro_gag_profile and reference_node is None:
-            raise ValueError("reference_micro_gag_profile requires reference_video_source")
+        reference_video_source = str(goal.constraints.get("reference_video_source") or "").strip()
+        if reference_video_source and reference_node is None:
+            raise ValueError("reference_video_source requires a readable reference analysis node")
         image_manifest = self._manifest_from_goal_constraints(
             goal,
             *self.DEFAULT_IMAGE_WORKFLOWS,
@@ -2716,13 +2760,8 @@ class TaskPlanner:
                         "height": image_height,
                         "video_count": self._constraint_int(goal, "video_count", 1),
                         **(
-                            {
-                                "length": round(
-                                    int(goal.constraints["duration_override_seconds"])
-                                    * float(goal.constraints.get("video_frame_rate") or 24)
-                                )
-                            }
-                            if goal.constraints.get("duration_override_seconds") is not None
+                            {"length": self._text2img2video_length(goal)}
+                            if self._text2img2video_length(goal) is not None
                             else {}
                         ),
                         **(
@@ -2764,10 +2803,17 @@ class TaskPlanner:
                 ),
             ]
         )
+        video_canvas_node = self._append_video_canvas_node(
+            nodes,
+            source_node="animate-video",
+            node_id="video-canvas",
+            width=image_width,
+            height=image_height,
+        )
         video_output_node = self._append_video_speed_node(
             goal,
             nodes,
-            source_node="animate-video",
+            source_node=video_canvas_node,
             node_id="video-speed",
         )
         video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
@@ -2835,13 +2881,8 @@ class TaskPlanner:
                             "height": self._canvas_dimensions(goal, image_manifest)[1],
                             "video_count": self._constraint_int(goal, "video_count", 1),
                             **(
-                                {
-                                    "length": round(
-                                        int(goal.constraints["duration_override_seconds"])
-                                        * float(goal.constraints.get("video_frame_rate") or 24)
-                                    )
-                                }
-                                if goal.constraints.get("duration_override_seconds") is not None
+                                {"length": self._text2img2video_length(goal)}
+                                if self._text2img2video_length(goal) is not None
                                 else {}
                             ),
                             **(
@@ -2874,10 +2915,18 @@ class TaskPlanner:
                     ),
                 ]
             )
+            review_video_canvas_node = self._append_video_canvas_node(
+                nodes,
+                source_node="review-animate-video",
+                node_id="review-video-canvas",
+                width=image_width,
+                height=image_height,
+                retry=True,
+            )
             review_video_output_node = self._append_video_speed_node(
                 goal,
                 nodes,
-                source_node="review-animate-video",
+                source_node=review_video_canvas_node,
                 node_id="review-video-speed",
                 retry=True,
             )
@@ -2924,7 +2973,7 @@ class TaskPlanner:
             "review_loop_enabled": review_loop_enabled,
             "video_speed": self._video_speed_config(goal),
             "review_notes": review_notes,
-            "reference_micro_gag_profile": reference_micro_gag_profile,
+            "reference_video_source": reference_video_source,
             **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
         }
         return ExecutionPlan(

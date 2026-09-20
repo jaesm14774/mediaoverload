@@ -102,7 +102,7 @@ _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "krea2_turbo": {"width": 1024, "height": 576, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple"},
     "krea2_turbo_img2img": {"steps": 8, "cfg": 1.0, "denoise": 0.25, "sampler_name": "euler", "scheduler": "simple"},
     "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
-    "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
+    "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 240, "frame_rate": 24, "steps": 20},
     "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
     "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
     "minimax_h3_native_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},

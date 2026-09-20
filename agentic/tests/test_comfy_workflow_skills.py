@@ -11,13 +11,13 @@ from agentic.skills.comfy_workflow_skills import ComfyWorkflowSkills
 
 
 class ComfyWorkflowSkillsTests(unittest.TestCase):
-    def test_reference_micro_gag_image_render_uses_opening_keyframe_prompt(self) -> None:
+    def test_i2v_image_render_uses_opening_keyframe_prompt(self) -> None:
         plan = ExecutionPlan(
             goal=GoalRequest(
                 prompt="full temporal gag prompt",
                 media_type="text2img2video",
                 style="anime",
-                constraints={"reference_micro_gag_profile": "reference_micro_gag_v1"},
+                constraints={"visual_action_profile": "text2img2video"},
             ),
             workflow_name="text2img2video_v1",
             nodes=[],
@@ -37,10 +37,12 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
 
         bundle = ComfyImageSkills._resolve_prompt_bundle(SkillContext(plan=plan, node=node, state=state))
 
-        self.assertEqual(bundle["prompt"], "single opening frame with one hero and one prop")
+        self.assertIn("single opening frame with one hero and one prop", bundle["prompt"])
+        self.assertIn("Opening action lock", bundle["prompt"])
         self.assertEqual(bundle["negative_prompt"], "duplicate, text")
 
-    def test_image_to_video_forwards_fixed_seed(self) -> None:
+    def test_user_given_i2v_contract_when_animating_then_render_parameters_reach_comfy(self) -> None:
+        """User Given a timed I2V plan When animation runs Then Comfy receives its render contract."""
         calls: list[tuple[str, dict[str, object]]] = []
         tools = ToolRegistry()
 
@@ -68,6 +70,11 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
                     "workflow_name": "minimax_h3_lowvram_i2v",
                     "image_path": "C:/renders/frame.png",
                     "prompt": "Kirby jumps",
+                    "width": 640,
+                    "height": 360,
+                    "video_count": 1,
+                    "length": 144,
+                    "steps": 16,
                 },
             )
 
@@ -78,6 +85,11 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(calls[0][0], "comfy.workflow.image_to_video")
         self.assertEqual(calls[0][1]["seed"], 123456)
+        self.assertEqual(calls[0][1]["width"], 640)
+        self.assertEqual(calls[0][1]["height"], 360)
+        self.assertEqual(calls[0][1]["video_count"], 1)
+        self.assertEqual(calls[0][1]["length"], 144)
+        self.assertEqual(calls[0][1]["steps"], 16)
 
     def test_optional_upscale_failure_keeps_source_image_for_downstream_video(self) -> None:
         tools = ToolRegistry()

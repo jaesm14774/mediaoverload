@@ -354,7 +354,7 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertEqual(resolved["selected_character"], "Kirby")
         self.assertEqual(resolved["subject_mode"], "single")
 
-    def test_reference_micro_gag_overrides_random_subject_mode_to_single(self) -> None:
+    def test_reference_video_overrides_random_subject_mode_to_single(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = Path(temp_dir) / "reference-random.yaml"
             config.write_text(
@@ -402,6 +402,55 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         select_single.assert_called_once()
         select_pair.assert_not_called()
         self.assertEqual(resolved["subject_mode"], "single")
+
+    def test_user_given_named_i2v_character_when_group_is_random_then_prompt_name_wins(self) -> None:
+        """User Given a named group member in the prompt When I2V selection runs Then that role is selected."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "i2v-named.yaml"
+            config.write_text(
+                "character:\n"
+                "  group_name: Kirby\n"
+                "generation:\n"
+                "  subject_mode: random\n"
+                "  subject_mode_weights:\n"
+                "    single: 2\n"
+                "    two_character_interaction: 5\n",
+                encoding="utf-8",
+            )
+            single_result = Mock()
+            single_result.to_dict.return_value = {
+                "mode": "group",
+                "group_name": "Kirby",
+                "selected_character": "Kirby",
+                "candidate_count": 2,
+                "candidates": [
+                    {"name": "Kirby", "role_description": "pink hero", "keywords": "pink"},
+                    {"name": "Parasol Waddle Dee", "role_description": "tan hero", "keywords": "parasol"},
+                ],
+                "selected_profile": {"role_description": "pink hero", "keywords": "pink"},
+                "selection_source": "group_weighted_random",
+            }
+            request = CharacterWorkflowRequest(
+                repo_root=self.repo_root,
+                config_path=config,
+                generation=CharacterGenerationOptions(
+                    prompt="Parasol Waddle Dee nudges one jelly cube",
+                    preferred_generation_type="text2image2video",
+                    reference_video_source="C:/references/clip.mp4",
+                    rng=random.Random(0),
+                ),
+                review=CharacterReviewOptions(),
+                runtime=CharacterRuntimeOptions(),
+            )
+            with patch.object(
+                CharacterGroupSelectionService,
+                "select_random_character",
+                return_value=single_result,
+            ):
+                resolved = resolve_character_selection(request)
+
+        self.assertEqual(resolved["selected_character"], "Parasol Waddle Dee")
+        self.assertEqual(resolved["selection_source"], "prompt_named_role")
 
     def test_random_subject_mode_can_select_pair_without_distinct_name_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

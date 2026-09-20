@@ -57,7 +57,11 @@ from agentic.runtime.prompting import (
     build_story_segments,
     validate_story_segments,
 )
-from agentic.minimax_prompting import short_action_contract
+from agentic.runtime.visual_action_contract import (
+    enforce_opening_action_lock,
+    is_motion_media_type,
+    visual_action_contract,
+)
 from agentic.runtime.media_dq import expected_subject_count, validate_subject_counts
 from agentic.storyboard import (
     _native_story_terms,
@@ -581,6 +585,11 @@ class LLMPromptEngine:
         safe_creative_brief = self._sanitize_native_h3_creative_brief(creative_brief)
         reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
         reference_images = reference_keyframe_paths(reference_analysis)[:8]
+        action_contract = visual_action_contract(
+            duration_seconds,
+            media_type="native_h3_story",
+            subject_count=len(subject_names) or 1,
+        )
         user_prompt = "\n".join(
             re.sub(r"(?<!\w)Kirby(?!\w)", str(character), line, flags=re.IGNORECASE)
             for line in [
@@ -589,6 +598,7 @@ class LLMPromptEngine:
                 f"Style: {style}",
                 f"Duration seconds: {int(duration_seconds)}",
                 f"Creative brief: {safe_creative_brief}",
+                f"Visual action contract: {action_contract}",
                 reference_directive,
                 (
                     "Attached reference keyframes are visual evidence. Extract only their pacing, framing, motion grammar, "
@@ -981,37 +991,46 @@ class LLMPromptEngine:
         fallback = build_goal_brief(goal, selected_style, idea_variants)
         reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
         reference_images = reference_keyframe_paths(reference_analysis)[:6]
-        reference_micro_gag = bool(
-            str(goal.constraints.get("reference_micro_gag_profile") or "").strip()
+        subject_context = dict(goal.constraints.get("subject_context") or {})
+        subject_count = len(
+            [item for item in (subject_context.get("subjects") or []) if isinstance(item, dict)]
+        ) or 1
+        action_contract = visual_action_contract(
+            goal.duration_seconds,
+            media_type=goal.media_type,
+            subject_count=subject_count,
+            loop=goal.media_type == "game_sprite",
         )
-        micro_gag_directive = (
-            "Reference micro-gag contract: borrow only the reference's timing, framing, motion grammar, and escalation. "
-            "Create an original 4-6 second loopable gag with one protagonist, one tactile prop or force, and one visible objective. "
-            "The first frame must already show the hook or action onset; use anticipation, contact or impact, consequence, reaction, and a settled payoff. "
-            "Keep the prompt suitable for a single first-frame image followed by continuous H3 I2V motion. Never copy source characters, plot, logos, UI, text, or location."
-            if reference_micro_gag
+        reference_motion_directive = (
+            "Reference motion contract: borrow only the reference's timing, framing, motion grammar, and escalation. "
+            "Create an original action for the current subject and objective. Preserve a visible causal chain, readable reaction, "
+            "and earned ending without copying source characters, plot, logos, UI, text, or location."
+            if reference_images or reference_analysis
             else ""
         )
+        if is_motion_media_type(goal.media_type):
+            fallback["opening_keyframe_prompt"] = enforce_opening_action_lock(
+                str(fallback.get("opening_keyframe_prompt") or fallback.get("prompt") or "")
+            )
         if reference_directive:
             fallback["creative_brief"] = f"{fallback['creative_brief']}\n{reference_directive}"
             fallback["prompt"] = f"{fallback['prompt']}, borrow the reference's measured pacing and camera grammar while inventing original source-independent action"
-        if micro_gag_directive:
-            fallback["creative_brief"] = f"{fallback['creative_brief']}\n{micro_gag_directive}"
-            fallback["prompt"] = f"{fallback['prompt']}, {micro_gag_directive}"
+        if action_contract:
+            fallback["creative_brief"] = f"{fallback['creative_brief']}\nVisual action contract: {action_contract}"
+            fallback["prompt"] = f"{fallback['prompt']}\nVisual action contract: {action_contract}"
+        if reference_motion_directive:
+            fallback["creative_brief"] = f"{fallback['creative_brief']}\n{reference_motion_directive}"
+            fallback["prompt"] = f"{fallback['prompt']}, {reference_motion_directive}"
         try:
             manager = self._require_manager()
-            duration_contract = short_action_contract(
+            duration_contract = visual_action_contract(
                 goal.duration_seconds,
                 media_type=goal.media_type,
+                subject_count=subject_count,
+                loop=goal.media_type == "game_sprite",
             )
             if not duration_contract:
-                if int(goal.duration_seconds or 0) <= 15:
-                    duration_contract = (
-                        "This is a 15-second-or-shorter clip: use one to three strong causal action beats, with a visible "
-                        "state change in each beat and one memorable physical payoff at the end."
-                    )
-                else:
-                    duration_contract = "Use a meaningful action sequence with visible progression across the requested duration."
+                duration_contract = "Use a meaningful visible action sequence with progression across the requested duration."
             user_prompt = "\n".join(
                 [
                     f"Goal: {goal.prompt}",
@@ -1022,7 +1041,8 @@ class LLMPromptEngine:
                     f"Duration seconds: {goal.duration_seconds}",
                     f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                     reference_directive,
-                    micro_gag_directive,
+                    action_contract,
+                    reference_motion_directive,
                     (
                         "Attached reference keyframes are visual evidence. Borrow timing, framing, motion grammar, and escalation only; do not copy source-specific assets or plot."
                         if reference_images
@@ -1033,6 +1053,7 @@ class LLMPromptEngine:
                     IMAGE_PROMPT_CONTRACT,
                     "The prompt must be generation-ready for diffusion and image-to-video models; use concrete visible nouns and verbs rather than abstract mood words.",
                     "opening_keyframe_prompt is for a single still Krea first frame: describe only the opening state and one visible action onset. Do not include later beats, aftermath, before-and-after states, montage language, duplicate subjects, reflections, or miniature copies.",
+                    "The opening_keyframe_prompt must make the dominant mechanism and action onset visible in one still; if contact drives the consequence, show the actual contact point rather than a near-miss.",
                     "For image-to-video, describe how the supplied image starts moving and evolves; do not spend the prompt redrawing the static image.",
                     duration_contract,
                     "For text-to-video, establish the subject inside the first moving action instead of opening on a character sheet or posed portrait.",
@@ -1072,6 +1093,10 @@ class LLMPromptEngine:
                     "negative_prompt": str(payload.get("negative_prompt") or fallback["negative_prompt"]),
                 }
             )
+            if is_motion_media_type(goal.media_type):
+                fallback["opening_keyframe_prompt"] = enforce_opening_action_lock(
+                    str(fallback.get("opening_keyframe_prompt") or fallback.get("prompt") or "")
+                )
             return self._mark_llm_payload(fallback)
         except Exception as exc:
             return self._template_fallback(fallback, exc)
@@ -1109,9 +1134,20 @@ class LLMPromptEngine:
                     "If news context exists, merge only a few concrete visual motifs into the scene instead of recreating the headline.",
             ]
         )
-        short_contract = short_action_contract(goal.duration_seconds, media_type=goal.media_type)
-        if short_contract:
-            user_prompt = "\n".join((user_prompt, short_contract))
+        action_contract = visual_action_contract(
+            goal.duration_seconds,
+            media_type=goal.media_type,
+            subject_count=len(
+                [
+                    item
+                    for item in (dict(goal.constraints.get("subject_context") or {}).get("subjects") or [])
+                    if isinstance(item, dict)
+                ]
+            ) or 1,
+            loop=goal.media_type == "game_sprite",
+        )
+        if action_contract:
+            user_prompt = "\n".join((user_prompt, action_contract))
         try:
             payload = self._chat_json_with_recorder(
                 manager,

@@ -37,7 +37,7 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         )
         self.assertEqual(profile.width, 608)
         self.assertEqual(profile.height, 352)
-        self.assertEqual(profile.length, 124)
+        self.assertEqual(profile.length, 240)
 
     def test_dry_run_does_not_create_model_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -129,6 +129,7 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
         self.assertEqual(continuity["9"]["inputs"]["denoise"], 0.25)
         h3_i2v = json.loads((repo_root / "configs" / "workflow" / "minimax_h3_lowvram_i2v.json").read_text(encoding="utf-8"))
         self.assertEqual(h3_i2v["5"]["inputs"]["first_frame"], ["16", 0])
+        self.assertEqual(h3_i2v["5"]["inputs"]["length"], 240)
 
 
 

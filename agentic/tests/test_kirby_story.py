@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.minimax_prompting import short_action_contract
+from agentic.runtime.visual_action_contract import visual_action_contract
 from agentic.runtime.prompting import (
     build_goal_brief,
     build_minimax_h3_prompt,
@@ -56,7 +56,7 @@ class StoryboardContractTests(unittest.TestCase):
         prompt = build_minimax_h3_prompt(goal, segment)["prompt"]
         self.assertIn("Primary physical action", prompt)
         self.assertIn("sprints forward", prompt)
-        self.assertIn("Long-segment action contract", prompt)
+        self.assertIn("Segment action contract", prompt)
 
     def test_generic_prompt_builder_uses_current_dynamic_story_contract(self) -> None:
         goal = GoalRequest(
@@ -99,7 +99,7 @@ class StoryboardContractTests(unittest.TestCase):
         self.assertIn("SHOT 1", prompt)
         self.assertIn("SHOT 3", prompt)
         self.assertIn("not a montage", prompt)
-        self.assertLess(len(prompt.split()), 600)
+        self.assertLess(len(prompt.split()), 760)
 
     def test_longvideo_storyboard_completes_30s_and_supports_45s_coda(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
@@ -155,8 +155,8 @@ class StoryboardContractTests(unittest.TestCase):
             constraints={"character": "Kirby"},
         )
         brief = build_goal_brief(goal, goal.style, [])
-        self.assertIn("one clear physical action only", brief["prompt"])
-        self.assertIn("completed end state", brief["prompt"])
+        self.assertIn("one dominant physical mechanism", brief["prompt"])
+        self.assertIn("settled payoff", brief["prompt"])
         self.assertIn("opening_keyframe_prompt", brief)
 
     def test_image_brief_prioritizes_visual_thesis_and_material_evidence(self) -> None:
@@ -173,17 +173,18 @@ class StoryboardContractTests(unittest.TestCase):
         self.assertIn("one dominant visual mechanism", brief["prompt"])
         self.assertIn("observable material cues", brief["prompt"])
 
-    def test_short_action_contract_is_topic_neutral_and_not_aspect_specific(self) -> None:
-        contract = short_action_contract(6, media_type="image_to_video")
+    def test_visual_action_contract_is_topic_neutral_and_not_aspect_specific(self) -> None:
+        contract = visual_action_contract(6, media_type="image_to_video")
 
         self.assertIn("one dominant physical mechanism", contract)
-        self.assertIn("completed end state", contract)
+        self.assertIn("settled payoff", contract)
+        self.assertIn("contact drives the mechanism", contract)
         self.assertNotIn("Kirby", contract)
         self.assertNotIn("Qixi", contract)
         self.assertNotIn("9:16", contract)
         self.assertNotIn("vertical", contract.lower())
-        self.assertEqual(short_action_contract(15, media_type="image_to_video"), "")
-        self.assertEqual(short_action_contract(6, media_type="text2img"), "")
+        self.assertIn("Causal-motion contract", visual_action_contract(15, media_type="image_to_video"))
+        self.assertEqual(visual_action_contract(6, media_type="text2img"), "")
 
     def test_short_gag_brief_applies_reference_derived_style_contract(self) -> None:
         goal = GoalRequest(

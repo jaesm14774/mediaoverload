@@ -14,17 +14,8 @@
     "text2img=1",
     "text2longvideo=2"
   ],
-  "bag": [
-    "story_card",
-    "game_sprite",
-    "text2image2video",
-    "sticker_pack"
-  ],
+  "bag": [],
   "history": [
-    "text2image2video",
-    "native_h3_l2va_story",
-    "text2image2native_h3_ref2va",
-    "text2img",
     "native_h3_fl2va_story",
     "native_h3_story",
     "sticker_pack",
@@ -44,6 +35,10 @@
     "native_h3_l2va_story",
     "game_sprite",
     "text2img",
-    "native_h3_story"
+    "native_h3_story",
+    "sticker_pack",
+    "text2image2video",
+    "game_sprite",
+    "story_card"
   ]
 }

@@ -1016,9 +1016,12 @@ class AgentMediaSkills:
                 "background": str(context.node.inputs.get("background", "#15151f")),
             },
         )
+        outputs = dict(result)
+        if outputs.get("video_path"):
+            outputs["final_video_path"] = outputs["video_path"]
         return SkillResult(
             status="success",
-            outputs=result,
+            outputs=outputs,
             metrics={"width": width, "height": height},
             logs=[f"Normalized final video canvas to {width}x{height} without changing its aspect ratio."],
         )

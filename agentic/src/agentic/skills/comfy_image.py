@@ -6,6 +6,7 @@ from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.minimax_prompting import structured_visual_prompt
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import asset_check_result, build_run_dir
+from agentic.runtime.visual_action_contract import enforce_opening_action_lock
 
 
 class ComfyImageSkills:
@@ -71,16 +72,24 @@ class ComfyImageSkills:
 
     @staticmethod
     def _resolve_prompt_bundle(context: SkillContext) -> dict[str, str]:
-        reference_micro_gag = str(
-            context.plan.goal.constraints.get("reference_micro_gag_profile") or ""
-        ).strip()
+        media_type = str(context.plan.goal.media_type or "").strip().lower()
+        uses_opening_frame = media_type in {
+            "text2img2video",
+            "image_to_video",
+            "image_to_video_audio",
+            "native_h3_story",
+            "native_h3_fl2va_story",
+            "native_h3_l2va_story",
+        }
         for dependency in reversed(context.node.depends_on):
             dependency_output = context.state[dependency]
-            prompt_key = "opening_keyframe_prompt" if reference_micro_gag else "prompt"
+            prompt_key = "opening_keyframe_prompt" if uses_opening_frame else "prompt"
             prompt = dependency_output.get(prompt_key)
             if not isinstance(prompt, str) or not prompt:
                 prompt = dependency_output.get("prompt")
             if isinstance(prompt, str) and prompt:
+                if uses_opening_frame:
+                    prompt = enforce_opening_action_lock(prompt)
                 return {
                     "prompt": prompt,
                     "negative_prompt": str(dependency_output.get("negative_prompt", "")),

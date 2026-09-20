@@ -49,7 +49,7 @@ CASE_PROMPTS: tuple[str, ...] = (
 
 
 REFERENCE_SINGLE_PROTAGONIST_CONTRACT = (
-    "Reference-derived micro-gag contract: show exactly one visible selected protagonist, "
+    "Reference-derived visual-action contract: show exactly one visible selected protagonist, "
     "with no duplicate, clone, reflection, miniature copy, background character, or second "
     "version of the protagonist. Keep the tabletop uncluttered so the one physical gag is "
     "immediately readable."
@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-root",
-        default=str(REPO_ROOT / "output" / "reference_micro_gag_e2e"),
+        default=str(REPO_ROOT / "output" / "reference_visual_action_e2e"),
     )
     parser.add_argument("--comfy-root", default=r"D:\ComfyUI_windows_portable")
     parser.add_argument("--comfy-host", default="127.0.0.1")
@@ -81,9 +81,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--duration-seconds",
         type=int,
-        default=5,
-        choices=range(4, 10),
-        help="Requested short clip duration; default 5 matches the existing H3 124-frame I2V profile",
+        default=10,
+        choices=range(4, 11),
+        help="Requested short clip duration; default 10 matches the H3 240-frame I2V profile",
     )
     parser.add_argument("--reference-depth", choices=("standard", "deep"), default="deep")
     parser.add_argument("--reference-keyframes", type=int, default=12)
@@ -187,7 +187,7 @@ def _run_case(
             "reference_video": str(source),
             "reference_policy": "borrow_grammar_not_assets",
             "generation_type": "text2image2video",
-            "workflow_profile": "reference_micro_gag_v1",
+            "workflow_profile": "visual_action_benchmark_v1",
             "duration_seconds": int(args.duration_seconds),
             "seed": seed,
         }
@@ -289,7 +289,7 @@ def main() -> int:
             "collection_root": str(collection_root),
             "output_root": str(run_output),
             "route": "existing text2image2video -> Krea2 -> MiniMax H3 I2V",
-            "workflow_profile": "reference_micro_gag_v1",
+            "workflow_profile": "visual_action_benchmark_v1",
             "duration_seconds": int(args.duration_seconds),
             "max_retries": int(args.max_retries),
             "case_count": len(sources),
@@ -298,7 +298,7 @@ def main() -> int:
         },
     )
     for index, source in enumerate(sources, start=1):
-        case_id = f"micro-gag-{index:02d}"
+        case_id = f"visual-action-{index:02d}"
         print(f"[{index}/{len(sources)}] {case_id} | reference={source.name}", flush=True)
         case = _run_case(
             case_id=case_id,

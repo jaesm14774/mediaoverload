@@ -78,6 +78,10 @@ class ComfyWorkflowSkills:
         seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
         if seed is not None:
             payload["seed"] = int(seed)
+        for key in ("video_count", "length", "steps"):
+            value = context.node.inputs.get(key)
+            if value is not None:
+                payload[key] = int(value)
         result = self.tools.call("comfy.workflow.image_to_video", payload)
         return SkillResult(status="success", outputs=result, logs=["Rendered video from still image with ComfyUI."])
 

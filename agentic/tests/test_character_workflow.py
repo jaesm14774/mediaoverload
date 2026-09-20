@@ -123,7 +123,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             preferred_generation_type="text2image2video",
             publish_after_generate=False,
         ))
-        self.assertEqual(default_short["duration_seconds"], 5)
+        self.assertEqual(default_short["duration_seconds"], 10)
+        self.assertEqual(default_short["constraints"]["max_i2v_frames"], 240)
 
         long_video = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -733,6 +734,26 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
         self.assertEqual(result, [final_video_path])
 
+    def test_user_given_final_canvas_when_publish_review_collects_then_raw_video_is_excluded(self) -> None:
+        """User Given a raw and normalized video When publish review collects Then only the normalized video remains."""
+        raw_video_path = r"C:\runs\raw_i2v.mp4"
+        final_video_path = r"C:\runs\normalized_i2v.mp4"
+        result = collect_media_paths_from_run_result(
+            {
+                "state": {
+                    "node_outputs": {
+                        "animate-video": {"video_path": [raw_video_path]},
+                        "video-canvas": {
+                            "video_path": final_video_path,
+                            "final_video_path": final_video_path,
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(result, [final_video_path])
+
     def test_publish_review_collects_final_images_from_image_generation(self) -> None:
         image_paths = [r"C:\runs\Kirby_1.png", r"C:\runs\Kirby_2.png"]
         result = collect_media_paths_from_run_result(
@@ -877,7 +898,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["prompt_source"], "news")
         self.assertEqual(payload["constraints"]["prompt_mode"], "news")
         self.assertEqual(payload["constraints"]["news_context"]["keyword"], "panda")
-        self.assertIn("cute micro-gag", payload["constraints"]["native_h3_creative_brief"])
+        self.assertIn("compact causal story", payload["constraints"]["native_h3_creative_brief"])
 
     def test_news_driven_random_mode_overrides_generic_prompt_and_persists_selection(self) -> None:
         news = NewsSelection(

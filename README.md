@@ -334,7 +334,11 @@ additional_params:
 
 ---
 
+---
+
 ### 4. `text2longvideo` — 長片／多段
+
+所有影片策略共用同一套 Visual Action Contract：開場 hook、主導機制、可見後果、角色反應與 settled payoff。短片會壓縮成一條清楚的因果動作，長片則在每個 segment 套用並透過尾幀延續；Native H3 映射到 storyboard shots，game sprite 映射成可循環的 action graph。這是共用製作品質層，不是新的 generation type。
 
 **會用到的鍵**：開場的 `image_workflow_name`、多段 I2V 的 `video_workflow_name`，以及只在明確狀態轉換時使用的 `transition_workflow_name`。
 

@@ -646,6 +646,7 @@ def format_native_h3_prompt(
         render_mode=render_mode,
         continuity_rules=continuity,
         subject_context=dict(storyboard.get("subject_context") or {}),
+        media_type=render_mode or "native_h3_story",
     )
     prompt += "\nAudience story contract: the first beat creates a concrete question, the middle worsens the obstacle or reverses the plan, and the final beat answers the original question with visible payoff evidence."
     gag_card = storyboard.get("gag_card")

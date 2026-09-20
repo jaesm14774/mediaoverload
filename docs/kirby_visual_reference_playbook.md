@@ -45,13 +45,13 @@
 | --- | --- |
 | Kirby config | `generation.visual_style_contract` 增加 tactile pastel、scale contrast、單一 palette、可回放 ending；creative brief 加入 prop-caused reaction 與 settled payoff。 |
 | Native storyboard | `native_h3_15s.yaml` 提供 generic dynamic-news timing、continuity、可讀反應與 loop echo 的 production contract；角色外觀由 resolved `character_profile` 提供。 |
-| H3 prompt | `compose_minimax_h3_prompt()` 加入 cute physical-comedy、scale-and-silhouette、replay 三個 contract。 |
-| 一般短片與貼圖 prompt | 5–6 秒改成單一完整 physical action；animated sticker 改成 anticipation → impact → settle，鎖定鏡頭與首尾可接。 |
-| Routing | 5–9 秒、食物／桌面互動、反應 loop、誇張伸縮、小角色對大物件等需求優先走 `text2image2video` 的首幀審核 + I2V，而不是 `text2longvideo`。 |
+| H3 prompt | `compose_minimax_h3_prompt()` 使用共用 Visual Action Contract，加入 causal mechanism、scale-and-silhouette、reaction 與 settled payoff。 |
+| 一般短片與貼圖 prompt | 短片改成單一完整 physical action；animated sticker 改成 anticipation → impact → settle；所有影片 route 都要求動作造成可見狀態變化。 |
+| Routing | 一般短片的 source default 為 10 秒；食物／桌面互動、反應 loop、誇張伸縮、小角色對大物件等需求仍走最適合的既有 route。品質 contract 由 `text2image2video`、`text2longvideo`、Native H3 與 `game_sprite` 共用，不新增相近 strategy。 |
 | Discord review | 人工判斷小對大、觸感互動、變形／反彈、留白與 opening echo；系統只驗證媒體格式、尺寸、時間與明確人物數量。 |
 
 ## 使用判準
 
-5–9 秒的單一可愛動作：優先 `text2image2video` 或 animated-sticker 類路線。需要完整三拍因果、新聞 anchor、可人工審核的開場：才使用 native H3 15 秒路線。需要多張既有素材共同保留身份／質感／運鏡：才使用 Ref2VA，並保留人工 reference gate。
+10 秒的單一可愛動作：使用既有的 `text2image2video` 或 animated-sticker route，由共用 Visual Action Contract 強制 hook、causal change、reaction 與 payoff。需要完整三拍因果、新聞 anchor、可人工審核的開場：使用 native H3 15 秒路線；需要多張既有素材共同保留身份／質感／運鏡：使用 Ref2VA，並保留人工 reference gate。
 
 這些規則是從素材中抽出的創作機制，不是複製任何單一作者的角色、畫面或浮水印。
