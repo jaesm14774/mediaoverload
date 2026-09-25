@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import json
+import shutil
 import socket
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +15,12 @@ import requests
 from agentic.tools.comfy_backend import AgenticComfyCommunicator
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.media_services import MediaServiceTools
-from agentic.tools.social_native import FacebookPlatform, InstagramGraphPlatform, MediaPost, YouTubePlatform
+from agentic.tools.social_native import (
+    FacebookPlatform,
+    InstagramGraphPlatform,
+    MediaPost,
+    YouTubePlatform,
+)
 from agentic.tools.social_services import (
     SocialServiceTools,
     complete_facebook_profile_handoff,
@@ -139,6 +146,7 @@ class FFmpegAdapterTests(unittest.TestCase):
         self.assertIn("-ac 2", command_text)
         self.assertIn("-b:a 128k", command_text)
 
+
     @patch.object(FFmpegAdapter, "_run")
     def test_trim_video_keeps_video_and_optional_audio(self, run_mock) -> None:
         adapter = FFmpegAdapter()
@@ -176,6 +184,52 @@ class FFmpegAdapterTests(unittest.TestCase):
         command_text = " ".join(run_mock.call_args.args[0])
         self.assertIn("aresample=48000,loudnorm=I=-20:TP=-1.5:LRA=11", command_text)
         self.assertIn("-ar 48000", command_text)
+
+
+class PublishingDeliveryVariantTests(unittest.TestCase):
+    def test_user_given_landscape_video_when_preparing_delivery_then_reels_are_vertical_and_youtube_keeps_source(self) -> None:
+        """User Given a generated landscape video When delivery is prepared Then each platform gets its contract."""
+        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+            self.skipTest("ffmpeg and ffprobe are required for delivery variant evidence")
+        with tempfile.TemporaryDirectory(prefix="mediaoverload-delivery-variant-") as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=orange:s=640x360:r=12:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-y",
+                    str(source),
+                ],
+                check=True,
+            )
+
+            variants = SocialServiceTools(root / "runtime").process_media(
+                {
+                    "media_paths": [str(source)],
+                    "output_dir": str(root / "publish_ready"),
+                    "platforms": ["instagram_graph", "facebook", "youtube"],
+                }
+            )["delivery_variants"]
+
+            instagram_delivery = variants["instagram_graph"]["delivery"][0]
+            facebook_delivery = variants["facebook"]["delivery"][0]
+            youtube_delivery = variants["youtube"]["delivery"][0]
+            self.assertEqual(instagram_delivery["aspect_ratio"], "9:16")
+            self.assertEqual((instagram_delivery["width"], instagram_delivery["height"]), (720, 1280))
+            self.assertEqual(facebook_delivery["media_path"], instagram_delivery["media_path"])
+            self.assertEqual(youtube_delivery["media_path"], str(source))
+            self.assertEqual(youtube_delivery["aspect_ratio"], "16:9")
 
 
 class AgenticComfyCommunicatorTests(unittest.TestCase):
@@ -630,12 +684,22 @@ class SocialServiceToolsTests(unittest.TestCase):
                     "instagram_graph": {
                         "caption": "ig caption",
                         "hashtags": "#ig",
-                        "media_paths": ["ig-a.jpg", "ig-b.jpg"],
+                        "media_paths": ["shared-a.jpg", "shared-b.jpg"],
                     },
                     "facebook": {
                         "caption": "fb caption",
                         "hashtags": "#fb",
-                        "media_paths": ["fb-a.jpg", "fb-b.jpg"],
+                        "media_paths": ["shared-a.jpg", "shared-b.jpg"],
+                    },
+                },
+                "delivery_variants": {
+                    "instagram_graph": {
+                        "media_paths": ["ig-a.9x16.mp4", "ig-b.9x16.mp4"],
+                        "delivery": [{"aspect_ratio": "9:16", "transform": "pad_to_9:16"}],
+                    },
+                    "facebook": {
+                        "media_paths": ["fb-a.9x16.mp4", "fb-b.9x16.mp4"],
+                        "delivery": [{"aspect_ratio": "9:16", "transform": "pad_to_9:16"}],
                     },
                 },
             }
@@ -648,10 +712,10 @@ class SocialServiceToolsTests(unittest.TestCase):
         fb_post = fake.published[1][0]
         self.assertEqual(ig_post.caption, "ig caption")
         self.assertEqual(ig_post.hashtags, "#ig")
-        self.assertEqual(ig_post.media_paths, ["ig-a.jpg", "ig-b.jpg"])
+        self.assertEqual(ig_post.media_paths, ["ig-a.9x16.mp4", "ig-b.9x16.mp4"])
         self.assertEqual(fb_post.caption, "fb caption")
         self.assertEqual(fb_post.hashtags, "#fb")
-        self.assertEqual(fb_post.media_paths, ["fb-a.jpg", "fb-b.jpg"])
+        self.assertEqual(fb_post.media_paths, ["fb-a.9x16.mp4", "fb-b.9x16.mp4"])
 
     def test_publish_social_collects_partial_failures(self) -> None:
         tools = SocialServiceTools(Path.cwd())

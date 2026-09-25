@@ -87,12 +87,9 @@ class EditingSkills:
         )
         result = self._render_candidate(plan, run_dir / "candidate_01", review_evidence=True)
         technical_qa = self._technical_qa(plan, result, context.node.inputs)
-        if not isinstance(technical_qa, dict) or technical_qa.get("passed") is not True:
-            return SkillResult(
-                status="failed",
-                outputs={"run_dir": str(run_dir), "technical_qa": technical_qa},
-                logs=["Edit candidate failed technical QA before materialization."],
-            )
+        if not isinstance(technical_qa, dict):
+            raise RuntimeError("media.video_qa returned a non-object inspection result")
+        technical_qa = {**technical_qa, "automatic_gate_applied": False}
         result = self.tools.call(
             "media.materialize_edit",
             {
@@ -107,7 +104,9 @@ class EditingSkills:
             run_dir=run_dir,
             plan=plan,
             drama_plan_path=drama_plan_path,
-            logs=[f"Rendered {plan.profile} timeline with {len(plan.clips)} clips; creative quality is reviewed in Discord."],
+            logs=[
+                f"Rendered {plan.profile} timeline with {len(plan.clips)} clips; Discord owns review and automatic DQ is disabled."
+            ],
         )
 
     def _render_candidate(

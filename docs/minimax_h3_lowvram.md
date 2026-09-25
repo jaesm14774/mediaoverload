@@ -48,7 +48,7 @@ Kirby 的短片 I2V 鏈路固定為：
 
 ```text
 krea2_turbo
-  -> Image input gate（可解碼、H3 最小尺寸 256×192）
+  -> 將已選影像直接上傳給 H3（檔案不存在仍是系統錯誤）
   -> minimax_h3_lowvram_i2v
   -> extract last frame
   -> krea2_turbo_img2img（denoise 0.25）

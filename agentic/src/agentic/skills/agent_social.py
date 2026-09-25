@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import textwrap
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +14,7 @@ from agentic.runtime.post_strategy import resolve_post_strategy
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.tools.context_services import DiscordHumanReviewService
-from agentic.tools.publishing_adapter import build_dispatch_plan
+from agentic.tools.publishing_adapter import build_dispatch_plan, merge_platform_delivery_variants
 
 VIDEO_REVIEW_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_REVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -146,6 +145,9 @@ class AgentSocialSkills:
             {
                 "media_paths": media_paths,
                 "output_dir": context.node.inputs.get("output_dir"),
+                "platforms": context.node.inputs.get("platforms")
+                or context.plan.goal.constraints.get("platforms")
+                or [],
             },
         )
         return SkillResult(status="success", outputs=result, logs=["Prepared media artifacts for social publishing."])
@@ -154,7 +156,11 @@ class AgentSocialSkills:
         processed = context.state[context.node.depends_on[0]] if context.node.depends_on else {}
         caption_bundle = context.state[context.node.depends_on[1]] if len(context.node.depends_on) > 1 else {}
         platform_captions = caption_bundle.get("platform_captions", {})
-        platform_bundle = caption_bundle.get("platform_bundle", {})
+        raw_platform_bundle = caption_bundle.get("platform_bundle", {})
+        platform_bundle = merge_platform_delivery_variants(
+            raw_platform_bundle if isinstance(raw_platform_bundle, dict) else {},
+            processed.get("delivery_variants", {}),
+        )
         requested_platforms = context.node.inputs.get("platforms") or context.plan.goal.constraints.get("platforms") or []
         platforms = [str(platform) for platform in requested_platforms]
         dispatch_plan = build_dispatch_plan(
@@ -162,7 +168,7 @@ class AgentSocialSkills:
             caption=context.node.inputs.get("caption") or caption_bundle.get("caption", ""),
             hashtags=context.node.inputs.get("hashtags") or caption_bundle.get("hashtags", ""),
             platforms=platforms,
-            platform_bundle=platform_bundle if isinstance(platform_bundle, dict) else {},
+            platform_bundle=platform_bundle,
         )
         dry_run = bool(context.node.inputs.get("dry_run", False))
         blocked_platforms = [
@@ -194,7 +200,7 @@ class AgentSocialSkills:
                     "caption": context.node.inputs.get("caption") or caption_bundle.get("caption", ""),
                     "hashtags": context.node.inputs.get("hashtags") or caption_bundle.get("hashtags", ""),
                     "platforms": platforms or list(dispatch_plan.keys()),
-                    "platform_bundle": platform_bundle if isinstance(platform_bundle, dict) else {},
+                    "platform_bundle": platform_bundle,
                     "dispatch_plan": dispatch_plan,
                     "dispatch_ready": False,
                     "blocked_platforms": blocked_platforms,
@@ -215,12 +221,14 @@ class AgentSocialSkills:
                 "additional_params": context.node.inputs.get("additional_params", {}),
                 "publish_mode": str(context.node.inputs.get("publish_mode") or context.plan.goal.constraints.get("publish_mode") or ""),
                 "dry_run": dry_run,
-                "platform_bundle": platform_bundle if isinstance(platform_bundle, dict) else {},
+                "platform_bundle": platform_bundle,
+                "delivery_variants": processed.get("delivery_variants", {}),
                 "manifest_dir": str(self.output_root),
             },
         )
         outputs = dict(result)
-        outputs["platform_bundle"] = platform_bundle if isinstance(platform_bundle, dict) else {}
+        outputs["platform_bundle"] = platform_bundle
+        outputs["delivery_variants"] = processed.get("delivery_variants", {})
         outputs["dispatch_plan"] = dispatch_plan
         outputs["platform_ineligible"] = platform_ineligible
         outputs["dispatch_ready"] = (
@@ -265,43 +273,19 @@ class AgentSocialSkills:
             or context.node.inputs.get("require_human_review", False)
             or context.plan.goal.constraints.get("require_human_review", False)
         )
+        human_review_enabled = bool(
+            not auto_select_for_probe
+            and (
+                context.plan.goal.constraints.get("enable_stage_review", False)
+                or context.plan.goal.constraints.get("enable_review_loop", False)
+                or require_human_review
+            )
+        )
         preferred_extensions = tuple(context.node.inputs.get("preferred_extensions", [".mp4", ".gif", ".png", ".jpg", ".jpeg", ".webp"]))
         ranked = sorted(
             media_paths,
             key=lambda path: (0 if path.lower().endswith(preferred_extensions) else 1, path),
         )
-        # Apply image contracts before any Discord branch, and only offer eligible files.
-        image_paths = [path for path in ranked if Path(path).suffix.lower() in IMAGE_REVIEW_EXTENSIONS]
-        hard_review = None
-        if image_paths:
-            image_constraints = dict(context.plan.goal.constraints)
-            generation_type = str(image_constraints.get("source_generation_type") or context.plan.goal.media_type)
-            # Review can contain upscaled images and previews. Their output size
-            # differs from the generation canvas; preserve its aspect contract.
-            width = image_constraints.pop("canvas_width", None)
-            height = image_constraints.pop("canvas_height", None)
-            if width and height:
-                image_constraints["canvas_aspect_ratio"] = f"{width}:{height}"
-            if generation_type == "story_card":
-                image_constraints.pop("canvas_aspect_ratio", None)
-                for axis in ("width", "height"):
-                    image_constraints.pop(f"canvas_{axis}", None)
-                    if image_constraints.get(f"story_card_{axis}"):
-                        image_constraints[f"canvas_{axis}"] = image_constraints[f"story_card_{axis}"]
-            elif generation_type == "game_sprite":
-                # Atlas/cell/frame contracts are checked by the sprite packager.
-                for key in ("canvas_width", "canvas_height", "canvas_aspect_ratio"):
-                    image_constraints.pop(key, None)
-            if reference_review and not auto_select_for_probe:
-                # Conditioning references need not share the output canvas.
-                for key in ("canvas_width", "canvas_height", "canvas_aspect_ratio", "expected_subject_count"):
-                    image_constraints.pop(key, None)
-            hard_review = self.prompt_engine.validate_image_candidates(
-                replace(context.plan.goal, constraints=image_constraints),
-                media_paths=image_paths, review_notes="", selection_limit=len(image_paths),
-            )
-            eligible_images = set(hard_review["selected_assets"])
-            ranked = [path for path in ranked if path not in image_paths or path in eligible_images]
         heuristic_ranked = [
             {
                 "media_path": path,
@@ -362,8 +346,8 @@ class AgentSocialSkills:
             bundle = {
                 "selected_assets": ranked[:limit],
                 "ranked_candidates": heuristic_ranked,
-                "selection_rationale": "Candidate order after hard checks; Discord owns creative selection.",
-                "prompt_mode": "hard_media_contract",
+                "selection_rationale": "All available candidates are presented; Discord owns creative selection.",
+                "prompt_mode": "human_review",
             }
         selected = [path for path in bundle.get("selected_assets", []) if path in ranked][:limit]
         if not selected:
@@ -372,7 +356,7 @@ class AgentSocialSkills:
         caption_media_paths = review_media_paths if (review_all_candidates or final_video_review or final_media_review) else (selected or ranked[:limit])
         hashtags = context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or [])]
-        if first_frame_review or last_frame_review or anchor_set_review or reference_review:
+        if auto_select_for_probe:
             caption_bundle = {"caption": context.plan.goal.prompt, "hashtags": ""}
         else:
             caption_bundle = self.prompt_engine.prepare_publish_caption(
@@ -410,14 +394,6 @@ class AgentSocialSkills:
                 candidate_paths=review_media_paths,
                 review_scope=review_scope,
             )
-        human_review_enabled = bool(
-            not auto_select_for_probe
-            and (
-                context.plan.goal.constraints.get("enable_stage_review", False)
-                or context.plan.goal.constraints.get("enable_review_loop", False)
-                or require_human_review
-            )
-        )
         decision = None
         if human_review_enabled:
             decision = self.discord_review.review_candidates(
@@ -601,10 +577,20 @@ class AgentSocialSkills:
             if review_mode == "discord" and str(getattr(decision, "status", "")).strip().lower() == "approved"
             else ""
         )
+        if (
+            not approved_review_text
+            and review_mode == "discord"
+            and str(getattr(decision, "status", "")).strip().lower() == "approved"
+        ):
+            draft_caption = str(caption_bundle.get("caption", "") or context.plan.goal.prompt).strip()
+            draft_hashtags = str(caption_bundle.get("hashtags", "") or "").strip()
+            approved_review_text = "\n\n".join(
+                part for part in (draft_caption, draft_hashtags) if part
+            )
         fallback_reason = str(getattr(decision, "fallback_reason", ""))
         review_delivery = dict(getattr(decision, "delivery", {}) or {})
         rejected = [path for path in ranked if path not in selected]
-        selection_logs = ["Selected a best-effort shortlist of candidate assets."]
+        selection_logs = ["Presented candidates without automatic media-quality filtering."]
         if not human_review_enabled:
             selection_logs.append(
                 "Discord review disabled for this run; selection was automatic. Use --no-review only when that is intentional."
@@ -615,10 +601,10 @@ class AgentSocialSkills:
                 "media_paths": selected,
                 "selected_assets": selected,
                 "selected_count": len(selected),
-                "hard_media_checks": hard_review or {},
+                "media_inspection": {},
                 "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
                 "rejected_assets": rejected,
-                "rejected_asset_details": (hard_review or {}).get("rejected_asset_details", []),
+                "rejected_asset_details": [],
                 "selection_rationale": str(bundle.get("selection_rationale") or f"Preferred extensions {preferred_extensions} with deterministic path ordering."),
                 "regeneration_notes": str(bundle.get("regeneration_notes") or context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
                 "publish_ready": bool(bundle.get("publish_ready", bool(selected))),
@@ -631,6 +617,8 @@ class AgentSocialSkills:
                 "review_delivery": review_delivery,
                 "approved_review_text": approved_review_text,
                 "edited_review_text": edited_review_text,
+                "review_draft_caption": str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
+                "review_draft_hashtags": str(caption_bundle.get("hashtags", "") or ""),
                 "fallback_reason": fallback_reason,
                 "auto_select_for_probe": auto_select_for_probe,
             },

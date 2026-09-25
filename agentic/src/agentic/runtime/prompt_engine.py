@@ -123,7 +123,6 @@ class PromptEngine:
             media_paths=media_paths,
         )
         return bundle
-
     def build_sticker_motion_prompt(
         self,
         goal: GoalRequest,
@@ -195,17 +194,3 @@ class PromptEngine:
         bundle["platform_strategy_version"] = PLATFORM_STRATEGY_VERSION
         bundle["dispatch_ready"] = bool(media_paths) and bool(bundle.get("caption"))
         return bundle
-
-    def evaluate_media_subjects(
-        self, *, image_path: str, expected_count: int | None, frame_count: int = 1,
-    ) -> dict[str, Any]:
-        return self.llm_engine.evaluate_media_subjects(
-            image_path=image_path, expected_count=expected_count, frame_count=frame_count,
-        )
-
-    def validate_image_candidates(
-        self, goal: GoalRequest, media_paths: list[str], review_notes: str, selection_limit: int,
-    ) -> dict[str, Any]:
-        return self.llm_engine.validate_image_candidates(
-            goal, media_paths=media_paths, review_notes=review_notes, selection_limit=selection_limit,
-        )

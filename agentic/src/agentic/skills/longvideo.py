@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from agentic.runtime.media_dq import expected_subject_count
-
 from dataclasses import dataclass, field, replace
 import json
 import re
@@ -525,21 +523,21 @@ class LongVideoSkills:
 
     def render_native_h3(self, context: SkillContext) -> SkillResult:
         story = context.state["native-story-prompt"]
-        gate = context.state["native-keyframe-gate"]
+        source_check = context.state["native-keyframe-source-check"]
         if int(context.plan.goal.duration_seconds) > 15:
             raise RuntimeError(
                 "Direct MiniMax H3 rendering supports at most 15 seconds (362 frames) in the local trained range; "
                 "use an explicit continuation workflow for a longer story."
             )
         workflow_name = str(context.node.inputs.get("workflow_name") or context.plan.goal.constraints.get("video_workflow_name") or "")
-        first_frame = str(gate.get("first_frame_path") or "")
+        first_frame = str(source_check.get("first_frame_path") or "")
         use_last_frame = bool(
             context.node.inputs.get(
                 "use_last_frame",
                 context.plan.goal.constraints.get("native_h3_use_last_frame", False),
             )
         )
-        last_frame = str(gate.get("last_frame_path") or "") if use_last_frame else ""
+        last_frame = str(source_check.get("last_frame_path") or "") if use_last_frame else ""
         if not workflow_name or not first_frame:
             raise RuntimeError("Native H3 render requires workflow_name and first_frame_path")
         if use_last_frame and not last_frame:
@@ -720,7 +718,7 @@ class LongVideoSkills:
 
     def render_native_h3_l2va(self, context: SkillContext) -> SkillResult:
         story = context.state["native-story-prompt"]
-        gate = context.state["native-l2va-frame-gate"]
+        source_check = context.state["native-l2va-frame-source-check"]
         if int(context.plan.goal.duration_seconds) > 15:
             raise RuntimeError(
                 "Direct MiniMax H3 last-frame-to-video rendering supports at most 15 seconds (362 frames); "
@@ -731,7 +729,7 @@ class LongVideoSkills:
             or context.plan.goal.constraints.get("video_workflow_name")
             or ""
         )
-        last_frame = str(gate.get("last_frame_path") or "")
+        last_frame = str(source_check.get("last_frame_path") or "")
         if not workflow_name or not last_frame:
             raise RuntimeError("Native H3 L2VA render requires workflow_name and last_frame_path")
         payload = {
@@ -1040,31 +1038,25 @@ class LongVideoSkills:
             },
         )
         technical_passed = technical_qa.get("passed") is True
-        subject_count = self.prompt_engine.evaluate_media_subjects(
-            image_path=str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
-            expected_count=expected_subject_count(constraints),
-            frame_count=int(context.node.inputs.get("frame_count") or 6),
-        ) if technical_passed else {"required": False, "passed": False, "status": "not_run"}
-        passed = technical_passed and subject_count["passed"] is True
         failures = [str(item) for item in (technical_qa.get("errors") or []) if str(item)]
-        if subject_count["passed"] is not True:
-            failures.append("subject count could not be verified against the declared contract")
-        log_message = "Native H3 hard media checks passed." if passed else "Native H3 QA failed: " + ", ".join(failures)
         return SkillResult(
-            status="success" if passed else "failed",
+            status="success",
             outputs={
-                "passed": passed,
+                "passed": technical_passed,
                 "video_path": video_path,
                 "h3_mode": h3_mode,
-                "technical_qa": {**technical_qa, "bypassed": False, "failures": failures},
-                "subject_count": subject_count,
+                "technical_qa": {
+                    **technical_qa,
+                    "automatic_gate_applied": False,
+                    "failures": failures,
+                },
                 "contact_sheet_path": str(technical_qa.get("contact_sheet_path") or contact_sheet_path),
             },
             metrics={
                 "video_count": len(saved_files),
                 "technical_qa_passed": int(technical_passed),
             },
-            logs=[log_message],
+            logs=["Recorded native H3 video inspection for Discord review; automatic DQ is disabled."],
         )
 
     def package_native_h3(self, context: SkillContext) -> SkillResult:

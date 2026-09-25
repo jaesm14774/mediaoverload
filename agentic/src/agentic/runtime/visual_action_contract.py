@@ -36,6 +36,15 @@ ACTION_BEATS = (
     "payoff",
 )
 
+SEMANTIC_CUE_MODE = "hypit_v1"
+SEMANTIC_CUE_RATIOS = (
+    ("hook", 0.00, 0.12, "make the objective and action onset visible"),
+    ("mechanism", 0.12, 0.34, "show the protagonist operating the dominant physical mechanism"),
+    ("consequence", 0.34, 0.56, "show the mechanism causing a concrete state change"),
+    ("reaction", 0.56, 0.78, "show the readable physical or emotional response"),
+    ("payoff", 0.78, 1.00, "hold the earned result and settled end state"),
+)
+
 OPENING_ACTION_LOCK = (
     "Opening action lock: begin with the protagonist already initiating the dominant causal action, "
     "with the action surface, force direction, or attachment point visibly readable. If contact causes "
@@ -117,12 +126,69 @@ def visual_action_contract(
     )
 
 
+def semantic_cue_timeline(
+    duration_seconds: int | float,
+    *,
+    media_type: str | None = None,
+) -> dict[str, Any]:
+    """Return semantic event windows for an opt-in, reusable production variant.
+
+    The windows are a directing aid, not a promise that a diffusion model will
+    cut exactly at those frame boundaries. They let a run describe *what* must
+    happen next while keeping the existing renderer and QA contracts intact.
+    """
+
+    normalized_type = str(media_type or "").strip().lower()
+    if normalized_type and not is_motion_media_type(normalized_type):
+        return {}
+    duration = max(1.0, float(duration_seconds or 0))
+    cues = [
+        {
+            "cue": cue,
+            "start_ratio": start_ratio,
+            "end_ratio": end_ratio,
+            "start_seconds": round(duration * start_ratio, 3),
+            "end_seconds": round(duration * end_ratio, 3),
+            "must_show": must_show,
+        }
+        for cue, start_ratio, end_ratio, must_show in SEMANTIC_CUE_RATIOS
+    ]
+    return {
+        "version": 1,
+        "mode": SEMANTIC_CUE_MODE,
+        "timing_basis": "semantic_event_windows",
+        "duration_seconds": round(duration, 3),
+        "cues": cues,
+    }
+
+
+def semantic_cue_timeline_prompt(
+    duration_seconds: int | float,
+    *,
+    media_type: str | None = None,
+) -> str:
+    """Format the semantic timeline as an English creative direction block."""
+
+    timeline = semantic_cue_timeline(duration_seconds, media_type=media_type)
+    if not timeline:
+        return ""
+    lines = [
+        "Semantic cue timeline: anchor the visible action to these meaningful events rather than an arbitrary montage; each cue must hand off its changed state to the next cue.",
+    ]
+    for item in timeline["cues"]:
+        lines.append(
+            f"- {item['cue']} ({item['start_seconds']:g}-{item['end_seconds']:g}s): {item['must_show']}; preserve the same subject, geography, and dominant mechanism."
+        )
+    return "\n".join(lines)
+
+
 def default_visual_action_contract(
     duration_seconds: int | float = 6,
     *,
     media_type: str = "text2img2video",
     subject_count: int = 1,
     loop: bool = False,
+    semantic_cue_mode: str = "",
 ) -> dict[str, Any]:
     """Return the inspectable contract carried in a goal and run manifest."""
 
@@ -134,7 +200,7 @@ def default_visual_action_contract(
         if normalized_type in {"long_video", "text2longvideo"}
         else "continuous_clip"
     )
-    return {
+    metadata = {
         "version": 1,
         "media_type": normalized_type,
         "duration_seconds": max(1, int(duration_seconds or 0)),
@@ -150,6 +216,12 @@ def default_visual_action_contract(
             "continuity_anchor",
         ],
     }
+    if str(semantic_cue_mode or "").strip().lower() == SEMANTIC_CUE_MODE:
+        metadata["semantic_cue_timeline"] = semantic_cue_timeline(
+            duration_seconds,
+            media_type=normalized_type,
+        )
+    return metadata
 
 
 def enforce_opening_action_lock(prompt: str) -> str:

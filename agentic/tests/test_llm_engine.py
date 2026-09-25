@@ -11,6 +11,8 @@ from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
 from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
 from agentic.runtime.observability import RunRecorder
+from agentic.runtime.prompting import build_goal_brief
+from agentic.runtime.visual_action_contract import SEMANTIC_CUE_MODE
 
 
 class _FakeTextModel:
@@ -30,6 +32,36 @@ class _FakeManager:
 
 
 class LLMEngineTests(unittest.TestCase):
+
+    def test_user_given_semantic_variant_when_goal_brief_is_built_then_cues_are_injected_and_control_is_unchanged(self) -> None:
+        """User Given a semantic variant When its goal brief is built Then only B receives the cue timeline."""
+        base_constraints = {"character": "Kirby"}
+        control = build_goal_brief(
+            GoalRequest(
+                prompt="Kirby pushes one glowing cube and reacts",
+                media_type="text2img2video",
+                duration_seconds=6,
+                style="polished 2D anime",
+                constraints=base_constraints,
+            ),
+            "polished 2D anime",
+            [],
+        )
+        treatment = build_goal_brief(
+            GoalRequest(
+                prompt="Kirby pushes one glowing cube and reacts",
+                media_type="text2img2video",
+                duration_seconds=6,
+                style="polished 2D anime",
+                constraints={**base_constraints, "semantic_cue_mode": SEMANTIC_CUE_MODE},
+            ),
+            "polished 2D anime",
+            [],
+        )
+
+        self.assertNotIn("Semantic cue timeline", control["prompt"])
+        self.assertIn("Semantic cue timeline", treatment["prompt"])
+        self.assertEqual(treatment["semantic_cue_timeline"]["mode"], SEMANTIC_CUE_MODE)
 
 
     def test_run_recorder_sanitizes_run_id_before_creating_paths(self) -> None:
@@ -80,6 +112,34 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("one visual thesis", user_prompt)
         self.assertNotIn("9:16", user_prompt)
         self.assertNotIn("vertical", user_prompt.lower())
+
+    def test_expand_goal_keeps_news_events_attached_to_reported_places(self) -> None:
+        manager = _FakeManager(
+            [
+                '{"creative_brief":"a grounded allegory","prompt":"Kirby reacts to an empty fuel can","negative_prompt":"text"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="Kirby responds to fuel protests reported in multiple countries",
+            media_type="text2img2video",
+            style="cel animation",
+            constraints={
+                "news_driven": True,
+                "news_context": {
+                    "title": "Fuel protests and shortages affect several countries",
+                    "keyword": "fuel protests",
+                    "content": "Distinct events occurred in Guatemala and the Philippines.",
+                },
+            },
+        )
+
+        engine.expand_goal(goal, "cel animation", [])
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("Preserve each documented location, actor, and event relationship", user_prompt)
+        self.assertIn("do not merge events from different places", user_prompt)
+        self.assertIn("use an unlocated metaphor", user_prompt)
 
     def test_expand_goal_injects_reference_motion_contract(self) -> None:
         manager = _FakeManager(
@@ -451,26 +511,89 @@ class LLMEngineTests(unittest.TestCase):
                 ))
 
     def test_generate_autonomous_scene_prompt_uses_llm_when_available(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = _FakeManager(
                 [
-                    '{"prompt":"kirby turns a headline into a whimsical alley chase","creative_seed":"headline seed","source":"autonomous_llm"}',
+                    '{"prompt":"Kirby protects unmarked student records from a leak","creative_seed":"source anchor","source":"autonomous_llm"}',
                 ]
-            ),
-        )
+            )
+            recorder = RunRecorder(Path(temp_dir), "autonomous-scene")
+            engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
+
+            result = engine.generate_autonomous_scene_prompt(
+                character="Kirby",
+                style="anime",
+                media_type="text2video",
+                news_context={
+                    "title": "Mathspace reports a student data breach",
+                    "keyword": "student data breach",
+                },
+                news_grounding_required=True,
+            )
+
+            self.assertEqual(result["prompt"], "Kirby protects unmarked student records from a leak")
+            self.assertEqual(result["creative_seed"], "source anchor")
+            self.assertEqual(result["source"], "autonomous_llm")
+            self.assertEqual(result["prompt_mode"], "llm")
+            user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+            self.assertIn("main documented event or impact as the story anchor", user_prompt)
+            self.assertIn("a loose pun or shared keyword is not a substitute", user_prompt)
+            call_files = list((Path(temp_dir) / "autonomous-scene" / "llm").glob("*.json"))
+            self.assertEqual(len(call_files), 1)
+            call = json.loads(call_files[0].read_text(encoding="utf-8"))
+            self.assertEqual(call["schema_name"], "autonomous_scene_prompt")
+            self.assertEqual(call["status"], "success")
+            self.assertEqual(call["parsed_payload"]["prompt"], result["prompt"])
+
+    def test_news_grounded_autonomous_fallback_keeps_the_source_event(self) -> None:
+        """User Given a news-driven scene uses the template fallback, When it creates the prompt, Then the headline remains the event anchor and motifs do not replace it."""
+        title = "Mathspace reports a student data breach affecting 1.08 million people"
+        engine = LLMPromptEngine(mode="template")
 
         result = engine.generate_autonomous_scene_prompt(
             character="Kirby",
             style="anime",
-            media_type="text2video",
-            news_context={"title": "headline"},
+            media_type="text2image2video",
+            news_context={"title": title, "keyword": "student data breach"},
+            news_grounding_required=True,
         )
 
-        self.assertEqual(result["prompt"], "kirby turns a headline into a whimsical alley chase")
-        self.assertEqual(result["creative_seed"], "headline seed")
-        self.assertEqual(result["source"], "autonomous_llm")
-        self.assertEqual(result["prompt_mode"], "llm")
+        self.assertIn(title, result["prompt"])
+        self.assertIn("never render", result["prompt"])
+        self.assertNotIn("news-inspired visual motifs only", result["prompt"])
+
+    def test_news_grounded_goal_fallback_keeps_the_source_event(self) -> None:
+        """User Given a news-driven goal cannot reach its language model, When the template brief is returned, Then the headline remains in its render prompts."""
+        title = "A food-safety event prompts a national product-identification plan"
+        engine = LLMPromptEngine(mode="template")
+        goal = GoalRequest(
+            prompt="Kirby inspects a product-safety report",
+            media_type="text2image2video",
+            style="paper-cut animation",
+            constraints={
+                "news_driven": True,
+                "news_context": {"title": title, "keyword": "food safety product identification"},
+            },
+        )
+
+        result = engine.expand_goal(goal, "paper-cut animation", [])
+
+        self.assertIn(title, result["prompt"])
+        self.assertIn(title, result["opening_keyframe_prompt"])
+        self.assertNotIn("news-inspired visual motifs only", result["prompt"])
+
+    def test_news_grounded_template_requires_an_identifying_source_headline(self) -> None:
+        """User Given a news-grounded fallback has no identifying headline or keyword, When it builds the scene prompt, Then it fails closed instead of inventing an event."""
+        engine = LLMPromptEngine(mode="template")
+
+        with self.assertRaises(ValueError):
+            engine.generate_autonomous_scene_prompt(
+                character="Kirby",
+                style="anime",
+                media_type="text2video",
+                news_context={"content": "No headline or keyword is available."},
+                news_grounding_required=True,
+            )
 
     def test_sticker_expressions_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(

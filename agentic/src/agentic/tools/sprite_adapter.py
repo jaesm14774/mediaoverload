@@ -128,20 +128,6 @@ class SpriteAdapter:
                 keyed = _chroma_key(raw, chroma, threshold)
                 keyed_frames.append(keyed)
                 edge_contacts.append(_edge_contact(keyed, raw=raw, chroma=chroma, threshold=threshold))
-        clipped = [
-            (index, contact)
-            for index, contact in enumerate(edge_contacts)
-            if any(contact[side] > 0 for side in ("top", "left", "right"))
-        ]
-        if clipped:
-            details = ", ".join(
-                f"frame-{index + 1:02d}({', '.join(f'{side}={contact[side]}' for side in ('top', 'left', 'right') if contact[side] > 0)})"
-                for index, contact in clipped
-            )
-            raise ValueError(
-                "Sprite source touches the top/left/right frame edge; refusing a clipped game sprite: "
-                f"{details}. Increase the source canvas or keep the subject inside the safe area."
-            )
         shared_bbox = _union_bbox(keyed_frames)
         if shared_bbox is None:
             raise ValueError("Sprite frames became fully transparent after chroma removal")
@@ -169,8 +155,6 @@ class SpriteAdapter:
                 }
             )
 
-        if len({_sha256(Path(record["path"])) for record in frame_records}) < 2:
-            raise ValueError("Sprite source produced no visible frame-to-frame motion")
         alpha_counts = [_opaque_pixel_count(frame) for frame in normalized_frames]
         atlas = Image.new("RGBA", (width * SPRITE_GRID_COLS, height * SPRITE_GRID_ROWS), (0, 0, 0, 0))
         for index, frame in enumerate(normalized_frames):
@@ -215,12 +199,7 @@ class SpriteAdapter:
                 "cell_dimensions": all(frame.size == (width, height) for frame in normalized_frames),
                 "atlas_dimensions": atlas.size == (width * SPRITE_GRID_COLS, height * SPRITE_GRID_ROWS),
                 "binary_alpha": all(_has_binary_alpha(frame) for frame in normalized_frames),
-                "motion_present": len({_sha256(Path(record["path"])) for record in frame_records}) >= 2,
                 "nonempty_frames": all(count > 0 for count in alpha_counts),
-                "non_floor_edge_contact": not any(
-                    any(contact[side] > 0 for side in ("top", "left", "right"))
-                    for contact in edge_contacts
-                ),
             },
             "opaque_pixel_count": alpha_counts,
             "edge_contacts": edge_contacts,
@@ -366,7 +345,11 @@ def _remove_border_background(image: Image.Image, *, threshold: int) -> Image.Im
                     continue
                 visited[neighbor] = 1
                 queue.append(neighbor)
-        if len(component) >= 16:
+        # Only remove a border-connected component when it is clearly a
+        # frame-wide background. A subject that touches an edge must remain
+        # available for Discord review instead of being mistaken for a DQ
+        # failure during preprocessing.
+        if len(component) >= max(16, (width * height) // 4):
             for index in component:
                 red, green, blue, _alpha = pixels[index]
                 pixels[index] = (red, green, blue, 0)

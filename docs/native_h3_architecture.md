@@ -22,8 +22,8 @@ the generated actions and the stable preset before prompt composition.
 
 News context and story metadata are retained for traceability only; no score or
 generation gate is produced from them. Beat boundaries must remain contiguous
-from 0 to 15 seconds; post-render hard media checks remain the authoritative
-checks for the actual media.
+from 0 to 15 seconds; post-render media inspection produces evidence for
+Discord, which remains authoritative for creative decisions.
 
 The production route uses `configs/storyboards/native_h3_15s.yaml` as its
 identity and continuity contract. Direct H3 rendering is intentionally capped
@@ -36,8 +36,8 @@ submission; the system does not silently shorten it or substitute a fallback.
 `native_h3_story` is the first-frame image-to-video route; `native_h3_fl2va_story`
 adds a reviewed landing frame, `native_h3_l2va_story` keeps only the reviewed
 landing frame, and `native_h3_ref2va` consumes either a validated manifest or
-the six-candidate Discord reference gate when its manifest is empty. All modes
-share the same minimal render-contract normalization and QA/package nodes.
+the six-candidate Discord reference review when its manifest is empty. All modes
+share the same minimal render-contract normalization and inspection/package nodes.
 
 ## Runtime path
 
@@ -60,14 +60,14 @@ selected Native H3 route
    -> FL2VA: opening + landing candidates -> Discord -> first+last-frame I2V
    -> L2VA: six landing candidates -> Discord -> last-frame I2V
    -> Ref2VA: valid manifest OR six T2I candidates -> Discord -> Ref2VA
-   -> shared technical QA + explicitly requested subject counts
+   -> media inspection evidence for Discord
    -> contact sheet + GIF + packaged video
 ```
 
 `longvideo.prepare_native_h3_story` delegates news selection and LLM story
 generation to `agentic/src/agentic/runtime/story_service.py`, then formats the
 resolved storyboard into the render prompt. The storyboard rules, `news_trace`,
-state changes, first/last frame contracts, and QA rules remain reproducible and
+state changes, first/last frame contracts, and inspection metadata remain reproducible and
 visible in the plan manifest. The publish stage receives a compact story/news
 context rather than the full production prompt.
 
@@ -217,12 +217,11 @@ repair attempt, `nodes/*.json` with node outputs, workflow result JSON, and
 `run_manifest.json`. `logs/agentic_portfolio.jsonl` remains a compact
 cross-run memory and is not the source of truth for prompt debugging.
 
-The native H3 QA node delegates file, stream, dimension, frame-rate, duration,
-and declared audio requirements to `media.video_qa`. It saves a contact sheet
-for review. An explicit `expected_subject_count` constraint requests counts
-for each sampled frame; the vision model reports counts only, and Python
-compares them with the requested number. Unknown or malformed counts do not
-pass. Sampling does not establish the count in every frame of a video.
+The native H3 inspection node calls `media.video_qa` only to create a contact
+sheet and record observable media metadata for Discord. Its result is not an
+automatic DQ gate: duration, dimensions, frame rate, audio, and subject counts
+never filter or block a candidate before or after human review. Missing files,
+failed rendering, and tool failures remain real system errors.
 
 No machine gate judges story, rhythm, identity, cuteness, composition, or
 prompt similarity. Discord owns those decisions. Approved media and captions

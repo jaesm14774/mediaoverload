@@ -15,18 +15,7 @@ from agentic.tools.context_services import DiscordHumanReviewService
 
 
 class HardContractPromptEngine:
-    """Test boundary for creative prompt generation; technical media checks stay in dedicated tests."""
-
-    def validate_image_candidates(self, goal, media_paths, review_notes, selection_limit):
-        del goal, review_notes
-        selected = list(dict.fromkeys(media_paths))[:selection_limit]
-        return {
-            "selected_assets": selected,
-            "ranked_candidates": [{"media_path": path} for path in selected],
-            "selection_rationale": "explicit test boundary",
-            "regeneration_notes": "",
-            "prompt_mode": "hard_media_contract",
-        }
+    """Test boundary for creative prompt generation after automatic DQ removal."""
 
     def prepare_publish_caption(self, goal, prefix, hashtags, platforms, media_paths=None, review_notes="", visual_paths=None):
         del goal, prefix, hashtags, platforms, media_paths, review_notes, visual_paths
@@ -239,19 +228,6 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         with patch.object(
             skills.prompt_engine,
-            "validate_image_candidates",
-            return_value={
-                "selected_assets": ["C:\\frame_a.png", "C:\\frame_b.png"],
-                "ranked_candidates": [
-                    {"media_path": "C:\\frame_a.png", "score": 90, "rationale": "good"},
-                    {"media_path": "C:\\frame_b.png", "score": 80, "rationale": "okay"},
-                ],
-                "selection_rationale": "LLM shortlist",
-                "regeneration_notes": "None",
-                "prompt_mode": "llm",
-            },
-        ), patch.object(
-            skills.prompt_engine,
             "prepare_publish_caption",
             return_value={
                 "caption": "Draft social post",
@@ -362,19 +338,6 @@ class AgentSocialSkillTests(unittest.TestCase):
         )
 
         with patch.object(
-            skills.prompt_engine,
-            "validate_image_candidates",
-            return_value={
-                "selected_assets": ["C:\\frame_a.png", "C:\\frame_b.png"],
-                "ranked_candidates": [
-                    {"media_path": "C:\\frame_a.png", "score": 90, "rationale": "good"},
-                    {"media_path": "C:\\frame_b.png", "score": 80, "rationale": "okay"},
-                ],
-                "selection_rationale": "LLM shortlist",
-                "regeneration_notes": "None",
-                "prompt_mode": "llm",
-            },
-        ), patch.object(
             skills.prompt_engine,
             "prepare_publish_caption",
             return_value={
@@ -554,7 +517,8 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(captured["selection_required"])
         self.assertEqual(captured["selection_limit"], 1)
 
-    def test_stage_probe_checks_all_candidates_before_deterministic_selection(self) -> None:
+    def test_stage_probe_keeps_candidates_without_automatic_image_dq(self) -> None:
+        """User: Given an artifact-only probe, When it selects generated media, Then it does not generate a publish caption."""
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
         candidate_paths = [f"C:\\probe_frame_{index}.png" for index in range(1, 7)]
@@ -591,29 +555,25 @@ class AgentSocialSkillTests(unittest.TestCase):
         captured: dict[str, object] = {}
 
         class FakePromptEngine:
-            def validate_image_candidates(self, goal, media_paths, review_notes, selection_limit):
-                captured.update(
-                    goal_prompt=goal.prompt,
-                    media_paths=media_paths,
-                    selection_limit=selection_limit,
-                )
+            calls = 0
+
+            def prepare_publish_caption(self, *args, **kwargs):
+                self.calls += 1
                 return {
-                    "selected_assets": [candidate_paths[2]],
-                    "ranked_candidates": [{"media_path": candidate_paths[2], "score": 93, "rationale": "best prompt match"}],
-                    "selection_rationale": "vision ranking selected the strongest probe frame",
-                    "prompt_mode": "llm",
+                    "caption": "probe",
+                    "hashtags": "",
                 }
 
         skills.prompt_engine = FakePromptEngine()
         result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.outputs["selected_assets"], [candidate_paths[2]])
-        self.assertEqual(captured["selection_limit"], 6)
-        self.assertEqual(captured["goal_prompt"], plan.goal.prompt)
+        self.assertEqual(result.outputs["selected_assets"], [candidate_paths[0]])
         self.assertTrue(result.outputs["auto_select_for_probe"])
+        self.assertEqual(skills.prompt_engine.calls, 0)
 
     def test_final_video_review_filters_frames_and_disables_asset_picker(self) -> None:
+        """User: Given a final video enters Discord review, When it is presented, Then the prepared caption accompanies its media."""
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
         video_path = r"C:\final\Kirby_H3.mp4"
@@ -668,10 +628,6 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         with patch.object(
             skills.prompt_engine,
-            "validate_image_candidates",
-            side_effect=AssertionError("final video review must not invoke asset shortlist LLM"),
-        ), patch.object(
-            skills.prompt_engine,
             "prepare_publish_caption",
             return_value={"caption": "Final caption", "hashtags": "#kirby", "dispatch_ready": True},
         ), patch.object(skills.discord_review, "review_candidates", side_effect=fake_review):
@@ -680,11 +636,10 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.outputs["selected_assets"], [video_path])
         self.assertEqual(captured["media_paths"], [video_path])
+        self.assertEqual(result.outputs["approved_review_text"], "Final caption\n\n#kirby")
         self.assertFalse(captured["allow_asset_selection"])
         self.assertTrue(captured["allow_text_edit"])
         self.assertEqual(captured["text"], "Final caption\n\n#kirby")
-        self.assertNotIn("Caption:", captured["text"])
-        self.assertNotIn("Hashtags:", captured["text"])
         self.assertNotIn("Strategy:", captured["text"])
         self.assertNotIn("Workflow:", captured["text"])
         self.assertNotIn("Stage:", captured["text"])
@@ -692,6 +647,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertNotIn("Candidates attached", captured["text"])
 
     def test_final_media_review_sends_images_to_discord_and_keeps_selection(self) -> None:
+        """User: Given a human approves media for publishing, When Discord reviews the candidates, Then the prepared caption is included for approval."""
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
         image_paths = [r"C:\final\Kirby_1.png", r"C:\final\Kirby_2.png"]
@@ -749,9 +705,7 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(captured["allow_asset_selection"])
         self.assertTrue(captured["allow_text_edit"])
         self.assertEqual(captured["text"], "Kirby image\n\n#kirby")
-        self.assertNotIn("Caption:", captured["text"])
-        self.assertNotIn("Hashtags:", captured["text"])
-        self.assertEqual(prepare_caption.call_args.kwargs["media_paths"], image_paths)
+        prepare_caption.assert_called_once()
         self.assertNotIn("Candidates attached", captured["text"])
 
     def test_last_frame_review_requires_explicit_approval_without_asset_picker(self) -> None:

@@ -357,8 +357,8 @@ class TaskPlanner:
         goal: GoalRequest,
         *,
         tags: list[str],
-        include_keyframe_gate: bool,
-        frame_gate_node_id: str = "native-keyframe-gate",
+        include_keyframe_source_check: bool,
+        frame_source_check_node_id: str = "native-keyframe-source-check",
         qa_inputs: dict[str, object] | None = None,
     ) -> list[ExecutionNode]:
         nodes: list[ExecutionNode] = []
@@ -382,18 +382,18 @@ class TaskPlanner:
             )
         final_qa_inputs = self._scaled_video_qa_inputs(goal, final_qa_inputs)
         final_qa_inputs.update({"render_node": "native-h3-render", "video_node": video_node})
-        qa_tags = ["technical-qa", "hard-media-dq", "manual-review", *tags]
+        qa_tags = ["media-inspection", "manual-review", *tags]
         preview_tags = ["preview", *tags]
         package_dependencies = ["native-h3-render", video_node, "native-h3-qa", "native-h3-preview"]
-        if include_keyframe_gate:
-            package_dependencies.append(frame_gate_node_id)
+        if include_keyframe_source_check:
+            package_dependencies.append(frame_source_check_node_id)
         nodes.extend(
             [
                 ExecutionNode(
                     node_id="native-h3-qa",
                     skill_name="longvideo.qa_native_h3",
                     inputs={
-                        "mode": "hard_media_checks_before_discord_review",
+                        "mode": "discord_review_evidence_only",
                         **final_qa_inputs,
                     },
                     depends_on=[video_node],
@@ -679,10 +679,10 @@ class TaskPlanner:
                 )
                 ending_source_node = "native-ending-review"
 
-        gate_depends_on = [opening_source_node]
+        source_depends_on = [opening_source_node]
         if ending_source_node:
-            gate_depends_on.append(ending_source_node)
-        gate_inputs = {
+            source_depends_on.append(ending_source_node)
+        source_inputs = {
             "character": str(goal.constraints.get("character") or ""),
             "opening_node": opening_source_node,
             "ending_node": ending_source_node,
@@ -699,12 +699,12 @@ class TaskPlanner:
         nodes.extend(
             [
                 ExecutionNode(
-                    node_id="native-keyframe-gate",
-                    skill_name="media.image.validate_character",
-                    inputs=gate_inputs,
-                    depends_on=gate_depends_on,
-                    tags=["quality", "identity", "native-h3"],
-                    stage="quality",
+                    node_id="native-keyframe-source-check",
+                    skill_name="media.image.confirm_keyframe_sources",
+                    inputs=source_inputs,
+                    depends_on=source_depends_on,
+                    tags=["assets", "frame-source", "native-h3"],
+                    stage="assets",
                 ),
                 ExecutionNode(
                     node_id="native-h3-render",
@@ -720,7 +720,7 @@ class TaskPlanner:
                         "use_last_frame": use_last_frame,
                         "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
                     },
-                    depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-gate"],
+                    depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-source-check"],
                     tags=["render", "video", "native-h3"],
                     tool_name="comfy.workflow.image_to_video",
                     stage="render",
@@ -728,7 +728,7 @@ class TaskPlanner:
                 *self._native_h3_finalize_nodes(
                     goal,
                     tags=["native-h3"],
-                    include_keyframe_gate=True,
+                    include_keyframe_source_check=True,
                     qa_inputs=(
                         {
                             "target_duration": length / float(goal.constraints.get("native_h3_frame_rate") or 24),
@@ -845,7 +845,7 @@ class TaskPlanner:
             *self._native_h3_finalize_nodes(
                 goal,
                 tags=["native-h3", "t2v"],
-                include_keyframe_gate=False,
+                include_keyframe_source_check=False,
                 qa_inputs={
                     "target_duration": render_duration,
                     "expected_width": width,
@@ -992,8 +992,8 @@ class TaskPlanner:
         nodes.extend(
             [
                 ExecutionNode(
-                    node_id="native-l2va-frame-gate",
-                    skill_name="media.image.validate_last_frame",
+                    node_id="native-l2va-frame-source-check",
+                    skill_name="media.image.confirm_last_frame_source",
                     inputs={
                         "frame_node": frame_node,
                         "character": str(goal.constraints.get("character") or ""),
@@ -1001,8 +1001,8 @@ class TaskPlanner:
                         "max_regenerations": 0,
                     },
                     depends_on=[frame_node],
-                    tags=["quality", "identity", "last-frame", "native-h3", "l2va"],
-                    stage="quality",
+                    tags=["assets", "frame-source", "last-frame", "native-h3", "l2va"],
+                    stage="assets",
                 ),
                 ExecutionNode(
                     node_id="native-h3-render",
@@ -1016,7 +1016,7 @@ class TaskPlanner:
                         "video_count": video_count,
                         "model_profile": model_profile,
                     },
-                    depends_on=["native-story-prompt", "native-video-asset-check", "native-l2va-frame-gate"],
+                    depends_on=["native-story-prompt", "native-video-asset-check", "native-l2va-frame-source-check"],
                     tags=["render", "video", "native-h3", "l2va"],
                     tool_name="comfy.workflow.image_to_video",
                     stage="render",
@@ -1024,8 +1024,8 @@ class TaskPlanner:
                 *self._native_h3_finalize_nodes(
                     goal,
                     tags=["native-h3", "l2va"],
-                    include_keyframe_gate=True,
-                    frame_gate_node_id="native-l2va-frame-gate",
+                    include_keyframe_source_check=True,
+                    frame_source_check_node_id="native-l2va-frame-source-check",
                     qa_inputs=(
                         {
                             "target_duration": length / float(goal.constraints.get("native_h3_frame_rate") or 24),
@@ -1294,7 +1294,7 @@ class TaskPlanner:
             self._native_h3_finalize_nodes(
                 goal,
                 tags=["native-h3", "ref2va"],
-                include_keyframe_gate=False,
+                include_keyframe_source_check=False,
                 qa_inputs={"frame_count": 12, "columns": 4},
             )
         )
@@ -1940,7 +1940,7 @@ class TaskPlanner:
                 nodes.append(
                     ExecutionNode(
                         node_id=segment_qa_node,
-                        skill_name="media.video.qa",
+                        skill_name="media.video.inspect",
                         inputs={
                             "expected_width": render_inputs["width"],
                             "expected_height": render_inputs["height"],
@@ -2105,7 +2105,7 @@ class TaskPlanner:
         nodes.append(
             ExecutionNode(
                 node_id="longvideo-video-qa",
-                skill_name="media.video.qa",
+                skill_name="media.video.inspect",
                 inputs=longvideo_qa_inputs,
                 depends_on=[preview_dependency],
                 tags=["quality", "technical-qa", "video", "longvideo"],
@@ -2270,7 +2270,7 @@ class TaskPlanner:
             nodes.append(
                 ExecutionNode(
                     node_id="review-longvideo-video-qa",
-                    skill_name="media.video.qa",
+                    skill_name="media.video.inspect",
                     inputs=longvideo_qa_inputs,
                     depends_on=[retry_preview_dependency],
                     tags=["quality", "technical-qa", "video", "longvideo", "retry"],
@@ -2356,7 +2356,7 @@ class TaskPlanner:
                             "final_video_node": final_video_node,
                             "publish_contract": {
                                 "human_review_required": True,
-                                "technical_qa_required": True,
+                                "media_inspection_recorded": True,
                                 "public_dispatch_requires_platform_receipt": True,
                             },
                         },
@@ -2536,7 +2536,7 @@ class TaskPlanner:
             ),
             ExecutionNode(
                 node_id="edit-video-qa",
-                skill_name="media.video.qa",
+                skill_name="media.video.inspect",
                 inputs={
                     "target_duration": qa_target_duration,
                     "duration_tolerance": 0.35,
@@ -2777,7 +2777,7 @@ class TaskPlanner:
                 ),
                 ExecutionNode(
                     node_id="video-qa",
-                    skill_name="media.video.qa",
+                    skill_name="media.video.inspect",
                     inputs={
                         **self._video_qa_inputs(goal, video_manifest),
                         "character": str(goal.constraints.get("character") or ""),
@@ -2832,7 +2832,12 @@ class TaskPlanner:
                         node_id="review-select",
                         skill_name="review.assets.select",
                         inputs={"limit": selection_limit, "review_notes": review_notes},
-                        depends_on=["render-image", "upscale-image", video_output_node, "gif-preview"],
+                        depends_on=[
+                            "render-image",
+                            *(["upscale-image"] if use_upscale_for_i2v else []),
+                            video_output_node,
+                            "gif-preview",
+                        ],
                         tags=["review", "retry"],
                         stage="review",
                     ),
@@ -2863,14 +2868,20 @@ class TaskPlanner:
                         tool_name="comfy.workflow.text_to_image",
                         stage="render",
                     ),
-                    ExecutionNode(
-                        node_id="review-upscale-image",
-                        skill_name="image.upscale",
-                        inputs={},
-                        depends_on=["review-render-image", "upscale-asset-check"],
-                        tags=["render", "upscale", "retry"],
-                        tool_name="comfy.workflow.image_upscale",
-                        stage="render",
+                    *(
+                        [
+                            ExecutionNode(
+                                node_id="review-upscale-image",
+                                skill_name="image.upscale",
+                                inputs={},
+                                depends_on=["review-render-image", "upscale-asset-check"],
+                                tags=["render", "upscale", "retry"],
+                                tool_name="comfy.workflow.image_upscale",
+                                stage="render",
+                            )
+                        ]
+                        if use_upscale_for_i2v
+                        else []
                     ),
                     ExecutionNode(
                         node_id="review-animate-video",
@@ -2891,7 +2902,15 @@ class TaskPlanner:
                                 else {}
                             ),
                         },
-                        depends_on=["review-refine-prompt", "review-upscale-image", "video-asset-check"],
+                        depends_on=[
+                            "review-refine-prompt",
+                            *(
+                                ["review-upscale-image"]
+                                if use_upscale_for_i2v
+                                else ["review-render-image"]
+                            ),
+                            "video-asset-check",
+                        ],
                         tags=["render", "video", "retry"],
                         tool_name="comfy.workflow.image_to_video",
                         stage="render",
@@ -2935,7 +2954,7 @@ class TaskPlanner:
             review_final_select_node = next(node for node in nodes if node.node_id == "review-final-select")
             review_final_select_node.depends_on = [
                 "review-render-image",
-                "review-upscale-image",
+                *(["review-upscale-image"] if use_upscale_for_i2v else []),
                 review_video_output_node,
                 "review-gif-preview",
             ]
@@ -3427,7 +3446,7 @@ class TaskPlanner:
             ),
             ExecutionNode(
                 node_id="video-qa",
-                skill_name="media.video.qa",
+                skill_name="media.video.inspect",
                 inputs=self._video_qa_inputs(goal, video_manifest),
                 depends_on=["animate-video"],
                 tags=["quality", "technical-qa", "video"],

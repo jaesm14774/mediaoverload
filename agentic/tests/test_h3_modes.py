@@ -51,11 +51,11 @@ class H3ModePlanTests(unittest.TestCase):
         plan = self._plan("native_h3_l2va_story")
         node_ids = [node.node_id for node in plan.nodes]
         self.assertIn("native-l2va-ending-review", node_ids)
-        self.assertIn("native-l2va-frame-gate", node_ids)
+        self.assertIn("native-l2va-frame-source-check", node_ids)
         self.assertNotIn("native-opening-keyframe", node_ids)
-        gate = next(node for node in plan.nodes if node.node_id == "native-l2va-frame-gate")
+        source_check = next(node for node in plan.nodes if node.node_id == "native-l2va-frame-source-check")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-        self.assertTrue(gate.inputs["preserve_last_frame"])
+        self.assertTrue(source_check.inputs["preserve_last_frame"])
         self.assertEqual(render.skill_name, "longvideo.render_native_h3_l2va")
         self.assertEqual(plan.metadata["render_mode"], "last_frame_to_video")
         self.assertEqual(render.inputs["width"], plan.goal.constraints["canvas_width"])
@@ -159,12 +159,12 @@ class H3ModePlanTests(unittest.TestCase):
         plan = self._plan("native_h3_l2va_story")
         ending = next(node for node in plan.nodes if node.node_id == "native-l2va-ending-keyframe")
         review = next(node for node in plan.nodes if node.node_id == "native-l2va-ending-review")
-        gate = next(node for node in plan.nodes if node.node_id == "native-l2va-frame-gate")
+        source_check = next(node for node in plan.nodes if node.node_id == "native-l2va-frame-source-check")
 
         self.assertEqual(ending.inputs["image_count"], 6)
         self.assertEqual(review.inputs["limit"], 1)
         self.assertTrue(review.inputs["require_human_review"])
-        self.assertEqual(gate.inputs["frame_node"], "native-l2va-ending-review")
+        self.assertEqual(source_check.inputs["frame_node"], "native-l2va-ending-review")
 
     def test_auto_ref2va_enforces_routing_candidate_and_selection_bounds(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -321,7 +321,7 @@ class H3ModePlanTests(unittest.TestCase):
             ["one.png"],
         )
 
-    def test_kirby_batch_keyframe_validates_every_candidate(self) -> None:
+    def test_kirby_batch_keyframe_passes_all_candidates_to_review(self) -> None:
         class FakeTools:
             def call(self, _name, _payload):
                 return {"saved_files": ["one.png", "two.png"]}
@@ -344,11 +344,9 @@ class H3ModePlanTests(unittest.TestCase):
             ),
             state=SimpleNamespace(node_outputs={}),
         )
-        report = SimpleNamespace(passed=True, reasons=[])
-        with patch("agentic.skills.agent_primitives.inspect_image_input", return_value=report) as inspect:
-            result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "batch-qa").generate_keyframe(context)
+        result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "batch-qa").generate_keyframe(context)
         self.assertEqual(result.status, "success")
-        self.assertEqual(inspect.call_count, 2)
+        self.assertEqual(result.outputs["saved_files"], ["one.png", "two.png"])
 
     def test_non_kirby_keyframe_payload_carries_role_description_identity_lock(self) -> None:
         calls: list[tuple[str, dict[str, object]]] = []
@@ -387,7 +385,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertIn("no feet", calls[0][1]["prompt"])
         self.assertIn("detached hands with cream mittens", calls[0][1]["prompt"])
 
-    def test_kirby_batch_keeps_valid_candidates_when_one_candidate_is_rejected(self) -> None:
+    def test_kirby_batch_keeps_every_candidate_when_identity_dq_would_reject_one(self) -> None:
         class FakeTools:
             def call(self, _name, _payload):
                 return {"saved_files": ["bad.png", "good.png", "also-good.png"]}
@@ -410,17 +408,11 @@ class H3ModePlanTests(unittest.TestCase):
             ),
             state=SimpleNamespace(node_outputs={}),
         )
-        rejected = SimpleNamespace(passed=False, reasons=("duplicate Kirby protagonist silhouettes are blocked",))
-        accepted = SimpleNamespace(passed=True, reasons=())
-        with patch(
-            "agentic.skills.agent_primitives.inspect_image_input",
-            side_effect=[rejected, accepted, accepted],
-        ):
-            result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "partial-batch").generate_keyframe(context)
+        result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "partial-batch").generate_keyframe(context)
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.outputs["saved_files"], ["good.png", "also-good.png"])
-        self.assertEqual(result.outputs["rejected_files"], ["bad.png"])
+        self.assertEqual(result.outputs["saved_files"], ["bad.png", "good.png", "also-good.png"])
+        self.assertEqual(result.outputs["rejected_files"], [])
 
     def test_continuity_keyframe_preserves_multi_reference_candidate_count(self) -> None:
         calls: list[tuple[str, dict[str, object]]] = []
@@ -496,11 +488,9 @@ class H3ModePlanTests(unittest.TestCase):
                 },
             ),
         )
-        report = SimpleNamespace(passed=True, reasons=[])
-        with patch("agentic.skills.agent_primitives.inspect_image_input", return_value=report):
-            result = AgentMediaSkills(
-                FakeTools(), self.repo_root / ".tmp-tests" / "independent-ending"
-            ).generate_keyframe(context)
+        result = AgentMediaSkills(
+            FakeTools(), self.repo_root / ".tmp-tests" / "independent-ending"
+        ).generate_keyframe(context)
 
         self.assertEqual(result.status, "success")
         self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
@@ -546,9 +536,7 @@ class H3ModePlanTests(unittest.TestCase):
                 },
             ),
         )
-        report = SimpleNamespace(passed=True, reasons=[])
-        with patch("agentic.skills.agent_primitives.inspect_image_input", return_value=report):
-            result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "landing-anchor").generate_keyframe(context)
+        result = AgentMediaSkills(FakeTools(), self.repo_root / ".tmp-tests" / "landing-anchor").generate_keyframe(context)
 
         self.assertEqual(result.status, "success")
         self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
@@ -594,7 +582,7 @@ class H3ModePlanTests(unittest.TestCase):
             resolved = AgentMediaSkills(SimpleNamespace(), Path(directory))._resolve_image_path(context)
         self.assertEqual(resolved, "first.png")
 
-    def test_last_frame_validator_does_not_regenerate_approved_file(self) -> None:
+    def test_last_frame_source_check_passes_through_selected_file_without_identity_review(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             frame = Path(directory) / "last.png"
             frame.write_bytes(b"approved")
@@ -606,9 +594,10 @@ class H3ModePlanTests(unittest.TestCase):
                 ),
                 plan=SimpleNamespace(goal=SimpleNamespace(prompt="test", constraints={})),
             )
-            result = AgentMediaSkills(SimpleNamespace(), Path(directory)).validate_last_frame(context)
+            result = AgentMediaSkills(SimpleNamespace(), Path(directory)).confirm_last_frame_source(context)
             self.assertEqual(result.outputs["last_frame_path"], str(frame))
-            self.assertEqual(result.outputs["identity_reports"][0]["validation"], "human_selected_immutable")
+            self.assertEqual(result.outputs["source_checks"][0]["check"], "file_exists")
+            self.assertEqual(result.outputs["identity_check"], "not_applied")
             self.assertEqual(result.outputs["regenerated_count"], 0)
 
     def test_ref2va_graph_is_empty_until_runtime_references_are_bound(self) -> None:

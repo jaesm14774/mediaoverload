@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from agentic.assets.registry import AssetRegistry
-from agentic.assets.image_input import assert_image_input
 from agentic.assets.minimax_h3 import minimax_h3_model_overrides
 from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
 from agentic.runtime.registry import ToolRegistry
@@ -166,12 +165,18 @@ class ComfyWorkflowToolset:
         output_dir.mkdir(parents=True, exist_ok=True)
         render_count = max(1, int(merged_payload.get(spec.count_payload_key, 1)))
         saved_files: list[str] = []
+        render_attempts: list[dict[str, Any]] = []
         memory_retry_count = 0
+        base_seed = merged_payload.get("seed")
+        if spec.seed_enabled:
+            if base_seed is None:
+                base_seed = random.randint(1, 999999999)
+            base_seed = int(base_seed)
         try:
             for run_index in range(render_count):
                 iteration_payload = dict(merged_payload)
-                if spec.seed_enabled and "seed" not in iteration_payload:
-                    iteration_payload["seed"] = random.randint(1, 999999999)
+                if spec.seed_enabled:
+                    iteration_payload["seed"] = (base_seed + run_index) % (2**64)
                 updates = self._build_updates(
                     spec,
                     workflow_path,
@@ -189,7 +194,7 @@ class ComfyWorkflowToolset:
                 if reference_info or model_overrides:
                     generate_kwargs["workflow"] = runtime_workflow
                 try:
-                    saved_files.extend(generator.generate(**generate_kwargs))
+                    rendered_files = generator.generate(**generate_kwargs)
                 except Exception as exc:
                     # Sequential long-video segments can leave a previous
                     # provider graph resident in ComfyUI.  Retry the exact
@@ -199,7 +204,15 @@ class ComfyWorkflowToolset:
                         raise
                     self._release_comfy_memory(generator)
                     memory_retry_count += 1
-                    saved_files.extend(generator.generate(**generate_kwargs))
+                    rendered_files = generator.generate(**generate_kwargs)
+                saved_files.extend(rendered_files)
+                render_attempts.append(
+                    {
+                        "candidate_index": run_index + 1,
+                        "seed": iteration_payload.get("seed"),
+                        "saved_files": list(rendered_files),
+                    }
+                )
         except Exception as exc:
             raise RuntimeError(f"ComfyUI generation failed for {spec_name}: {exc}") from exc
 
@@ -210,6 +223,7 @@ class ComfyWorkflowToolset:
             "requested_workflow_name": requested_workflow_name,
             "workflow_path": str(workflow_path),
             "saved_files": saved_files,
+            "render_attempts": render_attempts,
             "payload": self._serialize_payload(merged_payload),
             "memory_retry_count": memory_retry_count,
             "comfy_host": self.comfy_host or "127.0.0.1",
@@ -288,12 +302,6 @@ class ComfyWorkflowToolset:
 
         image_path = payload.get("image_path") or payload.get("input_image_path")
         requested_workflow = str(payload.get("workflow_name") or spec.workflow_name)
-        if image_path and spec.name == "comfy.workflow.image_to_video" and requested_workflow.startswith("minimax_h3_"):
-            prompt_text = str(payload.get("prompt") or "").lower()
-            if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
-                assert_image_input(
-                    image_path,
-                )
         image_binding = spec.image_binding
         if image_path and requested_workflow.endswith("_15s_fl2va_i2v") and image_binding:
             # The FLF graph has two LoadImage nodes.  Bind the opening anchor by
@@ -312,11 +320,6 @@ class ComfyWorkflowToolset:
 
         last_image_path = payload.get("last_image_path") or payload.get("last_frame_path")
         if last_image_path and spec.last_image_binding and requested_workflow.startswith("minimax_h3_"):
-            prompt_text = str(payload.get("prompt") or "").lower()
-            if str(payload.get("character") or "").strip().lower() == "kirby" or "kirby" in prompt_text:
-                assert_image_input(
-                    last_image_path,
-                )
             last_image_filename = generator.upload_image(str(last_image_path))
             updates.append(self._binding_update(spec.last_image_binding, last_image_filename, str(workflow_path)))
         elif payload.get("use_last_frame") is False and spec.last_frame_binding and requested_workflow.startswith("minimax_h3_"):

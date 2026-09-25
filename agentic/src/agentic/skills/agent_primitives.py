@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from agentic.runtime.media_dq import expected_subject_count
-
 import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 
-from agentic.assets.image_input import assert_image_input, inspect_image_input
 from agentic.minimax_prompting import subject_identity_lock
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.prompt_engine import PromptEngine
@@ -460,85 +457,30 @@ class AgentMediaSkills:
                     "light beam, lens flare"
                     + (", identity swap, unrequested third subject" if interaction_required else "")
                 )
-            attempts = 1 if character != "kirby" else max(1, int(context.node.inputs.get("max_regenerations", 2)) + 1)
-            result: dict[str, object] = {}
-            rejected_reasons: list[str] = []
-            final_reports: list[tuple[str, object | None]] = []
-            accepted_paths: list[str] = []
-            for attempt in range(attempts):
-                result = self.tools.call(
-                    "comfy.workflow.text_to_image",
-                    {
-                        "run_dir": str(
-                            self._build_run_dir(
-                                context.plan.goal.prompt,
-                                str(context.node.inputs.get("suffix") or "segment_keyframe"),
-                            )
-                        ),
-                        "workflow_name": workflow_name,
-                        "prompt": prompt,
-                        "negative_prompt": negative_prompt,
-                        "width": int(context.node.inputs.get("width", 1024)),
-                        "height": int(context.node.inputs.get("height", 1024)),
-                        "image_count": int(context.node.inputs.get("image_count", 1)),
-                    },
-                )
-                if character != "kirby":
-                    break
-                candidate_paths = self._output_paths(result)
-                reports = [
-                    (
-                        path,
-                        inspect_image_input(
-                            path,
-                        ),
-                    )
-                    for path in candidate_paths
-                ]
-                final_reports = reports
-                accepted_reports = [
-                    (path, report)
-                    for path, report in reports
-                    if report is not None and report.passed
-                ]
-                failed_reports = [
-                    (path, report)
-                    for path, report in reports
-                    if not report or not report.passed
-                ]
-                if accepted_reports:
-                    accepted_paths = [path for path, _report in accepted_reports]
-                    rejected_paths = [path for path, _report in failed_reports]
-                    result = dict(result)
-                    result["generated_files"] = list(candidate_paths)
-                    result["saved_files"] = list(accepted_paths)
-                    result["rejected_files"] = rejected_paths
-                    result["rejected_asset_details"] = [
-                        {
-                            "path": path,
-                            "reasons": list(getattr(report, "reasons", ())) if report else ["keyframe output is missing"],
-                        }
-                        for path, report in failed_reports
-                    ]
-                    break
-                if candidate_paths and not failed_reports:
-                    break
-                if failed_reports:
-                    rejected_reasons.extend(
-                        f"{path}: {('; '.join(report.reasons) if report else 'keyframe output is missing')}"
-                        for path, report in failed_reports
-                    )
-                else:
-                    rejected_reasons.append("keyframe output is missing")
-            if character == "kirby":
-                if not accepted_paths:
-                    details = " | ".join(rejected_reasons) or "unknown Kirby keyframe validation failure"
-                    raise ValueError(f"Kirby keyframe generation failed after {attempts} attempts: {details}")
-            log = (
-                f"Generated {len(accepted_paths)} validated Kirby keyframe candidate(s) from text."
-                if character == "kirby"
-                else "Generated an opening keyframe from text."
+            result = self.tools.call(
+                "comfy.workflow.text_to_image",
+                {
+                    "run_dir": str(
+                        self._build_run_dir(
+                            context.plan.goal.prompt,
+                            str(context.node.inputs.get("suffix") or "segment_keyframe"),
+                        )
+                    ),
+                    "workflow_name": workflow_name,
+                    "prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                    "width": int(context.node.inputs.get("width", 1024)),
+                    "height": int(context.node.inputs.get("height", 1024)),
+                    "image_count": int(context.node.inputs.get("image_count", 1)),
+                },
             )
+            generated_paths = self._output_paths(result)
+            result = dict(result)
+            result["generated_files"] = list(generated_paths)
+            result["saved_files"] = list(generated_paths)
+            result["rejected_files"] = []
+            result["rejected_asset_details"] = []
+            log = f"Generated {len(generated_paths)} keyframe candidate(s); Discord owns creative selection."
         return SkillResult(
             status="success",
             outputs=result,
@@ -546,7 +488,7 @@ class AgentMediaSkills:
             logs=[log],
         )
 
-    def validate_character_frames(self, context: SkillContext) -> SkillResult:
+    def confirm_keyframe_source_files(self, context: SkillContext) -> SkillResult:
         opening_node = str(context.node.inputs.get("opening_node") or context.node.depends_on[0])
         use_last_frame = bool(context.node.inputs.get("use_last_frame", False))
         ending_node = str(
@@ -554,11 +496,6 @@ class AgentMediaSkills:
             or (context.node.depends_on[1] if len(context.node.depends_on) > 1 else "")
         )
         character = str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or "").strip().lower()
-        subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
-        interaction_required = bool(
-            dict(subject_context.get("interaction_contract") or {}).get("required", False)
-        )
-        story = context.state.node_outputs.get("native-story-prompt", {})
         frame_specs = [
             ("opening", opening_node, str(context.node.inputs.get("opening_prompt_key") or "opening_keyframe_prompt")),
         ]
@@ -568,80 +505,36 @@ class AgentMediaSkills:
             frame_specs.append(
                 ("ending", ending_node, str(context.node.inputs.get("ending_prompt_key") or "ending_keyframe_prompt"))
             )
-        reports: list[dict[str, object]] = []
-        regenerated_count = 0
+        source_checks: list[dict[str, object]] = []
         final_paths: dict[str, str] = {}
-        preserve_opening_frame = bool(context.node.inputs.get("preserve_opening_frame", False))
-        preserve_ending_frame = bool(context.node.inputs.get("preserve_ending_frame", False))
         for label, node_id, prompt_key in frame_specs:
             frame_path = self._first_output_path(context.state.node_outputs.get(node_id, {}))
-            last_error = ""
-            for attempt in range(max(0, int(context.node.inputs.get("max_regenerations", 0))) + 1):
-                try:
-                    if not frame_path:
-                        raise ValueError("keyframe output is missing")
-                    preserve_frame = preserve_opening_frame if label == "opening" else preserve_ending_frame
-                    if preserve_frame:
-                        if not Path(frame_path).is_file():
-                            raise ValueError(f"human-selected {label} frame file is missing")
-                        report = {
-                            "path": frame_path,
-                            "passed": True,
-                            "validation": "human_selected_immutable",
-                        }
-                    elif character == "kirby":
-                        report = assert_image_input(
-                            frame_path,
-                        ).to_dict()
-                    else:
-                        report = {"path": frame_path, "passed": Path(frame_path).is_file()}
-                        if not report["passed"]:
-                            raise ValueError("keyframe output file is missing")
-                    reports.append(report)
-                    final_paths[label] = frame_path
-                    break
-                except (OSError, ValueError) as exc:
-                    last_error = str(exc)
-                    if attempt >= int(context.node.inputs.get("max_regenerations", 0)):
-                        raise ValueError(f"{label} image input gate failed after {attempt} regenerations: {last_error}") from exc
-                    prompt = self._resolve_prompt_with_identity_lock(
-                        context,
-                        str(story.get(prompt_key) or context.plan.goal.prompt),
-                    )
-                    result = self.tools.call(
-                        "comfy.workflow.text_to_image",
-                        {
-                            "workflow_name": str(context.node.inputs.get("workflow_name") or context.plan.goal.constraints.get("native_h3_keyframe_workflow_name") or context.plan.goal.constraints.get("keyframe_workflow_name") or ""),
-                            "run_dir": str(self._build_run_dir(context.plan.goal.prompt, f"identity_{label}_retry_{attempt + 1}")),
-                            "prompt": prompt,
-                            "negative_prompt": str(story.get("negative_prompt") or ""),
-                            "width": int(context.node.inputs.get("width") or 608),
-                            "height": int(context.node.inputs.get("height") or 352),
-                            "image_count": 1,
-                        },
-                    )
-                    frame_path = self._first_output_path(result)
-                    regenerated_count += 1
+            if not frame_path:
+                raise ValueError(f"{label} frame output is missing")
+            if not Path(frame_path).is_file():
+                raise ValueError(f"{label} frame file is missing: {frame_path}")
+            source_checks.append({"path": frame_path, "check": "file_exists"})
+            final_paths[label] = frame_path
         outputs: dict[str, object] = {
             "first_frame_path": final_paths["opening"],
             "character": character,
-            "identity_reports": reports,
-            "identity_gate": "passed",
+            "source_checks": source_checks,
+            "identity_check": "not_applied",
             "use_last_frame": use_last_frame,
-            "regenerated_count": regenerated_count,
+            "regenerated_count": 0,
         }
         if use_last_frame:
             outputs["last_frame_path"] = final_paths["ending"]
         return SkillResult(
             status="success",
             outputs=outputs,
-            metrics={"validated_frame_count": len(frame_specs), "regenerated_count": regenerated_count},
+            metrics={"source_frame_count": len(frame_specs), "regenerated_count": 0},
             logs=[
-                f"Validated {'opening and ending' if use_last_frame else 'opening'} continuity frame(s) for {character or 'the configured character'}."
+                f"Confirmed {'opening and ending' if use_last_frame else 'opening'} frame source file(s); identity review was not applied and Discord owns creative review."
             ]
         )
 
-    def validate_last_frame(self, context: SkillContext) -> SkillResult:
+    def confirm_last_frame_source(self, context: SkillContext) -> SkillResult:
         frame_node = str(context.node.inputs.get("frame_node") or context.node.depends_on[0])
         frame_path = self._first_output_path(context.state.node_outputs.get(frame_node, {}))
         if not frame_path:
@@ -654,36 +547,21 @@ class AgentMediaSkills:
             or context.plan.goal.constraints.get("character")
             or ""
         ).strip().lower()
-        subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
-        interaction_required = bool(
-            dict(subject_context.get("interaction_contract") or {}).get("required", False)
-        )
         preserve = bool(context.node.inputs.get("preserve_last_frame", True))
-        if preserve:
-            report = {
-                "path": frame_path,
-                "passed": True,
-                "validation": "human_selected_immutable",
-            }
-        elif character == "kirby":
-            report = assert_image_input(
-                frame_path,
-            ).to_dict()
-        else:
-            report = {"path": frame_path, "passed": True, "validation": "file_exists"}
+        source_check = {"path": frame_path, "check": "file_exists"}
         return SkillResult(
             status="success",
             outputs={
                 "first_frame_path": "",
                 "last_frame_path": frame_path,
                 "character": character,
-                "identity_reports": [report],
-                "identity_gate": "passed",
+                "source_checks": [source_check],
+                "identity_check": "not_applied",
                 "preserve_last_frame": preserve,
                 "regenerated_count": 0,
             },
-            metrics={"validated_frame_count": 1, "regenerated_count": 0},
-            logs=["Validated and preserved the selected last frame for native H3 L2VA."],
+            metrics={"source_frame_count": 1, "regenerated_count": 0},
+            logs=["Confirmed the selected last-frame source file; identity review was not applied and Discord owns creative review."],
         )
 
     def upscale_image(self, context: SkillContext) -> SkillResult:
@@ -1111,23 +989,17 @@ class AgentMediaSkills:
             "scale_width": int(context.node.inputs.get("scale_width", 480)),
         }
         result = self.tools.call("media.video_qa", payload)
-        passed = bool(result.get("passed", False))
-        subject_count = self.prompt_engine.evaluate_media_subjects(
-            image_path=str(result.get("contact_sheet_path") or payload["contact_sheet_path"]),
-            expected_count=expected_subject_count(context.plan.goal.constraints),
-            frame_count=payload["frame_count"],
-        ) if passed else {"required": False, "passed": False, "status": "not_run"}
-        result["subject_count"] = subject_count
-        passed = passed and subject_count["passed"] is True
-        result["passed"] = passed
+        observed_passed = bool(result.get("passed", False))
+        result["automatic_gate_applied"] = False
+        result["observed_passed"] = observed_passed
         return SkillResult(
-            status="success" if passed else "failed",
+            status="success",
             outputs=result,
             metrics={
-                "passed": passed,
+                "observed_passed": observed_passed,
                 "duration": result.get("duration", 0),
             },
-            logs=["Hard video checks passed." if passed else "Hard video checks failed."],
+            logs=["Recorded video inspection for Discord review; automatic DQ is disabled."],
         )
 
     def extract_last_frame(self, context: SkillContext) -> SkillResult:
@@ -1528,8 +1400,8 @@ def register_agent_primitive_skills(
     skill_registry.register("media.ensure_workflow", media.ensure_workflow, "Check workflow assets for any agent step")
     skill_registry.register("media.image.refine", media.refine_image, "Refine an image as an agent media primitive")
     skill_registry.register("media.image.generate_keyframe", media.generate_keyframe, "Generate a keyframe from text or a prior frame")
-    skill_registry.register("media.image.validate_character", media.validate_character_frames, "Validate configured character continuity keyframes")
-    skill_registry.register("media.image.validate_last_frame", media.validate_last_frame, "Validate and preserve a native H3 L2VA last frame")
+    skill_registry.register("media.image.confirm_keyframe_sources", media.confirm_keyframe_source_files, "Confirm keyframe source files exist without assessing character identity")
+    skill_registry.register("media.image.confirm_last_frame_source", media.confirm_last_frame_source, "Confirm the native H3 L2VA last-frame source file exists without assessing character identity")
     skill_registry.register("media.image.upscale", media.upscale_image, "Upscale an image as an agent media primitive")
     skill_registry.register("media.image.animate", media.animate_image, "Animate an image as an agent media primitive")
     skill_registry.register("media.image.render_batch", media.render_image_batch, "Render a batch of images as an agent media primitive")
@@ -1543,7 +1415,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.video.trim", media.trim_video, "Trim final video to the requested duration")
     skill_registry.register("media.video.merge_audio", media.merge_audio_video, "Mux audio and video as an agent media primitive")
     skill_registry.register("media.video.gif_preview", media.video_to_gif, "Create a GIF preview as an agent media primitive")
-    skill_registry.register("media.video.qa", media.qa_video, "Run technical video QA and create a contact sheet")
+    skill_registry.register("media.video.inspect", media.qa_video, "Record technical media observations and create a contact sheet")
     skill_registry.register("media.video.extract_last_frame", media.extract_last_frame, "Extract the last frame as an agent media primitive")
     skill_registry.register("agent.sticker.package", media.package_sticker_outputs, "Package sticker artifacts for downstream agent use")
     skill_registry.register("agent.sticker.animate.package", media.package_animated_sticker_outputs, "Package animated sticker artifacts for downstream agent use")

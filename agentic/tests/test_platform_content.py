@@ -4,6 +4,7 @@ import unittest
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.platform_content import build_platform_bundle
+from agentic.tools.publishing_adapter import merge_platform_delivery_variants
 
 
 class PlatformContentTests(unittest.TestCase):
@@ -32,6 +33,8 @@ class PlatformContentTests(unittest.TestCase):
 
         youtube = bundle["youtube"]
         facebook = bundle["facebook"]
+        self.assertEqual(youtube["media_paths"], ["neon-kirby.mp4"])
+        self.assertEqual(facebook["media_paths"], ["neon-kirby.mp4"])
         self.assertEqual(youtube["format"], "video")
         self.assertEqual(youtube["additional_params"]["youtube_title"], "YouTube version")
         self.assertTrue(
@@ -101,6 +104,32 @@ class PlatformContentTests(unittest.TestCase):
             "星星落下",
         )
         self.assertNotIn("mediaoverload", youtube["additional_params"]["youtube_tags"])
+
+    def test_user_given_delivery_variants_when_building_dispatch_bundle_then_each_platform_gets_its_own_media(self) -> None:
+        """User Given platform outputs When delivery variants are attached Then paths stay platform-specific."""
+        bundle = {
+            "instagram_graph": {"format": "reel", "media_paths": ["source.mp4"]},
+            "youtube": {"format": "video", "media_paths": ["source.mp4"]},
+        }
+        variants = {
+            "instagram_graph": {
+                "media_paths": ["platform_variants/reels_9x16/source.9x16.mp4"],
+                "delivery": [{"aspect_ratio": "9:16", "transform": "pad_to_9:16"}],
+            },
+            "youtube": {
+                "media_paths": ["source.mp4"],
+                "delivery": [{"aspect_ratio": "16:9", "transform": "source"}],
+            },
+        }
+
+        merged = merge_platform_delivery_variants(bundle, variants)
+
+        self.assertEqual(
+            merged["instagram_graph"]["media_paths"],
+            ["platform_variants/reels_9x16/source.9x16.mp4"],
+        )
+        self.assertEqual(merged["instagram_graph"]["delivery"][0]["aspect_ratio"], "9:16")
+        self.assertEqual(merged["youtube"]["media_paths"], ["source.mp4"])
 
 
 if __name__ == "__main__":

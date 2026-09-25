@@ -7,6 +7,7 @@ import logging
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -27,6 +28,7 @@ from agentic.app.character_workflow import (
     build_goal_payload_from_character_config,
     collect_media_paths_from_run_result,
     load_character_config,
+    resolve_character_selection,
     run_character_workflow,
 )
 from character_workflow_helpers import make_character_workflow_request
@@ -154,6 +156,31 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(production_long_video["constraints"]["segment_count"], 6)
         self.assertEqual(production_long_video["constraints"]["longvideo_continuity_mode"], "rendered_tail")
         self.assertEqual(production_long_video["constraints"]["video_speed"], {"enabled": False, "factor": 1.0})
+
+    def test_explicit_subject_mode_override_keeps_benchmark_subject_count_stable(self) -> None:
+        request = make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            prompt="one pink hero pushes one glowing cube",
+            preferred_generation_type="text2image2video",
+            subject_mode="single",
+            publish_after_generate=False,
+        )
+        selection = resolve_character_selection(request)
+        payload = build_goal_payload_from_character_config(
+            replace(
+                request,
+                generation=replace(
+                    request.generation,
+                    selected_character_name=str(selection.get("selected_character") or ""),
+                    character_selection=selection,
+                ),
+            )
+        )
+
+        self.assertEqual(selection["subject_mode"], "single")
+        self.assertEqual(payload["constraints"]["subject_mode"], "single")
+        self.assertEqual(len(payload["constraints"]["subjects"]), 1)
 
     def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(

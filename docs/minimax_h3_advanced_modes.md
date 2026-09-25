@@ -19,9 +19,9 @@ L2VA 是 FL2VA workflow 的明確變形，不是把一張「ending image」誤�
 
 1. 生成 ending keyframe。
 2. 人工 review（預設開啟）。
-3. `media.image.validate_last_frame` 驗證檔案並固定 selected asset。
+3. `media.image.confirm_last_frame_source` 確認來源檔案存在並直接沿用 selected asset；此步驟不判斷角色身分，Discord 保留人工創意審查。
 4. Comfy binding 清掉 `MiniMaxH3ImageToVideo.first_frame`，只保留 `last_frame`。
-5. 完成同一套 technical QA、明確指定的人物數檢查、GIF preview、package。
+5. 產生供 Discord 檢視的媒體證據、GIF preview 與 package；不設額外 DQ gate。
 
 執行：
 

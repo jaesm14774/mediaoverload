@@ -12,6 +12,7 @@ from agentic.tools.publishing_adapter import (
     MediaPost,
     PublishingAdapter,
     build_dispatch_plan,
+    merge_platform_delivery_variants,
 )
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
@@ -30,7 +31,16 @@ class SocialServiceTools:
         media_paths = [str(path) for path in payload.get("media_paths", [])]
         output_dir = str(payload.get("output_dir") or (self.output_root / "publish_ready"))
         processed = service.process_media(media_paths=media_paths, output_dir=output_dir)
-        return {"media_paths": processed, "output_dir": output_dir}
+        delivery_variants = service.prepare_delivery_variants(
+            media_paths=processed,
+            output_dir=output_dir,
+            platforms=[str(platform) for platform in payload.get("platforms", [])],
+        )
+        return {
+            "media_paths": processed,
+            "delivery_variants": delivery_variants,
+            "output_dir": output_dir,
+        }
 
     def publish_social(self, payload: dict[str, object]) -> dict[str, object]:
         media_paths = [str(path) for path in payload.get("media_paths", [])]
@@ -38,7 +48,11 @@ class SocialServiceTools:
         hashtags = payload.get("hashtags")
         hashtags_str = str(hashtags) if isinstance(hashtags, str) else None
         platforms = [str(platform) for platform in payload.get("platforms", [])]
-        platform_bundle = payload.get("platform_bundle", {}) or {}
+        raw_platform_bundle = payload.get("platform_bundle", {}) or {}
+        platform_bundle = merge_platform_delivery_variants(
+            raw_platform_bundle if isinstance(raw_platform_bundle, dict) else {},
+            payload.get("delivery_variants", {}),
+        )
         platform_configs = payload.get("platform_configs", {}) or {}
         dry_run = bool(payload.get("dry_run", False))
         publish_mode = str(payload.get("publish_mode") or "").strip().lower()
@@ -419,6 +433,12 @@ class SocialServiceTools:
                 "format": str(raw_entry.get("format") or ""),
                 "caption": str(raw_entry.get("caption") or ""),
                 "hashtags": str(raw_entry.get("hashtags") or ""),
+                "media_paths": [str(path) for path in raw_entry.get("media_paths", [])]
+                if isinstance(raw_entry.get("media_paths", []), list)
+                else [],
+                "delivery": [item for item in raw_entry.get("delivery", []) if isinstance(item, dict)]
+                if isinstance(raw_entry.get("delivery", []), list)
+                else [],
                 "content_strategy": dict(strategy),
                 "validation": dict(validation),
                 "derived_metadata": safe_metadata,

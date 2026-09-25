@@ -65,7 +65,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native-video-asset-check",
             "native-opening-keyframe",
             "native-opening-review",
-            "native-keyframe-gate",
+            "native-keyframe-source-check",
             "native-h3-render",
             "native-h3-speed",
             "native-h3-qa",
@@ -80,7 +80,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
         opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
         opening_review = next(node for node in plan.nodes if node.node_id == "native-opening-review")
-        keyframe_gate = next(node for node in plan.nodes if node.node_id == "native-keyframe-gate")
+        keyframe_source_check = next(node for node in plan.nodes if node.node_id == "native-keyframe-source-check")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
         story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
@@ -89,16 +89,19 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(opening_review.inputs["review_scope"], "first_frame")
         self.assertEqual(opening_review.inputs["review_notes"], "stage: preview")
         self.assertEqual(opening_review.depends_on, ["native-opening-keyframe"])
-        self.assertEqual(keyframe_gate.inputs["opening_node"], "native-opening-review")
-        self.assertTrue(keyframe_gate.inputs["preserve_opening_frame"])
-        self.assertFalse(keyframe_gate.inputs["use_last_frame"])
-        self.assertEqual(keyframe_gate.depends_on, ["native-opening-review"])
-        self.assertEqual(keyframe_gate.inputs["max_regenerations"], 0)
-        self.assertIn("native-opening-review", keyframe_gate.depends_on)
-        self.assertIn("native-keyframe-gate", render.depends_on)
+        self.assertEqual(keyframe_source_check.inputs["opening_node"], "native-opening-review")
+        self.assertTrue(keyframe_source_check.inputs["preserve_opening_frame"])
+        self.assertFalse(keyframe_source_check.inputs["use_last_frame"])
+        self.assertEqual(keyframe_source_check.depends_on, ["native-opening-review"])
+        self.assertEqual(keyframe_source_check.inputs["max_regenerations"], 0)
+        self.assertEqual(keyframe_source_check.skill_name, "media.image.confirm_keyframe_sources")
+        self.assertEqual(keyframe_source_check.stage, "assets")
+        self.assertNotIn("identity", keyframe_source_check.tags)
+        self.assertIn("native-opening-review", keyframe_source_check.depends_on)
+        self.assertIn("native-keyframe-source-check", render.depends_on)
         self.assertFalse(render.inputs["use_last_frame"])
         self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
-        self.assertEqual(qa.inputs["mode"], "hard_media_checks_before_discord_review")
+        self.assertEqual(qa.inputs["mode"], "discord_review_evidence_only")
         self.assertEqual(qa.inputs["video_node"], "native-h3-canvas" if "native-h3-canvas" in node_ids else "native-h3-speed")
         self.assertEqual(qa.inputs["target_duration"], 7.5)
         self.assertEqual(qa.inputs["expected_fps"], 24.0)
@@ -137,16 +140,16 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("native-ending-review", node_ids)
         ending_review = next(node for node in plan.nodes if node.node_id == "native-ending-review")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
-        gate = next(node for node in plan.nodes if node.node_id == "native-keyframe-gate")
+        source_check = next(node for node in plan.nodes if node.node_id == "native-keyframe-source-check")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
         self.assertEqual(ending.inputs["image_count"], 6)
         self.assertFalse(ending.inputs["use_prior_frame"])
         self.assertEqual(ending_review.depends_on, ["native-ending-keyframe"])
-        self.assertTrue(gate.inputs["use_last_frame"])
-        self.assertTrue(gate.inputs["preserve_ending_frame"])
-        self.assertEqual(gate.inputs["ending_node"], "native-ending-review")
-        self.assertIn("native-ending-review", gate.depends_on)
+        self.assertTrue(source_check.inputs["use_last_frame"])
+        self.assertTrue(source_check.inputs["preserve_ending_frame"])
+        self.assertEqual(source_check.inputs["ending_node"], "native-ending-review")
+        self.assertIn("native-ending-review", source_check.depends_on)
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertTrue(plan.metadata["native_h3"]["use_last_frame"])
 
@@ -206,12 +209,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
         review = next(node for node in plan.nodes if node.node_id == "native-opening-review")
-        gate = next(node for node in plan.nodes if node.node_id == "native-keyframe-gate")
+        source_check = next(node for node in plan.nodes if node.node_id == "native-keyframe-source-check")
         self.assertEqual(opening.inputs["image_count"], 6)
         self.assertTrue(review.inputs["auto_select_for_probe"])
         self.assertFalse(review.inputs["require_human_review"])
-        self.assertEqual(gate.inputs["opening_node"], "native-opening-review")
-        self.assertFalse(gate.inputs["preserve_opening_frame"])
+        self.assertEqual(source_check.inputs["opening_node"], "native-opening-review")
+        self.assertFalse(source_check.inputs["preserve_opening_frame"])
         self.assertTrue(plan.metadata["native_h3"]["stage_probe_auto_select"])
 
     def test_news_only_native_h3_does_not_validate_autonomous_brief_as_user_objective(self) -> None:
@@ -316,12 +319,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             plan=SimpleNamespace(goal=SimpleNamespace(prompt="immutable opening", constraints={})),
         )
 
-        result = AgentMediaSkills(FakeTools(), temp_root).validate_character_frames(context)
+        result = AgentMediaSkills(FakeTools(), temp_root).confirm_keyframe_source_files(context)
 
         self.assertEqual(result.status, "success")
         self.assertEqual(result.outputs["first_frame_path"], str(opening_path))
         self.assertEqual(result.outputs["regenerated_count"], 0)
-        self.assertEqual(result.outputs["identity_reports"][0]["validation"], "human_selected_immutable")
+        self.assertEqual(result.outputs["source_checks"][0]["check"], "file_exists")
+        self.assertEqual(result.outputs["identity_check"], "not_applied")
 
     def test_native_prompt_includes_creative_variation_and_cleans_title_artifact(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
@@ -863,6 +867,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
     def test_shared_video_system_prompt_does_not_downgrade_news_grounding(self) -> None:
         self.assertIn("news-grounded", LONG_VIDEO_SYSTEM_PROMPT)
         self.assertIn("causal story", LONG_VIDEO_SYSTEM_PROMPT)
+        self.assertIn("factual boundaries", LONG_VIDEO_SYSTEM_PROMPT)
+        self.assertIn("do not merge events from separate places", LONG_VIDEO_SYSTEM_PROMPT)
         self.assertNotIn("use it only as inspiration for visual motifs", LONG_VIDEO_SYSTEM_PROMPT)
 
     def test_native_h3_story_does_not_fallback_when_llm_is_unavailable(self) -> None:
@@ -878,7 +884,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                     news_context={"title": "test", "keyword": "test"},
                 )
 
-    def test_native_h3_qa_uses_hard_media_checks(self) -> None:
+    def test_native_h3_inspection_is_non_blocking_for_discord_review(self) -> None:
         class FakeTools:
             def call(self, tool_name: str, payload: dict[str, object]) -> dict[str, object]:
                 self.tool_name = tool_name
@@ -924,7 +930,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertTrue(result.outputs["passed"])
         self.assertNotIn("story_quality", result.outputs)
-        self.assertFalse(result.outputs["technical_qa"]["bypassed"])
+        self.assertFalse(result.outputs["technical_qa"]["automatic_gate_applied"])
         self.assertTrue(result.outputs["technical_qa"]["checks"]["duration"])
 
 class OpenRouterCatalogTests(unittest.TestCase):

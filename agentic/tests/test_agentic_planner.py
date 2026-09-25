@@ -71,7 +71,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(compose.skill_name, "media.video.compose_timeline")
         self.assertEqual(compose.inputs["profile"], "editorial_kinetic_v1")
         self.assertEqual(compose.inputs["variant_seed"], 4)
-        self.assertEqual(plan.nodes[1].skill_name, "media.video.qa")
+        self.assertEqual(plan.nodes[1].skill_name, "media.video.inspect")
 
     def test_image_sequence_edit_defaults_to_motion_cut_for_stills(self) -> None:
         goal = self.planner.create_goal(
@@ -907,6 +907,29 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertNotIn("upscale-image", node_ids)
         self.assertEqual(video_check.depends_on, ["render-image"])
         self.assertNotIn("upscale-image", animate.depends_on)
+
+    def test_text2img2video_review_loop_can_skip_unconsumed_upscale(self) -> None:
+        """User Given the route skips an unused upscale stage and review is enabled, When the graph is validated, Then all review and retry dependencies exist and retry I2V consumes the raw frame."""
+        goal = self.planner.create_goal(
+            prompt="Kirby taps one jelly cube",
+            media_type="text2img2video",
+            duration_seconds=5,
+            style="anime key visual",
+            auto_download_assets=False,
+            constraints={
+                "enable_review_loop": True,
+                "skip_upscale_for_i2v": True,
+            },
+        )
+        plan = self.planner.build_plan(goal)
+        node_ids = {node.node_id for node in plan.nodes}
+        retry_animate = next(node for node in plan.nodes if node.node_id == "review-animate-video")
+
+        plan.as_graph().topological_order()
+
+        self.assertNotIn("upscale-image", node_ids)
+        self.assertNotIn("review-upscale-image", node_ids)
+        self.assertIn("review-render-image", retry_animate.depends_on)
 
     def test_image_plan_render_node_depends_on_idea_brief(self) -> None:
         # Regression test: render-image must depend on idea-brief so that the

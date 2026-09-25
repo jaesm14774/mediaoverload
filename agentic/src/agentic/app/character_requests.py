@@ -23,6 +23,8 @@ class CharacterGenerationOptions:
     reference_video_depth: str | None = None
     reference_video_max_keyframes: int | None = None
     seed: int | None = None
+    semantic_cue_mode: str = ""
+    subject_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

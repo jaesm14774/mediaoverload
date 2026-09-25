@@ -45,11 +45,9 @@ To re-run QA without regenerating expensive clips:
 python scripts/verify_h3_e2e_outputs.py
 ```
 
-## Quality gate
+## Inspection evidence
 
-The P2 gate checks file existence, video stream, exact 608x352 canvas, 24 fps,
-target duration, native generated audio, stereo channels, audio/video duration
-alignment, and a contact sheet for visual inspection. Loudness and silence
-measurements are recorded; they block only when explicit numeric limits are
-supplied. The production recipes enable audio measurements through
-`native_h3_recipe`; Discord owns subjective quality decisions.
+The P2 inspection records file existence, video stream, canvas, frame rate,
+duration, audio, stereo channels, audio/video alignment, and a contact sheet.
+These observations are attached to the run for Discord; they do not filter or
+block a reviewed candidate. Discord owns subjective quality decisions.

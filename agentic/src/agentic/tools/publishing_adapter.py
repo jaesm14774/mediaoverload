@@ -77,12 +77,52 @@ def build_dispatch_plan(
     return dispatch_plan
 
 
+def merge_platform_delivery_variants(
+    platform_bundle: dict[str, object],
+    delivery_variants: object,
+) -> dict[str, object]:
+    """Attach materialized platform media to the existing publish bundle."""
+    merged: dict[str, object] = {
+        str(platform): dict(entry) if isinstance(entry, dict) else entry
+        for platform, entry in platform_bundle.items()
+    }
+    if not isinstance(delivery_variants, dict):
+        return merged
+    for raw_platform, raw_variant in delivery_variants.items():
+        if not isinstance(raw_variant, dict):
+            continue
+        media_paths = raw_variant.get("media_paths")
+        if not isinstance(media_paths, list):
+            continue
+        platform = str(raw_platform)
+        entry = merged.get(platform)
+        normalized_entry = dict(entry) if isinstance(entry, dict) else {}
+        normalized_entry["media_paths"] = [str(path) for path in media_paths if str(path).strip()]
+        delivery = raw_variant.get("delivery")
+        if isinstance(delivery, list):
+            normalized_entry["delivery"] = [item for item in delivery if isinstance(item, dict)]
+        merged[platform] = normalized_entry
+    return merged
+
+
 class PublishingAdapter:
     def __init__(self) -> None:
         self._service = PublishingService()
 
     def process_media(self, media_paths: list[str], output_dir: str) -> list[str]:
         return self._service.process_media(media_paths=media_paths, output_dir=output_dir)
+
+    def prepare_delivery_variants(
+        self,
+        media_paths: list[str],
+        output_dir: str,
+        platforms: list[str],
+    ) -> dict[str, dict[str, object]]:
+        return self._service.prepare_delivery_variants(
+            media_paths=media_paths,
+            output_dir=output_dir,
+            platforms=platforms,
+        )
 
     def register_platform(self, platform_name: str, platform_config: dict[str, Any]) -> None:
         self._service.register_platform(platform_name, platform_config)

@@ -100,6 +100,7 @@ def _base_entry(caption: str, hashtags: str, media_paths: list[str]) -> dict[str
     return {
         "caption": caption,
         "hashtags": str(hashtags or "").strip(),
+        "media_paths": list(media_paths),
         "character_count": len(caption),
         "validation": {
             "has_caption": bool(caption),

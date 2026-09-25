@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg2 \
     ffmpeg \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # 安裝 MSSQL ODBC 驅動程式

@@ -8,8 +8,11 @@ from agentic.app.character_workflow import choose_media_type
 from agentic.runtime.visual_action_contract import (
     ACTION_BEATS,
     OPENING_ACTION_LOCK,
+    SEMANTIC_CUE_MODE,
     default_visual_action_contract,
     enforce_opening_action_lock,
+    semantic_cue_timeline,
+    semantic_cue_timeline_prompt,
     visual_action_contract,
 )
 
@@ -116,6 +119,20 @@ class VisualActionContractTests(unittest.TestCase):
         self.assertEqual(canvas.depends_on, ["animate-video"])
         self.assertEqual(qa.depends_on[0], "video-canvas")
         self.assertEqual(animate.inputs["length"], 132)
+
+    def test_user_given_treatment_variant_when_semantic_cues_are_enabled_then_timeline_is_reproducible(self) -> None:
+        """User Given a treatment variant When semantic cues are enabled Then the timeline records stable event windows."""
+        timeline = semantic_cue_timeline(6, media_type="text2img2video")
+
+        self.assertEqual(timeline["mode"], SEMANTIC_CUE_MODE)
+        self.assertEqual([item["cue"] for item in timeline["cues"]], list(ACTION_BEATS))
+        self.assertEqual(timeline["cues"][0]["start_seconds"], 0.0)
+        self.assertEqual(timeline["cues"][-1]["end_seconds"], 6.0)
+        self.assertIn("Semantic cue timeline", semantic_cue_timeline_prompt(6, media_type="text2img2video"))
+
+    def test_user_given_control_variant_when_semantic_cues_are_disabled_then_no_timeline_is_added(self) -> None:
+        """User Given the control variant When semantic cues are disabled Then the existing motion contract stays unchanged."""
+        self.assertEqual(default_visual_action_contract(6, media_type="text2img2video").get("semantic_cue_timeline"), None)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw
-import pytest
 
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -470,7 +469,6 @@ def test_sprite_adapter_builds_transparent_4x4_gif_atlas(tmp_path: Path) -> None
     assert gif.info["loop"] == 0
     assert gif.convert("RGBA").getpixel((0, 0))[3] == 0
     assert len(manifest["qa"]["edge_contacts"]) == 16
-    assert manifest["qa"]["checks"]["non_floor_edge_contact"] is True
 
 
 def test_sprite_adapter_removes_h3_shifted_border_background(tmp_path: Path) -> None:
@@ -499,8 +497,8 @@ def test_sprite_adapter_removes_h3_shifted_border_background(tmp_path: Path) -> 
     assert all(check for check in result["qa"]["checks"].values())
 
 
-def test_user_given_sprite_touches_a_non_floor_edge_when_packaged_then_it_is_rejected(tmp_path: Path) -> None:
-    """User Given a generated frame is clipped at a non-floor edge When it is packaged Then it is rejected."""
+def test_user_given_sprite_touches_a_non_floor_edge_when_packaged_then_discord_can_review_it(tmp_path: Path) -> None:
+    """User Given a generated frame touches an edge When it is packaged Then it remains available for Discord review."""
 
     source_dir = tmp_path / "clipped-subject"
     source_dir.mkdir()
@@ -514,13 +512,15 @@ def test_user_given_sprite_touches_a_non_floor_edge_when_packaged_then_it_is_rej
         image.save(path)
         source_paths.append(str(path))
 
-    with pytest.raises(ValueError, match="top/left/right frame edge"):
-        SpriteAdapter().build_from_frames(
-            source_paths,
-            output_dir=str(tmp_path / "clipped-output"),
-            cell_width=64,
-            cell_height=64,
-        )
+    result = SpriteAdapter().build_from_frames(
+        source_paths,
+        output_dir=str(tmp_path / "clipped-output"),
+        cell_width=64,
+        cell_height=64,
+    )
+
+    assert result["qa"]["passed"] is True
+    assert result["qa"]["edge_contacts"][7]["left"] > 0
 
 
 def test_sprite_adapter_keeps_technical_frame_contracts(tmp_path: Path) -> None:

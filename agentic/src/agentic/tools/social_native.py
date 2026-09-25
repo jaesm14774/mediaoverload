@@ -4,6 +4,8 @@ import os
 import tempfile
 import time
 import json
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -21,6 +23,12 @@ class MediaPost:
     caption: str
     hashtags: str | None = None
     additional_params: dict[str, Any] | None = None
+
+
+REEL_DELIVERY_PLATFORMS = {"instagram", "instagram_graph", "facebook"}
+DELIVERY_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v", ".gif"}
+REEL_DELIVERY_WIDTH = 720
+REEL_DELIVERY_HEIGHT = 1280
 
 
 class SocialPlatform(Protocol):
@@ -95,6 +103,47 @@ def _redact_url_credentials(url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
 
 
+def _inspect_reel_media(ffmpeg: FFmpegAdapter, video_path: str) -> dict[str, Any]:
+    probe = ffmpeg.probe_media(video_path)
+    width = int(probe.get("width") or 0)
+    height = int(probe.get("height") or 0)
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Reels video has no readable dimensions: {Path(video_path).name}")
+    frame_rate = float(probe.get("frame_rate") or 0.0)
+    has_audio = bool(probe.get("has_audio"))
+    audio_is_safe = not has_audio or (
+        str(probe.get("audio_codec") or "").lower() == "aac"
+        and int(probe.get("sample_rate") or 0) == 48000
+    )
+    video_is_safe = (
+        Path(video_path).suffix.lower() == ".mp4"
+        and abs((width / height) - (9 / 16)) < 0.001
+        and width <= 1920
+        and height <= 1920
+        and (
+            not str(probe.get("video_codec") or "").strip()
+            or str(probe.get("video_codec") or "").lower() in {"h264", "hevc"}
+        )
+        and (frame_rate == 0.0 or 23 <= frame_rate <= 60)
+    )
+    return {
+        "probe": probe,
+        "width": width,
+        "height": height,
+        "safe": video_is_safe and audio_is_safe,
+    }
+
+
+def _aspect_ratio(width: int, height: int) -> str:
+    divisor = math.gcd(int(width), int(height))
+    return f"{int(width) // divisor}:{int(height) // divisor}" if divisor else ""
+
+
+def _delivery_filename(path: Path, suffix: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._-") or "media"
+    return f"{stem}{suffix}"
+
+
 class CloudinaryUploadService:
     FOLDER = "mediaoverload"
 
@@ -167,30 +216,8 @@ class BaseConfigPlatform:
         adapter owns delivery formatting so Instagram and Facebook do not
         grow separate, contradictory padding rules.
         """
-        probe = self.ffmpeg.probe_media(video_path)
-        width = int(probe.get("width") or 0)
-        height = int(probe.get("height") or 0)
-        if width <= 0 or height <= 0:
-            raise ValueError(f"Reels video has no readable dimensions: {Path(video_path).name}")
-        frame_rate = float(probe.get("frame_rate") or 0.0)
-        has_audio = bool(probe.get("has_audio"))
-        audio_is_safe = not has_audio or (
-            str(probe.get("audio_codec") or "").lower() == "aac"
-            and int(probe.get("sample_rate") or 0) == 48000
-        )
-        aspect = width / height
-        video_is_safe = (
-            Path(video_path).suffix.lower() == ".mp4"
-            and abs(aspect - (9 / 16)) < 0.001
-            and width <= 1920
-            and height <= 1920
-            and (
-                not str(probe.get("video_codec") or "").strip()
-                or str(probe.get("video_codec") or "").lower() in {"h264", "hevc"}
-            )
-            and (frame_rate == 0.0 or 23 <= frame_rate <= 60)
-        )
-        if video_is_safe and audio_is_safe:
+        inspected = _inspect_reel_media(self.ffmpeg, video_path)
+        if inspected["safe"]:
             return video_path
         vertical_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         vertical_path = vertical_file.name
@@ -1330,6 +1357,99 @@ class PublishingService:
             else:
                 processed_paths.append(media_path)
         return list(dict.fromkeys(processed_paths))
+
+    def prepare_delivery_variants(
+        self,
+        media_paths: list[str],
+        output_dir: str,
+        platforms: list[str],
+    ) -> dict[str, dict[str, object]]:
+        """Materialize platform-specific media without changing the source artifact."""
+        requested_platforms = list(dict.fromkeys(str(platform) for platform in platforms if str(platform).strip()))
+        if not requested_platforms:
+            return {}
+        existing_paths = [str(path) for path in media_paths if Path(path).is_file()]
+        if not existing_paths:
+            return {platform: {"media_paths": [], "delivery": []} for platform in requested_platforms}
+
+        ffmpeg = FFmpegAdapter()
+        variant_root = Path(output_dir) / "platform_variants" / "reels_9x16"
+        reel_cache: dict[str, tuple[str, dict[str, Any]]] = {}
+        variants: dict[str, dict[str, object]] = {}
+        for platform in requested_platforms:
+            normalized_platform = platform.casefold()
+            delivery_paths: list[str] = []
+            delivery_evidence: list[dict[str, object]] = []
+            for source_index, source_path in enumerate(existing_paths):
+                source = Path(source_path)
+                delivery_path = source_path
+                transform = "source"
+                if normalized_platform in REEL_DELIVERY_PLATFORMS and source.suffix.lower() in DELIVERY_VIDEO_EXTENSIONS:
+                    cached = reel_cache.get(source_path)
+                    if cached:
+                        delivery_path, evidence = cached
+                    else:
+                        working_path = source_path
+                        if source.suffix.lower() == ".gif":
+                            variant_root.mkdir(parents=True, exist_ok=True)
+                            working_path = str(
+                                variant_root / f"{source_index:02d}_{_delivery_filename(source, '.source.mp4')}"
+                            )
+                            ffmpeg.gif_to_mp4(source_path, working_path)
+                            transform = "gif_to_mp4"
+                        inspected = _inspect_reel_media(ffmpeg, working_path)
+                        if inspected["safe"]:
+                            delivery_path = working_path
+                        else:
+                            variant_root.mkdir(parents=True, exist_ok=True)
+                            delivery_path = str(
+                                variant_root / f"{source_index:02d}_{_delivery_filename(source, '.9x16.mp4')}"
+                            )
+                            ffmpeg.pad_video_to_aspect(
+                                working_path,
+                                delivery_path,
+                                target_width=REEL_DELIVERY_WIDTH,
+                                target_height=REEL_DELIVERY_HEIGHT,
+                            )
+                            transform = f"{transform}+pad_to_9:16" if transform != "source" else "pad_to_9:16"
+                        output_probe = _inspect_reel_media(ffmpeg, delivery_path)["probe"]
+                        evidence = {
+                            "source_path": source_path,
+                            "media_path": delivery_path,
+                            "transform": transform,
+                            "width": int(output_probe.get("width") or 0),
+                            "height": int(output_probe.get("height") or 0),
+                            "aspect_ratio": _aspect_ratio(
+                                int(output_probe.get("width") or 0), int(output_probe.get("height") or 0)
+                            ),
+                        }
+                        reel_cache[source_path] = (delivery_path, evidence)
+                    delivery_paths.append(delivery_path)
+                    delivery_evidence.append(dict(evidence))
+                    continue
+
+                delivery_paths.append(delivery_path)
+                if source.suffix.lower() in DELIVERY_VIDEO_EXTENSIONS:
+                    probe = ffmpeg.probe_media(delivery_path)
+                    width = int(probe.get("width") or 0)
+                    height = int(probe.get("height") or 0)
+                else:
+                    from PIL import Image
+
+                    with Image.open(delivery_path) as image:
+                        width, height = image.size
+                delivery_evidence.append(
+                    {
+                        "source_path": source_path,
+                        "media_path": delivery_path,
+                        "transform": transform,
+                        "width": int(width),
+                        "height": int(height),
+                        "aspect_ratio": _aspect_ratio(int(width), int(height)),
+                    }
+                )
+            variants[platform] = {"media_paths": delivery_paths, "delivery": delivery_evidence}
+        return variants
 
     def publish_to_social_media(self, post: MediaPost, platforms: list[str] | None = None) -> dict[str, bool]:
         if platforms:

@@ -36,7 +36,9 @@ from agentic.tools.context_services import (
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.tools.social_services import record_facebook_profile_handoff_delivery
 from agentic.runtime.visual_action_contract import (
+    SEMANTIC_CUE_MODE,
     default_visual_action_contract,
+    semantic_cue_timeline,
     visual_action_contract,
 )
 
@@ -367,7 +369,10 @@ def resolve_character_selection(
     character = dict(loaded_config.get("character", {}) or {})
     configured_name = str(character.get("name") or Path(request.config_path).stem)
     group_name = str(character.get("group_name") or "").strip()
-    configured_subject_mode = _subject_mode(loaded_config)
+    requested_subject_mode = str(request.generation.subject_mode or "").strip().lower()
+    if requested_subject_mode and requested_subject_mode not in SUPPORTED_SUBJECT_MODES:
+        raise ValueError(f"Unsupported subject mode: {requested_subject_mode}")
+    configured_subject_mode = requested_subject_mode or _subject_mode(loaded_config)
     story_card_requested = (
         str(request.generation.preferred_generation_type or "").strip().lower() == "story_card"
     )
@@ -403,8 +408,14 @@ def resolve_character_selection(
     if reference_video_requested or game_sprite_requested:
         subject_mode, subject_mode_weights = SUBJECT_MODE_SINGLE, None
     else:
+        selection_config = loaded_config
+        if requested_subject_mode:
+            selection_config = dict(loaded_config)
+            selection_generation = dict(loaded_config.get("generation", {}) or {})
+            selection_generation["subject_mode"] = requested_subject_mode
+            selection_config["generation"] = selection_generation
         subject_mode, subject_mode_weights = _resolve_subject_mode(
-            loaded_config,
+            selection_config,
             rng=request.generation.rng,
         )
     if subject_mode == SUBJECT_MODE_INTERACTION:
@@ -527,7 +538,11 @@ def choose_media_type(
     return config_generation_type, agentic_media_type
 
 
-def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) -> dict[str, Any]:
+def build_goal_payload_from_character_config(
+    request: CharacterWorkflowRequest,
+    *,
+    recorder: RunRecorder | None = None,
+) -> dict[str, Any]:
     generation = request.generation
     review = request.review
     runtime = request.runtime
@@ -545,9 +560,11 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     routing_history_path = generation.routing_history_path
     rng = generation.rng
     requested_seed = generation.seed
+    semantic_cue_mode = str(generation.semantic_cue_mode or "").strip().lower()
     requested_reference_video_source = str(generation.reference_video_source or "").strip()
     requested_reference_video_depth = str(generation.reference_video_depth or "").strip().lower()
     requested_reference_video_max_keyframes = generation.reference_video_max_keyframes
+    requested_subject_mode = str(generation.subject_mode or "").strip().lower()
     dry_run_publish = review.dry_run_publish
     publish_mode = review.publish_mode
     publish_platforms = list(review.publish_platforms)
@@ -576,7 +593,9 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
     configured_character_name = str(character.get("name") or "").strip()
     configured_group_name = str(character.get("group_name") or "").strip()
     configured_prompt_identity = configured_character_name or configured_group_name
-    configured_subject_mode = _subject_mode(config)
+    if requested_subject_mode and requested_subject_mode not in SUPPORTED_SUBJECT_MODES:
+        raise ValueError(f"Unsupported subject mode: {requested_subject_mode}")
+    configured_subject_mode = requested_subject_mode or _subject_mode(config)
     if configured_subject_mode == SUBJECT_MODE_RANDOM:
         _subject_mode_weights(config)
     if configured_group_name and not character_selection:
@@ -722,6 +741,7 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
         generation_type=config_generation_type,
         news_driven=effective_news_driven,
         news_history_path=news_history_path or _default_news_history_path(repo_root, character_name),
+        recorder=recorder,
     )
     if config_generation_type in {"story_card", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"} and (effective_news_driven or not str(prompt).strip()):
         # Native H3 owns the news-to-story prompt contract. Do not create a
@@ -1014,6 +1034,13 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
             media_type=config_generation_type,
             subject_count=visual_subject_count,
             loop=config_generation_type == "game_sprite",
+            semantic_cue_mode=semantic_cue_mode,
+        ),
+        "semantic_cue_mode": semantic_cue_mode,
+        "semantic_cue_timeline": (
+            semantic_cue_timeline(duration_seconds, media_type=config_generation_type)
+            if semantic_cue_mode == SEMANTIC_CUE_MODE
+            else {}
         ),
         "native_h3_creative_brief": native_h3_creative_brief,
         "native_h3_visual_style_contract": native_h3_visual_style_contract,
@@ -1099,11 +1126,6 @@ def build_goal_payload_from_character_config(request: CharacterWorkflowRequest) 
                 "sprite_cell_height": int(game_sprite_config.get("cell_height", 64)),
             }
         )
-    if "expected_subject_count" in generation:
-        count = generation["expected_subject_count"]
-        if type(count) is not int or count < 0:
-            raise ValueError("generation.expected_subject_count must be a non-negative integer")
-        constraints["expected_subject_count"] = count
     constraints.update(
         {
             "native_h3_workflow_name": str(native_recipe.get("workflow_name") or ""),
@@ -1246,7 +1268,9 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         try:
             selection_config = load_character_config(config_path)
             selection_character = dict(selection_config.get("character", {}) or {})
-            selection_subject_mode = _subject_mode(selection_config)
+            selection_subject_mode = str(request.generation.subject_mode or "").strip().lower()
+            if selection_subject_mode not in SUPPORTED_SUBJECT_MODES:
+                selection_subject_mode = _subject_mode(selection_config)
             selection_generation = dict(selection_config.get("generation", {}) or {})
             selection_interaction = dict(
                 selection_generation.get("two_character_interaction", {}) or {}
@@ -1324,7 +1348,8 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                 runtime,
                 asset_root=runtime.asset_root or _resolve_routing_asset_root(repo_root, runtime.comfy_root),
             ),
-        )
+        ),
+        recorder=recorder,
     )
     logger.info(
         "routing.selected | strategy=%s | media_type=%s | workflow=%s | prompt_source=%s",
@@ -1392,7 +1417,6 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                         for key in (
                             "canvas_width", "canvas_height", "canvas_aspect_ratio",
                             "story_card_width", "story_card_height", "source_generation_type",
-                            "expected_subject_count",
                         )
                         if key in payload["constraints"]
                     },
@@ -2971,6 +2995,7 @@ def _resolve_autonomous_prompt(
     generation_type: str = "",
     news_driven: bool = False,
     news_history_path: str | Path | None = None,
+    recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     explicit_prompt = str(prompt).strip()
     if explicit_prompt and not news_driven:
@@ -3011,11 +3036,15 @@ def _resolve_autonomous_prompt(
             "news_context": news_context,
         }
 
-    bundle = LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm")).generate_autonomous_scene_prompt(
+    bundle = LLMPromptEngine(
+        mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
+        recorder=recorder,
+    ).generate_autonomous_scene_prompt(
         character=character_name,
         style=style,
         media_type=media_type,
         news_context=news_context,
+        news_grounding_required=news_driven,
     )
     bundle.setdefault("prompt_mode", "template")
     bundle.setdefault("source", "autonomous_fallback")
