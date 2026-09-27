@@ -4,19 +4,18 @@ import unittest
 from pathlib import Path
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.visual_action_contract import visual_action_contract
 from agentic.runtime.prompting import (
     build_goal_brief,
     build_minimax_h3_prompt,
     build_story_segments,
     validate_story_segments,
 )
-from agentic.storyboard import build_story_plan, format_native_h3_prompt, load_storyboard
+from agentic.storyboard import format_native_h3_prompt, load_storyboard
 
 
 class StoryboardContractTests(unittest.TestCase):
 
-    def test_h3_prompt_exposes_story_contract(self) -> None:
+    def test_h3_prompt_uses_supplied_story_details_without_extra_story_contract(self) -> None:
         goal = GoalRequest(
             prompt="Kirby follows a mysterious light",
             media_type="long_video",
@@ -33,7 +32,7 @@ class StoryboardContractTests(unittest.TestCase):
             "next_hook": "The seed points to a light gate",
         }
         prompt = build_minimax_h3_prompt(goal, segment)["prompt"]
-        self.assertIn("Story progression contract", prompt)
+        self.assertNotIn("Story progression contract", prompt)
         self.assertIn("The seed points to a light gate", prompt)
 
     def test_h3_prompt_preserves_primary_physical_action(self) -> None:
@@ -56,7 +55,7 @@ class StoryboardContractTests(unittest.TestCase):
         prompt = build_minimax_h3_prompt(goal, segment)["prompt"]
         self.assertIn("Primary physical action", prompt)
         self.assertIn("sprints forward", prompt)
-        self.assertIn("Segment action contract", prompt)
+        self.assertNotIn("Segment action contract", prompt)
 
     def test_generic_prompt_builder_uses_current_dynamic_story_contract(self) -> None:
         goal = GoalRequest(
@@ -88,65 +87,38 @@ class StoryboardContractTests(unittest.TestCase):
         self.assertIn("warm clearing", states[4])
         self.assertEqual(len(states), len(set(states)))
 
-    def test_native_15s_preset_has_three_causal_shots(self) -> None:
+    def test_native_15s_preset_contains_render_defaults_without_a_fixed_story(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         storyboard_path = repo_root / "configs/storyboards/native_h3_15s.yaml"
         native = load_storyboard(storyboard_path)
         prompt = format_native_h3_prompt(native)
-        self.assertEqual(len(native["native_shots"]), 3)
-        self.assertNotIn("kirby", storyboard_path.read_text(encoding="utf-8").lower())
-        self.assertIn("character_profile", native["base_prompt"])
-        self.assertIn("SHOT 1", prompt)
-        self.assertIn("SHOT 3", prompt)
-        self.assertIn("not a montage", prompt)
-        self.assertLess(len(prompt.split()), 760)
+        self.assertEqual(native["native_duration_seconds"], 15)
+        self.assertEqual(native["native_shots"], [])
+        self.assertNotIn("required_shot_times", native)
+        self.assertNotIn("Shot progression:", prompt)
+        self.assertIn("Duration: 15 seconds", prompt)
 
-    def test_longvideo_storyboard_completes_30s_and_supports_45s_coda(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
-        storyboard = load_storyboard(repo_root / "configs/storyboards/text2longvideo_story.yaml")
-
-        plan_30 = build_story_plan(storyboard, duration_seconds=30)
-        plan_45 = build_story_plan(storyboard, duration_seconds=45)
-
-        self.assertEqual(plan_30["segment_count"], 6)
-        self.assertEqual(plan_30["planned_duration_seconds"], 30.0)
-        self.assertEqual(plan_30["segments"][-1]["id"], "payoff")
-        self.assertEqual(plan_45["segment_count"], 9)
-        self.assertEqual(plan_45["planned_duration_seconds"], 45.0)
-        self.assertEqual(plan_45["segments"][-1]["id"], "loop_echo")
-        for segment in plan_30["segments"]:
-            self.assertTrue(segment["action"])
-            self.assertTrue(segment["cause"])
-            self.assertTrue(segment["effect"])
-            self.assertTrue(segment["start_state"])
-            self.assertTrue(segment["end_state"])
-            self.assertTrue(segment["must_show"])
-
-    def test_longvideo_storyboard_injects_resolved_character_profile_into_prompt(self) -> None:
+    def test_user_given_long_video_when_story_planner_falls_back_then_it_keeps_the_brief(self) -> None:
+        """User Given a long video brief When story planning falls back Then each renderer segment uses the brief without a forced plot outline."""
         goal = GoalRequest(
-            prompt="A selected protagonist solves a visible delivery problem",
+            prompt="Waddle Dee follows a changing signal",
             media_type="long_video",
             duration_seconds=30,
             style="cinematic animation",
-            constraints={
-                "character": "Waddle Dee",
-                "character_profile": {
-                    "role_description": "a tan pear-shaped helper with a simple face",
-                    "keywords": "tan, simple face, small helper",
-                },
-                "storyboard_path": "configs/storyboards/text2longvideo_story.yaml",
-            },
+            constraints={"character": "Waddle Dee"},
         )
 
-        segments = build_story_segments(goal, "current news-derived delivery brief", 6, "curious", "text2longvideo")
+        brief = "current news-derived delivery brief"
+        segments = build_story_segments(goal, brief, 6, "curious", "text2longvideo")
 
         self.assertEqual(len(segments), 6)
-        self.assertIn("tan pear-shaped helper", segments[0]["visual"])
-        self.assertIn("simple face", segments[0]["visual"])
-        self.assertEqual(len(segments[0]["shots"]), 4)
-        self.assertEqual(segments[-1]["segment_id"], "payoff")
+        self.assertEqual(segments[0]["visual"], brief)
+        self.assertNotIn("shots", segments[0])
+        self.assertEqual(segments[-1]["segment_id"], "segment-6")
+        self.assertNotIn("cause", segments[0])
+        self.assertNotIn("action", segments[0])
 
-    def test_five_second_brief_is_one_completed_action(self) -> None:
+    def test_five_second_brief_is_not_rewritten_into_a_fixed_action_contract(self) -> None:
         goal = GoalRequest(
             prompt="Kirby swats one glowing orb into a target",
             media_type="text2img2video",
@@ -155,11 +127,11 @@ class StoryboardContractTests(unittest.TestCase):
             constraints={"character": "Kirby"},
         )
         brief = build_goal_brief(goal, goal.style, [])
-        self.assertIn("one dominant physical mechanism", brief["prompt"])
-        self.assertIn("settled payoff", brief["prompt"])
+        self.assertIn("Kirby swats one glowing orb into a target", brief["prompt"])
+        self.assertNotIn("action contract", brief["prompt"].lower())
         self.assertIn("opening_keyframe_prompt", brief)
 
-    def test_image_brief_prioritizes_visual_thesis_and_material_evidence(self) -> None:
+    def test_image_brief_preserves_requested_visual_details_without_a_fixed_visual_thesis(self) -> None:
         goal = GoalRequest(
             prompt="Kirby shelters inside one oversized paper lantern",
             media_type="image",
@@ -169,24 +141,11 @@ class StoryboardContractTests(unittest.TestCase):
 
         brief = build_goal_brief(goal, goal.style, [])
 
-        self.assertIn("one decisive visual state or pose", brief["prompt"])
-        self.assertIn("one dominant visual mechanism", brief["prompt"])
-        self.assertIn("observable material cues", brief["prompt"])
+        self.assertIn("Kirby shelters inside one oversized paper lantern", brief["prompt"])
+        self.assertNotIn("one dominant visual mechanism", brief["prompt"])
+        self.assertIn("style direction: soft storybook illustration", brief["prompt"])
 
-    def test_visual_action_contract_is_topic_neutral_and_not_aspect_specific(self) -> None:
-        contract = visual_action_contract(6, media_type="image_to_video")
-
-        self.assertIn("one dominant physical mechanism", contract)
-        self.assertIn("settled payoff", contract)
-        self.assertIn("contact drives the mechanism", contract)
-        self.assertNotIn("Kirby", contract)
-        self.assertNotIn("Qixi", contract)
-        self.assertNotIn("9:16", contract)
-        self.assertNotIn("vertical", contract.lower())
-        self.assertIn("Causal-motion contract", visual_action_contract(15, media_type="image_to_video"))
-        self.assertEqual(visual_action_contract(6, media_type="text2img"), "")
-
-    def test_short_gag_brief_applies_reference_derived_style_contract(self) -> None:
+    def test_video_brief_ignores_removed_automatic_visual_style_contract(self) -> None:
         goal = GoalRequest(
             prompt="Kirby gets squashed by one giant mochi and bounces back",
             media_type="text2img2video",
@@ -200,27 +159,17 @@ class StoryboardContractTests(unittest.TestCase):
             },
         )
         brief = build_goal_brief(goal, goal.style, [])
-        self.assertIn("small-versus-large scale contrast", brief["prompt"])
-        self.assertIn("tactile prop", brief["prompt"])
+        self.assertIn(goal.prompt, brief["prompt"])
+        self.assertIn("style direction: polished 2D anime", brief["prompt"])
+        self.assertNotIn("small-versus-large scale contrast", brief["prompt"])
 
-    def test_story_segment_contract_rejects_missing_physical_causality(self) -> None:
-        with self.assertRaisesRegex(ValueError, "missing: action, cause"):
-            validate_story_segments(
-                [
-                    {
-                        "segment_id": "segment-1",
-                        "visual": "Kirby looks at the prop",
-                        "narration": "A question appears",
-                        "action": "",
-                        "camera": "push in",
-                        "start_state": "prop is still",
-                        "end_state": "prop is still",
-                        "cause": "",
-                        "effect": "the next beat begins",
-                    }
-                ],
-                1,
-            )
+    def test_user_given_minimal_long_video_segment_when_renderer_validates_then_missing_story_fields_are_optional(self) -> None:
+        """User Given a segment with prompt text When render inputs are validated Then optional action and causal fields do not block it."""
+        segments = validate_story_segments(
+            [{"segment_id": "segment-1", "visual": "Kirby looks at the prop"}],
+            1,
+        )
+        self.assertEqual(segments[0]["visual"], "Kirby looks at the prop")
 
 if __name__ == "__main__":
     unittest.main()

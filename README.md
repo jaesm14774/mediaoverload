@@ -142,7 +142,7 @@ python run_media_interface.py `
 | `sticker_expression_count` | 貼圖表情數量 |
 | `images_per_prompt` | 每個 prompt／表情批次出圖數 |
 
-**長片總時長**（`text2longvideo`）：未指定時預設 30 秒，使用 `configs/storyboards/text2longvideo_story.yaml` 的六段 generic story contract（hook → goal → attempt → setback → reversal → payoff）；明確指定 45 秒時延伸到 aftermath/coda 段落。系統以約 5 秒為一段拆分，每段使用四拍劇情 prompt；I2V 以實際上一段尾幀接續，只有明確狀態轉換才使用 FL2V，並在每段及最終成片執行技術 QA。
+**長片總時長**（`text2longvideo`）：未指定時預設 30 秒，按渲染器適用的片段長度拆分；故事內容直接依使用者 prompt 生成，不套用固定劇情拍點或長片故事模板。I2V 可沿用上一段實際尾幀，並在每段及最終成片執行技術 QA。
 
 ---
 
@@ -379,7 +379,6 @@ additional_params:
     production_profile: text2longvideo
     default_duration_seconds: 30
     segment_duration: 5
-    storyboard_path: configs/storyboards/text2longvideo_story.yaml
     review_policy: opening_only
     continuity_mode: rendered_tail
     workflow_names:

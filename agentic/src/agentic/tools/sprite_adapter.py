@@ -302,7 +302,10 @@ def _chroma_key(image: Image.Image, key_color: tuple[int, int, int], threshold: 
         distance_sq = (red - kr) ** 2 + (green - kg) ** 2 + (blue - kb) ** 2
         pixels.append((red, green, blue, 0 if distance_sq <= threshold_sq else 255))
     image.putdata(pixels)
-    return _remove_border_background(image, threshold=max(36, min(96, threshold)))
+    # Border cleanup needs a tighter tolerance than the chroma radius: a dark,
+    # shifted backdrop can otherwise be close enough to absorb a dark subject.
+    border_tolerance = max(12, min(32, threshold // 2))
+    return _remove_border_background(image, threshold=border_tolerance)
 
 
 def _remove_border_background(image: Image.Image, *, threshold: int) -> Image.Image:

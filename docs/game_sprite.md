@@ -6,8 +6,8 @@ story, Native H3, audio, review, publishing, or scheduler contracts.
 
 ## What it produces
 
-The mode creates one continuous, LLM-directed choreography graph and packages
-the rendered result as:
+The mode passes the requested motion to image and video prompt generation and
+packages the rendered result as:
 
 - a transparent 4x4 atlas with exactly 16 frames;
 - individual RGBA PNG frames;
@@ -24,16 +24,11 @@ notes are abstract inspiration only: they are not character abilities, a
 moveset, a history, or a uniqueness database. The LLM may ignore them and
 freely decide the motion.
 
-The LLM returns four to eight causally connected beats, each with an action,
-body change, spatial change, cause, and transition. The system only supplies
-the continuity envelope: one subject, one continuous shot, readable identity,
-a locked chroma-key canvas, and a clean periodic or one-shot ending.
-
-The 16 frame descriptions are projected from that choreography graph for
-lineage and QA; they are not independent stock poses. If an identity repair is
-needed, it preserves the original beat graph and rewrites only the unsafe
-scene or identity wording instead of replacing the motion with a fixed action
-bundle.
+The system records optional motion notes when the prompt model supplies them.
+They do not need a fixed beat count or causal structure, and the system does
+not rewrite them through an identity or scene repair pass. The renderer still
+uses a uniform chroma-key background and a 4x4 atlas because those are required
+to extract the exported frames.
 
 The reference pack is sampled per request and recorded in the motion plan for
 lineage. Nothing is written back to the strategy config, and no character is
@@ -83,8 +78,7 @@ Native H3 story fields such as `require_human_review: true`, 15-second story
 timing, and required audio remain unchanged and do not leak into this asset
 route.
 
-Each run chooses one simple flat chroma background from a non-red palette
-(cyan, green, blue, yellow, violet, or orange). The adapter removes the
+Each run chooses a flat chroma background from a palette. The adapter removes the
 recorded per-run chroma color, computes a shared alpha bounding box across all
 frames, fits the subject into one stable cell size, and rejects empty or
 motionless outputs. The H3 source clip is now configured for 8 seconds; the
@@ -94,11 +88,8 @@ art quality, silhouette readability, and game feel.
 
 ## Output checks
 
-The packager checks 16 frames, configured cell and atlas dimensions, binary
-alpha, nonempty frames, at least two distinct frames, and non-floor edge
-contact. A source frame with opaque or likely-subject pixels in the top, left,
-or right four-pixel edge band is rejected with per-frame counts; the bottom
-edge remains allowed for grounded motion. This prevents a clipped generated
-subject from being published as a valid atlas. Subject size changes, identity,
-choreography, and appearance are still reviewed in Discord. A pixel-area ratio
+The packager checks frame count, configured cell and atlas dimensions, binary
+alpha, nonempty frames, and per-frame edge-contact evidence. Edge contact is
+reported for review rather than used to reject a render. Subject size, identity,
+motion, and appearance remain creative review decisions. A pixel-area ratio
 is not a proxy for character quality.

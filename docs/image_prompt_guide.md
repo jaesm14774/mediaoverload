@@ -1,5 +1,13 @@
 # Image Prompt Guide
 
+## Acceptance scenario
+
+User wants a simple visual style with depth and atmosphere.
+
+Given an illustration has one main idea and needs open space for reading,
+When its background is generated,
+Then the composition keeps a clear focal hierarchy and restrained palette while retaining a tactile surface, layered setting, atmospheric light, and a few story-relevant details; open space is not a blank or solid-color field.
+
 本指南把使用者提供的 Complete_39_AI_Art_Prompt_Master_Library.md 轉成
 MediaOverload 可重複使用的提示詞規則。原始文件是研究素材；文件內的
 「直接複製」、「8K」、「某品牌／工作室風格」等文字，不會自動變成 repo
@@ -42,6 +50,12 @@ output/prompt_library_eval/2026-09-01/review_report.md；候選與來源對照
 成品 gate。只有有獨立分數證據的條目才可寫入「已驗證技巧」。
 
 ## 3. 已驗證的提示詞原則
+
+### 3.0 簡單是層級清楚，不是背景空白
+
+「簡單」應減少互相競爭的主題與焦點，不應抹掉場景、色彩、材質或空氣感。一般插畫可以保留一個主視覺、克制的配色和大量留白，同時用紙張肌理、前中後景、光線變化及少量環境線索建立意境。只有去背素材或明確要求隔離主體時，才使用純色底。
+
+這套預設延伸到一般生圖、輪播圖與影片關鍵影格。貼圖和 sprite 仍保留透明底或色鍵底的技術規格，但主體本身延續細膩的水彩、粉彩與手繪質感。
 
 ### 3.1 一個 visual thesis
 

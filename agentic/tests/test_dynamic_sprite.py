@@ -25,8 +25,8 @@ from agentic.tools.sprite_adapter import SpriteAdapter
 from character_workflow_helpers import make_character_workflow_request
 
 
-def test_template_motion_plan_is_open_ended_and_choreographed_on_technical_grid() -> None:
-    """User Given a game-sprite goal When the template planner runs Then it returns an open-ended technical motion plan."""
+def test_user_given_sprite_prompt_when_planned_then_direct_prompt_and_render_metadata_are_returned() -> None:
+    """User Given a game-sprite prompt When its render plan is prepared Then the prompt passes through with atlas metadata."""
 
     goal = GoalRequest(
         prompt="a jelly star folds into a paper plane and circles back",
@@ -38,17 +38,15 @@ def test_template_motion_plan_is_open_ended_and_choreographed_on_technical_grid(
     plan = LLMPromptEngine(mode="template").build_dynamic_sprite_motion_plan(goal)
 
     assert plan["layout_mode"] == "single_motion"
-    assert plan["motion_plan_mode"] == "choreographed_action_graph"
+    assert plan["motion_plan_mode"] == "direct_prompt"
     assert plan["grid"] == {"rows": 4, "columns": 4}
     assert len(plan["frame_map"]) == 16
-    assert 4 <= len(plan["beats"]) <= 8
+    assert plan["beats"][0]["action"] == goal.prompt
     assert plan["video_duration_seconds"] == 8.0
     assert plan["chroma_color"] == plan["background_color"]
     assert plan["chroma_color"] != "#ff00ff"
-    assert all({"cause", "transition", "body_change", "spatial_change"} <= set(beat) for beat in plan["beats"])
     assert isinstance(plan["image_prompt"], str) and plan["image_prompt"].strip()
     assert isinstance(plan["video_prompt"], str) and plan["video_prompt"].strip()
-    assert plan["identity_repair_applied"] == "none"
 
 
 def test_game_sprite_reference_pack_is_ephemeral_inspiration_not_a_moveset() -> None:
@@ -131,15 +129,15 @@ def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() 
     )
 
     prompt = str(manager.text_model.calls[0]["messages"][1]["content"])
-    assert "Game action references for optional inspiration only" in prompt
-    assert "do not assign or register abilities" in prompt
+    assert "Optional inspiration notes" in prompt
+    assert "do not assign or register abilities" not in prompt
     assert "action_reference_pack" in plan
     assert len(plan["action_references"]) == 8
     assert "idle, walk, jump, attack" not in prompt.lower()
 
 
-def test_template_motion_plan_uses_resolved_subject_as_identity_anchor() -> None:
-    """User Given a resolved subject When a template plan is built Then prompts preserve that subject identity."""
+def test_template_motion_plan_includes_selected_subject_as_reference_context() -> None:
+    """User Given a selected subject When a template plan is built Then it is included as reference context."""
 
     plan = LLMPromptEngine(mode="template").build_dynamic_sprite_motion_plan(
         GoalRequest(
@@ -151,7 +149,7 @@ def test_template_motion_plan_uses_resolved_subject_as_identity_anchor() -> None
     )
 
     assert "waddle dee" in plan["image_prompt"].lower()
-    assert "waddle dee" in plan["video_prompt"].lower()
+    assert "kirby folds a glowing leaf and returns" in plan["video_prompt"].lower()
 
 
 def test_dynamic_sprite_normalizes_second_based_llm_timeline_as_one_sequence() -> None:
@@ -232,15 +230,15 @@ def test_dynamic_sprite_recovers_when_schema_clamps_later_beats_to_one() -> None
     assert all(beats[index]["time_start"] >= beats[index - 1]["time_end"] for index in range(1, len(beats)))
 
 
-def test_dynamic_sprite_identity_repair_fails_closed_without_fixed_actions() -> None:
-    """User Given an unsafe generated motion When the public planner repairs it Then identity safety wins without fixed actions."""
+def test_user_given_a_model_motion_prompt_when_planned_then_it_is_not_rewritten_by_a_creative_gate() -> None:
+    """User Given a model motion prompt When the plan is normalized Then the motion prompt is preserved."""
 
     class StubEngine(LLMPromptEngine):
         def _require_manager(self):
             return object()
 
         def _chat_json_with_recorder(self, _manager, _system, _prompt, *, schema_name, **_kwargs):
-            if schema_name == "dynamic_game_sprite_motion":
+            if schema_name == "dynamic_game_sprite_prompts":
                 return {
                     "motion_name": "unsafe_generated_motion",
                     "layout_mode": "single_motion",
@@ -255,7 +253,7 @@ def test_dynamic_sprite_identity_repair_fails_closed_without_fixed_actions() -> 
                         for index in range(16)
                     ],
                 }
-            raise RuntimeError("identity repair unavailable")
+            raise RuntimeError("unexpected prompt request")
 
         def _mark_llm_payload(self, payload):
             return payload
@@ -269,14 +267,12 @@ def test_dynamic_sprite_identity_repair_fails_closed_without_fixed_actions() -> 
         )
     )
 
-    assert plan["identity_repair_applied"] == "contract_repair"
-    assert "compresses into a spring" not in plan["video_prompt"].lower()
-    assert "idle" not in plan["video_prompt"].lower()
-    assert "attack" not in plan["video_prompt"].lower()
+    assert "compresses its round body into a tight spring coil" in plan["video_prompt"].lower()
+    assert plan["negative_prompt"] == ""
 
 
-def test_template_fallback_sanitizes_risky_identity_prompt() -> None:
-    """User Given a risky template goal When the public planner falls back Then the identity contract remains safe."""
+def test_user_given_a_game_sprite_prompt_when_no_model_is_available_then_fallback_keeps_the_prompt() -> None:
+    """User Given a game-sprite prompt When no model is available Then the fallback keeps the prompt."""
 
     plan = LLMPromptEngine(mode="template").build_dynamic_sprite_motion_plan(
         GoalRequest(
@@ -287,9 +283,8 @@ def test_template_fallback_sanitizes_risky_identity_prompt() -> None:
         )
     )
 
-    assert plan["identity_repair_applied"] == "contract_repair"
-    assert "compresses into a spring" not in plan["video_prompt"].lower()
-    assert "one single jelly star" in plan["image_prompt"]
+    assert "compresses into a spring" in plan["video_prompt"].lower()
+    assert "a jelly star compresses into a spring and returns" in plan["image_prompt"].lower()
 
 
 def test_game_sprite_plan_has_no_human_review_or_fixed_action_nodes() -> None:

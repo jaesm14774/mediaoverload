@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
-from agentic.minimax_prompting import structured_visual_prompt
+from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
+from agentic.runtime.prompting import include_role_description
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import asset_check_result, build_run_dir
-from agentic.runtime.visual_action_contract import enforce_opening_action_lock
 
 
 class ComfyImageSkills:
@@ -18,16 +18,10 @@ class ComfyImageSkills:
     def expand_idea(self, context: SkillContext) -> SkillResult:
         prompt = context.node.inputs["prompt"]
         style = context.node.inputs["style"]
-        creative_prompt = structured_visual_prompt(
-            subject=str(prompt),
-            scene=str(prompt),
-            action="a clear focal action or expression that is readable in one glance",
-            environment="layered but uncluttered supporting environment",
-            camera="clear focal composition with intentional framing",
-            style=str(style),
-            quality="high detail, cinematic lighting, clean silhouette, coherent anatomy",
+        creative_prompt = "\n".join(
+            part for part in (str(prompt).strip(), f"Style: {str(style).strip()}" if str(style).strip() else "") if part
         )
-        negative_prompt = "ugly, blurry, low quality, bad anatomy, deformed, duplicate, watermark, text"
+        negative_prompt = ""
         return SkillResult(
             status="success",
             outputs={
@@ -88,13 +82,21 @@ class ComfyImageSkills:
             if not isinstance(prompt, str) or not prompt:
                 prompt = dependency_output.get("prompt")
             if isinstance(prompt, str) and prompt:
-                if uses_opening_frame:
-                    prompt = enforce_opening_action_lock(prompt)
+                prompt = include_role_description(prompt, context.plan.goal)
+                prompt = apply_paper_storybook_art_direction(
+                    prompt,
+                    isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+                )
                 return {
                     "prompt": prompt,
                     "negative_prompt": str(dependency_output.get("negative_prompt", "")),
                 }
-        return {"prompt": context.plan.goal.prompt, "negative_prompt": ""}
+        prompt = include_role_description(context.plan.goal.prompt, context.plan.goal)
+        prompt = apply_paper_storybook_art_direction(
+            prompt,
+            isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+        )
+        return {"prompt": prompt, "negative_prompt": ""}
 
     def _build_run_dir(self, prompt: str) -> Path:
         return build_run_dir(self.output_root, prompt, default_slug="comfy-image", max_slug_length=40)

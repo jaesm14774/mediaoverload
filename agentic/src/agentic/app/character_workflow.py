@@ -35,12 +35,6 @@ from agentic.tools.context_services import (
 )
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.tools.social_services import record_facebook_profile_handoff_delivery
-from agentic.runtime.visual_action_contract import (
-    SEMANTIC_CUE_MODE,
-    default_visual_action_contract,
-    semantic_cue_timeline,
-    visual_action_contract,
-)
 
 SUPPORTED_PUBLISH_PLATFORMS = {"twitter", "facebook", "instagram_graph", "youtube", FACEBOOK_PROFILE_HANDOFF_PLATFORM}
 MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
@@ -133,6 +127,25 @@ def _fixed_character_selection(name: str, *, group_name: str = "") -> dict[str, 
         "selected_profile": {},
         "selection_source": "fixed_config",
     }
+
+
+def _validate_character_path_component(name: str) -> None:
+    value = str(name or "").strip()
+    if not value:
+        return
+    invalid_path_characters = '<>:/\\|?*\x00'
+    reserved_device_name = value.split(".", 1)[0].casefold() in {
+        "con", "prn", "aux", "nul",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+    }
+    if (
+        value in {".", ".."}
+        or value.endswith((".", " "))
+        or any(character in value for character in invalid_path_characters)
+        or reserved_device_name
+    ):
+        raise ValueError("Character name used for output paths must be a safe path component.")
 
 
 def _subject_mode(config: dict[str, Any]) -> str:
@@ -242,6 +255,12 @@ def _annotate_subject_selection(
     subject_mode_weights: dict[str, float] | None,
 ) -> dict[str, Any]:
     resolved = dict(selection)
+    _validate_character_path_component(str(resolved.get("selected_character") or ""))
+    raw_subjects = resolved.get("subjects")
+    if isinstance(raw_subjects, list):
+        for subject in raw_subjects:
+            if isinstance(subject, dict):
+                _validate_character_path_component(str(subject.get("name") or ""))
     resolved["subject_mode"] = effective_subject_mode
     if configured_subject_mode == SUBJECT_MODE_RANDOM:
         resolved["configured_subject_mode"] = configured_subject_mode
@@ -373,6 +392,7 @@ def resolve_character_selection(
     if requested_subject_mode and requested_subject_mode not in SUPPORTED_SUBJECT_MODES:
         raise ValueError(f"Unsupported subject mode: {requested_subject_mode}")
     configured_subject_mode = requested_subject_mode or _subject_mode(loaded_config)
+    requested_character_name = str(request.generation.selected_character_name or "").strip()
     story_card_requested = (
         str(request.generation.preferred_generation_type or "").strip().lower() == "story_card"
     )
@@ -394,6 +414,21 @@ def resolve_character_selection(
             ).to_dict()
         else:
             selection = _fixed_character_selection(configured_name)
+        return _annotate_subject_selection(
+            selection,
+            configured_subject_mode=configured_subject_mode,
+            effective_subject_mode=SUBJECT_MODE_SINGLE,
+            subject_mode_weights=None,
+        )
+    if requested_character_name and configured_subject_mode == SUBJECT_MODE_SINGLE:
+        selection = (
+            CharacterGroupSelectionService().select_named_character(
+                group_name,
+                requested_character_name,
+            ).to_dict()
+            if group_name
+            else _fixed_character_selection(requested_character_name)
+        )
         return _annotate_subject_selection(
             selection,
             configured_subject_mode=configured_subject_mode,
@@ -556,11 +591,13 @@ def build_goal_payload_from_character_config(
     duration_seconds = generation.duration_seconds
     output_dir = generation.output_dir
     news_driven = generation.news_driven
+    news_context_override = dict(generation.news_context or {})
+    requested_native_h3_creative_brief = str(generation.native_h3_creative_brief or "").strip()
+    requested_native_h3_arc_instruction = str(generation.native_h3_arc_instruction or "").strip()
     news_history_path = generation.news_history_path
     routing_history_path = generation.routing_history_path
     rng = generation.rng
     requested_seed = generation.seed
-    semantic_cue_mode = str(generation.semantic_cue_mode or "").strip().lower()
     requested_reference_video_source = str(generation.reference_video_source or "").strip()
     requested_reference_video_depth = str(generation.reference_video_depth or "").strip().lower()
     requested_reference_video_max_keyframes = generation.reference_video_max_keyframes
@@ -740,6 +777,7 @@ def build_goal_payload_from_character_config(
         generation=generation,
         generation_type=config_generation_type,
         news_driven=effective_news_driven,
+        news_context_override=news_context_override,
         news_history_path=news_history_path or _default_news_history_path(repo_root, character_name),
         recorder=recorder,
     )
@@ -850,28 +888,29 @@ def build_goal_payload_from_character_config(
             native_recipe["reference_selection_limit"] = 1
     if config_generation_type != "native_h3_fl2va_story":
         native_recipe["use_last_frame"] = False
-    native_h3_quality = dict(generation.get("native_h3_quality") or {})
     native_h3_creative_brief = _replace_character_identity(
         str(
         native_recipe.get("creative_brief")
-        or native_h3_quality.get("creative_brief")
         or generation.get("native_h3_creative_brief")
         or ""
         ).strip(),
         configured_name=configured_prompt_identity,
         selected_name=character_name,
     ).strip()
-    native_h3_visual_style_contract = _replace_character_identity(
-        str(
-        generation.get("visual_style_contract")
-        or native_recipe.get("visual_style_contract")
-        or native_h3_quality.get("visual_style_contract")
-        or generation.get("native_h3_visual_style_contract")
-        or ""
-        ).strip(),
+    requested_native_h3_creative_brief = _replace_character_identity(
+        requested_native_h3_creative_brief,
         configured_name=configured_prompt_identity,
         selected_name=character_name,
     ).strip()
+    if requested_native_h3_creative_brief:
+        native_h3_creative_brief = "\n".join(
+            item
+            for item in (
+                native_h3_creative_brief,
+                f"Additional Native H3 creative direction: {requested_native_h3_creative_brief}",
+            )
+            if item
+        )
     style_guidance = "; ".join(
         part
         for part in (
@@ -883,9 +922,6 @@ def build_goal_payload_from_character_config(
         )
         if part
     )
-    native_h3_visual_style_contract = "; ".join(
-        part for part in (native_h3_visual_style_contract, style_guidance) if part
-    )
     native_h3_creative_brief = "; ".join(
         part for part in (native_h3_creative_brief, f"Selected visual style: {style_guidance}") if part
     )
@@ -895,7 +931,7 @@ def build_goal_payload_from_character_config(
     if selected_profile and subject_mode != SUBJECT_MODE_INTERACTION:
         subject_context["character_profile"] = dict(selected_profile)
     if subject_mode == SUBJECT_MODE_INTERACTION:
-        profile_block = f"Subject interaction contract: {_subject_prompt_block(subject_context)}"
+        profile_block = f"Selected subject configuration: {_subject_prompt_block(subject_context)}"
     elif role_description or role_keywords:
         profile_parts = [f"Selected character: {character_name}"]
         if role_description:
@@ -909,20 +945,9 @@ def build_goal_payload_from_character_config(
         native_h3_creative_brief = "\n".join(
             item for item in (native_h3_creative_brief, profile_block) if item
         )
-        native_h3_visual_style_contract = "; ".join(
-            item for item in (native_h3_visual_style_contract, profile_block) if item
-        )
     story_card_config = dict(generation.get("story_card", {}) or {})
     story_card_visual = dict(story_card_config.get("visual") or {})
     game_sprite_config = dict(generation.get("game_sprite", {}) or {})
-    visual_subject_count = len(subject_context.get("subjects") or []) or 1
-    resolved_visual_action_contract = visual_action_contract(
-        duration_seconds,
-        media_type=config_generation_type,
-        subject_count=visual_subject_count,
-        loop=config_generation_type == "game_sprite",
-        segment=config_generation_type == "text2longvideo",
-    )
     constraints = {
         "character": character_name,
         "subject_mode": subject_mode,
@@ -953,7 +978,6 @@ def build_goal_payload_from_character_config(
         "story_card_visual": story_card_visual,
         "keyframe_workflow_name": str(generation.get("keyframe_workflow_name") or ""),
         "identity_refine_workflow_name": str(generation.get("identity_refine_workflow_name") or ""),
-        "storyboard_path": str(generation.get("storyboard_path") or ""),
         "native_h3_storyboard_path": str(
             native_recipe.get("storyboard_path")
             or generation.get("storyboard_path")
@@ -998,6 +1022,7 @@ def build_goal_payload_from_character_config(
         "review_notes": review_notes,
         "news_driven": effective_news_driven,
         "news_history_path": str(news_history_path or _default_news_history_path(repo_root, character_name)),
+        "native_h3_arc_instruction": requested_native_h3_arc_instruction,
         "native_h3_keyframe_candidate_count": native_keyframe_candidate_count,
         "pre_video_review_enabled": pre_video_review_enabled,
         "pre_video_candidate_count": pre_video_candidate_count,
@@ -1027,24 +1052,7 @@ def build_goal_payload_from_character_config(
             if not no_review and not stage_probe
             else False
         ),
-        "visual_action_profile": config_generation_type,
-        "visual_action_contract": resolved_visual_action_contract,
-        "visual_action_contract_spec": default_visual_action_contract(
-            duration_seconds,
-            media_type=config_generation_type,
-            subject_count=visual_subject_count,
-            loop=config_generation_type == "game_sprite",
-            semantic_cue_mode=semantic_cue_mode,
-        ),
-        "semantic_cue_mode": semantic_cue_mode,
-        "semantic_cue_timeline": (
-            semantic_cue_timeline(duration_seconds, media_type=config_generation_type)
-            if semantic_cue_mode == SEMANTIC_CUE_MODE
-            else {}
-        ),
         "native_h3_creative_brief": native_h3_creative_brief,
-        "native_h3_visual_style_contract": native_h3_visual_style_contract,
-        "visual_style_contract": native_h3_visual_style_contract,
         "native_h3_use_last_frame": bool(native_recipe.get("use_last_frame", False)),
         # The pre-video gate selects from the raw keyframes. Upscaling before
         # that gate creates an artifact that the selected I2V input never
@@ -1166,7 +1174,6 @@ def build_goal_payload_from_character_config(
             "production_profile": "longvideo_production_profile",
             "default_duration_seconds": "longvideo_default_duration_seconds",
             "segment_duration": "longvideo_segment_duration",
-            "storyboard_path": "storyboard_path",
             "review_policy": "longvideo_review_policy",
             "continuity_mode": "longvideo_continuity_mode",
             "workflow_names": "longvideo_workflow_names",
@@ -2994,35 +3001,44 @@ def _resolve_autonomous_prompt(
     generation: dict[str, Any],
     generation_type: str = "",
     news_driven: bool = False,
+    news_context_override: dict[str, Any] | None = None,
     news_history_path: str | Path | None = None,
     recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     explicit_prompt = str(prompt).strip()
+    news_context = dict(news_context_override or {})
+    if news_context:
+        title = str(news_context.get("title") or "")
+        keyword = str(news_context.get("keyword") or "")
+        if not NewsContextService.is_usable_selection(title, keyword):
+            raise ValueError("Explicit news context requires a usable title and keyword.")
+        if not NewsContextService.is_brand_safe_selection(title, keyword):
+            raise ValueError("Explicit news context is not brand safe.")
     if explicit_prompt and not news_driven:
         return {
             "prompt": explicit_prompt,
             "source": "user",
             "prompt_mode": "user",
             "creative_seed": "",
-            "news_context": {},
+            "news_context": news_context,
         }
 
-    news_context: dict[str, Any] = {}
-    try:
-        news_service = NewsContextService()
-        if news_driven:
-            selected_news = _select_fresh_news(
-                news_service,
-                Path(news_history_path or "news_selection_history.json").expanduser().resolve(),
-            )
-        else:
-            selected_news = news_service.get_random_news()
-        if selected_news is not None:
-            news_context = selected_news.to_dict()
-    except Exception as exc:
-        if news_driven:
-            raise
-        news_context = {"error": f"{type(exc).__name__}: {exc}"}
+    if not news_context:
+        try:
+            news_service = NewsContextService()
+            if news_driven:
+                selected_news = _select_fresh_news(
+                    news_service,
+                    Path(news_history_path or "news_selection_history.json").expanduser().resolve(),
+                )
+            else:
+                selected_news = news_service.get_random_news()
+            if selected_news is not None:
+                news_context = selected_news.to_dict()
+        except Exception as exc:
+            if news_driven:
+                raise
+            news_context = {"error": f"{type(exc).__name__}: {exc}"}
 
     if news_driven and not news_context:
         raise RuntimeError("News-driven generation did not receive a usable news context.")
@@ -3134,7 +3150,6 @@ def _summarize_character_config(
             "segment_count": int(longvideo_config.get("segment_count", 0) or 0),
             "segment_duration": int(longvideo_config.get("segment_duration", 0) or 0),
             "default_duration_seconds": int(longvideo_config.get("default_duration_seconds", 0) or 0),
-            "storyboard_path": str(longvideo_config.get("storyboard_path") or ""),
             "production_profile": str(longvideo_config.get("production_profile") or ""),
             "continuity_mode": str(longvideo_config.get("continuity_mode") or ""),
             "use_tts": bool(longvideo_config.get("use_tts", False)),

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.prompting import include_role_description
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import (
     build_run_dir,
@@ -20,7 +21,9 @@ class ComfyWorkflowSkills:
 
     def refine_image(self, context: SkillContext) -> SkillResult:
         image_path = context.node.inputs.get("image_path") or self._resolve_first_file(context)
-        prompt = context.node.inputs.get("prompt") or self._resolve_prompt(context)
+        prompt = include_role_description(
+            context.node.inputs.get("prompt") or self._resolve_prompt(context), context.plan.goal
+        )
         negative_prompt = context.node.inputs.get("negative_prompt") or self._resolve_negative_prompt(context)
         result = self.tools.call(
             "comfy.workflow.image_to_image",

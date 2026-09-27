@@ -144,6 +144,24 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertNotIn("Kirby", payload["constraints"]["native_h3_creative_brief"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "MetaKnight")
 
+    def test_user_given_single_character_name_when_it_contains_a_path_then_reject_before_workflow(self) -> None:
+        """User Given a single-character request When its name contains a path Then workflow selection rejects it."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "single.yaml"
+            config.write_text(
+                "character:\n  name: Kirby\ngeneration:\n  subject_mode: single\n",
+                encoding="utf-8",
+            )
+            for unsafe_name in ("../outside", "..\\outside", "C:outside"):
+                with self.subTest(name=unsafe_name), self.assertRaisesRegex(ValueError, "safe path component"):
+                    resolve_character_selection(
+                        make_character_workflow_request(
+                            self.repo_root,
+                            config,
+                            selected_character_name=unsafe_name,
+                        )
+                    )
+
     def test_group_name_cannot_be_used_as_prompt_identity_without_selection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = Path(temp_dir) / "group-only.yaml"
@@ -659,8 +677,8 @@ class CharacterGroupSelectionTests(unittest.TestCase):
     def test_native_storyboard_identity_uses_selected_role_profile(self) -> None:
         storyboard = {
             "character": "Kirby",
-            "base_prompt": "Kirby identity contract with a round pink body.",
-            "world": {"continuity_rules": ["Only Kirby appears."]},
+            "base_prompt": "Kirby, a round pink body.",
+            "world": {"continuity_rules": ["Round pink body."]},
             "native_shots": [{"action": "Kirby presses the mechanism."}],
         }
         resolved = _apply_selected_character_to_storyboard(
@@ -673,7 +691,7 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         )
 
         self.assertEqual(resolved["character"], "MetaKnight")
-        self.assertIn("MetaKnight", resolved["world"]["continuity_rules"][0])
+        self.assertEqual(resolved["world"]["continuity_rules"], ["Round pink body."])
         self.assertIn("MetaKnight", resolved["base_prompt"])
         self.assertIn("masked knight", resolved["base_prompt"])
         self.assertIn("MetaKnight", resolved["native_shots"][0]["action"])
@@ -681,9 +699,9 @@ class CharacterGroupSelectionTests(unittest.TestCase):
     def test_native_storyboard_pair_removes_single_subject_negative_constraints(self) -> None:
         storyboard = {
             "character": "Kirby",
-            "base_prompt": "Kirby identity contract.",
-            "negative_prompt": "humans, extra characters, duplicate Kirby, watermark, text",
-            "world": {"continuity_rules": ["Kirby remains the only protagonist."]},
+            "base_prompt": "Kirby",
+            "negative_prompt": "watermark, text",
+            "world": {"continuity_rules": []},
         }
         resolved = _apply_selected_character_to_storyboard(
             storyboard,
@@ -698,9 +716,8 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         )
 
         self.assertEqual(resolved["characters"], ["Kirby", "MetaKnight"])
-        self.assertNotIn("duplicate Kirby", resolved["negative_prompt"])
-        self.assertNotIn("extra characters", resolved["negative_prompt"])
-        self.assertIn("unrequested third subject", resolved["negative_prompt"])
+        self.assertEqual(resolved["negative_prompt"], "watermark, text")
+        self.assertEqual(resolved["world"]["continuity_rules"], [])
 
 
 if __name__ == "__main__":

@@ -273,6 +273,36 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
         )
         self.assertEqual(toolset.adapter.last_generate_updates["seed"], 321)
 
+    def test_user_can_clear_a_workflow_negative_prompt(self) -> None:
+        """User Given a workflow has a default negative prompt, When the user explicitly sends an empty one, Then the default is cleared."""
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            asset_registry = _FakeAssetRegistry(temp_root)
+            with patch.object(ComfyWorkflowToolset, "_build_specs", return_value={}):
+                toolset = ComfyWorkflowToolset(asset_registry=asset_registry, output_root=temp_root)
+            toolset.adapter = _FakeAdapter()
+            workflow_path = temp_root / "workflow.json"
+            workflow_path.write_text("{}", encoding="utf-8")
+            spec = ComfyWorkflowSpec(
+                name="comfy.workflow.text_to_image",
+                workflow_name="image_test",
+                output_folder="images",
+                file_prefix="agentic_image",
+                negative_prompt_binding=NodeBinding(kind="negative_prompt", node_type="PrimitiveString", input_key="value"),
+            )
+
+            updates = toolset._build_updates(
+                spec,
+                workflow_path,
+                {"negative_prompt": ""},
+                toolset.adapter.generator,
+            )
+
+        self.assertEqual(
+            updates,
+            [{"node_type": "PrimitiveString", "node_index": 0, "inputs": {"value": ""}}],
+        )
+
     def test_build_updates_can_override_img2img_denoise_for_story_card_motion(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

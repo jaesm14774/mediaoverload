@@ -44,7 +44,7 @@ class PromptEngine:
         style: str,
         prefix: str = "",
         suffix: str = "",
-        negative_prompt: str = "ugly, blurry, low quality, bad anatomy, deformed, duplicate, watermark, text",
+        negative_prompt: str = "",
     ) -> dict[str, Any]:
         return self.llm_engine.compose_prompt(
             goal,

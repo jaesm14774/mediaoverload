@@ -12,7 +12,6 @@ from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
 from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
 from agentic.runtime.observability import RunRecorder
 from agentic.runtime.prompting import build_goal_brief
-from agentic.runtime.visual_action_contract import SEMANTIC_CUE_MODE
 
 
 class _FakeTextModel:
@@ -32,37 +31,6 @@ class _FakeManager:
 
 
 class LLMEngineTests(unittest.TestCase):
-
-    def test_user_given_semantic_variant_when_goal_brief_is_built_then_cues_are_injected_and_control_is_unchanged(self) -> None:
-        """User Given a semantic variant When its goal brief is built Then only B receives the cue timeline."""
-        base_constraints = {"character": "Kirby"}
-        control = build_goal_brief(
-            GoalRequest(
-                prompt="Kirby pushes one glowing cube and reacts",
-                media_type="text2img2video",
-                duration_seconds=6,
-                style="polished 2D anime",
-                constraints=base_constraints,
-            ),
-            "polished 2D anime",
-            [],
-        )
-        treatment = build_goal_brief(
-            GoalRequest(
-                prompt="Kirby pushes one glowing cube and reacts",
-                media_type="text2img2video",
-                duration_seconds=6,
-                style="polished 2D anime",
-                constraints={**base_constraints, "semantic_cue_mode": SEMANTIC_CUE_MODE},
-            ),
-            "polished 2D anime",
-            [],
-        )
-
-        self.assertNotIn("Semantic cue timeline", control["prompt"])
-        self.assertIn("Semantic cue timeline", treatment["prompt"])
-        self.assertEqual(treatment["semantic_cue_timeline"]["mode"], SEMANTIC_CUE_MODE)
-
 
     def test_run_recorder_sanitizes_run_id_before_creating_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -86,10 +54,10 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertEqual(result["creative_brief"], "llm brief")
         self.assertEqual(result["prompt"], "llm prompt")
-        self.assertEqual(result["negative_prompt"], "llm negative")
+        self.assertEqual(result["negative_prompt"], "")
         self.assertEqual(result["prompt_mode"], "llm")
 
-    def test_expand_goal_injects_shared_visual_action_contract(self) -> None:
+    def test_expand_goal_follows_the_user_brief_without_invented_action_rules(self) -> None:
         manager = _FakeManager(
             [
                 '{"creative_brief":"llm brief","prompt":"llm prompt","negative_prompt":"llm negative"}',
@@ -106,10 +74,9 @@ class LLMEngineTests(unittest.TestCase):
         engine.expand_goal(goal, "storybook animation", [])
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Short causal-action contract", user_prompt)
-        self.assertIn("one dominant physical mechanism", user_prompt)
-        self.assertIn("Image prompt contract", user_prompt)
-        self.assertIn("one visual thesis", user_prompt)
+        self.assertIn("Follow the user's requested subject, scene, action, style, composition, and text where specified.", user_prompt)
+        self.assertNotIn("action contract", user_prompt.lower())
+        self.assertNotIn("one dominant physical mechanism", user_prompt)
         self.assertNotIn("9:16", user_prompt)
         self.assertNotIn("vertical", user_prompt.lower())
 
@@ -141,7 +108,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("do not merge events from different places", user_prompt)
         self.assertIn("use an unlocated metaphor", user_prompt)
 
-    def test_expand_goal_injects_reference_motion_contract(self) -> None:
+    def test_expand_goal_uses_reference_as_optional_visual_inspiration(self) -> None:
         manager = _FakeManager(
             [
                 '{"creative_brief":"llm brief","prompt":"llm prompt","negative_prompt":"llm negative"}',
@@ -156,10 +123,11 @@ class LLMEngineTests(unittest.TestCase):
         )
         engine.expand_goal(goal, "polished 2D anime", [], reference_analysis={"keyframes": []})
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Reference motion contract", user_prompt)
-        self.assertIn("first frame must already contain the hook", user_prompt)
+        self.assertIn("Use the supplied reference for visual inspiration", user_prompt)
+        self.assertNotIn("Reference motion contract", user_prompt)
+        self.assertNotIn("first frame must already contain the hook", user_prompt)
 
-    def test_compose_prompt_injects_shared_visual_action_contract(self) -> None:
+    def test_compose_prompt_follows_the_user_brief_without_invented_action_rules(self) -> None:
         manager = _FakeManager(
             [
                 '{"prompt":"llm composed prompt","negative_prompt":"llm negative"}',
@@ -176,9 +144,8 @@ class LLMEngineTests(unittest.TestCase):
         engine.compose_prompt(goal, "a paper boat rides a sudden gust", "storybook animation")
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Short causal-action contract", user_prompt)
-        self.assertIn("settled payoff", user_prompt)
-        self.assertIn("observable material cues", user_prompt)
+        self.assertIn("Write a natural prompt that follows the user's brief, base prompt, and style.", user_prompt)
+        self.assertNotIn("action contract", user_prompt.lower())
         self.assertNotIn("Qixi", user_prompt)
 
     def test_segment_story_uses_llm_array_when_available(self) -> None:
@@ -197,7 +164,8 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(segments[0]["visual"], "shot one")
         self.assertEqual(segments[1]["narration"], "line two")
 
-    def test_production_segment_story_preserves_internal_timed_shots(self) -> None:
+    def test_user_given_long_video_segment_when_llm_returns_shots_then_shot_count_is_not_forced(self) -> None:
+        """User: Given an LLM returns extra shot details, When segments are prepared, Then the renderer uses the segment without a fixed internal shot contract."""
         shots = [
             {
                 "time": f"{index * 4}-{(index + 1) * 4}s",
@@ -240,10 +208,11 @@ class LLMEngineTests(unittest.TestCase):
             production_profile="text2longvideo",
         )
 
-        self.assertEqual(len(segments[0]["shots"]), 4)
-        self.assertIn("internal shots", manager.text_model.calls[0]["messages"][1]["content"])
+        self.assertNotIn("shots", segments[0])
+        self.assertNotIn("internal shots", manager.text_model.calls[0]["messages"][1]["content"])
 
-    def test_publishable_segment_story_forces_four_beats_even_at_five_seconds(self) -> None:
+    def test_user_given_five_second_video_segment_when_story_is_built_then_no_four_beat_template_is_forced(self) -> None:
+        """User: Given a five-second segment, When story data is built, Then no four-shot template is forced."""
         response = json.dumps(
             {
                 "segments": [
@@ -285,10 +254,10 @@ class LLMEngineTests(unittest.TestCase):
             production_profile="text2longvideo",
         )
 
-        self.assertEqual(len(segments[0]["shots"]), 4)
-        self.assertIn("publishable story-assembly profile", manager.text_model.calls[0]["messages"][1]["content"])
+        self.assertNotIn("shots", segments[0])
+        self.assertNotIn("publishable story-assembly profile", manager.text_model.calls[0]["messages"][1]["content"])
 
-    def test_production_segment_story_includes_checked_in_storyboard_sequence(self) -> None:
+    def test_production_segment_story_uses_user_brief_without_fixed_storyboard(self) -> None:
         manager = _FakeManager(['{"segments":[]}'])
         engine = LLMPromptEngine(mode="llm", manager=manager)
         goal = GoalRequest(
@@ -296,7 +265,7 @@ class LLMEngineTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=30,
             style="cinematic animation",
-            constraints={"storyboard_path": "configs/storyboards/text2longvideo_story.yaml"},
+            constraints={},
         )
 
         segments = engine.segment_story(
@@ -309,9 +278,8 @@ class LLMEngineTests(unittest.TestCase):
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
         self.assertEqual(len(segments), 6)
-        self.assertIn("Segment 1 (hook)", user_prompt)
-        self.assertIn("Segment 6 (payoff)", user_prompt)
-        self.assertIn("resolved character_profile", user_prompt)
+        self.assertIn("current brief", user_prompt)
+        self.assertNotIn("text2longvideo_story.yaml", user_prompt)
 
     def test_compose_prompt_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(
@@ -327,7 +295,7 @@ class LLMEngineTests(unittest.TestCase):
         result = engine.compose_prompt(goal, "kirby runs", "anime", prefix="hero shot")
 
         self.assertEqual(result["prompt"], "llm composed prompt")
-        self.assertEqual(result["negative_prompt"], "llm negative")
+        self.assertEqual(result["negative_prompt"], "")
         self.assertEqual(result["prompt_mode"], "llm")
 
     def test_route_generation_strategy_uses_llm_json_when_available(self) -> None:
@@ -669,7 +637,7 @@ class LLMEngineTests(unittest.TestCase):
         result = engine.refine_prompt_from_review(goal, "old prompt", "need stronger action")
 
         self.assertEqual(result["prompt"], "revised prompt")
-        self.assertEqual(result["negative_prompt"], "revised negative")
+        self.assertEqual(result["negative_prompt"], "")
         self.assertEqual(result["prompt_mode"], "llm")
 
     def test_build_sticker_motion_prompt_uses_llm_json_when_available(self) -> None:

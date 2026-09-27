@@ -37,7 +37,7 @@ class PromptEngineTests(unittest.TestCase):
         result = engine.compose_prompt(goal, "kirby key visual", "anime key visual", prefix="hero shot")
 
         self.assertEqual(result["prompt"], "llm composed prompt")
-        self.assertEqual(result["negative_prompt"], "llm negative")
+        self.assertEqual(result["negative_prompt"], "")
         self.assertEqual(result["prompt_mode"], "llm")
 
     def test_build_sticker_prompt_set_returns_llm_bundle(self) -> None:

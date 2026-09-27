@@ -8,11 +8,12 @@ from typing import Any
 
 from agentic.h3_reference import build_reference_lineage, format_ref2va_prompt, normalize_reference_manifest
 from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
 from agentic.runtime.reference_video import format_reference_video_directive
-from agentic.minimax_prompting import structured_visual_prompt
 from agentic.runtime.prompting import (
     build_minimax_h3_prompt,
     build_story_segments,
+    include_role_description,
     validate_story_segments,
 )
 from agentic.runtime.prompt_engine import PromptEngine
@@ -21,7 +22,6 @@ from agentic.runtime.story_service import NativeH3StoryService
 from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
 from agentic.storyboard import (
     format_native_h3_prompt,
-    ground_native_h3_ending_keyframe_prompt,
     load_storyboard,
 )
 
@@ -84,30 +84,9 @@ def _apply_selected_character_to_storyboard(
             subject_lines.append(
                 f"{item.get('role', 'subject')}: {name}{f' ({details})' if details else ''}"
             )
-        resolved["base_prompt"] = (
-            f"Two required subject slots share one readable scene: {'; '.join(subject_lines)}. "
-            "Preserve each subject's recognizable identity, proportions, silhouette, and palette; show a visible mutual interaction."
+        resolved["base_prompt"] = "; ".join(
+            part for part in (str(resolved.get("base_prompt") or "").strip(), "Configured subjects: " + "; ".join(subject_lines)) if part
         )
-        world = dict(resolved.get("world") or {})
-        rules = list(world.get("continuity_rules") or [])
-        world["continuity_rules"] = [
-            "Exactly the two declared subject slots remain visible when the story requires both; preserve each identity and role.",
-            *[
-                str(rule)
-                for rule in rules
-                if not ("only" in str(rule).lower() and "protagonist" in str(rule).lower())
-            ],
-        ]
-        resolved["world"] = world
-        negative_parts = [
-            part.strip()
-            for part in str(resolved.get("negative_prompt") or "").split(",")
-            if part.strip()
-            and part.strip().lower()
-            not in {"humans", "extra characters", "duplicate", "duplicate kirby"}
-        ]
-        negative_parts.extend(["identity swap", "unrequested third subject"])
-        resolved["negative_prompt"] = ", ".join(dict.fromkeys(negative_parts))
         return resolved
     role_description = str(profile.get("role_description") or "").strip()
     keywords = str(profile.get("keywords") or "").strip()
@@ -120,13 +99,14 @@ def _apply_selected_character_to_storyboard(
             )
             if item
         )
-        if base_character.casefold() != selected.casefold():
-            resolved["base_prompt"] = (
-                f"One {selected} is the only protagonist. {profile_text}. "
-                "Preserve this selected role's recognizable identity and proportions throughout the clip."
+        resolved["base_prompt"] = "; ".join(
+            part
+            for part in (
+                str(resolved.get("base_prompt") or "").strip(),
+                f"Character reference: {profile_text}",
             )
-        else:
-            resolved["base_prompt"] = f"{str(resolved.get('base_prompt') or '').strip()} {profile_text}".strip()
+            if part
+        )
     return resolved
 
 
@@ -163,23 +143,15 @@ class LongVideoSkills:
         idea_variants = list(context.node.inputs.get("idea_variants", []))
         selected_variant = idea_variants[0] if idea_variants else {"style": style}
         selected_style = str(selected_variant.get("style", style))
-        expanded_prompt = structured_visual_prompt(
-            subject=str(context.plan.goal.constraints.get("character") or "the main subject"),
-            scene=prompt,
-            action="one meaningful physical action with a visible beginning, escalation, and end",
-            environment="a coherent world that changes with the action",
-            camera="camera framing and movement follow the action with a clear change in depth",
-            style=selected_style,
-            quality="cinematic lighting, strong silhouette, spatial depth, coherent continuity",
-        )
+        expanded_prompt = "\n".join(part for part in (prompt, f"Style: {selected_style}" if selected_style else "") if part)
         return SkillResult(
             status="success",
             outputs={
-                "creative_brief": f"{prompt} rendered as a {selected_style} long-form video narrative",
-                "tone": "playful cinematic escalation",
+                "creative_brief": prompt,
+                "tone": "",
                 "idea_variants": idea_variants,
                 "prompt": expanded_prompt,
-                "negative_prompt": "ugly, blurry, low quality, bad anatomy, deformed, duplicate, watermark, text",
+                "negative_prompt": "",
             },
             logs=["Expanded goal into a creative brief."],
         )
@@ -240,11 +212,6 @@ class LongVideoSkills:
             or 15
         )
         style = str(context.node.inputs.get("style") or context.plan.goal.style)
-        style_contract = str(
-            context.plan.goal.constraints.get("native_h3_visual_style_contract") or ""
-        ).strip()
-        if style_contract:
-            style = f"{style}; {style_contract}"
         configured_brief = str(
             context.plan.goal.constraints.get("native_h3_creative_brief") or ""
         ).strip()
@@ -257,6 +224,9 @@ class LongVideoSkills:
         if str(context.plan.goal.constraints.get("prompt_source") or "").strip().lower() != "user":
             user_brief = ""
         creative_brief = configured_brief
+        arc_guidance = str(
+            context.plan.goal.constraints.get("native_h3_arc_instruction") or ""
+        ).strip()
         if user_brief:
             creative_brief = (
                 f"{configured_brief}\nUser objective: {user_brief}"
@@ -284,9 +254,9 @@ class LongVideoSkills:
             duration_seconds=duration_seconds,
             news_context=news_context,
             creative_brief=creative_brief,
+            arc_guidance=arc_guidance,
             reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
         )
-        storyboard["ending_keyframe_prompt"] = ground_native_h3_ending_keyframe_prompt(storyboard)
         render_mode = str(context.node.inputs.get("render_mode") or "").strip()
         if render_mode:
             storyboard["render_mode"] = render_mode
@@ -295,11 +265,9 @@ class LongVideoSkills:
             style=style,
             duration_seconds=duration_seconds,
         )
-        opening_prompt = str(storyboard.get("opening_keyframe_prompt") or "").strip()
-        ending_prompt = str(storyboard.get("ending_keyframe_prompt") or "").strip()
-        if not opening_prompt or not ending_prompt:
-            raise ValueError("Native H3 storyboard must define opening_keyframe_prompt and ending_keyframe_prompt")
-        negative_prompt = str(storyboard["negative_prompt"]).strip()
+        opening_prompt = str(storyboard.get("opening_keyframe_prompt") or prompt).strip()
+        ending_prompt = str(storyboard.get("ending_keyframe_prompt") or prompt).strip()
+        negative_prompt = str(storyboard.get("negative_prompt") or "").strip()
         return SkillResult(
             status="success",
             outputs={
@@ -334,21 +302,19 @@ class LongVideoSkills:
             context.plan.goal.constraints.get("keyframe_workflow_name")
             or context.node.inputs["workflow_name"]
         )
-        character = str(context.plan.goal.constraints.get("character") or "the protagonist").strip()
+        prompt = "\n".join(
+            part
+            for part in (str(segment.get("visual") or ""), str(context.plan.goal.style or ""))
+            if part
+        )
+        prompt = include_role_description(prompt, context.plan.goal)
         result = self.tools.call(
             "comfy.render_image",
             {
                 "workflow_name": workflow_name,
                 "run_dir": str(run_dir),
-                "prompt": (
-                    f"one single {character} only, no second subject; {segment['visual']}, "
-                    f"{context.plan.goal.style}, cinematic lighting, consistent character design, "
-                    "clear full-body silhouette and one readable action setup"
-                ),
-                "negative_prompt": (
-                    f"{context.state['idea-brief'].get('negative_prompt', '')}, "
-                    "second protagonist, duplicate character, cloned subject, multiple copies"
-                ),
+                "prompt": apply_paper_storybook_art_direction(prompt),
+                "negative_prompt": str(context.state["idea-brief"].get("negative_prompt") or ""),
                 "width": context.node.inputs.get("width", 1024),
                 "height": context.node.inputs.get("height", 1024),
             },
@@ -411,7 +377,11 @@ class LongVideoSkills:
             if isinstance(prepared_prompt_output, dict)
             else ""
         )
-        prompt = f"{segment['visual']}, {context.plan.goal.style}, motion continuity, coherent action"
+        prompt = ", ".join(
+            part
+            for part in (str(segment.get("visual") or "").strip(), context.plan.goal.style.strip())
+            if part
+        )
         prompt_anchor = first_frame or last_frame
         segment_frame_rate = float(
             context.node.inputs.get("frame_rate")
@@ -438,12 +408,7 @@ class LongVideoSkills:
             )["prompt"]
             if prepared_prompt:
                 prompt = "\n".join(
-                    (
-                        prompt,
-                        "LLM segment direction (use as a refinement of the declared story state; "
-                        "do not add a new prop, character, location, or plot): "
-                        + prepared_prompt,
-                    )
+                    (prompt, prepared_prompt)
                 )
 
         width = context.node.inputs.get("width") or constraints.get("canvas_width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
@@ -512,13 +477,6 @@ class LongVideoSkills:
             outputs=outputs,
             metrics={"video_count": len(result.get("saved_files", [])), "recipe": recipe},
             logs=[f"Rendered {segment['segment_id']} clip with {recipe} conditioning."],
-        )
-
-        overlap = int(
-            context.node.inputs.get(
-                "continuity_overlap_frames",
-                constraints.get("director_continuity_overlap_frames", DIRECTOR_CONTINUITY_OVERLAP_FRAMES),
-            )
         )
 
     def render_native_h3(self, context: SkillContext) -> SkillResult:
@@ -813,7 +771,7 @@ class LongVideoSkills:
         prompt = format_ref2va_prompt(
             str(story["prompt"]),
             references,
-            soundscape=str(story.get("native_audio") or "Generate native H3 audio from the scene; do not use reference audio."),
+            soundscape=str(story.get("native_audio") or ""),
         )
         payload = {
             "workflow_name": workflow_name,
@@ -1161,7 +1119,7 @@ def register_longvideo_skills(
     skill_registry.register("idea.expand", skills.expand_idea, "Expand the goal into a creative brief")
     skill_registry.register("script.segment_story", skills.segment_story, "Create long-video story segments")
     skill_registry.register("asset.ensure_workflow", skills.ensure_workflow, "Verify workflow assets")
-    skill_registry.register("longvideo.prepare_native_h3_story", skills.prepare_native_h3_story, "Prepare one causal native H3 storyboard prompt")
+    skill_registry.register("longvideo.prepare_native_h3_story", skills.prepare_native_h3_story, "Prepare a native H3 prompt from the selected story source")
     skill_registry.register("longvideo.render_initial_frame", skills.render_initial_frame, "Render the opening seed frame")
     skill_registry.register("longvideo.render_segment_video", skills.render_segment_video, "Render one long-video segment")
     skill_registry.register("longvideo.validate_references", skills.validate_references, "Validate a typed long-video reference bundle")

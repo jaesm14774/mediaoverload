@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "reference_repository": "https://github.com/Alisa0808/vox-director",
+  "shared_story_brief": "Create a short, original, stylized Kirby allegory of the supplied article. Preserve the event and outcome established by the article; keep one visible protagonist and one dominant physical idea; do not invent source-specific people, places, impacts, or outcomes; do not use readable text, logos, or subtitles. Keep three connected beats in order: hook, escalation, and payoff.",
+  "cases": [
+    {
+      "case_id": "bolivia_tilcayo_discovery",
+      "arc": "hook_payoff",
+      "article": {
+        "title": "Meet Earth's newest wild cat species, the first named in over a century",
+        "publisher": "Associated Press",
+        "published": "2026-09-18",
+        "url": "https://apnews.com/article/d1f442eb8f173850bb5456aedb1a2ac7",
+        "keyword": "Bolivia Yungas tilcayo wild cat species",
+        "summary": "A spotted wild cat living at a Bolivian sanctuary was identified as Leopardus tilcayo after researchers compared genetic evidence. The finding separates South America's tiger cats into multiple species and marks the first newly described living wild cat species in more than a century."
+      },
+      "arc_instruction": "Use hook_payoff: open on an ordinary-looking spotted cat and a clear unanswered visual question; build one clue through the middle; resolve the opening by revealing a distinctive, source-grounded species discovery. Let the last image answer the opening question."
+    },
+    {
+      "case_id": "noaa_commercial_satellite_data",
+      "arc": "how_it_works",
+      "article": {
+        "title": "NOAA expands use of commercial satellite data to enhance weather forecasting",
+        "publisher": "NOAA",
+        "published": "2026-09-10",
+        "url": "https://noaa.gov/news-release/noaa-expands-use-of-commercial-satellite-data-to-enhance-weather-forecasting",
+        "keyword": "commercial satellite environmental data weather forecasts",
+        "summary": "NOAA is expanding commercial environmental satellite data streams. The observations will feed operational prediction models and support weather and space-weather forecasting; the contract period began September 1, 2026."
+      },
+      "arc_instruction": "Use how_it_works: show the observation entering the system, make the data flow and model interaction visible in causal order, then show the resulting forecast capability. Each beat must explain the same mechanism, with no unrelated metaphor."
+    },
+    {
+      "case_id": "hurricane_polo_intensification",
+      "arc": "timeline",
+      "article": {
+        "title": "Explosive Intensification for Hurricane Polo",
+        "publisher": "NASA Earth Observatory",
+        "published": "2026-09-25",
+        "url": "https://science.nasa.gov/earth/earth-observatory/explosive-intensification-for-hurricane-polo/",
+        "keyword": "Hurricane Polo rapid intensification Category 5",
+        "summary": "NASA reported that Hurricane Polo's maximum sustained winds increased by 90 knots in 24 hours by September 22, reaching Category 5 strength over the Pacific off Mexico. The report links the rapid strengthening to several environmental ingredients, including high ocean heat content."
+      },
+      "arc_instruction": "Use timeline: move through the article's documented stages in chronological order, from the earlier storm state through the rapid 24-hour strengthening to Category 5 over the Pacific. Make progression visible without labels; do not show landfall, damage, or consequences the article does not report."
+    },
+    {
+      "case_id": "mississippi_raccoon_bootcamp",
+      "arc": "man_in_hole",
+      "article": {
+        "title": "A raccoon boot camp in Mississippi teaches abandoned kits survival skills",
+        "publisher": "Associated Press",
+        "published": "2026-09-21",
+        "url": "https://apnews.com/article/016f6332a7267497cfeaa9effe387168",
+        "keyword": "Mississippi rescued raccoon kits rehabilitation release",
+        "summary": "A Mississippi wildlife center rehabilitates orphaned raccoon kits by teaching survival behaviors. After about six months of care and training, ready kits are released into another section of the center's forested property."
+      },
+      "arc_instruction": "Use man_in_hole: establish one rescued kit's vulnerable starting state, make a survival challenge visibly worsen, show a learned change in approach, and finish with the source-supported release into the forested property. Compress the recovery into three beats; do not imply a release into a different wild location."
+    },
+    {
+      "case_id": "western_australia_desert_blooms",
+      "arc": "story_spine",
+      "article": {
+        "title": "Boom Year for Desert Blooms",
+        "publisher": "NASA Earth Observatory",
+        "published": "2026-09-23",
+        "url": "https://science.nasa.gov/earth/earth-observatory/boom-year-for-desert-blooms/",
+        "keyword": "Western Australia Murchison desert flowers rainfall",
+        "summary": "Above-average rainfall, especially in August, followed drier conditions across Western Australia's Murchison region. Dormant seeds responded to the rain with widespread desert blooms visible in satellite imagery."
+      },
+      "arc_instruction": "Use story_spine: establish the dormant-land premise and a clear objective to bloom; make lack of water the obstacle; use the return of rain as the turning point; end on the source-grounded bloom as the resolution. Keep cause and result in the same place."
+    },
+    {
+      "case_id": "prima_mission_origin",
+      "arc": "origin",
+      "article": {
+        "title": "NASA Selects Far-Infrared Telescope as First in New Mission Class",
+        "publisher": "NASA Jet Propulsion Laboratory",
+        "published": "2026-09-23",
+        "url": "https://www.jpl.nasa.gov/news/nasa-selects-far-infrared-telescope-as-first-in-new-mission-class/",
+        "keyword": "PRIMA far infrared telescope Probe Explorers mission",
+        "summary": "NASA selected the PRIMA far-infrared telescope as the first Probe Explorers mission. The new mission class followed a recommendation in the 2020 astronomy and astrophysics decadal survey; PRIMA will study how dust and gas shape stars and planetary systems."
+      },
+      "arc_instruction": "Use origin: begin with the scientific question and the recommendation that created the opportunity; show the idea taking shape as a far-infrared telescope mission; finish with its selected purpose of studying dust, gas, stars, and planetary systems. Do not depict launch or discoveries that have not happened."
+    },
+    {
+      "case_id": "heat_tolerant_complex_life",
+      "arc": "myth_buster",
+      "article": {
+        "title": "NASA-Funded Research Finds Complex Life Defying Record Heat",
+        "publisher": "NASA Science",
+        "published": "2026-09-22",
+        "url": "https://science.nasa.gov/science-research/planetary-science/nasa-funded-research-finds-complex-life-defying-record-heat/",
+        "keyword": "Incendiamoeba cascadensis reproduces at 63 degrees Celsius",
+        "summary": "NASA-funded researchers report that Incendiamoeba cascadensis reproduces by division at 63 degrees Celsius, remains active and mobile up to 64 degrees, and is only partially active at 66 degrees in lab tests. It can recover after five minutes at 70 degrees, while 80 degrees is too hot for recovery. The finding sets a record upper reproduction temperature for eukaryotes and challenges assumptions about complex-cell stability."
+      },
+      "arc_instruction": "Use myth_buster: establish the former 60-degree eukaryote record as the expectation, reveal that Incendiamoeba cascadensis can reproduce at 63 degrees, then distinguish movement up to 64 degrees from partial activity at 66 degrees. End with the brief five-minute 70-degree recovery test and the 80-degree limit. Do not call 66 degrees the growth or reproduction limit."
+    },
+    {
+      "case_id": "planetary_boundaries_climate_week",
+      "arc": "listicle",
+      "article": {
+        "title": "Climate Week talks balance hope for clean energy against uncertainty over artificial intelligence",
+        "publisher": "Associated Press",
+        "published": "2026-09-21",
+        "url": "https://apnews.com/article/f3208930e39c7d233bdc24315065dcd2",
+        "keyword": "planetary boundaries seven of nine climate clean energy",
+        "summary": "The AP report opens Climate Week with a scientific assessment that seven of nine planetary boundaries have been breached. It also describes rapid renewable-energy growth and the need for much more renewable capacity, alongside uncertainty about the energy demands of artificial intelligence."
+      },
+      "arc_instruction": "Use listicle: build a compact visual set of the nine planetary-boundary markers, reveal the seven that the report says are breached, then group the remaining two as not reported breached. End by connecting this count to the article's clean-energy challenge without claiming that any one marker represents a specific measured boundary."
+    },
+    {
+      "case_id": "new_lunar_crater_discovery",
+      "arc": "three_act",
+      "article": {
+        "title": "NASA's Moon Orbiter Spots New, 'Once-in-Century' Moon Crater",
+        "publisher": "NASA Science",
+        "published": "2026-09-16",
+        "url": "https://science.nasa.gov/solar-system/moon/nasas-moon-orbiter-spots-new-once-in-century-moon-crater/",
+        "keyword": "Lunar Reconnaissance Orbiter new moon crater 2024 impact",
+        "summary": "A routine image comparison by NASA's Lunar Reconnaissance Orbiter exposed a bright new feature. Researchers traced it to a crater created by an impact in 2024 and describe this scale of new lunar crater as roughly once per century."
+      },
+      "arc_instruction": "Use three_act: set up a routine lunar image check, disrupt it with an unexplained bright spot, then resolve the mystery by revealing the new impact crater confirmed in later comparison. Keep the discovery separate from the 2024 impact date and do not imply the spacecraft witnessed the impact."
+    },
+    {
+      "case_id": "parker_solar_probe_return",
+      "arc": "story_circle",
+      "article": {
+        "title": "After Latest Swing Past Sun, NASA's Parker Solar Probe Checks in",
+        "publisher": "NASA Science",
+        "published": "2026-09-10",
+        "url": "https://science.nasa.gov/blogs/parker-solar-probe/2026/09/10/after-latest-swing-past-sun-nasas-parker-solar-probe-checks-in/",
+        "keyword": "Parker Solar Probe ninth day communication beacon September 2026",
+        "summary": "Parker Solar Probe completed its 29th close approach to the Sun on September 4, passing within 3.8 million miles and collecting data from the corona. It operated autonomously and out of contact for nine days as planned, then sent a beacon on September 7 showing its systems were functioning normally. Detailed telemetry was scheduled to begin September 11, with science data transmission planned for September 13-27."
+      },
+      "arc_instruction": "Use story_circle: start with the probe's normal communication state, send it on the planned close-Sun passage and nine-day quiet interval, then return to the September 7 beacon confirming normal systems. Foreshadow that detailed telemetry and science data are scheduled to arrive later; do not depict those later data as already received, and do not imply an emergency or loss of spacecraft control."
+    }
+  ]
+}

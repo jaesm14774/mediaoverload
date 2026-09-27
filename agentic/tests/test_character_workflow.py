@@ -75,10 +75,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["image_workflow_name"], "krea2_turbo")
         self.assertEqual(payload["constraints"]["refine_workflow_name"], "")
         self.assertEqual(payload["constraints"]["story_card_brand_label"], "CHARACTER NOTE")
-        self.assertEqual(
-            payload["constraints"]["story_card_visual"]["companion_pages"],
-            [2, 4],
-        )
+        self.assertTrue(payload["constraints"]["story_card_visual"]["supporting_cast"])
         self.assertNotIn("story_card_refine_denoise", payload["constraints"])
 
     def test_duration_policy_selects_single_action_or_native_story(self) -> None:
@@ -137,9 +134,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         ))
         self.assertEqual(long_video["duration_seconds"], 30)
         self.assertEqual(long_video["constraints"]["segment_count"], 6)
-        self.assertTrue(long_video["constraints"]["storyboard_path"].endswith("text2longvideo_story.yaml"))
+        self.assertNotIn("storyboard_path", long_video["constraints"])
         self.assertEqual(long_video["character_config_summary"]["longvideo"]["default_duration_seconds"], 30)
-        self.assertTrue(long_video["character_config_summary"]["longvideo"]["storyboard_path"].endswith("text2longvideo_story.yaml"))
         self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_i2v")
 
         production_long_video = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -181,6 +177,25 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(selection["subject_mode"], "single")
         self.assertEqual(payload["constraints"]["subject_mode"], "single")
         self.assertEqual(len(payload["constraints"]["subjects"]), 1)
+
+    def test_user_given_named_character_when_single_subject_is_resolved_then_group_randomization_is_bypassed(self) -> None:
+        """User Given a named Kirby protagonist When a single subject is resolved Then the requested profile remains selected."""
+        request = make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            prompt="",
+            preferred_generation_type="native_h3_t2v_story",
+            subject_mode="single",
+            selected_character_name="Kirby",
+            rng=random.Random(17),
+            publish_after_generate=False,
+        )
+
+        selection = resolve_character_selection(request)
+
+        self.assertEqual(selection["subject_mode"], "single")
+        self.assertEqual(selection["selected_character"], "Kirby")
+        self.assertEqual(selection["selection_source"], "fixed_config_role")
 
     def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(
@@ -906,7 +921,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             (),
             {"to_dict": lambda self: {"title": "Taipei panda steals zongzi", "keyword": "panda"}},  # noqa: ARG005
         )()
-        with patch(
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
             "agentic.app.character_workflow.NewsContextService.get_random_news",
             return_value=news,
         ), patch(
@@ -918,6 +933,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 self.kirby_config,
                 prompt="",
                 preferred_generation_type="native_h3_story",
+                news_history_path=Path(temp_dir) / "news-history.json",
                 publish_after_generate=False,
             ))
 
@@ -926,6 +942,82 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["prompt_mode"], "news")
         self.assertEqual(payload["constraints"]["news_context"]["keyword"], "panda")
         self.assertIn("compact causal story", payload["constraints"]["native_h3_creative_brief"])
+
+    def test_user_given_explicit_news_context_when_native_story_is_built_then_exact_source_is_preserved(self) -> None:
+        """User Given a sourced article When a Native H3 story is built Then it keeps that article instead of selecting another."""
+        news = {
+            "title": "NASA field-tests an AI robot fleet",
+            "keyword": "NASA ASTRA robot fleet",
+            "category": "science",
+            "created_at": "2026-09-15T16:43:00Z",
+            "content": "Three robots assessed targets, risks, and follow-up opportunities during a field test.",
+            "url": "https://science.nasa.gov/example-article",
+        }
+
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            prompt="Tell a short story grounded only in the supplied article.",
+            preferred_generation_type="native_h3_t2v_story",
+            duration_seconds=15,
+            news_driven=True,
+            news_context=news,
+            publish_after_generate=False,
+        ))
+
+        self.assertEqual(payload["constraints"]["news_context"], news)
+        self.assertEqual(payload["constraints"]["prompt_source"], "news")
+        self.assertEqual(payload["source_generation_type"], "native_h3_t2v_story")
+
+    def test_user_given_native_h3_arc_brief_when_news_story_is_built_then_brief_reaches_story_planner(self) -> None:
+        """User Given an article and optional arc brief When a news story is built Then the exact source and brief reach Native H3."""
+        news = {
+            "title": "NASA expands commercial satellite data for forecasting",
+            "keyword": "commercial satellite data forecasting",
+            "category": "science",
+            "content": "Commercial environmental observations will feed NOAA operational prediction models.",
+            "url": "https://www.noaa.gov/news-release/noaa-expands-use-of-commercial-satellite-data-to-enhance-weather-forecasting",
+        }
+        arc_brief = "Use a three beat how_it_works arc: show the observation, data flow, and forecast consequence in order."
+
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            preferred_generation_type="native_h3_t2v_story",
+            duration_seconds=15,
+            news_driven=True,
+            news_context=news,
+            native_h3_creative_brief=arc_brief,
+            publish_after_generate=False,
+        ))
+
+        self.assertEqual(payload["constraints"]["news_context"], news)
+        self.assertIn(arc_brief, payload["constraints"]["native_h3_creative_brief"])
+
+    def test_user_given_story_arc_guidance_when_news_story_is_built_then_guidance_reaches_story_planner(self) -> None:
+        """User Given a source article and arc guidance When a news story is built Then the guidance reaches Native H3 separately from the creative brief."""
+        news = {
+            "title": "A new wild cat species is confirmed",
+            "keyword": "Bolivia wild cat species genetic evidence",
+            "category": "science",
+            "content": "Researchers identified a distinct living wild cat species after comparing genetic evidence.",
+            "url": "https://apnews.com/example-wild-cat",
+        }
+        arc_guidance = "Open on a spotted cat, reveal one genetic clue, and resolve with the newly confirmed species."
+
+        payload = build_goal_payload_from_character_config(make_character_workflow_request(
+            self.repo_root,
+            self.kirby_config,
+            preferred_generation_type="native_h3_t2v_story",
+            duration_seconds=15,
+            news_driven=True,
+            news_context=news,
+            native_h3_arc_instruction=arc_guidance,
+            publish_after_generate=False,
+        ))
+
+        self.assertEqual(payload["constraints"]["news_context"], news)
+        self.assertEqual(payload["constraints"]["native_h3_arc_instruction"], arc_guidance)
 
     def test_news_driven_random_mode_overrides_generic_prompt_and_persists_selection(self) -> None:
         news = NewsSelection(

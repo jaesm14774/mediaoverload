@@ -17,10 +17,8 @@ from agentic.skills.agent_primitives import AgentMediaSkills
 from agentic.skills.longvideo import LongVideoSkills
 from agentic.storyboard import (
     format_native_h3_prompt,
-    ground_native_h3_ending_keyframe_prompt,
     load_storyboard,
     merge_native_h3_storyboard,
-    validate_native_h3_shot_timing,
 )
 from agentic.tools.context_services import NewsContextService
 
@@ -218,7 +216,9 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(plan.metadata["native_h3"]["stage_probe_auto_select"])
 
     def test_news_only_native_h3_does_not_validate_autonomous_brief_as_user_objective(self) -> None:
+        """User Given an optional arc alongside selected news When Native H3 prepares its story Then arc guidance reaches the story service without changing the news contract."""
         captured: dict[str, object] = {}
+        arc_guidance = "Use timeline: show the storm strengthening across three successive states."
         storyboard_fixture = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard_fixture.update(
             {
@@ -252,6 +252,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                         "character": "Kirby",
                         "prompt_source": "news",
                         "native_h3_creative_brief": "compact causal story with one prop and a visible payoff",
+                        "native_h3_arc_instruction": arc_guidance,
                         "news_context": {"title": "AI companion robot arrives", "keyword": "AI;robot"},
                     },
                 )
@@ -272,6 +273,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertEqual(captured["creative_brief"], "compact causal story with one prop and a visible payoff")
+        self.assertEqual(captured["arc_guidance"], arc_guidance)
         ending_prompt = str(result.outputs["ending_keyframe_prompt"])
         self.assertIn("high-tech semiconductor laboratory", ending_prompt)
         self.assertIn("scanning arch traps the subject", ending_prompt)
@@ -338,10 +340,10 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("Hook", prompt)
         self.assertNotIn("??", prompt)
         self.assertIn("15-second", prompt)
-        self.assertIn("Causal-motion contract", prompt)
+        self.assertNotIn("contract", prompt.lower())
         self.assertIn("payoff", prompt)
 
-    def test_native_prompt_carries_the_single_visual_gag_contract(self) -> None:
+    def test_native_prompt_keeps_visual_ideas_optional(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["gag_card"] = {
             "hook_frame": "Kirby is already being dragged by a runaway cushion",
@@ -355,10 +357,39 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         prompt = format_native_h3_prompt(storyboard, duration_seconds=15)
 
-        self.assertIn("Single visual gag contract", prompt)
-        self.assertIn("Prop rule", prompt)
-        self.assertIn("Final reversal", prompt)
-        self.assertIn("Replay reason", prompt)
+        self.assertIn("Optional visual ideas", prompt)
+        self.assertIn("Kirby is already being dragged by a runaway cushion", prompt)
+        self.assertIn("The cushion springs away whenever Kirby lands on it", prompt)
+        self.assertNotIn("contract", prompt.lower())
+
+    def test_user_given_generated_world_without_continuity_when_story_is_merged_then_base_rules_are_preserved(self) -> None:
+        """User: Given the generated world omits continuity rules, When its story is merged, Then the base rules remain available to rendering."""
+        base_storyboard = {
+            "native_duration_seconds": 15,
+            "base_prompt": "Kirby follows a firefly.",
+            "world": {
+                "setting": "a quiet meadow",
+                "continuity_rules": ["Keep the same garden path throughout."],
+            },
+        }
+        generated_story = {
+            "world": {"setting": "a moonlit garden"},
+            "native_shots": [{"action": "Kirby follows a firefly along the path."}],
+        }
+
+        merged = merge_native_h3_storyboard(base_storyboard, generated_story)
+
+        self.assertEqual(merged["world"]["setting"], "a moonlit garden")
+        self.assertEqual(
+            merged["world"]["continuity_rules"],
+            ["Keep the same garden path throughout."],
+        )
+        prompt = format_native_h3_prompt(merged)
+        self.assertIn("same garden path throughout", prompt.lower())
+        self.assertEqual(
+            base_storyboard["world"]["continuity_rules"],
+            ["Keep the same garden path throughout."],
+        )
 
     def test_native_gag_card_is_preserved_when_story_is_merged(self) -> None:
         base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
@@ -423,12 +454,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "interaction_contract": {"required": True, "same_frame": True},
         }
         pair_merged = merge_native_h3_storyboard(pair_base, generated_story)
-        self.assertTrue(
-            any("Exactly the two declared subject slots" in rule for rule in pair_merged["world"]["continuity_rules"])
-        )
-        self.assertFalse(any("Only one" in rule for rule in pair_merged["world"]["continuity_rules"]))
-        self.assertNotIn("duplicate Kirby", pair_merged["negative_prompt"])
-        self.assertIn("unrequested third subject", pair_merged["negative_prompt"])
+        self.assertEqual(pair_merged["world"]["continuity_rules"], generated_story["world"]["continuity_rules"])
+        self.assertEqual(pair_merged["negative_prompt"], "")
 
     def test_character_route_builds_direct_t2v_story_graph(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -466,25 +493,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("native-opening-keyframe", [node.node_id for node in plan.nodes])
         self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
 
-    def test_native_h3_timing_allows_adjusted_contiguous_20_second_beats(self) -> None:
-        shots = [
-            {"time": "0-2.5s"},
-            {"time": "2.5-6.25s"},
-            {"time": "6.25-11.5s"},
-            {"time": "11.5-16.75s"},
-            {"time": "16.75-20s"},
-        ]
-        valid, error = validate_native_h3_shot_timing(shots, duration_seconds=20)
-        self.assertTrue(valid, error)
-
-        invalid, error = validate_native_h3_shot_timing(
-            [{"time": "0-2s"}, {"time": "2.5-20s"}],
-            duration_seconds=20,
-        )
-        self.assertFalse(invalid)
-        self.assertIn("start where the previous shot ends", error)
-
-    def test_native_prompt_rejects_unbounded_scene_rewrite(self) -> None:
+    def test_native_prompt_preserves_the_complete_creative_brief(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         prompt = format_native_h3_prompt(
             storyboard,
@@ -493,9 +502,9 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 "while the camera performs an orbital rotation in a 3D void."
             ),
         )
-        self.assertIn("a restrained atmospheric variation", prompt)
-        self.assertNotIn("digital archive", prompt)
-        self.assertNotIn("red shards", prompt)
+        self.assertIn("digital archive", prompt)
+        self.assertIn("red shards", prompt)
+        self.assertIn("orbital rotation", prompt)
 
     def test_native_h3_story_is_generated_from_news_and_replaces_fixed_plot(self) -> None:
         base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
@@ -558,32 +567,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(result["story"]["news_trace"]["source_title"], "city lantern outage")
         self.assertEqual(merged["name"], "Kirby and the Lantern Current")
         self.assertEqual(len(merged["native_shots"]), 3)
-        self.assertEqual(len(merged["segments"]), 3)
+        self.assertNotIn("segments", merged)
         self.assertIn("lantern", prompt.lower())
         self.assertNotIn("golden star seed", prompt.lower())
         self.assertNotIn("dark sky rift", prompt.lower())
 
-    def test_native_h3_ending_keyframe_prompt_locks_news_scene_and_payoff(self) -> None:
-        story = {
-            "ending_keyframe_prompt": "Magolor remains suspended in the foreground.",
-            "world": {"setting": "a high-tech semiconductor laboratory"},
-            "news_trace": {
-                "visual_anchors": ["lab conveyor", "scanning arch", "sealed bubble"],
-                "news_mechanism": "the scanning arch traps the subject inside the bubble",
-                "news_consequence": "the sealed bubble leaves the lab route blocked",
-            },
-        }
-
-        prompt = ground_native_h3_ending_keyframe_prompt(story)
-
-        self.assertIn("high-tech semiconductor laboratory", prompt)
-        self.assertIn("lab conveyor", prompt)
-        self.assertIn("scanning arch", prompt)
-        self.assertIn("sealed bubble", prompt)
-        self.assertIn("scanning arch traps the subject", prompt)
-        self.assertIn("sealed bubble leaves the lab route blocked", prompt)
-
-    def test_native_h3_render_prompt_carries_news_mechanism_contract(self) -> None:
+    def test_native_h3_render_prompt_keeps_source_context_without_a_mechanism_contract(self) -> None:
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["news_trace"] = {
             "visual_translation": "A city blackout closes a canal path.",
@@ -593,11 +582,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "anchor_roles": ["context", "mechanism", "consequence"],
         }
         prompt = format_native_h3_prompt(storyboard, duration_seconds=15)
-        self.assertIn("News mechanism contract", prompt)
+        self.assertIn("Additional source context", prompt)
         self.assertIn("synchronized lights shut down", prompt)
-        self.assertIn("Do not replace the mechanism with a generic floating object", prompt)
+        self.assertNotIn("News mechanism contract", prompt)
 
-    def test_native_h3_safety_contract_rejects_readable_text_without_semantic_repair(self) -> None:
+    def test_user_given_readable_text_visual_when_native_h3_story_is_generated_then_story_is_not_rejected(self) -> None:
+        """User: Given a story mentions a readable document, When Native H3 prepares its render data, Then that creative detail does not block generation."""
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         invalid_story = {
             "base_prompt": "Kirby reaches for a glowing document covered in financial symbols.",
@@ -617,18 +607,18 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         with patch.object(engine, "_require_manager", return_value=object()), patch.object(
             LLMPromptEngine, "_chat_json", side_effect=fake_chat
         ), patch.object(engine, "backend_info", return_value={"provider": "test"}):
-            with self.assertRaisesRegex(PromptGenerationError, "forbidden readable-text visual cues"):
-                engine.generate_native_h3_storyboard(
-                    character="Kirby",
-                    style="polished 2D anime",
-                    duration_seconds=15,
-                    base_storyboard=storyboard,
-                    news_context={"title": "city lantern outage", "keyword": "canal safety"},
-                )
+            result = engine.generate_native_h3_storyboard(
+                character="Kirby",
+                style="polished 2D anime",
+                duration_seconds=15,
+                base_storyboard=storyboard,
+                news_context={"title": "city lantern outage", "keyword": "canal safety"},
+            )
 
         self.assertEqual(len(calls), 1)
+        self.assertIn("document", result["story"]["base_prompt"])
 
-    def test_native_h3_visual_cue_filter_allows_unmarked_physical_surfaces(self) -> None:
+    def test_native_h3_visual_cue_detector_is_not_a_generation_gate(self) -> None:
         allowed = LLMPromptEngine._find_native_h3_forbidden_visual_cues(
             "no text or logos; glowing floor panels, a data-core pedestal, clear screen geography, readable cause-and-effect, and a calm light display"
         )
@@ -650,7 +640,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
         self.assertIn("stamp with readable content", stamped_text)
 
-    def test_native_h3_rejects_text_cues_in_story_spine_and_keyframe_prompts(self) -> None:
+    def test_user_given_readable_text_cues_when_story_payload_is_checked_then_story_is_returned(self) -> None:
+        """User: Given a story includes text in a keyframe description, When its render data is checked, Then the story is returned without a creative-content gate."""
         story = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         story.update(
             {
@@ -689,15 +680,15 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaises(PromptGenerationError) as raised:
-            LLMPromptEngine._validate_native_h3_story_payload(
-                {"story": story},
-                expected_times=tuple(str(shot["time"]) for shot in story["native_shots"]),
-                duration_seconds=15,
-                news_context={"title": "city lantern outage", "keyword": "lantern"},
-            )
+        prepared = LLMPromptEngine._validate_native_h3_story_payload(
+            {"story": story},
+            expected_times=tuple(str(shot["time"]) for shot in story["native_shots"]),
+            duration_seconds=15,
+            news_context={"title": "city lantern outage", "keyword": "lantern"},
+        )
 
-        self.assertIn("label", str(raised.exception))
+        self.assertIs(prepared, story)
+        self.assertIn("APPROVED", prepared["opening_keyframe_prompt"])
 
     def test_native_h3_normalizes_timestamp_only_hook_from_opening_prompt(self) -> None:
         payload = {
@@ -728,6 +719,36 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         still_invalid = LLMPromptEngine._normalize_native_h3_story_payload(mismatched)
 
         self.assertEqual(still_invalid["story"]["gag_card"]["hook_frame"], "0s")
+
+    def test_user_given_three_shot_storyboard_when_native_h3_payload_is_normalized_then_all_shots_reach_render_contract(self) -> None:
+        """User Given the model returns three timed shots under storyboard When its response is normalized Then the render contract retains all three shots in order."""
+        expected_times = ("0-4s", "4-10s", "10-15s")
+        payload = {
+            "story": {
+                "title": "Kirby and the Clean Energy Challenge",
+                "storyboard": [
+                    {"shot_id": 1, "time_range": expected_times[0], "beat": "hook", "action": "Kirby faces a heavy smoke cloud."},
+                    {"shot_id": 2, "time_range": expected_times[1], "beat": "escalation", "action": "Kirby steadies a flickering light."},
+                    {"shot_id": 3, "time_range": expected_times[2], "beat": "payoff", "action": "The clean light powers the room."},
+                ],
+            }
+        }
+
+        normalized = LLMPromptEngine._normalize_native_h3_story_payload(
+            payload,
+            expected_times=expected_times,
+        )
+        story = LLMPromptEngine._validate_native_h3_story_payload(
+            normalized,
+            expected_times=expected_times,
+            duration_seconds=15,
+        )
+
+        self.assertEqual(len(story["native_shots"]), 3)
+        self.assertEqual(
+            [shot["time"] for shot in story["native_shots"]],
+            list(expected_times),
+        )
 
     def test_news_selection_rejects_placeholder_titles(self) -> None:
         self.assertFalse(NewsContextService.is_usable_selection("...", "gold;reserve"))
@@ -846,12 +867,67 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(all(shot["state_change"] for shot in result["story"]["native_shots"]))
         self.assertNotIn("news_grounding", result)
 
-    def test_native_h3_risky_creative_brief_is_sanitized(self) -> None:
-        sanitized = LLMPromptEngine._sanitize_native_h3_creative_brief(
+    def test_native_h3_creative_brief_is_not_filtered_by_topic_or_digits(self) -> None:
+        preserved = LLMPromptEngine._sanitize_native_h3_creative_brief(
             "stock ticker 810.06, chart, report, and glowing symbols"
         )
-        self.assertIn("abstract atmosphere", sanitized)
-        self.assertNotIn("810.06", sanitized)
+        self.assertIn("810.06", preserved)
+        self.assertIn("chart", preserved)
+
+    def test_user_given_numeric_arc_guidance_when_story_prompt_is_built_then_guidance_is_preserved(self) -> None:
+        """User Given a timed source-matched arc When its Native H3 directive is built Then its causal beats reach the story model unchanged."""
+        guidance = (
+            "Use hook_payoff: open on the ordinary spotted cat (0-4 seconds), reveal a genetic clue, "
+            "then resolve with the distinct species discovery; preserve the article's reported facts."
+        )
+
+        directive = LLMPromptEngine._format_native_h3_arc_guidance(guidance)
+
+        self.assertIn(guidance, directive)
+        self.assertIn("article remains authoritative for facts", directive)
+
+    def test_user_given_no_arc_guidance_when_story_prompt_is_built_then_default_prompt_has_no_arc_gap(self) -> None:
+        """User Given the existing Native H3 route When arc guidance is empty Then the default prompt keeps its original section boundary."""
+        class ContractChatModel:
+            last_success_model = "local-contract-model"
+
+            def __init__(self) -> None:
+                self.messages: list[dict[str, object]] = []
+
+            def chat_completion(self, *, messages: list[dict[str, object]], **_options: object) -> str:
+                self.messages = messages
+                return json.dumps(
+                    {
+                        "story": {
+                            "world": {
+                                "setting": "A moonlit garden",
+                                "continuity_rules": ["Keep the same garden path throughout."],
+                            },
+                            "native_shots": [
+                                {"time": "0-4s", "action": "Kirby starts down the garden path."},
+                                {"time": "4-10s", "action": "Kirby follows a firefly around one bend."},
+                                {"time": "10-15s", "action": "Kirby returns to the same path as the firefly glows."},
+                            ],
+                        }
+                    }
+                )
+
+        model = ContractChatModel()
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=SimpleNamespace(text_model=model, vision_model=model),
+        )
+        engine.generate_native_h3_storyboard(
+            character="Kirby",
+            style="polished 2D anime",
+            duration_seconds=15,
+            base_storyboard=load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml"),
+            news_context={"title": "A firefly returns to the garden", "keyword": "firefly garden"},
+        )
+
+        prompt = str(model.messages[1]["content"])
+        self.assertIn("Creative brief: \n", prompt)
+        self.assertNotIn("Visual action contract:", prompt)
 
     def test_native_h3_negative_visual_constraints_do_not_erase_creative_brief(self) -> None:
         brief = (

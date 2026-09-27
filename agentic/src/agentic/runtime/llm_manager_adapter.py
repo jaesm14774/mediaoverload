@@ -168,7 +168,20 @@ def _add_auxiliary_fallbacks(
             if not provider_credentials_present(normalized_provider):
                 skipped.append(f"{provider}:missing_api_key")
                 continue
-            auxiliary.append(build_model(normalized_provider, ModelConfig(model_name=model_name, temperature=0.3)))
+            auxiliary.append(
+                build_model(
+                    normalized_provider,
+                    ModelConfig(
+                        model_name=model_name,
+                        temperature=0.3,
+                        reasoning_effort=(
+                            str(backend.get("reasoning_effort") or "xhigh")
+                            if normalized_provider == "openai"
+                            else None
+                        ),
+                    ),
+                )
+            )
         except (KeyError, ValueError) as exc:
             skipped.append(f"{provider}:{type(exc).__name__}")
 
@@ -241,7 +254,14 @@ def build_llm_manager(backend: dict[str, Any]) -> Any:
             raw = provider_default_model(text_provider, "text")
         text_model = build_model(
             text_provider,
-            ModelConfig(model_name=raw),
+            ModelConfig(
+                model_name=raw,
+                reasoning_effort=(
+                    str(backend.get("reasoning_effort") or "xhigh")
+                    if text_provider.lower() == "openai"
+                    else None
+                ),
+            ),
         )
         text_model = _add_auxiliary_fallbacks(text_model, backend, "text")
 
@@ -257,7 +277,14 @@ def build_llm_manager(backend: dict[str, Any]) -> Any:
             raise ValueError(f"Provider '{vision_provider}' has no configured vision model")
         vision_model = build_model(
             vision_provider,
-            ModelConfig(model_name=vraw),
+            ModelConfig(
+                model_name=vraw,
+                reasoning_effort=(
+                    str(backend.get("reasoning_effort") or "xhigh")
+                    if vision_provider.lower() == "openai"
+                    else None
+                ),
+            ),
         )
         vision_model = _add_auxiliary_fallbacks(vision_model, backend, "vision")
 

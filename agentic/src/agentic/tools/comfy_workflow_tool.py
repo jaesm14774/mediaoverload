@@ -273,7 +273,7 @@ class ComfyWorkflowToolset:
 
         if spec.prompt_binding and payload.get("prompt"):
             updates.append(self._binding_update(spec.prompt_binding, payload["prompt"], str(workflow_path)))
-        if spec.negative_prompt_binding and payload.get("negative_prompt"):
+        if spec.negative_prompt_binding and "negative_prompt" in payload:
             updates.append(self._binding_update(spec.negative_prompt_binding, payload["negative_prompt"], str(workflow_path)))
         if spec.width_binding and payload.get("width") is not None:
             updates.append(self._binding_update(spec.width_binding, int(payload["width"]), str(workflow_path)))

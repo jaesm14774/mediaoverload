@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 
-from agentic.minimax_prompting import subject_identity_lock
 from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.story_cards import (
@@ -14,11 +13,11 @@ from agentic.runtime.story_cards import (
     STORY_CARD_DEFAULT_WIDTH,
     new_story_card_visual_seed,
     render_story_card_images,
-    story_card_visual_beat,
     validate_story_card_payload,
 )
 from agentic.runtime.prompting import (
     build_segment_prompt,
+    include_role_description,
     validate_story_segments,
 )
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
@@ -70,7 +69,7 @@ class AgentPlanningSkills:
         negative_prompt = str(
             context.node.inputs.get(
                 "negative_prompt",
-                "ugly, blurry, low quality, bad anatomy, deformed, duplicate, watermark, text",
+                "",
             )
         )
         bundle = self.prompt_engine.compose_prompt(
@@ -303,10 +302,11 @@ class AgentMediaSkills:
                 if isinstance(resolved_prompt, str) and resolved_prompt.strip():
                     prompt = resolved_prompt.strip()
                     break
+        prompt = include_role_description(prompt or self._resolve_prompt(context), context.plan.goal)
         payload = {
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "img2img")),
             "image_path": self._resolve_image_path(context),
-            "prompt": self._resolve_prompt_with_identity_lock(context, prompt or self._resolve_prompt(context)),
+            "prompt": prompt,
             "negative_prompt": self._resolve_negative_prompt(context),
         }
         if workflow_name:
@@ -323,6 +323,15 @@ class AgentMediaSkills:
         )
 
     def generate_keyframe(self, context: SkillContext) -> SkillResult:
+        media_type = str(context.plan.goal.media_type or "").strip().lower()
+
+        def apply_art_direction(prompt: str) -> str:
+            prompt = include_role_description(prompt, context.plan.goal)
+            return apply_paper_storybook_art_direction(
+                prompt,
+                isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+            )
+
         use_prior_frame = bool(context.node.inputs.get("use_prior_frame", True))
         prior_frame_path = context.node.inputs.get("prior_frame_path")
         if use_prior_frame and not prior_frame_path:
@@ -342,7 +351,7 @@ class AgentMediaSkills:
                     "workflow_name": workflow_name,
                     "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
                     "image_path": prior_frame_path,
-                    "prompt": self._resolve_prompt_with_identity_lock(context, self._resolve_prompt(context)),
+                    "prompt": apply_art_direction(self._resolve_prompt(context)),
                     "negative_prompt": self._resolve_negative_prompt(context),
                     # Continuity refinement is also the source of auto-generated
                     # Ref2VA candidates. Preserve the requested bundle size
@@ -357,134 +366,31 @@ class AgentMediaSkills:
                 context.plan.goal.constraints.get("keyframe_workflow_name")
                 or context.node.inputs["workflow_name"]
             )
-            character_label = str(
-                context.plan.goal.constraints.get("character") or "the selected protagonist"
-            ).strip()
-            character = character_label.lower()
-            subject_context = dict(context.plan.goal.constraints.get("subject_context") or {})
-            profile = dict(
-                subject_context.get("character_profile")
-                or context.plan.goal.constraints.get("character_profile")
-                or {}
-            )
-            profile_details = "; ".join(
-                part
-                for part in (
-                    str(profile.get("role_description") or "").strip(),
-                    str(profile.get("keywords") or "").strip(),
-                )
-                if part
-            )
-            resolved_subject = (
-                f"{character_label} ({profile_details})"
-                if profile_details
-                else character_label
-            )
-            interaction_required = bool(
-                dict(subject_context.get("interaction_contract") or {}).get("required", False)
-            )
-            subject_names = [
-                str(item.get("name") or "").strip()
-                for item in (subject_context.get("subjects") or [])
-                if isinstance(item, dict) and str(item.get("name") or "").strip()
-            ]
-            prompt = self._resolve_prompt_with_identity_lock(context, self._resolve_prompt(context))
+            prompt = apply_art_direction(self._resolve_prompt(context))
             negative_prompt = self._resolve_negative_prompt(context)
-            if character == "kirby":
-                anchor_position = str(context.node.inputs.get("anchor_position") or "").strip().lower()
-                if anchor_position in {"first", "last"}:
-                    script_output = context.state.node_outputs.get("script-plan", {})
-                    segments = script_output.get("segments", []) if isinstance(script_output, dict) else []
-                    segment_index = int(context.node.inputs.get("segment_index") or 0)
-                    segment = segments[segment_index] if segment_index < len(segments) else {}
-                    state_key = "start_state" if anchor_position == "first" else "end_state"
-                    planned_state = str(segment.get(state_key) or "").strip()
-                    if planned_state:
-                        prompt = (
-                            f"{'Opening' if anchor_position == 'first' else 'Landing'} keyframe only: {planned_state}. "
-                            f"Freeze one single moment {'immediately before the physical action begins' if anchor_position == 'first' else 'immediately after the decisive outcome'}; "
-                            "do not depict a sequence, a storyboard, or multiple copies of the character."
-                        )
-                        if anchor_position == "last":
-                            prompt += (
-                                " Render every named prop from the end state literally at a natural scale, "
-                                f"grounded in a physically plausible location and clearly separate from {character_label}'s face, "
-                                "eyes, and body; preserve one readable wide composition."
-                            )
-                prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
-                if prompt_key == "opening_keyframe_prompt":
-                    story_output = context.state.node_outputs.get("native-story-prompt", {})
-                    generated_storyboard = (
-                        story_output.get("generated_storyboard")
-                        if isinstance(story_output, dict)
-                        else None
-                    )
-                    news_trace = (
-                        generated_storyboard.get("news_trace")
-                        if isinstance(generated_storyboard, dict)
-                        else None
-                    )
-                    mechanism = (
-                        str(news_trace.get("news_mechanism") or "").strip().rstrip(".")
-                        if isinstance(news_trace, dict)
-                        else ""
-                    )
-                    if mechanism:
-                        prompt = (
-                            f"{prompt}. FIRST-FRAME NEWS-MECHANISM LOCK: show {mechanism} visibly operating "
-                            "inside the opening composition now, not merely implied in the background; keep the "
-                            "same mechanism and its dominant anchor large and readable from frame one."
-                        )
-                if interaction_required and len(subject_names) == 2:
-                    prompt = (
-                        f"{prompt}, single continuous animation frame, one composition, both declared subject slots "
-                        f"({'; '.join(subject_names)}) large and clearly visible in the foreground or midground, "
-                        "preserve both recognizable identities and show their visible mutual interaction, "
-                        "no storyboard, no sequence, no contact sheet, no split composition, no unrequested third subject"
-                    )
-                else:
-                    prompt = (
-                        f"{prompt}, single continuous animation frame, one {resolved_subject} only, one composition, "
-                        f"{character_label} large and clearly visible in the foreground or midground, "
-                        "with the resolved character_profile appearance readable, "
-                        "no storyboard, no sequence, no contact sheet, no split composition"
-                    )
-                negative_prompt = (
-                    f"{negative_prompt}, storyboard, contact sheet, comic panels, multi-panel, split screen, collage, "
-                    f"tiny distant subject, cropped character, unrecognizable character, duplicate {character_label}, "
-                    f"second {character_label}, cloned subject, object on face, object on head, object covering eyes, "
-                    "oversized prop, giant orb, floating unrelated object, humanoid silhouette, black figure, "
-                    "light beam, lens flare"
-                    + (", identity swap, unrequested third subject" if interaction_required else "")
-                )
             result = self.tools.call(
                 "comfy.workflow.text_to_image",
                 {
-                    "run_dir": str(
-                        self._build_run_dir(
-                            context.plan.goal.prompt,
-                            str(context.node.inputs.get("suffix") or "segment_keyframe"),
-                        )
-                    ),
                     "workflow_name": workflow_name,
                     "prompt": prompt,
                     "negative_prompt": negative_prompt,
                     "width": int(context.node.inputs.get("width", 1024)),
                     "height": int(context.node.inputs.get("height", 1024)),
-                    "image_count": int(context.node.inputs.get("image_count", 1)),
+                    "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
+                    "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
                 },
             )
-            generated_paths = self._output_paths(result)
-            result = dict(result)
-            result["generated_files"] = list(generated_paths)
-            result["saved_files"] = list(generated_paths)
-            result["rejected_files"] = []
-            result["rejected_asset_details"] = []
-            log = f"Generated {len(generated_paths)} keyframe candidate(s); Discord owns creative selection."
+            log = "Generated keyframe candidates."
+        generated_paths = self._output_paths(result)
+        result = dict(result)
+        result["generated_files"] = list(generated_paths)
+        result["saved_files"] = list(generated_paths)
+        result["rejected_files"] = []
+        result["rejected_asset_details"] = []
         return SkillResult(
             status="success",
             outputs=result,
-            metrics={"image_count": len(result.get("saved_files", []))},
+            metrics={"image_count": len(generated_paths)},
             logs=[log],
         )
 
@@ -495,19 +401,15 @@ class AgentMediaSkills:
             context.node.inputs.get("ending_node")
             or (context.node.depends_on[1] if len(context.node.depends_on) > 1 else "")
         )
-        character = str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character") or "").strip().lower()
-        frame_specs = [
-            ("opening", opening_node, str(context.node.inputs.get("opening_prompt_key") or "opening_keyframe_prompt")),
-        ]
+        frame_specs = [("opening", opening_node)]
         if use_last_frame:
             if not ending_node:
                 raise ValueError("Native H3 use_last_frame=true requires an ending_node")
-            frame_specs.append(
-                ("ending", ending_node, str(context.node.inputs.get("ending_prompt_key") or "ending_keyframe_prompt"))
-            )
+            frame_specs.append(("ending", ending_node))
+
         source_checks: list[dict[str, object]] = []
         final_paths: dict[str, str] = {}
-        for label, node_id, prompt_key in frame_specs:
+        for label, node_id in frame_specs:
             frame_path = self._first_output_path(context.state.node_outputs.get(node_id, {}))
             if not frame_path:
                 raise ValueError(f"{label} frame output is missing")
@@ -515,9 +417,14 @@ class AgentMediaSkills:
                 raise ValueError(f"{label} frame file is missing: {frame_path}")
             source_checks.append({"path": frame_path, "check": "file_exists"})
             final_paths[label] = frame_path
+
         outputs: dict[str, object] = {
             "first_frame_path": final_paths["opening"],
-            "character": character,
+            "character": str(
+                context.node.inputs.get("character")
+                or context.plan.goal.constraints.get("character")
+                or ""
+            ).strip().lower(),
             "source_checks": source_checks,
             "identity_check": "not_applied",
             "use_last_frame": use_last_frame,
@@ -530,8 +437,9 @@ class AgentMediaSkills:
             outputs=outputs,
             metrics={"source_frame_count": len(frame_specs), "regenerated_count": 0},
             logs=[
-                f"Confirmed {'opening and ending' if use_last_frame else 'opening'} frame source file(s); identity review was not applied and Discord owns creative review."
-            ]
+                f"Confirmed {'opening and ending' if use_last_frame else 'opening'} frame source file(s); "
+                "identity review was not applied and Discord owns creative review."
+            ],
         )
 
     def confirm_last_frame_source(self, context: SkillContext) -> SkillResult:
@@ -548,20 +456,22 @@ class AgentMediaSkills:
             or ""
         ).strip().lower()
         preserve = bool(context.node.inputs.get("preserve_last_frame", True))
-        source_check = {"path": frame_path, "check": "file_exists"}
         return SkillResult(
             status="success",
             outputs={
                 "first_frame_path": "",
                 "last_frame_path": frame_path,
                 "character": character,
-                "source_checks": [source_check],
+                "source_checks": [{"path": frame_path, "check": "file_exists"}],
                 "identity_check": "not_applied",
                 "preserve_last_frame": preserve,
                 "regenerated_count": 0,
             },
             metrics={"source_frame_count": 1, "regenerated_count": 0},
-            logs=["Confirmed the selected last-frame source file; identity review was not applied and Discord owns creative review."],
+            logs=[
+                "Confirmed the selected last-frame source file; identity review was not applied "
+                "and Discord owns creative review."
+            ],
         )
 
     def upscale_image(self, context: SkillContext) -> SkillResult:
@@ -572,7 +482,11 @@ class AgentMediaSkills:
                 "image_path": self._resolve_image_path(context),
             },
         )
-        return SkillResult(status="success", outputs=result, logs=["Upscaled an image with an agent media primitive."])
+        return SkillResult(
+            status="success",
+            outputs=result,
+            logs=["Upscaled an image with an agent media primitive."],
+        )
 
     def animate_image(self, context: SkillContext) -> SkillResult:
         workflow_name = str(context.node.inputs.get("workflow_name", ""))
@@ -586,7 +500,11 @@ class AgentMediaSkills:
                 or context.plan.goal.constraints.get("native_h3_model_profile")
                 or "q4"
             ),
-            "video_count": int(context.node.inputs.get("video_count") or context.plan.goal.constraints.get("video_count") or 1),
+            "video_count": int(
+                context.node.inputs.get("video_count")
+                or context.plan.goal.constraints.get("video_count")
+                or 1
+            ),
             "width": context.node.inputs.get("width"),
             "height": context.node.inputs.get("height"),
         }
@@ -597,9 +515,6 @@ class AgentMediaSkills:
             constraints = context.plan.goal.constraints
             payload.update(
                 {
-                    # Long-video runs queue multiple H3 jobs. Keep each draft
-                    # below the standalone 5-second profile so an 8GB GPU can
-                    # complete the segment and reload the next one.
                     "width": int(constraints.get("longvideo_h3_width", 512)),
                     "height": int(constraints.get("longvideo_h3_height", 288)),
                     "length": int(constraints.get("longvideo_h3_length", 81)),
@@ -611,10 +526,7 @@ class AgentMediaSkills:
             payload["length"] = int(context.node.inputs["length"])
         if workflow_name.startswith("minimax_h3_") and context.node.inputs.get("steps") is not None:
             payload["steps"] = int(context.node.inputs["steps"])
-        result = self.tools.call(
-            "comfy.workflow.image_to_video",
-            payload,
-        )
+        result = self.tools.call("comfy.workflow.image_to_video", payload)
         return SkillResult(
             status="success",
             outputs=result,
@@ -633,6 +545,7 @@ class AgentMediaSkills:
             or context.plan.goal.constraints.get("images_per_prompt")
             or 1
         )
+        media_type = str(context.plan.goal.media_type or "").strip().lower()
         run_dir = self._build_run_dir(context.plan.goal.prompt, str(context.node.inputs.get("suffix", "batch_images")))
         saved_files: list[str] = []
         item_runs: list[dict[str, str]] = []
@@ -642,14 +555,16 @@ class AgentMediaSkills:
                 default=f"item-{index:02d}",
             )
             item_dir = run_dir / label
+            prompt = include_role_description(prompt_set["prompt"], context.plan.goal)
+            prompt = apply_paper_storybook_art_direction(
+                prompt,
+                isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+            )
             result = self.tools.call(
                 "comfy.workflow.text_to_image",
                 {
                     "workflow_name": workflow_name,
-                    "prompt": self._resolve_prompt_with_identity_lock(
-                        context,
-                        str(prompt_set["prompt"]),
-                    ),
+                    "prompt": prompt,
                     "negative_prompt": negative_prompt,
                     "width": width,
                     "height": height,
@@ -662,7 +577,7 @@ class AgentMediaSkills:
             item_runs.append(
                 {
                     "label": label,
-                    "prompt": str(prompt_set["prompt"]),
+                    "prompt": prompt,
                     "expression": str(prompt_set.get("expression", "")),
                     "run_dir": str(item_dir),
                     "saved_file": generated[0] if generated else "",
@@ -674,9 +589,8 @@ class AgentMediaSkills:
             metrics={"image_count": len(saved_files)},
             logs=[f"Rendered {len(saved_files)} images as a reusable batch primitive."],
         )
-
     def render_story_card_backgrounds(self, context: SkillContext) -> SkillResult:
-        """Render each page as an independent style-locked background."""
+        """Render each requested story-card background."""
 
         story_output = context.state[context.node.inputs.get("story_node", "story-card-write")]
         story = validate_story_card_payload(dict(story_output))
@@ -687,12 +601,6 @@ class AgentMediaSkills:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "story_card_backgrounds")
         background_paths: list[str] = []
         page_runs: list[dict[str, object]] = []
-        background_hashes: set[str] = set()
-        character = str(context.plan.goal.constraints.get("character") or "").strip()
-        if not character:
-            raise RuntimeError("Story-card background generation requires a resolved selected character")
-        profile = context.plan.goal.constraints.get("character_profile")
-        visual_config = context.plan.goal.constraints.get("story_card_visual")
         seed_value = context.plan.goal.constraints.get("seed")
         if seed_value is not None:
             seed_base = int(seed_value)
@@ -700,7 +608,9 @@ class AgentMediaSkills:
             seed_base = int(story.get("visual_seed") or new_story_card_visual_seed())
         for index, page in enumerate(story["pages"], start=1):
             page_dir = run_dir / f"page_{index:02d}"
-            background_prompt = str(page["background_prompt"])
+            background_prompt = include_role_description(
+                page["background_prompt"], context.plan.goal
+            )
             page_seed = seed_base + (index * 1009)
             payload: dict[str, object] = {
                 "workflow_name": workflow_name,
@@ -717,13 +627,6 @@ class AgentMediaSkills:
             if not generated:
                 raise RuntimeError(f"Story-card background render produced no image for page {index}")
             generated_path = generated[0]
-            digest = hashlib.sha256(Path(generated_path).read_bytes()).hexdigest()
-            if digest in background_hashes:
-                raise RuntimeError(
-                    f"Story-card background page {index} duplicated an earlier page image; "
-                    "page-specific motif and seed did not produce visual variation"
-                )
-            background_hashes.add(digest)
             background_paths.append(generated_path)
             page_runs.append(
                 {
@@ -732,12 +635,6 @@ class AgentMediaSkills:
                     "prompt": background_prompt,
                     "saved_file": generated_path,
                     "seed": str(page_seed),
-                    "visual_beat": story_card_visual_beat(
-                        index,
-                        page_count=len(story["pages"]),
-                        visual_config=visual_config,
-                    ),
-                    "sha256": digest,
                 }
             )
         return SkillResult(
@@ -751,7 +648,7 @@ class AgentMediaSkills:
                 "visual_seed": seed_base,
             },
             metrics={"background_count": len(background_paths)},
-            logs=[f"Rendered {len(background_paths)} style-locked text-to-image page backgrounds."],
+            logs=[f"Rendered {len(background_paths)} text-to-image page backgrounds."],
         )
 
     def compose_story_card(self, context: SkillContext) -> SkillResult:
@@ -769,7 +666,7 @@ class AgentMediaSkills:
             width=int(context.node.inputs.get("width", STORY_CARD_DEFAULT_WIDTH)),
             height=int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT)),
             font_path=str(context.node.inputs.get("font_path") or context.plan.goal.constraints.get("story_card_font_path") or "") or None,
-            overlay_opacity=int(context.node.inputs.get("overlay_opacity", 202)),
+            overlay_opacity=int(context.node.inputs.get("overlay_opacity", 176)),
             brand_label=str(context.node.inputs.get("brand_label", "STORY NOTE")),
         )
         summary_path = output_dir / "story_card_summary.json"
@@ -1273,24 +1170,6 @@ class AgentMediaSkills:
         return resolve_dependency_prompt(context)
 
     @staticmethod
-    def _resolve_prompt_with_identity_lock(context: SkillContext, prompt: str) -> str:
-        constraints = dict(getattr(context.plan.goal, "constraints", {}) or {})
-        character = str(constraints.get("character") or "").strip()
-        subject_context = dict(constraints.get("subject_context") or {})
-        profile = constraints.get("character_profile")
-        if isinstance(profile, dict) and profile:
-            subject_context.setdefault("character_profile", profile)
-        if not character and not subject_context:
-            return str(prompt or "").strip()
-        identity = subject_identity_lock(character, subject_context)
-        if not identity:
-            return str(prompt or "").strip()
-        base_prompt = str(prompt or "").strip().rstrip(".")
-        if base_prompt:
-            return f"{base_prompt}. Character identity lock: {identity}."
-        return f"Character identity lock: {identity}."
-
-    @staticmethod
     def _first_output_path(outputs: dict[str, object]) -> str | None:
         for key in ("image_path", "frame_path", "selected_assets", "saved_files", "media_paths"):
             value = outputs.get(key)
@@ -1405,7 +1284,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.image.upscale", media.upscale_image, "Upscale an image as an agent media primitive")
     skill_registry.register("media.image.animate", media.animate_image, "Animate an image as an agent media primitive")
     skill_registry.register("media.image.render_batch", media.render_image_batch, "Render a batch of images as an agent media primitive")
-    skill_registry.register("media.story_card.backgrounds", media.render_story_card_backgrounds, "Render style-locked story-card backgrounds per page")
+    skill_registry.register("media.story_card.backgrounds", media.render_story_card_backgrounds, "Render story-card backgrounds per page")
     skill_registry.register("media.story_card.compose", media.compose_story_card, "Compose exact story-card text over generated backgrounds")
     skill_registry.register("media.audio.narrate", media.narrate_text, "Generate narration audio as an agent media primitive")
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")

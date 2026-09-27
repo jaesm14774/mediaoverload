@@ -1,10 +1,12 @@
 version: 1
-snapshot_date: '2026-08-22'
+snapshot_date: '2026-09-26'
 discover_catalog_at_runtime: false
 randomize_each_request: true
 
 # This pool mirrors AGENTIC_OPENROUTER_TEXT_MODELS and
-# AGENTIC_OPENROUTER_VISION_MODELS in media_overload.env.
+# AGENTIC_OPENROUTER_VISION_MODELS in media_overload.env and
+# media_overload.env.example. Model availability is checked against the live
+# OpenRouter catalog; new candidates still need project-specific JSON review.
 # mode=structured sends response_format for ordinary JSON requests;
 # prompt_only relies on the prompt plus the shared fence/fragment JSON parser;
 # reasoning_off disables hidden reasoning where it otherwise consumes the answer
@@ -15,12 +17,10 @@ text:
   - id: nvidia/nemotron-3-super-120b-a12b:free
     mode: structured
   - id: nvidia/nemotron-3.5-lightning:free
-    mode: structured
-  - id: google/gemma-4-31b-it:free
-    mode: structured
+    mode: prompt_only
   - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     mode: reasoning_off
-  - id: z-ai/glm-5.2:free
+  - id: qwen/qwen3.8-27b:free
     mode: structured
 
 vision:
@@ -28,9 +28,7 @@ vision:
     mode: structured
   - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     mode: reasoning_off
-  - id: nvidia/nemotron-nano-12b-v2-vl:free
-    mode: prompt_only
-  - id: google/gemma-4-31b-it:free
+  - id: qwen/qwen3.8-27b:free
     mode: structured
 
 # The pool intentionally follows the active env file, including models that were

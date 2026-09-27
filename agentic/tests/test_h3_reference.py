@@ -33,18 +33,19 @@ class H3ReferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "type=image or type=video"):
             normalize_reference_manifest([{"path": "voice.wav"}])
 
-    def test_ref2va_prompt_has_contract_and_no_audio_reference_input(self) -> None:
+    def test_ref2va_prompt_has_required_sections_without_default_audio_direction(self) -> None:
         refs = [{"tag": "reference_image_1", "prompt_label": "<Picture 1>", "role": "identity", "retention": "identity_and_appearance"}]
         prompt = format_ref2va_prompt("A Kirby scene", refs)
         self.assertIn("subject_definitions:", prompt)
         self.assertIn("summary:", prompt)
         self.assertIn("retention_analysis:", prompt)
         self.assertIn("detailed_description:", prompt)
-        self.assertIn("non_diegetic_music:", prompt)
+        self.assertIn("Use the current scene prompt to direct the target video", prompt)
         self.assertNotIn("<Subject Definitions>", prompt)
         self.assertIn("<Picture 1>", prompt)
-        self.assertIn("overall_soundscape:", prompt)
-        self.assertIn("do not use reference audio", prompt.lower())
+        self.assertNotIn("overall_soundscape:", prompt)
+        self.assertNotIn("reference audio", prompt.lower())
+        self.assertNotIn("music direction", prompt.lower())
         self.assertNotIn("<Reference Audio>", prompt)
 
     def test_ref2va_prompt_marks_continuation_picture_as_first_frame(self) -> None:
@@ -54,9 +55,9 @@ class H3ReferenceTests(unittest.TestCase):
         ]
         prompt = format_ref2va_prompt("Kirby takes the next action", refs)
         self.assertIn("[keyframe completion + reference generation]", prompt)
-        self.assertIn("<Picture 2> is the lossless first-frame continuity anchor for [Shot 1]", prompt)
-        self.assertIn("<Picture 2> ([Shot 1] first frame): fully_preserved", prompt)
-        self.assertIn("begins exactly from the declared continuity anchor", prompt)
+        self.assertIn("<Picture 2> is the supplied first-frame input for [Shot 1]", prompt)
+        self.assertIn("<Picture 2> ([Shot 1] first frame): use as the starting image", prompt)
+        self.assertIn("starts from the supplied [Shot 1] image", prompt)
 
 
 if __name__ == "__main__":

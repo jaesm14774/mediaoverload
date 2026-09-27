@@ -82,10 +82,10 @@ GGUF / native H3 loader
   -> SaveVideo
 ```
 
-I2V 由 Kirby keyframe 鎖定角色外觀；T2V 仍是獨立的單一短片探索路線，不參與
+I2V 以 Kirby keyframe 作為輸入；T2V 仍是獨立的單一短片探索路線，不參與
 `text2longvideo` production path。long-video planner 將 H3 prompt builder 接到每個
-segment，加入角色 identity lock、具體 story-state、動作方向與 native stereo audio
-direction；每段結束後抽取真實尾幀，作為下一段的 first-frame conditioning。
+segment，傳入該段 prompt、使用者要求的動作方向與 native stereo audio direction；
+每段結束後抽取真實尾幀，作為下一段的 first-frame conditioning。
 
 ## 在 ComfyUI 畫布查看完整 workflow
 

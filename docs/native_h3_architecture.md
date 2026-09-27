@@ -8,25 +8,17 @@ They use the same automation surface as every other media strategy; generation s
 `run_media_interface.py` or the scheduler and reaches ComfyUI through the
 agentic runtime.
 
-## Current short-video contract
+## Native H3 generation
 
-The production Kirby native-H3 recipes use a single 15-second clip with three
-causal beats: hook, escalation, and payoff. The repository preset supplies the
-character, identity, safety, continuity, and timing contract; the LLM supplies
-the current story. Creative metadata such as `gag_card`, `story_spine`, and
-`news_trace` is optional and is retained as observability/context when present.
-The pre-render contract only requires a JSON story with the expected number of
-shots, visible actions, contiguous timing, and safe visual prompt text. Missing
-titles, camera directions, state changes, keyframes, or audio are filled from
-the generated actions and the stable preset before prompt composition.
+The production Kirby native-H3 recipes use a single 15-second clip. The preset
+supplies renderer settings and a character reference; the LLM follows the
+current user prompt and selected style. Shot count and creative fields are
+optional, and the application assigns render timing to any returned shots.
+News context is retained for factual grounding and traceability. Post-render
+inspection records technical evidence for Discord, which owns creative review.
 
-News context and story metadata are retained for traceability only; no score or
-generation gate is produced from them. Beat boundaries must remain contiguous
-from 0 to 15 seconds; post-render media inspection produces evidence for
-Discord, which remains authoritative for creative decisions.
-
-The production route uses `configs/storyboards/native_h3_15s.yaml` as its
-identity and continuity contract. Direct H3 rendering is intentionally capped
+The production route uses `configs/storyboards/native_h3_15s.yaml` for its
+duration and renderer settings. Direct H3 rendering is capped
 at 362 frames (~15 seconds): the local ComfyUI H3 node documents 124-362 frames
 as the trained range. A 20-second direct request is rejected before
 submission; the system does not silently shorten it or substitute a fallback.
@@ -66,26 +58,24 @@ selected Native H3 route
 
 `longvideo.prepare_native_h3_story` delegates news selection and LLM story
 generation to `agentic/src/agentic/runtime/story_service.py`, then formats the
-resolved storyboard into the render prompt. The storyboard rules, `news_trace`,
-state changes, first/last frame contracts, and inspection metadata remain reproducible and
-visible in the plan manifest. The publish stage receives a compact story/news
+resolved prompt for rendering. Optional story fields and `news_trace` remain
+available in the plan manifest. The publish stage receives a compact story/news
 context rather than the full production prompt.
 
 ## Publishable 30/45-second story assembly
 
 Use the `text2longvideo` route for a long story. The checked-in
-`text2longvideo` profile turns 30 seconds into six roughly
-five-second H3 clips, or 45 seconds into nine clips. Every clip receives four
-chronological internal action beats. I2V carries the actual rendered tail into
-the next clip; FL2V is reserved for deliberate state transitions. If approved
+`text2longvideo` profile turns 30 seconds into roughly six
+five-second H3 clips, or 45 seconds into roughly nine clips. Segment prompts
+follow the current user brief and do not require a fixed number of narrative
+beats. I2V carries the actual rendered tail into the next clip; the selected
+conditioning workflow handles frame transitions. If approved
 reference images or videos are configured, only the opening clip uses Ref2VA
-for identity and prop anchoring, after which the real tail continues the story.
+for optional visual references, after which the real tail continues the story.
 
-This is the production route currently selected for the local RTX 4060. The
-segments are not independent clips joined after the fact: the story planner
-gives every segment four causal beats, each segment starts from the previous
-rendered tail, and FL2V marks deliberate state transitions before the final
-package is assembled.
+This is the production route currently selected for the local RTX 4060. Each
+segment starts from the previous rendered tail, and the selected conditioning
+workflow is used before the final package is assembled.
 
 The route extracts a tail frame and runs technical QA for every segment, then
 writes `publish_ready_longvideo.json` beside the normal long-video summary.
@@ -116,19 +106,15 @@ approval and the public URL/credentials required by each platform are ready.
 
 The reusable recipe lives in:
 
-- `configs/characters/kirby.yaml` — profile, storyboard, 608x352, 362 frames,
+- `configs/characters/kirby.yaml` — profile, render recipe, 608x352, 362 frames,
   16 steps, and workflow names.
-- `configs/storyboards/native_h3_15s.yaml` — one generic 15-second causal arc with
-  hook, escalation, and payoff; it is one H3 clip, not stitched 5-second clips.
-- `configs/storyboards/text2longvideo_story.yaml` — a generic six-beat 30-second
-  long-video arc; explicit 45-second requests append consequence/coda cards.
+- `configs/storyboards/native_h3_15s.yaml` — native H3 duration and story input
+  settings; the current prompt supplies the creative direction.
 - `configs/workflow/minimax_h3_lowvram_15s_fl2va_i2v.json` — visible ComfyUI
   API graph with first and last frame LoadImage bindings.
 
-To make another scheduled story, copy the storyboard preset, keep
-`story_spine`, `native_shots`, `opening_keyframe_prompt`, and
-`ending_keyframe_prompt`, then point a character or routing override at it.
-No generator code changes are required.
+To make another scheduled story, set its character profile, renderer settings,
+and prompt in the character or routing configuration.
 
 ## Scheduler setup
 

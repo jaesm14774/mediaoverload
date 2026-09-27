@@ -155,9 +155,8 @@ def production_recipe_sequence(
     """Build a deterministic sequence for a publishable story assembly.
 
     The production route uses a stable editorial rhythm. I2V carries the
-    actual tail-to-next-segment handoff; FL2V is reserved for deliberate state
-    transitions and Ref2VA is used only for the opening identity lock when the
-    caller supplied approved references.
+    actual tail-to-next-segment handoff; FL2V handles frame-transition inputs
+    and Ref2VA is used for optional references when supplied by the caller.
     """
 
     count = max(1, int(segment_count))

@@ -70,11 +70,11 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("last_frame", stage_contracts["native_h3_fl2va_story"]["video_workflow_name"])
         self.assertIn("reference images/videos", stage_contracts["native_h3_ref2va"]["video_workflow_name"])
         self.assertIn("segment", stage_contracts["text2longvideo"]["video_workflow_name"])
-        self.assertEqual(self.routing["count_policies"]["text2longvideo"]["segment_count"], {"min": 4, "max": 8})
+        self.assertNotIn("segment_count", self.routing["count_policies"]["text2longvideo"])
         longvideo_config = self.routing["longvideo_config"]
         self.assertEqual(longvideo_config["default_duration_seconds"], 30)
         self.assertEqual(longvideo_config["segment_duration"], 5)
-        self.assertEqual(longvideo_config["storyboard_path"], "configs/storyboards/text2longvideo_story.yaml")
+        self.assertNotIn("storyboard_path", longvideo_config)
         auto_contract = stage_contracts["text2image2native_h3_ref2va"]
         self.assertIn("six", auto_contract["image_workflow_name"])
         self.assertIn("explicitly selected", auto_contract["video_workflow_name"])

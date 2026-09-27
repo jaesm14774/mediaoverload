@@ -117,8 +117,10 @@ class SharedSkillHelperTests(unittest.TestCase):
         self.assertIs(AdapterMediaPost, NativeMediaPost)
 
 class NativeH3StoryServiceTests(unittest.TestCase):
-    def test_service_injects_news_and_llm_once_without_storyboard_import_cycle(self) -> None:
+    def test_user_given_news_and_arc_guidance_when_story_service_runs_then_model_receives_both(self) -> None:
+        """User Given selected news and optional arc guidance When Native H3 resolves a story Then both reach the story model."""
         calls: list[dict[str, object]] = []
+        arc_guidance = "Use hook_payoff: pose one question, build a clue, then answer it visibly."
 
         class FakeNewsService:
             def get_random_news(self) -> SimpleNamespace:
@@ -143,11 +145,13 @@ class NativeH3StoryServiceTests(unittest.TestCase):
             style="anime",
             duration_seconds=15,
             news_context={},
+            arc_guidance=arc_guidance,
         )
 
         self.assertEqual(merged["story"], {"name": "generated"})
         self.assertEqual(payload["story"], {"name": "generated"})
         self.assertEqual(calls[0]["news_context"], {"title": "rain warning", "keyword": "weather"})
+        self.assertEqual(calls[0]["arc_guidance"], arc_guidance)
         self.assertEqual(merged["base"], {"name": "base"})
 
     def test_service_replaces_brand_unsafe_injected_news_context(self) -> None:

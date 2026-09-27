@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile, minimax_h3_model_overrides
 from agentic.assets.registry import AssetRegistry
 from agentic.app.character_workflow import _prioritize_h3_profile
-from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt, subject_identity_lock
+from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt, subject_reference
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.prompting import build_minimax_h3_prompt
 
@@ -139,8 +139,8 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
-    def test_single_subject_identity_lock_uses_canonical_role_description(self) -> None:
-        lock = subject_identity_lock(
+    def test_user_given_character_profile_when_prompt_is_composed_then_it_is_passed_as_reference(self) -> None:
+        reference = subject_reference(
             "Waddle Dee",
             {
                 "character_profile": {
@@ -149,10 +149,9 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 }
             },
         )
-        self.assertIn("Waddle Dee", lock)
-        self.assertIn("tan pear-shaped face and no mouth", lock)
-        self.assertIn("canonical character identity", lock.lower())
-        self.assertIn("do not invent or add conflicting features", lock)
+        self.assertIn("Waddle Dee", reference)
+        self.assertIn("tan pear-shaped face and no mouth", reference)
+        self.assertNotIn("must", reference.lower())
 
     def test_local_h3_prompt_uses_context_ir_order_and_i2v_input_relation(self) -> None:
         prompt = compose_minimax_h3_prompt(
@@ -176,7 +175,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("[Shot 1 / SHOT 1 | 0-6s]", prompt)
         self.assertIn("overall_soundscape:", prompt)
         self.assertIn("non_diegetic_music:", prompt)
-        self.assertIn("first-frame image is authoritative", prompt)
+        self.assertIn("begin from the supplied first frame", prompt)
 
     def test_first_last_frame_prompt_carries_ending_condition(self) -> None:
         prompt = compose_minimax_h3_prompt(
@@ -186,10 +185,10 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             shots=[{"time": "0-15s", "action": "Kirby reaches the closing gate", "state_change": "the gate opens"}],
             render_mode="first_last_frame_to_video",
         )
-        self.assertIn("first-frame image is authoritative", prompt)
-        self.assertIn("supplied last-frame state", prompt)
+        self.assertIn("begin from the supplied first frame", prompt)
+        self.assertIn("Follow the supplied last frame", prompt)
 
-    def test_pair_prompt_keeps_same_name_slots_and_interaction_contract(self) -> None:
+    def test_pair_prompt_lists_configured_subjects_without_interaction_rules(self) -> None:
         prompt = compose_minimax_h3_prompt(
             duration_seconds=6,
             character="Kirby",
@@ -211,10 +210,10 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("Two required subject slots", prompt)
-        self.assertIn("slots may use the same name", prompt)
-        self.assertIn("unrequested third subject", prompt)
-        self.assertNotIn("duplicate protagonist", prompt)
+        self.assertIn("Character references", prompt)
+        self.assertIn("Kirby", prompt)
+        self.assertNotIn("unrequested third subject", prompt)
+        self.assertNotIn("must remain", prompt)
 
     def test_visual_prompt_has_stable_subject_action_camera_order(self) -> None:
         prompt = structured_visual_prompt(
@@ -230,7 +229,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertLess(prompt.index("Action:"), prompt.index("Camera:"))
         self.assertLess(prompt.index("Camera:"), prompt.index("Quality:"))
 
-    def test_kirby_prompt_contains_identity_motion_and_native_audio_contract(self) -> None:
+    def test_kirby_prompt_uses_subject_reference_without_default_audio_direction(self) -> None:
         goal = GoalRequest(
             prompt="Kirby races through a neon night market and catches a falling star",
             media_type="long_video",
@@ -243,11 +242,11 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             {"segment_id": "segment-1", "visual": "Kirby runs through a glowing market"},
             prior_frame="frame.png",
         )
-        self.assertIn("Character lock", result["prompt"])
+        self.assertIn("Character reference", result["prompt"])
         self.assertIn("Kirby", result["prompt"])
-        self.assertIn("Motion direction", result["prompt"])
-        self.assertIn("Audio direction", result["prompt"])
-        self.assertIn("native stereo audio", result["prompt"])
+        self.assertIn("supplied first frame", result["prompt"])
+        self.assertNotIn("Audio direction", result["prompt"])
+        self.assertEqual(result["audio_direction"], "")
 
 
 if __name__ == "__main__":

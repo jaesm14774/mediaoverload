@@ -32,6 +32,7 @@ class NativeH3StoryService:
         duration_seconds: int,
         news_context: dict[str, Any] | None = None,
         creative_brief: str = "",
+        arc_guidance: str = "",
         reference_analysis: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         resolved_news = dict(news_context or {})
@@ -60,6 +61,7 @@ class NativeH3StoryService:
             base_storyboard=base_storyboard,
             news_context=resolved_news,
             creative_brief=creative_brief,
+            arc_guidance=arc_guidance,
             reference_analysis=dict(reference_analysis or {}),
         )
         return self.storyboard_merger(base_storyboard, payload["story"]), payload

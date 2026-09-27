@@ -19,26 +19,28 @@ MAX_PROVIDER_RETRIES = 5
 MAX_OPENROUTER_MODELS_PER_CALL = 5
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+OPENAI_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 DEFAULT_STATIC_MODEL_POOLS = {
     "text": [
         "nvidia/nemotron-3-ultra-550b-a55b:free",
         "nvidia/nemotron-3-super-120b-a12b:free",
-        "google/gemma-4-26b-a4b-it:free",
-        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "nvidia/nemotron-3.5-lightning:free",
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "qwen/qwen3.8-27b:free",
     ],
     "vision": [
         "google/gemma-4-26b-a4b-it:free",
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "qwen/qwen3.8-27b:free",
     ],
 }
 DEFAULT_STATIC_MODEL_MODES = {
     "nvidia/nemotron-3-ultra-550b-a55b:free": "structured",
     "nvidia/nemotron-3-super-120b-a12b:free": "structured",
+    "nvidia/nemotron-3.5-lightning:free": "prompt_only",
     "google/gemma-4-26b-a4b-it:free": "structured",
-    "nvidia/nemotron-3-nano-30b-a3b:free": "reasoning_off",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "reasoning_off",
-    "nvidia/nemotron-nano-12b-v2-vl:free": "prompt_only",
+    "qwen/qwen3.8-27b:free": "structured",
 }
 _STATIC_MODEL_CONFIG_CACHE: dict[str, Any] | None = None
 
@@ -108,6 +110,7 @@ class ModelConfig:
     model_name: str
     temperature: float = 0.3
     max_tokens: int | None = None
+    reasoning_effort: str | None = None
 
 
 class ChatModel(Protocol):
@@ -199,13 +202,20 @@ class FallbackChatModel:
 
 
 OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
-    # These are deliberately limited to providers with an official OpenAI-
-    # compatible endpoint and a documented free path for this project.
+    # Providers use the shared Chat Completions request/response contract.
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": ("OPENAI_API_KEY",),
+        "text_model": "gpt-6-luna",
+        "vision_model": "gpt-6-luna",
+        "supports_vision": True,
+        "supports_response_format": True,
+    },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "api_key_env": ("GEMINI_API_KEY", "gemini_api_token"),
-        "text_model": "gemini-3.5-flash",
-        "vision_model": "gemini-3.5-flash",
+        "text_model": "gemini-3.5-flash-lite",
+        "vision_model": "gemini-3.5-flash-lite",
         "supports_vision": True,
         "supports_response_format": True,
     },
@@ -215,8 +225,8 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
         # Groq retired llama-3.3-70b-versatile in the current runtime window;
         # keep the text default aligned with the supported qwen fallback that
         # is already used by the vision route.
-        "text_model": "qwen/qwen3.6-27b",
-        "vision_model": "qwen/qwen3.6-27b",
+        "text_model": "qwen/qwen3.8-27b",
+        "vision_model": "qwen/qwen3.8-27b",
         "supports_vision": True,
         # llama-3.3-70b-versatile accepts JSON prompting but rejects the
         # OpenAI `json_schema` response format with HTTP 400.  Omit the
@@ -226,7 +236,7 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
     "mistral": {
         "base_url": "https://api.mistral.ai/v1",
         "api_key_env": ("MISTRAL_API_KEY",),
-        "text_model": "mistral-small-latest",
+        "text_model": "ministral-14b-2512",
         "vision_model": "",
         "supports_vision": False,
         # The shared OpenAI json_schema envelope is rejected by the current
@@ -256,12 +266,23 @@ def provider_credentials_present(provider: str) -> bool:
     return any(bool(os.environ.get(name, "").strip()) for name in provider_spec(provider)["api_key_env"])
 
 
+def _openai_reasoning_effort(configured: str | None) -> str:
+    raw_effort = configured or os.environ.get("AGENTIC_REASONING_EFFORT", "xhigh")
+    effort = str(raw_effort).strip().lower() or "xhigh"
+    if effort not in OPENAI_REASONING_EFFORTS:
+        options = ", ".join(sorted(OPENAI_REASONING_EFFORTS))
+        raise ProviderConfigurationError(
+            f"Unsupported OpenAI reasoning effort {effort!r}. Choose one of: {options}."
+        )
+    return effort
+
+
 class OpenAICompatibleModel:
     """Small OpenAI Chat Completions adapter shared by cloud providers.
 
     Providers only need to supply a base URL, an environment-variable key list,
     and a model id. The request/response contract remains the same for
-    OpenRouter, Gemini, Groq, and Mistral.
+    OpenAI, OpenRouter, Gemini, Groq, and Mistral.
     """
 
     def __init__(
@@ -278,6 +299,9 @@ class OpenAICompatibleModel:
         _load_project_env()
         self.config = config
         self.provider_name = str(provider_name).strip().lower()
+        self.reasoning_effort = (
+            _openai_reasoning_effort(config.reasoning_effort) if self.provider_name == "openai" else None
+        )
         self.api_key_env = tuple(api_key_env)
         self.api_key = next(
             (os.environ.get(name, "").strip() for name in self.api_key_env if os.environ.get(name, "").strip()),
@@ -341,12 +365,22 @@ class OpenAICompatibleModel:
         payload: dict[str, object] = {
             "model": model_name,
             "messages": self._process_messages_with_images(messages, images),
-            "temperature": self.config.temperature,
         }
+        if self.provider_name == "openai":
+            payload["reasoning_effort"] = self.reasoning_effort
         if self.config.max_tokens is not None:
             payload["max_tokens"] = self.config.max_tokens
         for key, value in kwargs.items():
-            if key not in {"images", "max_retries", "initial_retry_delay", "request_timeout", "max_models_per_call", "_deadline"}:
+            if key not in {
+                "images",
+                "temperature",
+                "reasoning_effort",
+                "max_retries",
+                "initial_retry_delay",
+                "request_timeout",
+                "max_models_per_call",
+                "_deadline",
+            }:
                 if key == "response_format" and not self.supports_response_format:
                     continue
                 payload[key] = value

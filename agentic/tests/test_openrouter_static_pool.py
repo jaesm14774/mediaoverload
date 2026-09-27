@@ -44,20 +44,26 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
         self.assertEqual(pool, static_openrouter_models("text"))
         self.assertEqual(backend["openrouter_text_pool_source"], "static_config")
 
-    def test_static_config_contains_all_tested_text_and_vision_routes(self) -> None:
+    def test_static_config_uses_current_text_and_vision_routes(self) -> None:
+        """User uses free OpenRouter models: Given the live catalog, When a
+        pool is loaded, Then it contains current general routes and excludes
+        removed or temporarily throttled candidates.
+        """
         text = static_openrouter_models("text")
         vision = static_openrouter_models("vision")
 
         self.assertIn("nvidia/nemotron-3-ultra-550b-a55b:free", text)
         self.assertIn("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", text)
+        self.assertIn("qwen/qwen3.8-27b:free", text)
+        self.assertNotIn("z-ai/glm-5.2:free", text)
+        self.assertNotIn("google/gemma-4-31b-it:free", text)
         self.assertNotIn("nvidia/nemotron-nano-9b-v2:free", text)
         self.assertCountEqual(
             vision,
             [
                 "google/gemma-4-26b-a4b-it:free",
                 "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-                "nvidia/nemotron-nano-12b-v2-vl:free",
-                "google/gemma-4-31b-it:free",
+                "qwen/qwen3.8-27b:free",
             ],
         )
 

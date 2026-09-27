@@ -37,7 +37,6 @@ routing:
     production_profile: text2longvideo
     default_duration_seconds: 30
     segment_duration: 5
-    storyboard_path: configs/storyboards/text2longvideo_story.yaml
     review_policy: opening_only
     continuity_mode: rendered_tail
     workflow_names:
@@ -475,9 +474,6 @@ routing:
       video_count:
         min: 1
         max: 1
-      segment_count:
-        min: 4
-        max: 8
       review_selection_limit:
         min: 1
         max: 6
@@ -853,7 +849,7 @@ routing:
           - "只要純靜態圖。"
           - "需要長篇故事、多段轉場與段落銜接，應改選 text2longvideo。"
       text2longvideo:
-        summary: "用於可直接進入發文審核的多段故事、旁白式內容、章節式演出與連續分鏡；預設 30 秒拆成 6 個約 5 秒 H3 片段，使用 generic six-beat storyboard、4 個時間化動作節拍、實際尾幀接續、開場審核、逐段技術 QA 與最終發文包。"
+        summary: "用於多段影片與旁白式內容；預設 30 秒依約 5 秒的渲染片段拆分，prompt 直接依使用者描述生成，不使用固定劇情拍點。可沿用上一段尾幀，並保留開場素材審核、逐段技術 QA 與最終發文包。"
         best_for:
           - "需求有起承轉合、腳本段落、章節、旁白、storyboard 或多個 scene beat。"
           - "使用者提到 story、episode、narration、multi-scene 這類語意。"
@@ -936,11 +932,11 @@ routing:
         - hybrid anime refinement
         - SDXL base then Z-Image Anime
         - controlled redraw
-        - identity-preserving polish
+        - style and detail polish
         - fast key visual iteration
       kirby_keyframe_anima:
         - Kirby opening keyframe
-        - character identity lock
+        - character reference
         - approved first frame
         - direct Anima render
         - story keyframe candidates
@@ -951,14 +947,14 @@ routing:
         - fix anatomy
       kirby_continuity_img2img:
         - Kirby continuity frame
-        - subtle identity correction
-        - preserve previous frame
+        - subtle prior-frame adjustment
+        - use previous frame as context
         - low-denoise img2img
         - story frame refinement
       kirby_identity_img2img:
         - Kirby identity refinement
         - stronger redraw
-        - preserve character appearance
+        - character appearance reference
         - anime consistency
         - keyframe cleanup
       minimax_h3_lowvram_t2v:
@@ -1124,8 +1120,6 @@ routing:
         image_count_rule: "先產生六張 reference candidates；這些是等待使用者挑選的參考素材，不是未經選擇的首幀 conditioning。"
         review_selection_limit_rule: "Discord 正常流程選 1-4 張；Reject 時停止，不自動替換或補選。"
         video_count_rule: "候選 reference 通過選擇後，預設只生成 1 支 native H3 Ref2VA 影片。"
-      text2longvideo:
-        segment_count_rule: "只有需求具備多段敘事時才提高 segment_count；2-4 適合短故事，5-8 適合明確分章節內容。"
       text2image2image:
         image_count_rule: "通常 1-2 張 refine 結果已足夠；只有要比對不同修圖方向時才拉到 3-4。"
       sticker_pack:

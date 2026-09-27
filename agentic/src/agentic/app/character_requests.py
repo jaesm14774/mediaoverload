@@ -14,6 +14,9 @@ class CharacterGenerationOptions:
     duration_seconds: int | None = None
     output_dir: str | None = None
     news_driven: bool = False
+    news_context: dict[str, Any] | None = None
+    native_h3_creative_brief: str = ""
+    native_h3_arc_instruction: str = ""
     news_history_path: str | None = None
     routing_history_path: str | None = None
     rng: random.Random | None = None
@@ -23,7 +26,6 @@ class CharacterGenerationOptions:
     reference_video_depth: str | None = None
     reference_video_max_keyframes: int | None = None
     seed: int | None = None
-    semantic_cue_mode: str = ""
     subject_mode: str | None = None
 
 
