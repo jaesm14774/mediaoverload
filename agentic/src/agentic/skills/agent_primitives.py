@@ -343,23 +343,27 @@ class AgentMediaSkills:
             workflow_name = str(
                 context.node.inputs.get("identity_refine_workflow_name")
                 or context.plan.goal.constraints.get("identity_refine_workflow_name")
-                or "image_to_image"
+                or "krea2_turbo_img2img"
             )
-            result = self.tools.call(
-                "comfy.workflow.image_to_image",
-                {
-                    "workflow_name": workflow_name,
-                    "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
-                    "image_path": prior_frame_path,
-                    "prompt": apply_art_direction(self._resolve_prompt(context)),
-                    "negative_prompt": self._resolve_negative_prompt(context),
-                    # Continuity refinement is also the source of auto-generated
-                    # Ref2VA candidates. Preserve the requested bundle size
-                    # instead of collapsing every planned-anchor refinement to one
-                    # image before reference validation.
-                    "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
-                },
-            )
+            payload = {
+                "workflow_name": workflow_name,
+                "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
+                "image_path": prior_frame_path,
+                "prompt": apply_art_direction(self._resolve_prompt(context)),
+                "negative_prompt": self._resolve_negative_prompt(context),
+                # Continuity refinement is also the source of auto-generated
+                # Ref2VA candidates. Preserve the requested bundle size
+                # instead of collapsing every planned-anchor refinement to one
+                # image before reference validation.
+                "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
+            }
+            seed = context.node.inputs.get("seed")
+            if seed is not None:
+                payload["seed"] = int(seed)
+            denoise = context.node.inputs.get("denoise")
+            if denoise is not None:
+                payload["denoise"] = float(denoise)
+            result = self.tools.call("comfy.workflow.image_to_image", payload)
             log = "Generated a continuity keyframe from a prior frame."
         else:
             workflow_name = str(
@@ -368,18 +372,19 @@ class AgentMediaSkills:
             )
             prompt = apply_art_direction(self._resolve_prompt(context))
             negative_prompt = self._resolve_negative_prompt(context)
-            result = self.tools.call(
-                "comfy.workflow.text_to_image",
-                {
-                    "workflow_name": workflow_name,
-                    "prompt": prompt,
-                    "negative_prompt": negative_prompt,
-                    "width": int(context.node.inputs.get("width", 1024)),
-                    "height": int(context.node.inputs.get("height", 1024)),
-                    "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
-                    "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
-                },
-            )
+            payload = {
+                "workflow_name": workflow_name,
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "width": int(context.node.inputs.get("width", 1024)),
+                "height": int(context.node.inputs.get("height", 1024)),
+                "image_count": max(1, int(context.node.inputs.get("image_count", 1))),
+                "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "segment_keyframe")),
+            }
+            seed = context.node.inputs.get("seed")
+            if seed is not None:
+                payload["seed"] = int(seed)
+            result = self.tools.call("comfy.workflow.text_to_image", payload)
             log = "Generated keyframe candidates."
         generated_paths = self._output_paths(result)
         result = dict(result)

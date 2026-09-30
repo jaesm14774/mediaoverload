@@ -246,6 +246,9 @@ class LongVideoSkills:
         news_context = context.plan.goal.constraints.get("news_context") or {}
         if not isinstance(news_context, dict):
             raise RuntimeError("Native H3 news_context must be a mapping")
+        render_mode = str(context.node.inputs.get("render_mode") or "").strip()
+        if render_mode:
+            storyboard["render_mode"] = render_mode
         storyboard, story_payload = self.story_service.resolve(
             storyboard,
             character=selected_character,
@@ -257,9 +260,6 @@ class LongVideoSkills:
             arc_guidance=arc_guidance,
             reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
         )
-        render_mode = str(context.node.inputs.get("render_mode") or "").strip()
-        if render_mode:
-            storyboard["render_mode"] = render_mode
         prompt = format_native_h3_prompt(
             storyboard,
             style=style,
@@ -267,6 +267,14 @@ class LongVideoSkills:
         )
         opening_prompt = str(storyboard.get("opening_keyframe_prompt") or prompt).strip()
         ending_prompt = str(storyboard.get("ending_keyframe_prompt") or prompt).strip()
+        if render_mode == "first_last_frame_to_video":
+            ending_prompt = (
+                f"{ending_prompt}\n"
+                "This is the terminal image of the exact same shot as the supplied opening image. "
+                "Preserve the same character identity and count, silhouette, costume, prop count, setting, "
+                "camera axis, framing, perspective, paper texture, ink line weight, and color palette. "
+                "Show only the described final action state and its readable reaction; do not redesign the scene."
+            )
         negative_prompt = str(storyboard.get("negative_prompt") or "").strip()
         return SkillResult(
             status="success",
@@ -547,6 +555,8 @@ class LongVideoSkills:
                 or default_model_profile
             ),
         }
+        if context.node.inputs.get("seed") is not None:
+            payload["seed"] = int(context.node.inputs["seed"])
         if use_last_frame:
             payload["last_image_path"] = last_frame
         result = self.tools.call("comfy.workflow.image_to_video", payload)

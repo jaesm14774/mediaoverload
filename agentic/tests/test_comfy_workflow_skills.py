@@ -12,7 +12,7 @@ from agentic.skills.comfy_workflow_skills import ComfyWorkflowSkills
 
 class ComfyWorkflowSkillsTests(unittest.TestCase):
     def test_user_given_i2v_image_prompt_when_render_bundle_is_built_then_no_action_lock_is_added(self) -> None:
-        """User: Given an I2V opening prompt, When the image render bundle is built, Then its wording is passed through unchanged."""
+        """User: Given an I2V opening prompt, When the shared art direction is applied, Then its wording stays intact without an action lock."""
         plan = ExecutionPlan(
             goal=GoalRequest(
                 prompt="full temporal gag prompt",
@@ -38,7 +38,7 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
 
         bundle = ComfyImageSkills._resolve_prompt_bundle(SkillContext(plan=plan, node=node, state=state))
 
-        self.assertEqual(bundle["prompt"], "single opening frame with one hero and one prop")
+        self.assertTrue(bundle["prompt"].startswith("single opening frame with one hero and one prop"))
         self.assertNotIn("Opening action lock", bundle["prompt"])
         self.assertEqual(bundle["negative_prompt"], "duplicate, text")
 

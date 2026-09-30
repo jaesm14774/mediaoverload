@@ -72,9 +72,15 @@ def compose_minimax_h3_prompt(
     identity = subject_reference(character, context)
     mode = clean_prompt_text(render_mode).lower()
     if prior_frame or mode in {"image_to_video", "i2v", "first_last_frame_to_video", "fl2va"}:
-        input_relation = "Input relation: begin from the supplied first frame and follow the requested motion."
+        input_relation = "Input relation: begin from the supplied first frame and follow the requested motion"
         if mode in {"first_last_frame_to_video", "fl2va"}:
-            input_relation += " Follow the supplied last frame where one is provided."
+            input_relation = (
+                "Input relation: begin from the supplied first frame and make the requested action visibly cause "
+                "the supplied last-frame state. Preserve character identity and count, screen direction, setting, "
+                "props, drawing style, palette, framing, and camera axis unless the shot progression calls for a "
+                "clear change. Make the physical cause, surprise/payoff, and character reaction legible; land on "
+                "the supplied last frame and hold the final reveal for about half a second"
+            )
     else:
         input_relation = "Input relation: generate from the supplied text brief."
     prompt_parts = [
