@@ -545,6 +545,9 @@ class LLMPromptEngine:
             f"Duration seconds: {int(duration_seconds)}",
             f"Creative brief: {safe_creative_brief}",
         ]
+        render_mode = str(base_storyboard.get("render_mode") or "").strip()
+        if render_mode:
+            prompt_sections.append(f"Render mode: {render_mode}")
         if formatted_arc_guidance:
             prompt_sections.append(formatted_arc_guidance)
         prompt_sections.extend(
@@ -564,8 +567,10 @@ class LLMPromptEngine:
                     if has_news_source
                     else "Follow the user's creative brief."
                 ),
-                "Opening and ending keyframe prompts are useful when the workflow supplies those frames; describe the actual visual state if you provide them.",
-                "If useful, return any number of visual moments. Their titles, actions, camera directions, and timing details are optional.",
+                "Return 3 to 5 time-ordered native_shots. Give each a concise title, visible action, physical cause, visible effect or state change, and camera direction; add audio_direction when it improves the joke or reveal. Do not leave shot action and causal links optional.",
+                "Shape the clip as a silent-readable hook, an escalating complication or setback, a physical reversal or visual reveal, and a payoff reaction. Keep each beat simple enough to read on a phone and leave the final payoff clearly held.",
+                "When the render mode uses first and last frame anchors, make both keyframe prompts depict the same continuous scene: keep the cast, character scale, camera axis, composition, setting, palette, linework, and props consistent. The opening should pose one visible question; the ending should show the physical answer and reaction. Use the ordered shots to describe the bridge between them.",
+                "Do not introduce extra characters, props, or locations unless a beat explicitly needs them. Keep the selected protagonist recognizable and the event causally connected; do not replace a concrete visual payoff with unrelated montage.",
                 "Return one JSON object, either a story object or an object with a story key. Do not return markdown or explanations.",
                 "Use character details as references while following the requested scene and action.",
             ]

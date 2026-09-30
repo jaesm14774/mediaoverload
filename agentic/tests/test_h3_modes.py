@@ -82,18 +82,26 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(render.inputs["length"], 362)
         story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
         self.assertEqual(story_prompt.inputs["render_mode"], "first_last_frame_to_video")
+        ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
+        self.assertTrue(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_15s_fl2va_i2v")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
 
-    def test_fl2va_review_builds_six_independent_ending_candidates(self) -> None:
+    def test_fl2va_review_builds_six_opening_conditioned_ending_candidates(self) -> None:
+        """User: Given FL2VA needs six reviewed endings, When the plan is built, Then each ending refines the opening before review."""
         plan = self._plan("native_h3_fl2va_story")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
         ending_review = next(node for node in plan.nodes if node.node_id == "native-ending-review")
         speed_nodes = [node for node in plan.nodes if node.node_id == "native-h3-speed"]
 
         self.assertEqual(ending.inputs["image_count"], 6)
-        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertTrue(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
+        self.assertTrue(
+            any(node.node_id == "native-ending-image-refine-asset-check" for node in plan.nodes)
+        )
         self.assertEqual(ending.inputs["prompt_key"], "ending_keyframe_prompt")
         self.assertTrue(ending_review.inputs["review_all_candidates"])
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")

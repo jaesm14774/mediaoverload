@@ -544,6 +544,23 @@ class TaskPlanner:
             pre_video_review and pre_video_requires_human
         )
         use_last_frame = bool(goal.constraints.get("native_h3_use_last_frame", False))
+        frame_pair_strategy = str(
+            goal.constraints.get("native_h3_frame_pair_strategy")
+            or "opening_conditioned_image_to_image"
+        ).strip()
+        allowed_frame_pair_strategies = {
+            "independent_text_to_image",
+            "opening_conditioned_image_to_image",
+        }
+        if use_last_frame and frame_pair_strategy not in allowed_frame_pair_strategies:
+            raise ValueError(
+                "native_h3_frame_pair_strategy must be independent_text_to_image or opening_conditioned_image_to_image"
+            )
+        experiment_seed = goal.constraints.get("native_h3_experiment_seed")
+        if experiment_seed is not None:
+            experiment_seed = int(experiment_seed)
+            if experiment_seed < 0 or experiment_seed > (2**64) - 3:
+                raise ValueError("native_h3_experiment_seed must allow three non-negative 64-bit seeds")
         if keyframe_candidate_count > 1 and not require_human_review and not stage_probe_auto_select:
             raise ValueError(
                 "Native H3 multiple keyframe candidates require require_human_review=true; refusing to select one automatically."
@@ -556,6 +573,16 @@ class TaskPlanner:
         reference_node = self._reference_video_analysis_node(goal)
         story_prompt_dependencies = [reference_node.node_id] if reference_node else []
 
+        opening_inputs = {
+            "workflow_name": image_manifest.name,
+            "prompt_key": "opening_keyframe_prompt",
+            "width": width,
+            "height": height,
+            "image_count": keyframe_candidate_count,
+            "suffix": "native_h3_opening",
+        }
+        if experiment_seed is not None:
+            opening_inputs["seed"] = experiment_seed
         nodes = [
             *([reference_node] if reference_node else []),
             ExecutionNode(
@@ -602,14 +629,7 @@ class TaskPlanner:
             ExecutionNode(
                 node_id="native-opening-keyframe",
                 skill_name="media.image.generate_keyframe",
-                inputs={
-                    "workflow_name": image_manifest.name,
-                    "prompt_key": "opening_keyframe_prompt",
-                    "width": width,
-                    "height": height,
-                    "image_count": keyframe_candidate_count,
-                    "suffix": "native_h3_opening",
-                },
+                inputs=opening_inputs,
                 depends_on=["native-story-prompt", "native-image-asset-check"],
                 tags=["render", "image", "continuity", "native-h3"],
                 tool_name="comfy.workflow.text_to_image",
@@ -640,20 +660,47 @@ class TaskPlanner:
             opening_source_node = opening_review_node
         ending_source_node = ""
         if use_last_frame:
+            refine_workflow_name = str(
+                goal.constraints.get("identity_refine_workflow_name") or "krea2_turbo_img2img"
+            ).strip()
+            use_opening_reference = frame_pair_strategy == "opening_conditioned_image_to_image"
+            ending_dependencies = [opening_source_node, "native-story-prompt", "native-image-asset-check"]
+            if use_opening_reference:
+                nodes.append(
+                    ExecutionNode(
+                        node_id="native-ending-image-refine-asset-check",
+                        skill_name="media.ensure_workflow",
+                        inputs={
+                            "workflow_name": refine_workflow_name,
+                            "auto_download": goal.auto_download_assets,
+                        },
+                        depends_on=["native-story-prompt"],
+                        tags=["assets", "image", "continuity", "native-h3"],
+                        tool_name="asset.ensure_workflow_ready",
+                        stage="assets",
+                    )
+                )
+                ending_dependencies.append("native-ending-image-refine-asset-check")
+            ending_inputs = {
+                "workflow_name": image_manifest.name,
+                "prompt_key": "ending_keyframe_prompt",
+                "use_prior_frame": use_opening_reference,
+                "identity_refine_workflow_name": refine_workflow_name,
+                "width": width,
+                "height": height,
+                "image_count": keyframe_candidate_count,
+                "suffix": "native_h3_ending",
+            }
+            if use_opening_reference:
+                ending_inputs["denoise"] = 0.5
+            if experiment_seed is not None:
+                ending_inputs["seed"] = experiment_seed + 1
             nodes.append(
                 ExecutionNode(
                     node_id="native-ending-keyframe",
                     skill_name="media.image.generate_keyframe",
-                    inputs={
-                        "workflow_name": image_manifest.name,
-                        "prompt_key": "ending_keyframe_prompt",
-                        "use_prior_frame": False,
-                        "width": width,
-                        "height": height,
-                        "image_count": keyframe_candidate_count,
-                        "suffix": "native_h3_ending",
-                    },
-                    depends_on=[opening_source_node, "native-story-prompt", "native-image-asset-check"],
+                    inputs=ending_inputs,
+                    depends_on=ending_dependencies,
                     tags=["render", "image", "last-frame", "native-h3"],
                     tool_name="comfy.workflow.text_to_image",
                     stage="render",
@@ -696,6 +743,19 @@ class TaskPlanner:
             "height": height,
             "max_regenerations": 0,
         }
+        render_inputs = {
+            "workflow_name": video_manifest.name,
+            "width": width,
+            "height": height,
+            "length": length,
+            "steps": steps,
+            "video_count": video_count,
+            "model_profile": model_profile,
+            "use_last_frame": use_last_frame,
+            "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
+        }
+        if experiment_seed is not None:
+            render_inputs["seed"] = experiment_seed + 2
         nodes.extend(
             [
                 ExecutionNode(
@@ -709,17 +769,7 @@ class TaskPlanner:
                 ExecutionNode(
                     node_id="native-h3-render",
                     skill_name="longvideo.render_native_h3",
-                    inputs={
-                        "workflow_name": video_manifest.name,
-                        "width": width,
-                        "height": height,
-                        "length": length,
-                        "steps": steps,
-                        "video_count": video_count,
-                        "model_profile": model_profile,
-                        "use_last_frame": use_last_frame,
-                        "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
-                    },
+                    inputs=render_inputs,
                     depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-source-check"],
                     tags=["render", "video", "native-h3"],
                     tool_name="comfy.workflow.image_to_video",
@@ -748,7 +798,7 @@ class TaskPlanner:
             "selected_workflow": video_manifest.name,
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "use_last_frame": use_last_frame, "lowvram_preview": lowvram_fl2va},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "use_last_frame": use_last_frame, "frame_pair_strategy": frame_pair_strategy if use_last_frame else "", "experiment_seed": experiment_seed, "lowvram_preview": lowvram_fl2va},
             **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
             "graph_overview": [node.node_id for node in nodes],
         }

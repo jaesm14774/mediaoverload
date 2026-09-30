@@ -108,7 +108,65 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(plan.metadata["native_h3"]["use_last_frame"])
         self.assertIn("native_h3", plan.metadata)
 
+    def test_user_gets_reproducible_opening_conditioned_ending_for_fl2va(self) -> None:
+        """User Given the same FL2VA story and seed When the planner builds either A/B arm Then only the treatment reuses the opening image for its ending anchor."""
+        planner, _runner, _memory = build_runtime(
+            self.repo_root,
+            output_root=self.repo_root / ".tmp-tests" / "native-h3-paired-anchor-plan",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        common_constraints = {
+            "character": "Kirby",
+            "native_h3_use_last_frame": True,
+            "native_h3_keyframe_candidate_count": 1,
+            "native_h3_keyframe_workflow_name": "krea2_turbo",
+            "workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
+            "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
+            "require_human_review": False,
+            "enable_review_loop": False,
+            "native_h3_experiment_seed": 730927,
+        }
+
+        def make_plan(strategy: str):
+            goal = planner.create_goal(
+                prompt="Kirby draws one small star that comes alive and surprises him.",
+                media_type="native_h3_fl2va_story",
+                duration_seconds=15,
+                style="hand-drawn paper storybook animation",
+                auto_download_assets=False,
+                constraints={**common_constraints, "native_h3_frame_pair_strategy": strategy},
+            )
+            return planner.build_plan(goal)
+
+        treatment = make_plan("opening_conditioned_image_to_image")
+        control = make_plan("independent_text_to_image")
+        treatment_nodes = {node.node_id: node for node in treatment.nodes}
+        control_nodes = {node.node_id: node for node in control.nodes}
+        treatment_ending = treatment_nodes["native-ending-keyframe"]
+        control_ending = control_nodes["native-ending-keyframe"]
+
+        self.assertTrue(treatment_ending.inputs["use_prior_frame"])
+        self.assertEqual(treatment_ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
+        self.assertEqual(treatment_ending.inputs["denoise"], 0.5)
+        self.assertEqual(treatment_ending.inputs["seed"], 730928)
+        self.assertFalse(control_ending.inputs["use_prior_frame"])
+        self.assertEqual(control_ending.inputs["seed"], treatment_ending.inputs["seed"])
+        self.assertTrue(
+            any(node.node_id == "native-ending-image-refine-asset-check" for node in treatment.nodes)
+        )
+        self.assertFalse(
+            any(node.node_id == "native-ending-image-refine-asset-check" for node in control.nodes)
+        )
+        for plan in (treatment, control):
+            render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
+            opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
+            self.assertEqual(opening.inputs["seed"], 730927)
+            self.assertEqual(render.inputs["seed"], 730929)
+            self.assertTrue(render.inputs["use_last_frame"])
+
     def test_native_h3_last_frame_mode_adds_review_and_passes_both_frames(self) -> None:
+        """User Given FL2VA needs editorial review When the planner creates the ending Then it refines the opening into reviewed candidates before rendering both anchors."""
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
@@ -142,7 +200,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
         self.assertEqual(ending.inputs["image_count"], 6)
-        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertTrue(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
+        self.assertIn(
+            "native-ending-image-refine-asset-check",
+            node_ids,
+        )
         self.assertEqual(ending_review.depends_on, ["native-ending-keyframe"])
         self.assertTrue(source_check.inputs["use_last_frame"])
         self.assertTrue(source_check.inputs["preserve_ending_frame"])

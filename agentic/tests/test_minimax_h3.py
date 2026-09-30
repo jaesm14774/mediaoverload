@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile, minimax_h3_model_overrides
 from agentic.assets.registry import AssetRegistry
 from agentic.app.character_workflow import _prioritize_h3_profile
-from agentic.minimax_prompting import compose_minimax_h3_prompt, structured_visual_prompt, subject_reference
+from agentic.minimax_prompting import compose_minimax_h3_prompt, subject_reference
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.prompting import build_minimax_h3_prompt
 
@@ -172,9 +172,9 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         )
         self.assertLess(len(prompt), 7000)
         self.assertIn("integrated_multimodal_description:", prompt)
-        self.assertIn("[Shot 1 / SHOT 1 | 0-6s]", prompt)
-        self.assertIn("overall_soundscape:", prompt)
-        self.assertIn("non_diegetic_music:", prompt)
+        self.assertIn("[Shot 1 | 0-6s]", prompt)
+        self.assertLess(prompt.index("Protagonist objective:"), prompt.index("Shot progression:"))
+        self.assertLess(prompt.index("Kirby runs and catches the seed"), prompt.index("tracking shot follows the run"))
         self.assertIn("begin from the supplied first frame", prompt)
 
     def test_first_last_frame_prompt_carries_ending_condition(self) -> None:
@@ -186,7 +186,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             render_mode="first_last_frame_to_video",
         )
         self.assertIn("begin from the supplied first frame", prompt)
-        self.assertIn("Follow the supplied last frame", prompt)
+        self.assertIn("supplied last-frame state", prompt)
 
     def test_pair_prompt_lists_configured_subjects_without_interaction_rules(self) -> None:
         prompt = compose_minimax_h3_prompt(
@@ -216,18 +216,34 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertNotIn("must remain", prompt)
 
     def test_visual_prompt_has_stable_subject_action_camera_order(self) -> None:
-        prompt = structured_visual_prompt(
-            subject="Kirby",
-            scene="a flower garden",
-            action="runs toward a falling seed",
-            environment="petals scatter in the wind",
-            camera="tracking shot",
+        """User Given an H3 first/last-frame story When its prompt is composed Then action and payoff guidance precede the camera rendering details."""
+        prompt = compose_minimax_h3_prompt(
+            duration_seconds=15,
+            character="Kirby",
             style="2D anime",
-            quality="clear silhouette",
+            story_spine={
+                "premise": "a seed falls through a flower garden",
+                "objective": "Kirby tries to catch it",
+            },
+            shots=[
+                {
+                    "cause": "a flower releases a seed",
+                    "action": "Kirby runs toward the falling seed",
+                    "camera": "tracking shot",
+                    "state_change": "the seed begins to glow",
+                    "effect": "the glowing seed surprises Kirby",
+                }
+            ],
+            render_mode="fl2va",
         )
-        self.assertLess(prompt.index("Subject:"), prompt.index("Action:"))
-        self.assertLess(prompt.index("Action:"), prompt.index("Camera:"))
-        self.assertLess(prompt.index("Camera:"), prompt.index("Quality:"))
+        self.assertLess(
+            prompt.index("Kirby runs toward the falling seed"),
+            prompt.index("tracking shot"),
+        )
+        self.assertIn("supplied first frame", prompt)
+        self.assertIn("supplied last-frame state", prompt)
+        self.assertIn("physical cause", prompt)
+        self.assertIn("half a second", prompt)
 
     def test_kirby_prompt_uses_subject_reference_without_default_audio_direction(self) -> None:
         goal = GoalRequest(
@@ -242,7 +258,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             {"segment_id": "segment-1", "visual": "Kirby runs through a glowing market"},
             prior_frame="frame.png",
         )
-        self.assertIn("Character reference", result["prompt"])
+        self.assertIn("Character: Kirby", result["prompt"])
         self.assertIn("Kirby", result["prompt"])
         self.assertIn("supplied first frame", result["prompt"])
         self.assertNotIn("Audio direction", result["prompt"])

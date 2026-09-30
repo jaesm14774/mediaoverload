@@ -5,7 +5,7 @@ PAPER_STORYBOOK_ART_DIRECTION = (
     "Default illustration art direction: a refined, atmospheric storybook image on warm ivory paper "
     "with subtle handmade fiber and pigment texture; hand-painted watercolor and gouache with delicate "
     "ink or pencil edges; layered foreground, middle distance, and background; nuanced natural light and "
-    "soft shadows; a restrained yet clearly chromatic palette with considered blue or teal, leaf green, "
+    "soft shadows; a restrained yet clearly chromatic palette with considered cool blues, warm neutrals, "
     "and muted coral or ochre accents. Build one clear focal path and let generous negative space retain "
     "faint scene texture, light, shadow, or environmental traces so it feels intentional rather than blank. "
     "Keep fine material detail and an original, quietly poetic mood. Preserve the requested subject and "
