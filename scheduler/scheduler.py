@@ -47,7 +47,6 @@ class SchedulerConfig:
     config_path: Path | None
     prompt: str
     news_driven: bool
-    news_history_path: str | None
     run_immediately: bool
     dry_run_publish: bool
     publish_mode: str
@@ -65,7 +64,6 @@ class SchedulerConfig:
     duration_seconds: int | None
     sleep_seconds: int
     random_seed: int | None
-    routing_history_path: str | None = None
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:
@@ -110,12 +108,11 @@ def load_scheduler_config() -> SchedulerConfig:
     character = str(os.getenv("SCHEDULER_CHARACTER", "")).strip() or None
     raw_config_path = str(os.getenv("SCHEDULER_CONFIG", "")).strip() or None
     mode = str(os.getenv("SCHEDULER_MODE", "interval")).strip().lower() or "interval"
-    interval_hours = int(os.getenv("SCHEDULER_INTERVAL_HOURS", "24"))
+    interval_hours = int(os.getenv("SCHEDULER_INTERVAL_HOURS", "4"))
     daily_time = str(os.getenv("SCHEDULER_DAILY_TIME", "09:00")).strip() or "09:00"
     comfy_port_raw = str(os.getenv("SCHEDULER_COMFY_PORT", "")).strip()
     duration_raw = str(os.getenv("SCHEDULER_DURATION_SECONDS", "")).strip()
     random_seed_raw = str(os.getenv("SCHEDULER_RANDOM_SEED", "")).strip()
-    routing_history_path = str(os.getenv("SCHEDULER_ROUTING_HISTORY_PATH", "")).strip() or None
     return SchedulerConfig(
         enabled=_parse_bool(os.getenv("SCHEDULER_ENABLED"), default=True),
         mode=mode,
@@ -125,7 +122,6 @@ def load_scheduler_config() -> SchedulerConfig:
         config_path=_resolve_character_config(character, raw_config_path),
         prompt=str(os.getenv("SCHEDULER_PROMPT", "")).strip(),
         news_driven=_parse_bool(os.getenv("SCHEDULER_NEWS_DRIVEN"), default=True),
-        news_history_path=str(os.getenv("SCHEDULER_NEWS_HISTORY_PATH", "")).strip() or None,
         run_immediately=_parse_bool(os.getenv("SCHEDULER_RUN_IMMEDIATELY"), default=False),
         dry_run_publish=_parse_bool(os.getenv("SCHEDULER_DRY_RUN_PUBLISH"), default=False),
         publish_mode=str(os.getenv("SCHEDULER_PUBLISH_MODE", "")).strip().lower(),
@@ -143,7 +139,6 @@ def load_scheduler_config() -> SchedulerConfig:
         duration_seconds=int(duration_raw) if duration_raw else None,
         sleep_seconds=max(5, int(os.getenv("SCHEDULER_SLEEP_SECONDS", "30"))),
         random_seed=int(random_seed_raw) if random_seed_raw else None,
-        routing_history_path=routing_history_path,
     )
 
 
@@ -174,11 +169,6 @@ def run_scheduled_job(
             duration_seconds=config.duration_seconds,
             output_dir=config.output_dir,
             news_driven=config.news_driven,
-            news_history_path=config.news_history_path,
-            routing_history_path=(
-                config.routing_history_path
-                or str(REPO_ROOT / "agentic" / "state" / "routing_selection" / f"{config.config_path.stem}.json")
-            ),
             rng=rng,
         ),
         review=CharacterReviewOptions(
@@ -189,6 +179,7 @@ def run_scheduled_job(
             enable_review_loop=config.enable_review_loop,
             review_notes=config.review_notes,
             no_review=config.no_review,
+            allow_continue=True,
         ),
         runtime=CharacterRuntimeOptions(
             comfy_host=config.comfy_host,
@@ -197,14 +188,21 @@ def run_scheduled_job(
             auto_download_assets=config.auto_download_assets,
         ),
     )
-    result = workflow_runner(request)
-    LOGGER.info(
-        "scheduler.result | status=%s | strategy=%s | publish=%s",
-        result.get("status"),
-        result.get("source_generation_type"),
-        ((result.get("publish") or {}).get("result") or {}).get("status", ""),
-    )
-    return result
+    while True:
+        result = workflow_runner(request)
+        LOGGER.info(
+            "scheduler.result | status=%s | strategy=%s | publish=%s",
+            result.get("status"),
+            result.get("source_generation_type"),
+            ((result.get("publish") or {}).get("result") or {}).get("status", ""),
+        )
+        if str(result.get("status") or "").strip().lower() != "continue_requested":
+            return result
+        LOGGER.info(
+            "scheduler.continue | previous_run_id=%s | config=%s",
+            result.get("run_id", ""),
+            config.config_path,
+        )
 
 
 def _run_scheduled_job_safe(

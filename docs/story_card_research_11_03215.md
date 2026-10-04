@@ -67,7 +67,7 @@
 
 現行契約要求「來源事實 → 人的需要與代價 → 適合的文風 → 理解的推進」。不強制虛構人物、誤會或善意反轉，也不禁止有根據的結論。新聞名稱、地點和職業可以出現；不得為了增加情緒編造來源沒有交代的事實。
 
-預設自動決定最少頁數：50 字內一張，超過 50 字才拆成 2–6 張，每張最多 50 字。先以 `editorial_brief` 選定來源細節、人性看點及理由，再用同一來源直接寫成完整字卡。成品保留 `editorial_brief`、`source_context` 與 `writing_process.plan`；recorder 保存兩次實際輸入輸出。程式只驗來源引用和格式邊界，情感品質由人讀稿判斷；常見 AI 句型只作修稿參考。
+預設自動決定最少頁數：40 字內一張，超過 40 字才拆成 2–6 張，每張最多 40 字。先以 `editorial_brief` 選定來源細節、人性看點及理由，再用同一來源直接寫成完整字卡。成品保留 `editorial_brief`、`source_context` 與 `writing_process.plan`；recorder 保存兩次實際輸入輸出。程式只驗來源引用和格式邊界，情感品質由人讀稿判斷；常見 AI 句型只作修稿參考。
 
 新聞選題現在會把資料庫已有的 `content` 與 `article_url` 帶入來源，不再只取標題和關鍵字。有摘要、正文或網址時保留相應欄位；正文按已提供的節錄使用，網址本身不代表已讀全文。只有標題時仍限制為標題範圍的反思。已刪除與新聞無關的家庭故事 fallback，模型失敗會回報失敗。
 
@@ -94,6 +94,6 @@
 | 第一張背景 | `image.render` | 用 `anchor_prompt` 生成共同視覺錨點 |
 | 畫風延續 | `media.story_card.backgrounds` | 對每頁的英文背景提示做 img2img，並檢查 seed 與 SHA-256 不重複 |
 | 文字成品 | `media.story_card.compose` | 將 exact text 疊到背景，寫出 summary 與 text manifest |
-| 路由 | `story_card` / `story_card_v1` | 可用 `--generation-type story_card` 固定執行，也可透過角色設定的 `generation_type_weights.story_card` 進入加權 shuffle-bag |
+| 路由 | `story_card` / `story_card_v1` | 可用 `--generation-type story_card` 固定執行，也可透過角色設定的 `generation_type_weights.story_card` 依權重隨機抽選 |
 
 這條路徑的「完成」必須以 `story_card_summary.json`、所有頁面 PNG、文字 manifest、背景輸出與實際 ComfyUI receipt 一起判斷；只有設定或 plan 通過，不代表已完成真實出圖。

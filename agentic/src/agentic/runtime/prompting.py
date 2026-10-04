@@ -39,19 +39,28 @@ def selected_role_description(goal: GoalRequest) -> str:
 def include_role_description(prompt: object, goal: GoalRequest) -> str:
     prompt_text = str(prompt or "").strip()
     role_description = selected_role_description(goal)
-    identity_instruction = (
-        f"Selected character names and authoritative role descriptions: {role_description}. "
-        "Write the selected character names explicitly and preserve their defining features, "
-        "even if generic appearance wording conflicts."
+    visual_identity = "; ".join(
+        _visual_identity_phrase(identity)
+        for identity in role_description.split("; ")
+        if identity.strip()
     )
-    if not role_description or identity_instruction.casefold() in prompt_text.casefold():
+    if not visual_identity or visual_identity.casefold() in prompt_text.casefold():
         return prompt_text
-    return " ".join(
-        (
-            identity_instruction,
-            prompt_text,
-        )
-    ).strip()
+    return "; ".join(part for part in (visual_identity, prompt_text) if part)
+
+
+def _visual_identity_phrase(identity: str) -> str:
+    name, separator, description = identity.partition(": ")
+    if not separator:
+        return identity.strip()
+    description = re.sub(
+        rf"^{re.escape(name)}\s+(?:is|are)\s+",
+        "",
+        description.strip(),
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return f"{name}, {description}" if description else name
 
 
 LONG_VIDEO_SYSTEM_PROMPT = """
@@ -162,7 +171,9 @@ def build_game_sprite_reference_context(
         selected = chooser.sample(references, sample_limit)
     else:
         selected = []
-    lines = ["Optional inspiration notes:"]
+    lines = [
+        "Optional inspiration notes (use for visual timing only; do not assign or register these actions as character abilities):"
+    ]
     lines.extend(f"- {item['source']}: {item['inspiration']}" for item in selected)
     return {
         "pack_version": str(strategy_context.get("reference_pack_version") or "strategy_context"),
@@ -459,6 +470,10 @@ def build_autonomous_scene_prompt(
     news_grounding_required: bool = False,
 ) -> dict[str, str]:
     normalized_news = dict(news_context or {})
+    if news_grounding_required and not any(
+        str(normalized_news.get(key) or "").strip() for key in ("title", "keyword")
+    ):
+        raise ValueError("A news-grounded scene requires an identifying headline or keyword.")
     news_anchor = news_grounding_anchor_clause(normalized_news) if news_grounding_required else ""
     prompt = ", ".join(
         part
@@ -590,7 +605,11 @@ def news_grounding_anchor_clause(news_context: dict[str, Any]) -> str:
     )
     if not source:
         return ""
-    return f"News source context: {source}. Keep factual claims within the supplied source."
+    return (
+        f"News source context: {source}. Keep factual claims within the supplied source. "
+        "Treat the headline as planning context, never as text to draw. Never render readable headlines, "
+        "article text, logos, or unsupported named people."
+    )
 
 
 def _segment_motif_clause(motif_pool: list[str], index: int) -> str:

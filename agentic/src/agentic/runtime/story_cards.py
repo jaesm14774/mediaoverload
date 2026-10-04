@@ -24,8 +24,8 @@ from agentic.runtime.contracts import GoalRequest
 STORY_CARD_PAGE_COUNT_DEFAULT = "auto"
 STORY_CARD_PAGE_COUNT_MIN = 1
 STORY_CARD_PAGE_COUNT_MAX = 6
-STORY_CARD_MIN_TEXT_CHARS = 36
-STORY_CARD_MAX_TEXT_CHARS = 70
+STORY_CARD_MIN_TEXT_CHARS = 16
+STORY_CARD_MAX_TEXT_CHARS = 40
 # A single complete thought may still fit on one page without being forced to
 # meet the multi-page density floor.
 STORY_CARD_MAX_SINGLE_PAGE_TEXT_CHARS = STORY_CARD_MAX_TEXT_CHARS
@@ -33,13 +33,18 @@ STORY_CARD_MIN_CANVAS_DIMENSION = 320
 STORY_CARD_MAX_CANVAS_DIMENSION = 4096
 STORY_CARD_DEFAULT_WIDTH = 1080
 STORY_CARD_DEFAULT_HEIGHT = 1350
-STORY_CARD_MAX_TITLE_CHARS = 24
+STORY_CARD_MAX_TITLE_CHARS = 18
 STORY_CARD_LANGUAGE_MODES = (
     "emotion_first",
     "plain_explainer",
     "actionable_warning",
 )
-STORY_CARD_BACKGROUND_STYLE = "Leave a clear area for the overlaid story text."
+STORY_CARD_BACKGROUND_STYLE = (
+    "text-free illustration; no lettering, words, numbers, handwriting, captions, labels, signs, "
+    "logos, watermarks, screens, monitors, displays, interfaces, documents, or typography-like marks; "
+    "all surfaces unmarked; upper half is pale, quiet, and low-detail; place characters and the key "
+    "action in the lower third; continuous environmental scene with clear negative space"
+)
 
 
 def new_story_card_visual_seed() -> int:
@@ -143,13 +148,13 @@ evidence_anchor 只是內部 grounding metadata，不是可貼上的文案；不
 不要補出誰加班、失業、受傷、被迫離開，或把特定金流直接推成讀者資產的來源。
 若提要有跳躍，就用同一來源修正角度，不能靠「也許」保留臆測。
 
-每頁最多70字（含標點與換行）。多頁時每頁至少36字，目標落在42–65字；不要把兩個有關聯的完整句子拆成過短卡片。
-  只有在語意真的完整時才使用一頁；只要完整看點需要超過70字，就按意思拆成最少的多頁，不要為了單張而刪掉理由，也不得用氣氛句湊字數。
-  不要刻意把完整論點縮成35字；如果事件、理由和理解的轉變需要多一步，就使用2–6頁。
+每頁最多40字（含標點與換行），多頁時每頁至少16字，正文目標22–32字；不要為了接近上限塞滿文字。
+  一頁只放一個完整的小想法，句子太長就先濃縮，再按意思拆成最少的多頁；不可截斷詞語或句子，也不得用氣氛句湊字數。
+  不要把兩個有關聯的完整句子拆成過短卡片；如果事件、理由和理解的轉變需要多一步，就使用2–6頁。
   有正文節錄時，若要交代「看見的新聞 → 重新理解 → 留下的感受」，通常應自然使用2–4頁，
   不要把三步驟壓成一段摘要。
   每頁都要有完整的小步驟，句尾使用完整標點，不可在字數上限處截斷詞語或句子；最後一頁把話說完。role 使用英文。
-短標題最多24字，像人會說的話。背景整體風格由程式處理；每頁可選填一條英文 visual_anchor，當作背景畫面的參考提示。沒有合適提示時省略即可，不影響字卡生成；最後的畫面由 Discord 人工檢視。
+短標題最多18字，像人會說的話。visual_anchor 只描述無字的場景與動作；不要安排螢幕、介面、文件、紙張、標示牌或其他文字載體，數位事件以未標記設備和抽象光線呈現。背景整體風格由程式處理；最後的畫面由 Discord 人工檢視。
 交稿前默讀一次：來源連得上嗎？理由在正文嗎？有無捏造、病句、未完句或泛用口號？直接修好再交稿。
 不使用 Markdown、hashtag、收藏分享口號，不堆金句，不反覆寫「不是……而是……」。
 若 language_mode 是 plain_explainer：先用10歲小孩子聽得懂的短句講「這是什麼」和「為什麼會影響人」，
@@ -227,12 +232,13 @@ def story_card_character_visual(
     }:
         raise ValueError("Story-card requires a resolved selected character")
     profile = profile if isinstance(profile, dict) else {}
-    keywords = str(profile.get("keywords") or "").strip()
     role_description = str(profile.get("role_description") or "").strip()
-    detail = keywords or role_description
+    keywords = str(profile.get("keywords") or "").strip()
+    detail = role_description or keywords
     if detail and detail.isascii():
-        return f"the selected {name}, {detail}"
-    return f"the selected {name} character"
+        detail = re.sub(rf"^{re.escape(name)}\s+(?:is|are)\s+", "", detail, count=1, flags=re.IGNORECASE)
+        return f"{name}, {detail}"
+    return f"{name} character"
 
 
 def _ascii_visual_text(value: Any, default: str = "") -> str:
@@ -278,9 +284,9 @@ def story_card_anchor_prompt(
     return "; ".join(
         part
         for part in (
+            STORY_CARD_BACKGROUND_STYLE,
             story_card_character_visual(character, profile),
             scene_style,
-            STORY_CARD_BACKGROUND_STYLE,
         )
         if part
     )
@@ -293,21 +299,22 @@ def story_card_page_prompt(
     *,
     visual_anchor: str = "",
 ) -> str:
-    """Pass the page's visual cue through with the character reference."""
+    """Prioritize the page scene, then keep the selected character and style."""
 
     config = visual_config if isinstance(visual_config, dict) else {}
     scene_style = _ascii_visual_text(config.get("scene_style"))
     visual = safe_news_visual_anchor(visual_anchor)
+    page_scene = visual
     cast = _ascii_visual_list(config.get("supporting_cast"))
-    companion = "Optional supporting cast references: " + "; ".join(cast) if cast else ""
+    companion = "; ".join(cast)
     return "; ".join(
         part
         for part in (
+            STORY_CARD_BACKGROUND_STYLE,
+            page_scene,
             story_card_character_visual(character, profile),
             scene_style,
-            visual,
             companion,
-            STORY_CARD_BACKGROUND_STYLE,
         )
         if part
     )
@@ -529,11 +536,16 @@ def _fit_body(
     max_width: int,
     max_height: int,
     base_size: int = 48,
+    min_size: int = 28,
+    size_step: int = 2,
 ) -> tuple[ImageFont.FreeTypeFont, list[str], int]:
-    for size in range(base_size, 27, -2):
+    base_size = max(1, int(base_size))
+    min_size = max(1, min(base_size, int(min_size)))
+    size_step = max(1, int(size_step))
+    for size in range(base_size, min_size - 1, -size_step):
         font = _font(font_path, size)
         lines = _wrap_text(draw, text, font, max_width)
-        spacing = max(12, round(size * 0.46))
+        spacing = max(6, round(size * 0.46))
         line_height = size + spacing
         ink_bottom = max(
             index * line_height + draw.textbbox((0, 0), line, font=font)[3]
@@ -549,13 +561,19 @@ def _fit_title(
     text: str,
     font_path: Path,
     max_width: int,
+    base_size: int = 82,
+    min_size: int = 40,
+    size_step: int = 2,
 ) -> tuple[ImageFont.FreeTypeFont, list[str]]:
-    for size in range(82, 39, -2):
+    base_size = max(1, int(base_size))
+    min_size = max(1, min(base_size, int(min_size)))
+    size_step = max(1, int(size_step))
+    for size in range(base_size, min_size - 1, -size_step):
         font = _font(font_path, size)
         lines = _wrap_text(draw, text, font, max_width)
         if len(lines) <= 2 and max(_text_width(draw, line, font) for line in lines) <= max_width:
             return font, lines
-    font = _font(font_path, 40)
+    font = _font(font_path, min_size)
     return font, _wrap_text(draw, text, font, max_width)
 
 
@@ -597,6 +615,7 @@ def render_story_card_images(
         raise ValueError("story-card overlay_opacity must be between 0 and 255")
     width = resolve_story_card_canvas_dimension(width, STORY_CARD_DEFAULT_WIDTH, name="story_card_width")
     height = resolve_story_card_canvas_dimension(height, STORY_CARD_DEFAULT_HEIGHT, name="story_card_height")
+    scale = min(1.0, width / STORY_CARD_DEFAULT_WIDTH, height / STORY_CARD_DEFAULT_HEIGHT)
     resolved_font = resolve_story_card_font(font_path)
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -613,8 +632,8 @@ def render_story_card_images(
         # payoff so the character and prop keep their color and depth.
         veil = Image.new("RGBA", background.size, (0, 0, 0, 0))
         veil_draw = ImageDraw.Draw(veil)
-        fade_start = int(height * 0.60)
-        fade_end = int(height * 0.84)
+        fade_start = int(height * 0.56)
+        fade_end = int(height * 0.74)
         for y in range(fade_end + 1):
             if y <= fade_start:
                 alpha = int(overlay_opacity)
@@ -623,19 +642,28 @@ def render_story_card_images(
             veil_draw.line((0, y, width, y), fill=(249, 244, 236, alpha))
         canvas = Image.alpha_composite(background, veil)
         draw = ImageDraw.Draw(canvas)
-        small_font = _font(resolved_font, 22)
-        title_font, title_lines = _fit_title(draw, normalized["title"], resolved_font, int(width * 0.76))
+        small_font = _font(resolved_font, max(10, round(22 * scale)))
+        title_font, title_lines = _fit_title(
+            draw,
+            normalized["title"],
+            resolved_font,
+            int(width * 0.76),
+            base_size=max(20, round(82 * scale)),
+            min_size=max(16, round(40 * scale)),
+            size_step=max(1, round(2 * scale)),
+        )
         draw.text((int(width * 0.12), int(height * 0.08)), brand_label, font=small_font, fill=muted)
         line_y = int(height * 0.125)
-        draw.line((int(width * 0.12), line_y, int(width * 0.42), line_y), fill=muted, width=2)
+        rule_width = max(1, round(2 * scale))
+        draw.line((int(width * 0.12), line_y, int(width * 0.42), line_y), fill=muted, width=rule_width)
         draw.ellipse((int(width * 0.45), line_y - 5, int(width * 0.45) + 10, line_y + 5), fill=muted)
-        draw.line((int(width * 0.48), line_y, int(width * 0.88), line_y), fill=muted, width=2)
+        draw.line((int(width * 0.48), line_y, int(width * 0.88), line_y), fill=muted, width=rule_width)
 
         if index == 1:
             title_y = int(height * 0.17)
             for line in title_lines:
                 draw.text((int(width * 0.12), title_y), line, font=title_font, fill=muted)
-                title_y += int(title_font.size * 1.18)
+                title_y += max(1, round(title_font.size * 1.18))
             body_start = max(int(height * 0.31), title_y + int(height * 0.04))
         else:
             # Keep each continuation page in the same upper reading band.
@@ -649,6 +677,9 @@ def render_story_card_images(
             resolved_font,
             max_width=int(width * 0.76),
             max_height=body_end - body_start,
+            base_size=max(16, round(48 * scale)),
+            min_size=max(12, round(28 * scale)),
+            size_step=max(1, round(2 * scale)),
         )
         body_height = len(body_lines) * (body_font.size + body_spacing)
         y = body_start
@@ -656,11 +687,11 @@ def render_story_card_images(
             draw.text((int(width * 0.12), y), line, font=body_font, fill=body_color)
             y += body_font.size + body_spacing
 
-        draw.line((int(width * 0.12), footer_y, int(width * 0.88), footer_y), fill=muted, width=2)
+        draw.line((int(width * 0.12), footer_y, int(width * 0.88), footer_y), fill=muted, width=rule_width)
         page_label = f"{index:02d} / {len(pages):02d}"
         box = draw.textbbox((0, 0), page_label, font=small_font)
         page_x = (width - (box[2] - box[0])) // 2
-        draw.text((page_x, footer_y + 18), page_label, font=small_font, fill=muted)
+        draw.text((page_x, footer_y + max(8, round(18 * scale))), page_label, font=small_font, fill=muted)
 
         output_path = output_root / f"story_card_{index:02d}.png"
         canvas.convert("RGB").save(output_path)

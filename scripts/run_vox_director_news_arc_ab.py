@@ -361,8 +361,6 @@ def _run_variant(
                     preferred_generation_type="native_h3_t2v_story",
                     duration_seconds=DURATION_SECONDS,
                     output_dir=str(variant_dir),
-                    news_history_path=str(variant_dir / "news_history.json"),
-                    routing_history_path=str(variant_dir / "routing_history.json"),
                     rng=random.Random(seed),
                     seed=seed,
                     subject_mode="single",

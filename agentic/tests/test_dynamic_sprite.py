@@ -67,8 +67,9 @@ def test_game_sprite_reference_pack_is_ephemeral_inspiration_not_a_moveset() -> 
     assert context["pack_version"] == "game_sprite_action_references_v1"
     assert "crisp 2d pixel-art game asset" in context["visual_contract"].casefold()
     assert len(context["references"]) == 5
-    assert "optional inspiration only" in context["prompt_text"]
-    assert "do not assign or register abilities" in context["prompt_text"]
+    assert "optional inspiration notes" in context["prompt_text"].casefold()
+    assert "visual timing only" in context["prompt_text"].casefold()
+    assert "character abilities" in context["prompt_text"].casefold()
     assert len({item["id"] for item in context["references"]}) == 5
 
 
@@ -418,7 +419,6 @@ def test_kirby_yaml_can_weight_game_sprite_for_random_selection(tmp_path: Path) 
         preferred_generation_type=None,
         requested_duration_seconds=None,
         rng=random.Random(0),
-        routing_history_path=tmp_path / "routing.json",
     )
 
     assert result["generation_type"] == "game_sprite"

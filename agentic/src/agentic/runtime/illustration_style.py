@@ -2,14 +2,14 @@ from __future__ import annotations
 
 
 PAPER_STORYBOOK_ART_DIRECTION = (
-    "Default illustration art direction: a refined, atmospheric storybook image on warm ivory paper "
-    "with subtle handmade fiber and pigment texture; hand-painted watercolor and gouache with delicate "
-    "ink or pencil edges; layered foreground, middle distance, and background; nuanced natural light and "
-    "soft shadows; a restrained yet clearly chromatic palette with considered cool blues, warm neutrals, "
-    "and muted coral or ochre accents. Build one clear focal path and let generous negative space retain "
-    "faint scene texture, light, shadow, or environmental traces so it feels intentional rather than blank. "
-    "Keep fine material detail and an original, quietly poetic mood. Preserve the requested subject and "
-    "honor an explicitly requested different medium, palette, or isolated background."
+    "Default illustration art direction: hand-painted watercolor and gouache with tactile pigment, confident "
+    "ink contours, dimensional shadows, and a specific scene environment that grounds the characters' action. "
+    "Keep the characters and their physical interaction dominant; use a readable foreground, middle distance, "
+    "and background instead of blank paper. Match composition, color, face, and body posture to the emotion. "
+    "For comedy, use vivid contrast, a strong diagonal silhouette, exaggerated body acting, clear physical "
+    "contact, and open laughing or startled expressions. For tenderness or sadness, bring the characters "
+    "closer and let posture and light carry the feeling without forcing a smile. Preserve the requested subject "
+    "and honor an explicitly requested medium, palette, or isolated background."
 )
 PAPER_STORYBOOK_SUBJECT_DIRECTION = (
     "Default subject art direction: render the subject itself as a refined hand-painted storybook "

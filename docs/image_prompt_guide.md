@@ -316,9 +316,8 @@ explicitly required.
   - expand_goal() 與 compose_prompt() 都注入同一份 image contract，
     避免 LLM route 和 fallback route 的學習規則分裂。
 - configs/characters/kirby.yaml
-  - 在既有 generation.visual_style_contract 中加入 still/opening
-    keyframe 的 visual thesis、scale/attachment/layer geometry 與 material
-    cues；沒有寫死新角色或新 provider。
+  - 早期試用的 generation.visual_style_contract 已從 runtime 移除；still/opening
+    keyframe 的風格與構圖回到每次生成明確提供的 style/story prompt，不另加自動美感 gate。
 - output/prompt_library_eval/2026-09-01/accepted/
   - 只保留七個 strict 90+ 案例的 copied PNG；被淘汰候選未進入 repo
     accepted folder，也未進 guide。

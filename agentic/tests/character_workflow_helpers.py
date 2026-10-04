@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import yaml
 
@@ -13,10 +11,6 @@ from agentic.app.character_requests import (
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
-
-_TEST_NEWS_HISTORY_TEMP = tempfile.TemporaryDirectory(prefix="mediaoverload-test-news-history-")
-_TEST_NEWS_HISTORY_ROOT = Path(_TEST_NEWS_HISTORY_TEMP.name)
-
 
 _GENERATION_FIELDS = {
     "prompt",
@@ -28,8 +22,6 @@ _GENERATION_FIELDS = {
     "news_context",
     "native_h3_creative_brief",
     "native_h3_arc_instruction",
-    "news_history_path",
-    "routing_history_path",
     "rng",
     "selected_character_name",
     "character_selection",
@@ -38,6 +30,7 @@ _GENERATION_FIELDS = {
     "reference_video_max_keyframes",
     "seed",
     "subject_mode",
+    "motion_graphics",
 }
 _REVIEW_FIELDS = {
     "dry_run_publish",
@@ -97,8 +90,6 @@ def make_character_workflow_request(
             selected_name, selection = resolved_selection
             generation["selected_character_name"] = selected_name
             generation["character_selection"] = selection
-    if not generation.get("news_history_path"):
-        generation["news_history_path"] = str(_TEST_NEWS_HISTORY_ROOT / f"{uuid4().hex}.json")
     if "publish_platforms" in review:
         review["publish_platforms"] = tuple(review["publish_platforms"] or ())
     return CharacterWorkflowRequest(

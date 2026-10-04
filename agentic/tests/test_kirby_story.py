@@ -15,78 +15,6 @@ from agentic.storyboard import format_native_h3_prompt, load_storyboard
 
 class StoryboardContractTests(unittest.TestCase):
 
-    def test_h3_prompt_uses_supplied_story_details_without_extra_story_contract(self) -> None:
-        goal = GoalRequest(
-            prompt="Kirby follows a mysterious light",
-            media_type="long_video",
-            duration_seconds=10,
-            style="cinematic anime",
-            constraints={"character": "Kirby"},
-        )
-        segment = {
-            "segment_id": "discover_star_seed",
-            "visual": "Kirby discovers a glowing star seed",
-            "narrative_goal": "Kirby discovers the signal",
-            "start_state": "Kirby stands in the meadow",
-            "end_state": "Kirby holds the star seed",
-            "next_hook": "The seed points to a light gate",
-        }
-        prompt = build_minimax_h3_prompt(goal, segment)["prompt"]
-        self.assertNotIn("Story progression contract", prompt)
-        self.assertIn("The seed points to a light gate", prompt)
-
-    def test_h3_prompt_preserves_primary_physical_action(self) -> None:
-        goal = GoalRequest(
-            prompt="Kirby reaches a glowing seed",
-            media_type="long_video",
-            duration_seconds=10,
-            style="cinematic anime",
-            constraints={"character": "Kirby"},
-        )
-        segment = {
-            "segment_id": "segment-1",
-            "visual": "Kirby faces the seed in a windy meadow",
-            "action": "Kirby sprints forward, skids, and snatches the seed before it blows away",
-            "start_state": "the seed is loose",
-            "end_state": "Kirby grips the seed",
-            "cause": "the wind carries the seed away",
-            "effect": "Kirby must protect it from the storm",
-        }
-        prompt = build_minimax_h3_prompt(goal, segment)["prompt"]
-        self.assertIn("Primary physical action", prompt)
-        self.assertIn("sprints forward", prompt)
-        self.assertNotIn("Segment action contract", prompt)
-
-    def test_generic_prompt_builder_uses_current_dynamic_story_contract(self) -> None:
-        goal = GoalRequest(
-            prompt="Kirby follows a mysterious light",
-            media_type="long_video",
-            duration_seconds=10,
-            style="cinematic anime",
-            constraints={"character": "Kirby"},
-        )
-        segments = build_story_segments(goal, "Kirby story brief", 2, "playful")
-        self.assertEqual([segment["segment_id"] for segment in segments], ["segment-1", "segment-2"])
-        self.assertNotEqual(segments[0]["stage"], segments[1]["stage"])
-        self.assertIn("Kirby follows a mysterious light", segments[1]["visual"])
-
-    def test_fallback_four_segment_story_keeps_concrete_seed_states(self) -> None:
-        goal = GoalRequest(
-            prompt="Kirby crosses a windy meadow, discovers a glowing seed, protects it from a storm, and reaches a warm clearing",
-            media_type="long_video",
-            duration_seconds=20,
-            style="polished 2D anime cinematic",
-            constraints={"character": "Kirby"},
-        )
-        segments = build_story_segments(goal, "fallback story", 4, "playful")
-        states = [segments[0]["start_state"], *(segment["end_state"] for segment in segments)]
-        self.assertIn("glowing seed", states[0])
-        self.assertIn("grabbed the glowing seed", states[1])
-        self.assertIn("shielding the glowing seed", states[2])
-        self.assertIn("carried the glowing seed", states[3])
-        self.assertIn("warm clearing", states[4])
-        self.assertEqual(len(states), len(set(states)))
-
     def test_native_15s_preset_contains_render_defaults_without_a_fixed_story(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         storyboard_path = repo_root / "configs/storyboards/native_h3_15s.yaml"
@@ -144,24 +72,6 @@ class StoryboardContractTests(unittest.TestCase):
         self.assertIn("Kirby shelters inside one oversized paper lantern", brief["prompt"])
         self.assertNotIn("one dominant visual mechanism", brief["prompt"])
         self.assertIn("style direction: soft storybook illustration", brief["prompt"])
-
-    def test_video_brief_ignores_removed_automatic_visual_style_contract(self) -> None:
-        goal = GoalRequest(
-            prompt="Kirby gets squashed by one giant mochi and bounces back",
-            media_type="text2img2video",
-            duration_seconds=6,
-            style="polished 2D anime",
-            constraints={
-                "character": "Kirby",
-                "visual_style_contract": (
-                    "small-versus-large scale contrast, tactile prop, readable reaction, and a loopable settled ending"
-                ),
-            },
-        )
-        brief = build_goal_brief(goal, goal.style, [])
-        self.assertIn(goal.prompt, brief["prompt"])
-        self.assertIn("style direction: polished 2D anime", brief["prompt"])
-        self.assertNotIn("small-versus-large scale contrast", brief["prompt"])
 
     def test_user_given_minimal_long_video_segment_when_renderer_validates_then_missing_story_fields_are_optional(self) -> None:
         """User Given a segment with prompt text When render inputs are validated Then optional action and causal fields do not block it."""

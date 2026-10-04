@@ -613,9 +613,7 @@ class AgentMediaSkills:
             seed_base = int(story.get("visual_seed") or new_story_card_visual_seed())
         for index, page in enumerate(story["pages"], start=1):
             page_dir = run_dir / f"page_{index:02d}"
-            background_prompt = include_role_description(
-                page["background_prompt"], context.plan.goal
-            )
+            background_prompt = str(page["background_prompt"])
             page_seed = seed_base + (index * 1009)
             payload: dict[str, object] = {
                 "workflow_name": workflow_name,
@@ -747,9 +745,6 @@ class AgentMediaSkills:
         return SkillResult(status="success", outputs=result, logs=["Concatenated videos for an agent step."])
 
     def change_video_speed(self, context: SkillContext) -> SkillResult:
-        run_dir = self._build_run_dir(context.plan.goal.prompt, "video_speed")
-        video_dir = run_dir / "video"
-        video_dir.mkdir(parents=True, exist_ok=True)
         video_path = str(
             context.node.inputs.get("video_path")
             or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
@@ -757,6 +752,9 @@ class AgentMediaSkills:
         )
         if not video_path:
             raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
+        run_dir = self._build_run_dir("speed", "video_speed")
+        video_dir = run_dir / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
         speed = float(context.node.inputs.get("speed", 1.0))
         result = self.tools.call(
             "media.change_video_speed",

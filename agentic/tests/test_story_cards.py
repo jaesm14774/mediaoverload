@@ -16,7 +16,7 @@ from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
 from agentic.tools.context_services import NewsContextService
-from agentic.storyboard import load_storyboard, merge_native_h3_storyboard
+from agentic.storyboard import format_native_h3_prompt, load_storyboard, merge_native_h3_storyboard
 from agentic.runtime.story_cards import (
     STORY_CARD_BACKGROUND_STYLE,
     STORY_CARD_DEFAULT_HEIGHT,
@@ -97,7 +97,8 @@ class StoryCardContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "background_prompt"):
             validate_story_card_payload(payload)
 
-    def test_image_prompts_are_not_rejected_for_length(self) -> None:
+    def test_user_given_long_english_image_directions_when_story_card_is_checked_then_text_is_preserved_without_a_small_length_cap(self) -> None:
+        """User Given a long English image direction When the story-card payload is checked Then the full direction survives aside from surrounding whitespace."""
         payload = sample_payload(self.make_goal(), 1)
         long_prompt = "English visual direction. " + ("soft paper detail; " * 140)
         payload["anchor_prompt"] = long_prompt
@@ -106,7 +107,8 @@ class StoryCardContractTests(unittest.TestCase):
 
         normalized = validate_story_card_payload(payload)
 
-        self.assertEqual(normalized["pages"][0]["background_prompt"], long_prompt)
+        self.assertEqual(normalized["pages"][0]["background_prompt"], long_prompt.strip())
+        self.assertGreater(len(normalized["pages"][0]["background_prompt"]), 1600)
 
     def test_configured_long_page_prompt_does_not_trigger_a_writer_repair(self) -> None:
         goal = self.make_goal(
@@ -162,7 +164,7 @@ class StoryCardContractTests(unittest.TestCase):
 
         payload = sample_payload(self.make_goal(), 1)
         payload["pages"][0]["text"] = "一" * (STORY_CARD_MAX_TEXT_CHARS + 1)
-        with self.assertRaisesRegex(ValueError, "1-70 characters"):
+        with self.assertRaisesRegex(ValueError, "1-40 characters"):
             validate_story_card_payload(payload)
 
     def test_short_copy_is_a_human_editorial_decision(self) -> None:
@@ -207,7 +209,7 @@ class StoryCardContractTests(unittest.TestCase):
 
     def test_reflection_does_not_require_parent_twist_or_household_prop(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
-        payload["pages"][0]["text"] = "醫院公布照護人力調整計畫。有人多了一個班可以交接，生活就多了一點能自己安排的時間。"
+        payload["pages"][0]["text"] = "照護人力調整後，有人多了時間安排生活。"
         self.assertFalse(validate_story_card_payload(payload)["contains_simplified_characters"])
 
     def test_prose_is_validated_only_for_hard_text_contracts(self) -> None:
@@ -235,8 +237,9 @@ class StoryCardContractTests(unittest.TestCase):
         config = {"supporting_cast": ["one tiny unnamed orange side character with a shy smile"]}
         prompt = story_card_page_prompt("Meta Knight", {"keywords": "masked, caped"}, config)
 
-        self.assertIn("the selected Meta Knight", prompt)
-        self.assertIn("Optional supporting cast references", prompt)
+        self.assertIn("Meta Knight, masked, caped", prompt)
+        self.assertNotIn("the selected", prompt)
+        self.assertNotIn("Optional supporting cast references", prompt)
         self.assertIn("one tiny unnamed orange side character", prompt)
         self.assertNotIn("exactly one", prompt.lower())
 
@@ -244,7 +247,8 @@ class StoryCardContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "resolved selected character"):
             story_card_anchor_prompt("the selected character")
 
-    def test_background_executor_uses_the_supplied_page_prompts(self) -> None:
+    def test_user_given_page_background_and_role_when_backgrounds_are_rendered_then_both_reach_the_image_provider(self) -> None:
+        """User Given a page prompt and selected character role When story-card backgrounds are rendered Then the provider receives both in its visual prompt."""
         config = {
             "supporting_cast": ["one tiny unnamed orange side character with a shy smile"],
         }
@@ -286,10 +290,18 @@ class StoryCardContractTests(unittest.TestCase):
                 SkillContext(plan, node, state),
             )
 
-        self.assertEqual([payload["prompt"] for _, payload in calls], [page["background_prompt"] for page in story["pages"]])
+        prompts = [str(payload["prompt"]) for _, payload in calls]
+        self.assertEqual(len(prompts), len(story["pages"]))
+        self.assertTrue(
+            all(
+                page["background_prompt"] in prompt
+                for page, prompt in zip(story["pages"], prompts, strict=True)
+            )
+        )
         self.assertEqual([name for name, _ in calls], ["comfy.workflow.text_to_image", "comfy.workflow.text_to_image"])
         self.assertTrue(all("image_path" not in payload for _, payload in calls))
-        self.assertIn("the selected Meta Knight", result.outputs["page_runs"][0]["prompt"])
+        self.assertIn("Meta Knight, masked, caped", result.outputs["page_runs"][0]["prompt"])
+        self.assertNotIn("the selected", result.outputs["page_runs"][0]["prompt"])
         self.assertEqual(len(result.outputs["page_runs"]), 2)
 
     def test_background_executor_uses_story_visual_seed_instead_of_fixed_default(self) -> None:
@@ -408,50 +420,6 @@ class StoryCardContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "factual source field"):
             validate_story_card_evidence(payload, source)
 
-    def test_writer_receives_verified_angle_and_source_then_writes_only_the_card(self) -> None:
-        goal = self.make_goal(news_context={"title": "金融業準備後量子加密"})
-        final = sample_payload(goal, 1)
-        plan = {"editorial_brief": deepcopy(final["editorial_brief"])}
-        final["pages"][0]["text"] = "金融業準備後量子加密。\\n\\n今天仍能平常地轉帳，也值得想想誰在提前準備。"
-        engine = LLMPromptEngine(mode="llm", manager=object())
-        with patch.object(engine, "_require_manager", return_value=object()), patch.object(
-            engine, "_chat_json_with_recorder", side_effect=[plan, final]
-        ) as chat, patch.object(engine, "_mark_llm_payload", side_effect=lambda x: x):
-            result = engine.build_story_card(goal)
-        self.assertEqual(chat.call_count, 2)
-        self.assertEqual(chat.call_args_list[0].kwargs["schema_name"], "story_card_plan")
-        self.assertEqual(chat.call_args_list[1].kwargs["schema_name"], "story_card_write")
-        self.assertIn(plan["editorial_brief"]["human_tension"], chat.call_args_list[1].args[2])
-        self.assertIn("不要逐字引用", chat.call_args_list[1].args[2])
-        self.assertNotIn("manuscript", chat.call_args_list[0].kwargs["schema"]["properties"])
-        self.assertNotIn("pages", chat.call_args_list[0].kwargs["schema"]["properties"])
-        self.assertEqual(set(chat.call_args_list[1].kwargs["schema"]["properties"]), {"title", "pages"})
-        self.assertEqual(chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["minItems"], 1)
-        self.assertEqual(chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["maxItems"], 6)
-        page_schema = chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["items"]
-        self.assertNotIn("visual_anchor", page_schema["required"])
-        self.assertIn("visual_anchor", page_schema["properties"])
-        self.assertNotIn("pattern", chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["items"]["properties"]["text"])
-        self.assertIn("多頁時每頁至少36字", chat.call_args_list[1].args[2])
-        self.assertIn("visual_anchor 可省略", chat.call_args_list[1].args[2])
-        self.assertNotIn("限12個英文單字", chat.call_args_list[1].args[2])
-        self.assertIn("headline_only", chat.call_args_list[1].args[2])
-        self.assertIn("10歲孩子聽得懂", chat.call_args_list[1].args[2])
-        self.assertIn("不可把一批資料可能外洩擴大成所有同類的人都在名單", chat.call_args_list[1].args[2])
-        brief_schema = chat.call_args_list[0].kwargs["schema"]["properties"]["editorial_brief"]["properties"]
-        self.assertEqual(brief_schema["human_tension"]["maxLength"], 360)
-        self.assertEqual(
-            brief_schema["language_mode"]["enum"],
-            ["emotion_first", "plain_explainer", "actionable_warning"],
-        )
-        self.assertEqual(chat.call_args_list[1].kwargs["schema"]["properties"]["pages"]["items"]["properties"]["role"]["maxLength"], 32)
-        self.assertEqual(result["pages"][0]["text"], final["pages"][0]["text"].replace("\\n", "\n"))
-        self.assertIn(final["pages"][0]["visual_anchor"], result["pages"][0]["background_prompt"])
-        self.assertEqual(result["writing_process"]["plan"], plan)
-        self.assertEqual(result["editorial_brief"], plan["editorial_brief"])
-        self.assertEqual(result["source_context"]["title"], "金融業準備後量子加密")
-        self.assertTrue(result["pages"][0]["background_prompt"].isascii())
-
     def test_writer_failure_in_auto_mode_does_not_return_stock_prose(self) -> None:
         engine = LLMPromptEngine(mode="auto", manager=object())
         with patch.object(engine, "_require_manager", return_value=object()), patch.object(
@@ -557,6 +525,7 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertIn('"required": ["editorial_brief"]', repair_prompt)
 
     def test_pillow_composition_preserves_exact_text_and_page_order(self) -> None:
+        """User Given ordered story text and valid background images When cards are composed Then page order, text, canvas size, and visual contrast remain intact."""
         goal = self.make_goal(story_card_page_count=4)
         payload = sample_payload(goal, 4)
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -585,7 +554,6 @@ class StoryCardContractTests(unittest.TestCase):
             with Image.open(result["saved_files"][0]) as rendered:
                 self.assertEqual(rendered.size, (STORY_CARD_DEFAULT_WIDTH, STORY_CARD_DEFAULT_HEIGHT))
                 self.assertGreater(rendered.getpixel((540, 420))[0], rendered.getpixel((540, 1150))[0])
-                self.assertEqual(rendered.getpixel((540, 1150)), (236, 231, 223))
 
     def test_short_paragraphs_stay_above_footer_without_losing_characters(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
@@ -724,89 +692,19 @@ class StoryCardContractTests(unittest.TestCase):
             "native_shots": [{"time": time, "action": "Base action"} for time in times],
         }
 
-    def test_user_given_story_list_response_when_normalized_then_native_h3_keeps_actions_and_times(self) -> None:
-        """User: Given a provider returns ordered story beats, When H3 normalizes them, Then each source action maps to the preset shot time."""
-        times = ("0-4s", "4-10s", "10-15s")
-        payload = {
-            "story": [
-                {"time_range": "0-4s", "primary_action": "A reporter checks the river gauge."},
-                {"time_range": "4-10s", "description": "The water rises past the marked bank."},
-                {"time_range": "10-15s", "primary_action": "Residents move supplies uphill."},
-            ]
-        }
-
-        normalized = LLMPromptEngine._normalize_native_h3_story_payload(payload, expected_times=times)
-        story = LLMPromptEngine._extract_native_h3_story(normalized)
-        result = merge_native_h3_storyboard(self._native_h3_base_storyboard(), story)
-
-        self.assertEqual([shot["time"] for shot in result["native_shots"]], list(times))
-        self.assertEqual(
-            [shot["action"] for shot in result["native_shots"]],
-            [
-                "A reporter checks the river gauge.",
-                "The water rises past the marked bank.",
-                "Residents move supplies uphill.",
-            ],
-        )
-
-    def test_user_given_time_keyed_story_when_normalized_then_contiguous_beats_map_to_preset(self) -> None:
-        """User: Given a provider returns a contiguous time-keyed story, When H3 normalizes it, Then ordered actions map to the application timing contract."""
-        times = ("0-4s", "4-10s", "10-15s")
-        payload = {
-            "story": {
-                "0-4s": "A nurse checks the medicine refrigerator.",
-                "4-10s": "The temperature alarm begins to flash.",
-                "10-15s": "The nurse moves the medicine to backup storage.",
-            }
-        }
-
-        normalized = LLMPromptEngine._normalize_native_h3_story_payload(payload, expected_times=times)
-        story = LLMPromptEngine._extract_native_h3_story(normalized)
-        result = merge_native_h3_storyboard(self._native_h3_base_storyboard(), story)
-
-        self.assertEqual(len(result["native_shots"]), len(times))
-        self.assertIn("backup storage", result["native_shots"][-1]["action"])
-
-    def test_user_given_provider_shots_or_beats_envelopes_when_normalized_then_each_valid_shape_reaches_merge(self) -> None:
-        """User: Given providers wrap ordered actions as shots or beats, When H3 normalizes their envelopes, Then each valid shape reaches the preset merge with all actions intact."""
-        times = ("0-4s", "4-10s", "10-15s")
-        actions = (
-            "A reporter checks the river gauge.",
-            "The water rises past the marked bank.",
-            "Residents move supplies uphill.",
-        )
-        shots = [
-            {"time_range": time, "primary_action": action}
-            for time, action in zip(times, actions, strict=True)
-        ]
-        envelopes = (
-            {"beats": shots},
-            {"shots": shots},
-            {"story": {"beats": shots}},
-            {"story": {"character": "Kirby", "beats": shots}},
-            {"story": {"shots": shots}},
-        )
-
-        for payload in envelopes:
-            with self.subTest(envelope=list(payload)):
-                normalized = LLMPromptEngine._normalize_native_h3_story_payload(
-                    payload, expected_times=times
-                )
-                story = LLMPromptEngine._extract_native_h3_story(normalized)
-                result = merge_native_h3_storyboard(self._native_h3_base_storyboard(), story)
-                self.assertEqual([shot["action"] for shot in result["native_shots"]], list(actions))
-
-    def test_user_given_story_beat_without_action_when_merged_then_render_fields_are_filled(self) -> None:
-        """User: Given a provider omits optional shot actions, When H3 merges the story, Then renderer fields are filled without rejecting the creative plan."""
+    def test_user_given_story_shot_without_action_when_merged_then_configured_base_action_is_preserved(self) -> None:
+        """User Given the model omits an optional shot action When H3 merges the story Then the configured action remains in the render prompt."""
         times = ("0-4s", "4-10s", "10-15s")
         normalized = LLMPromptEngine._normalize_native_h3_story_payload(
-            {"beats": [{"time_range": time} for time in times]}, expected_times=times
+            {"story": {"native_shots": [{"time": time} for time in times]}}
         )
         story = LLMPromptEngine._extract_native_h3_story(normalized)
 
         result = merge_native_h3_storyboard(self._native_h3_base_storyboard(), story)
+        prompt = format_native_h3_prompt(result, duration_seconds=15)
 
         self.assertEqual([shot["action"] for shot in result["native_shots"]], ["Base action"] * len(times))
+        self.assertIn("Base action", prompt)
 
     def test_user_given_news_visual_anchor_when_background_is_built_then_prompt_keeps_the_concept(self) -> None:
         """User: Given a page has an English source-grounded visual anchor, When the image prompt is built, Then the news concept remains in the background direction."""

@@ -7,7 +7,6 @@ import random
 import re
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -589,13 +588,12 @@ def build_goal_payload_from_character_config(
     temperature = generation.temperature
     preferred_generation_type = generation.preferred_generation_type
     duration_seconds = generation.duration_seconds
+    motion_graphics_requested = bool(generation.motion_graphics)
     output_dir = generation.output_dir
     news_driven = generation.news_driven
     news_context_override = dict(generation.news_context or {})
     requested_native_h3_creative_brief = str(generation.native_h3_creative_brief or "").strip()
     requested_native_h3_arc_instruction = str(generation.native_h3_arc_instruction or "").strip()
-    news_history_path = generation.news_history_path
-    routing_history_path = generation.routing_history_path
     rng = generation.rng
     requested_seed = generation.seed
     requested_reference_video_source = str(generation.reference_video_source or "").strip()
@@ -693,10 +691,11 @@ def build_goal_payload_from_character_config(
         requested_duration_seconds=requested_duration_seconds,
         news_driven=news_driven,
         rng=rng,
-        routing_history_path=Path(routing_history_path).expanduser() if routing_history_path else None,
         asset_root=asset_root,
     )
     config_generation_type = str(routing["generation_type"])
+    if motion_graphics_requested and config_generation_type != "text2image2video":
+        raise ValueError("--motion-graphics is supported only with the text2image2video generation type")
     longvideo_config = dict(routing.get("longvideo_config", {}) or {})
     longvideo_config.update(
         dict(dict(strategies.get("text2longvideo", {}) or {}).get("longvideo_config", {}) or {})
@@ -778,7 +777,6 @@ def build_goal_payload_from_character_config(
         generation_type=config_generation_type,
         news_driven=effective_news_driven,
         news_context_override=news_context_override,
-        news_history_path=news_history_path or _default_news_history_path(repo_root, character_name),
         recorder=recorder,
     )
     if config_generation_type in {"story_card", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"} and (effective_news_driven or not str(prompt).strip()):
@@ -1021,7 +1019,6 @@ def build_goal_payload_from_character_config(
         "enable_review_loop": bool(enable_review_loop and not no_review),
         "review_notes": review_notes,
         "news_driven": effective_news_driven,
-        "news_history_path": str(news_history_path or _default_news_history_path(repo_root, character_name)),
         "native_h3_arc_instruction": requested_native_h3_arc_instruction,
         "native_h3_keyframe_candidate_count": native_keyframe_candidate_count,
         "pre_video_review_enabled": pre_video_review_enabled,
@@ -1110,6 +1107,8 @@ def build_goal_payload_from_character_config(
             and config_generation_type in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va"}
         ),
     }
+    if motion_graphics_requested:
+        constraints["enable_motion_graphics"] = True
     if config_generation_type == "game_sprite":
         requested_sprite_length = (
             max(1, round(float(duration_seconds) * 24.0))
@@ -1395,6 +1394,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
 
     publish_dict: dict[str, Any] | None = None
     publish_gate_failure: str = ""
+    continue_requested = False
     if effective_publish_after_generate and generation_result.status == "success":
         media_paths = generation_media_paths
         platform_configs = payload["constraints"].get("platform_configs", {})
@@ -1451,6 +1451,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     "require_human_review": True,
                     "review_scope": _publish_review_scope(media_paths),
                     "review_all_candidates": _publish_review_scope(media_paths) == "final_media",
+                    "allow_continue_review": bool(review.allow_continue),
                     "publish_prompt_source": publish_prompt_source,
                     # Keep editorial rotation different across successful
                     # workflow runs while preserving a traceable key.
@@ -1480,6 +1481,15 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                 if isinstance(publish_node_outputs, dict)
                 else {}
             )
+            final_review_outputs = (
+                publish_node_outputs.get("review-select", {})
+                if isinstance(publish_node_outputs, dict)
+                else {}
+            )
+            continue_requested = bool(
+                isinstance(final_review_outputs, dict)
+                and final_review_outputs.get("continue_requested") is True
+            )
             publish_state = str(publish_outputs.get("publication_state") or "unknown")
             publicly_visible = bool(publish_outputs.get("publicly_visible", False))
             logger.info(
@@ -1494,7 +1504,11 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                 "prompt_summary": _build_prompt_summary(publish_result_dict.get("state", {})),
             }
     failure_details = _extract_failure_details(generation_dict)
-    overall_status = "success" if generation_result.status == "success" else "failed"
+    overall_status = (
+        "continue_requested"
+        if continue_requested
+        else ("success" if generation_result.status == "success" else "failed")
+    )
     if publish_gate_failure:
         logger.error("publish.blocked | reason=%s", publish_gate_failure)
         overall_status = "failed"
@@ -1505,7 +1519,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         }
     if publish_dict:
         publish_result_status = str((publish_dict.get("result") or {}).get("status") or "").lower()
-        if publish_result_status not in {"success"}:
+        if publish_result_status not in {"success"} and not continue_requested:
             overall_status = "failed"
             publish_failure_details = _extract_failure_details(publish_dict.get("result"))
             if not failure_details:
@@ -1578,11 +1592,18 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         )
         platform_results = dispatch_outputs.get("results", {}) if isinstance(dispatch_outputs, dict) else {}
         errors = dispatch_outputs.get("errors", {}) if isinstance(dispatch_outputs, dict) else {}
+        publish_summary = (
+            "Continue requested; starting a new end-to-end run"
+            if continue_requested
+            else (
+                f"{str(dispatch_outputs.get('status') or publish_result.get('status') or overall_status)} | "
+                f"state={str(dispatch_outputs.get('publication_state') or 'unknown')} | "
+                f"public={bool(dispatch_outputs.get('publicly_visible', False))}"
+            )
+        )
         discord_lines = [
             f"MediaOverload | {payload['character_name']} | run {run_id}",
-            f"Publish: {str(dispatch_outputs.get('status') or publish_result.get('status') or overall_status)} | "
-            f"state={str(dispatch_outputs.get('publication_state') or 'unknown')} | "
-            f"public={bool(dispatch_outputs.get('publicly_visible', False))}",
+            f"Publish: {publish_summary}",
             f"Platforms: {json.dumps(platform_results, ensure_ascii=False)}",
         ]
         if errors:
@@ -1652,8 +1673,11 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         media_paths=generation_media_paths,
         platform_configs=payload["constraints"].get("platform_configs", {}),
     )
+    if continue_requested:
+        publish_status = "continue_requested"
     result_payload = {
         "status": overall_status,
+        "continue_requested": continue_requested,
         "failure_reason": failure_details.get("failure_reason"),
         "failure_node": failure_details.get("failure_node"),
         "failure_skill": failure_details.get("failure_skill"),
@@ -1717,9 +1741,23 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             if Path(path).suffix.lower() in MEDIA_EXTENSIONS and path not in collected:
                 collected.append(path)
 
-    # A configured speed node is the authoritative final-video artifact. If a
-    # review loop produced both the first render and a retry, the last speed
-    # node is the publish candidate and the raw intermediate videos are not.
+    # Optional post-speed motion graphics produce the authoritative final
+    # video; the last candidate represents the final render/retry branch.
+    motion_graphics_candidates: list[str] = []
+    for outputs in node_outputs.values():
+        if not isinstance(outputs, dict) or outputs.get("motion_graphics_applied") is not True:
+            continue
+        candidates = outputs.get("final_video_path") or outputs.get("video_path") or []
+        if isinstance(candidates, str):
+            candidates = [candidates]
+        motion_graphics_candidates.extend(
+            path
+            for path in candidates
+            if isinstance(path, str) and Path(path).suffix.lower() in VIDEO_EXTENSIONS
+        )
+    if motion_graphics_candidates:
+        return [motion_graphics_candidates[-1]]
+
     speed_candidates: list[str] = []
     for outputs in node_outputs.values():
         if not isinstance(outputs, dict) or outputs.get("speed") in {None, ""}:
@@ -1967,8 +2005,6 @@ def _weighted_candidate_choice(
     candidates: list[str],
     *,
     rng: random.Random | None = None,
-    state_path: Path | None = None,
-    diversity_config: dict[str, Any] | None = None,
 ) -> str:
     """Pick a configured strategy without selecting an unavailable route."""
     allowed = {str(candidate).strip() for candidate in candidates if str(candidate).strip()}
@@ -1987,8 +2023,6 @@ def _weighted_candidate_choice(
         normalized_weights,
         list(normalized_weights),
         rng=rng,
-        state_path=state_path,
-        diversity_config=diversity_config,
     )
 
 
@@ -2058,7 +2092,6 @@ def _route_generation_from_character_config(
     requested_duration_seconds: int | None,
     rng: random.Random | None,
     news_driven: bool = False,
-    routing_history_path: Path | None = None,
     asset_root: Path | None = None,
 ) -> dict[str, Any]:
     generation = dict(config.get("generation", {}) or {})
@@ -2171,8 +2204,6 @@ def _route_generation_from_character_config(
             dict(generation.get("generation_type_weights", {}) or {}),
             generation_type_candidates,
             rng=rng,
-            state_path=routing_history_path,
-            diversity_config=dict(routing_config.get("route_diversity", {}) or {}),
         )
         return build_fixed_route(
             selected_generation_type,
@@ -2945,53 +2976,6 @@ def _build_default_prompt(character_name: str, media_type: str, style: str) -> s
     return f"{character_name} in a {style} {media_label} concept"
 
 
-def _default_news_history_path(repo_root: Path, character_name: str) -> Path:
-    configured = os.environ.get("AGENTIC_NEWS_HISTORY_PATH", "").strip()
-    if configured:
-        return Path(configured).expanduser().resolve()
-    return repo_root / "agentic" / "state" / "news_selection" / f"{character_name.lower()}.json"
-
-
-def _load_news_history(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"News history could not be read safely: {path}") from exc
-    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
-        raise RuntimeError(f"News history has an invalid format: {path}")
-    return [dict(item) for item in payload]
-
-
-def _select_fresh_news(news_service: NewsContextService, history_path: Path) -> Any:
-    history = _load_news_history(history_path)
-    exclude_keys = {
-        str(item.get("key") or NewsContextService.selection_key(item.get("title", ""), item.get("keyword", "")))
-        for item in history
-    }
-    selected = news_service.get_random_news(exclude_keys=exclude_keys)
-    if selected is None:
-        raise RuntimeError(
-            "News-driven generation requires an unseen news item, but no unseen usable news was available. "
-            f"History: {history_path}"
-        )
-    selected_dict = dict(selected.to_dict() or {})
-    history.append(
-        {
-            **selected_dict,
-            "key": NewsContextService.selection_key(
-                selected_dict.get("title", ""),
-                selected_dict.get("keyword", ""),
-            ),
-            "selected_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    history_path.parent.mkdir(parents=True, exist_ok=True)
-    history_path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
-    return selected
-
-
 def _resolve_autonomous_prompt(
     *,
     prompt: str,
@@ -3002,7 +2986,6 @@ def _resolve_autonomous_prompt(
     generation_type: str = "",
     news_driven: bool = False,
     news_context_override: dict[str, Any] | None = None,
-    news_history_path: str | Path | None = None,
     recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     explicit_prompt = str(prompt).strip()
@@ -3026,13 +3009,7 @@ def _resolve_autonomous_prompt(
     if not news_context:
         try:
             news_service = NewsContextService()
-            if news_driven:
-                selected_news = _select_fresh_news(
-                    news_service,
-                    Path(news_history_path or "news_selection_history.json").expanduser().resolve(),
-                )
-            else:
-                selected_news = news_service.get_random_news()
+            selected_news = news_service.get_random_news()
             if selected_news is not None:
                 news_context = selected_news.to_dict()
         except Exception as exc:

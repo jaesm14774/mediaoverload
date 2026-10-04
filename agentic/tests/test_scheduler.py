@@ -32,7 +32,6 @@ def test_user_given_scheduler_config_when_running_a_job_then_the_workflow_receiv
         "SCHEDULER_CHARACTER": "kirby",
         "SCHEDULER_PROMPT": "Kirby neon short",
         "SCHEDULER_NEWS_DRIVEN": "true",
-        "SCHEDULER_NEWS_HISTORY_PATH": "/tmp/kirby-news.json",
         "SCHEDULER_DRY_RUN_PUBLISH": "true",
         "SCHEDULER_ENABLE_REVIEW_LOOP": "false",
     }.items():
@@ -53,7 +52,6 @@ def test_user_given_scheduler_config_when_running_a_job_then_the_workflow_receiv
     assert request.config_path == Path(config.config_path)
     assert request.generation.prompt == "Kirby neon short"
     assert request.generation.news_driven is True
-    assert request.generation.news_history_path == "/tmp/kirby-news.json"
     assert request.review.dry_run_publish is True
     assert request.review.enable_review_loop is False
     assert isinstance(request.generation.rng, random.Random)

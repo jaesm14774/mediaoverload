@@ -21,6 +21,7 @@ from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
 from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
 from agentic.storyboard import (
+    format_native_h3_keyframe_prompt,
     format_native_h3_prompt,
     load_storyboard,
 )
@@ -265,8 +266,8 @@ class LongVideoSkills:
             style=style,
             duration_seconds=duration_seconds,
         )
-        opening_prompt = str(storyboard.get("opening_keyframe_prompt") or prompt).strip()
-        ending_prompt = str(storyboard.get("ending_keyframe_prompt") or prompt).strip()
+        opening_prompt = format_native_h3_keyframe_prompt(storyboard, style=style, frame="opening")
+        ending_prompt = format_native_h3_keyframe_prompt(storyboard, style=style, frame="ending")
         if render_mode == "first_last_frame_to_video":
             ending_prompt = (
                 f"{ending_prompt}\n"

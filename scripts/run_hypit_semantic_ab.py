@@ -156,7 +156,6 @@ def _run_variant(
                     preferred_generation_type="text2image2video",
                     duration_seconds=int(args.duration_seconds),
                     output_dir=str(variant_dir),
-                    routing_history_path=str(variant_dir / "routing_history.json"),
                     rng=random.Random(seed),
                     seed=seed,
                     semantic_cue_mode=semantic_mode,

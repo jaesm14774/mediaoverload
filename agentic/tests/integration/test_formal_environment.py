@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -24,7 +23,6 @@ def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
         pytest.skip("Formal integration requires AGENTIC_FORMAL_INTEGRATION=1")
 
     repo_root = Path(__file__).resolve().parents[3]
-    history_path = tmp_path / "news-selection" / "kirby.json"
     output_dir = tmp_path / "output"
     request = CharacterWorkflowRequest(
         repo_root=repo_root,
@@ -32,7 +30,6 @@ def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
         generation=CharacterGenerationOptions(
             preferred_generation_type="text2video",
             news_driven=True,
-            news_history_path=str(history_path),
             output_dir=str(output_dir),
         ),
         review=CharacterReviewOptions(publish_after_generate=False),
@@ -60,7 +57,3 @@ def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
     assert payload["constraints"]["news_driven"] is True
     assert payload["constraints"]["prompt_mode"] == "llm"
     assert payload["prompt"]
-
-    persisted = json.loads(history_path.read_text(encoding="utf-8"))
-    assert persisted[0]["title"] == news_context["title"]
-    assert persisted[0]["key"]

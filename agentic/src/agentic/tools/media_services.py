@@ -7,6 +7,7 @@ from agentic.runtime.registry import ToolRegistry
 from agentic.runtime.editing import EditPlan
 from agentic.tools.editing_adapter import OpenCutEditAdapter
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+from agentic.tools.motion_graphics_adapter import MotionGraphicsAdapter
 from agentic.tools.sprite_adapter import SpriteAdapter
 from agentic.tools.tts_adapter import TTSAdapter
 
@@ -24,6 +25,7 @@ class MediaServiceTools:
         self._ffmpeg = ffmpeg
         self._sprite: SpriteAdapter | None = None
         self._editing: OpenCutEditAdapter | None = None
+        self._motion_graphics: MotionGraphicsAdapter | None = None
         self._tts: TTSAdapter | None = None
 
     def extract_last_frame(self, payload: dict[str, object]) -> dict[str, object]:
@@ -226,6 +228,21 @@ class MediaServiceTools:
             "contact_sheet_path": contact_sheet_path,
         }
 
+    def probe_video(self, payload: dict[str, object]) -> dict[str, object]:
+        video_path = str(payload["video_path"])
+        return {"probe": self._ffmpeg_service().probe_media(video_path)}
+
+    def compose_motion_graphics(self, payload: dict[str, object]) -> dict[str, object]:
+        raw_plan = payload.get("motion_graphics_plan")
+        if not isinstance(raw_plan, dict):
+            raise ValueError("media.compose_motion_graphics requires a motion_graphics_plan object")
+        return self._motion_graphics_service().compose(
+            video_path=str(payload["video_path"]),
+            output_path=str(payload["output_path"]),
+            plan=raw_plan,
+            work_dir=Path(str(payload["work_dir"])),
+        )
+
     def merge_audio_video(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._ffmpeg_service()
         return {
@@ -323,6 +340,11 @@ class MediaServiceTools:
             self._editing = OpenCutEditAdapter(output_root=self.output_root, input_roots=self.input_roots)
         return self._editing
 
+    def _motion_graphics_service(self) -> MotionGraphicsAdapter:
+        if self._motion_graphics is None:
+            self._motion_graphics = MotionGraphicsAdapter(self._ffmpeg_service())
+        return self._motion_graphics
+
     def _tts_service(self) -> TTSAdapter:
         if self._tts is None:
             self._tts = TTSAdapter()
@@ -343,6 +365,8 @@ def register_media_service_tools(
     tool_registry.register("media.video_to_gif", tools.video_to_gif, "Convert a video to a GIF")
     tool_registry.register("media.video_to_sprite", tools.video_to_sprite, "Convert a generated motion video to a transparent game sprite atlas")
     tool_registry.register("media.video_qa", tools.video_qa, "Probe duration/streams and create a video contact sheet")
+    tool_registry.register("media.probe_video", tools.probe_video, "Read video stream timing, canvas, and audio metadata")
+    tool_registry.register("media.compose_motion_graphics", tools.compose_motion_graphics, "Render a declarative Pillow motion layer over a source video")
     tool_registry.register("media.merge_audio_video", tools.merge_audio_video, "Merge one audio track into a video")
     tool_registry.register("audio.concat_tracks", tools.concat_audio, "Concatenate multiple audio tracks")
     tool_registry.register("media.create_video_from_image", tools.create_video_from_image, "Create a video from a still image and audio")

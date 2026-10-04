@@ -527,7 +527,7 @@ class LLMEngineTests(unittest.TestCase):
         )
 
         self.assertIn(title, result["prompt"])
-        self.assertIn("never render", result["prompt"])
+        self.assertIn("never render readable headlines", result["prompt"].casefold())
         self.assertNotIn("news-inspired visual motifs only", result["prompt"])
 
     def test_news_grounded_goal_fallback_keeps_the_source_event(self) -> None:
@@ -554,7 +554,7 @@ class LLMEngineTests(unittest.TestCase):
         """User Given a news-grounded fallback has no identifying headline or keyword, When it builds the scene prompt, Then it fails closed instead of inventing an event."""
         engine = LLMPromptEngine(mode="template")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "headline or keyword"):
             engine.generate_autonomous_scene_prompt(
                 character="Kirby",
                 style="anime",

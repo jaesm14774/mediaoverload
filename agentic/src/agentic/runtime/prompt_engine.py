@@ -137,6 +137,34 @@ class PromptEngine:
             selected_expression=selected_expression,
         )
 
+    def build_motion_graphics_plan(
+        self,
+        goal: GoalRequest,
+        *,
+        duration_seconds: float,
+        fps: float,
+    ) -> dict[str, Any]:
+        return self.llm_engine.build_motion_graphics_plan(
+            goal,
+            duration_seconds=duration_seconds,
+            fps=fps,
+        )
+
+    def review_motion_graphics_plan(
+        self,
+        goal: GoalRequest,
+        *,
+        plan: dict[str, Any],
+        contact_sheet_path: str,
+        round_number: int,
+    ) -> dict[str, Any]:
+        return self.llm_engine.review_motion_graphics_plan(
+            goal,
+            plan=plan,
+            contact_sheet_path=contact_sheet_path,
+            round_number=round_number,
+        )
+
     def build_dynamic_sprite_motion_plan(self, goal: GoalRequest) -> dict[str, Any]:
         return self.llm_engine.build_dynamic_sprite_motion_plan(goal)
 

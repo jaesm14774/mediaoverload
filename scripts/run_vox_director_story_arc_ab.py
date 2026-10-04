@@ -262,7 +262,6 @@ def _run_variant(
                     preferred_generation_type="text2image2video",
                     duration_seconds=DURATION_SECONDS,
                     output_dir=str(variant_dir),
-                    routing_history_path=str(variant_dir / "routing_history.json"),
                     rng=random.Random(seed),
                     seed=seed,
                     subject_mode="single",

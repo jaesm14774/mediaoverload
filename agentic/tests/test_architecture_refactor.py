@@ -117,6 +117,41 @@ class SharedSkillHelperTests(unittest.TestCase):
         self.assertIs(AdapterMediaPost, NativeMediaPost)
 
 class NativeH3StoryServiceTests(unittest.TestCase):
+    def test_user_given_selected_group_characters_when_news_story_is_prepared_then_the_storyboard_and_model_use_the_real_cast(self) -> None:
+        """User Given selected Kirby group characters and a generic storyboard placeholder When a news story is prepared Then the LLM and merged storyboard use the exact selected names and role context."""
+        calls: list[dict[str, object]] = []
+
+        class FakeLLM:
+            def generate_native_h3_storyboard(self, **kwargs: object) -> dict[str, object]:
+                calls.append(kwargs)
+                return {"story": {"name": "a reusable greeting"}}
+
+        base_storyboard: dict[str, object] = {"character": "selected protagonist", "name": "base"}
+        subject_context: dict[str, object] = {
+            "subjects": [
+                {"name": "Kirby", "role": "primary"},
+                {"name": "Bandana Waddle Dee", "role": "secondary"},
+            ]
+        }
+        service = NativeH3StoryService(
+            llm_engine=FakeLLM(),
+            news_service=SimpleNamespace(get_random_news=lambda: None),
+            storyboard_merger=lambda base, story: {"base": base, "story": story},
+        )  # type: ignore[arg-type]
+
+        merged, _payload = service.resolve(
+            base_storyboard,
+            character="Kirby, Bandana Waddle Dee",
+            subject_context=subject_context,
+            style="storybook watercolor",
+            duration_seconds=15,
+            news_context={"title": "Google converts Gems to Skills", "keyword": "Gems; Skills; reusable instructions"},
+        )
+
+        self.assertEqual(calls[0]["base_storyboard"]["character"], "Kirby, Bandana Waddle Dee")
+        self.assertEqual(calls[0]["subject_context"], subject_context)
+        self.assertEqual(merged["base"]["character"], "Kirby, Bandana Waddle Dee")
+
     def test_user_given_news_and_arc_guidance_when_story_service_runs_then_model_receives_both(self) -> None:
         """User Given selected news and optional arc guidance When Native H3 resolves a story Then both reach the story model."""
         calls: list[dict[str, object]] = []
@@ -152,7 +187,8 @@ class NativeH3StoryServiceTests(unittest.TestCase):
         self.assertEqual(payload["story"], {"name": "generated"})
         self.assertEqual(calls[0]["news_context"], {"title": "rain warning", "keyword": "weather"})
         self.assertEqual(calls[0]["arc_guidance"], arc_guidance)
-        self.assertEqual(merged["base"], {"name": "base"})
+        self.assertEqual(merged["base"]["name"], "base")
+        self.assertEqual(merged["base"]["character"], "Kirby")
 
     def test_service_replaces_brand_unsafe_injected_news_context(self) -> None:
         calls: list[dict[str, object]] = []

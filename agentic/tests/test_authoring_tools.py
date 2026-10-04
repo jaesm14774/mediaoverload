@@ -58,7 +58,7 @@ class AuthoringToolTests(unittest.TestCase):
             "workflow.author.create_draft",
             {
                 "workflow_name": "krea2_turbo",
-                "variant_name": "legacy_image_test_draft",
+                "variant_name": "image_test_draft",
                 "summary": "test draft",
             },
         )

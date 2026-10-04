@@ -17,8 +17,6 @@ class CharacterGenerationOptions:
     news_context: dict[str, Any] | None = None
     native_h3_creative_brief: str = ""
     native_h3_arc_instruction: str = ""
-    news_history_path: str | None = None
-    routing_history_path: str | None = None
     rng: random.Random | None = None
     selected_character_name: str | None = None
     character_selection: dict[str, Any] | None = None
@@ -27,6 +25,7 @@ class CharacterGenerationOptions:
     reference_video_max_keyframes: int | None = None
     seed: int | None = None
     subject_mode: str | None = None
+    motion_graphics: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +39,7 @@ class CharacterReviewOptions:
     review_notes: str = ""
     no_review: bool = False
     stage_probe: bool = False
+    allow_continue: bool = False
 
 @dataclass(frozen=True, slots=True)
 class CharacterRuntimeOptions:
