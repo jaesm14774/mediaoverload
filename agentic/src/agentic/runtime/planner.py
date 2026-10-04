@@ -2866,15 +2866,29 @@ class TaskPlanner:
             source_node=video_canvas_node,
             node_id="video-speed",
         )
+        motion_graphics_enabled = bool(goal.constraints.get("enable_motion_graphics", False))
+        final_video_node = video_output_node
+        if motion_graphics_enabled:
+            nodes.append(
+                ExecutionNode(
+                    node_id="motion-graphics-review",
+                    skill_name="media.video.motion_graphics",
+                    inputs={"max_review_rounds": 2},
+                    depends_on=[video_output_node],
+                    tags=["render", "programmatic-graphics", "visual-review"],
+                    stage="quality",
+                )
+            )
+            final_video_node = "motion-graphics-review"
         video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
         video_qa_node.inputs = self._scaled_video_qa_inputs(goal, video_qa_node.inputs)
         video_qa_node.depends_on = [
-            video_output_node,
+            final_video_node,
             "idea-brief",
             *([reference_node.node_id] if reference_node else []),
         ]
         gif_preview_node = next(node for node in nodes if node.node_id == "gif-preview")
-        gif_preview_node.depends_on = [video_output_node]
+        gif_preview_node.depends_on = [final_video_node]
         if review_loop_enabled:
             nodes.extend(
                 [
@@ -2885,7 +2899,7 @@ class TaskPlanner:
                         depends_on=[
                             "render-image",
                             *(["upscale-image"] if use_upscale_for_i2v else []),
-                            video_output_node,
+                            final_video_node,
                             "gif-preview",
                         ],
                         tags=["review", "retry"],
@@ -2999,13 +3013,26 @@ class TaskPlanner:
                 node_id="review-video-speed",
                 retry=True,
             )
+            review_final_video_node = review_video_output_node
+            if motion_graphics_enabled:
+                nodes.append(
+                    ExecutionNode(
+                        node_id="review-motion-graphics-review",
+                        skill_name="media.video.motion_graphics",
+                        inputs={"max_review_rounds": 2},
+                        depends_on=[review_video_output_node],
+                        tags=["render", "programmatic-graphics", "visual-review", "retry"],
+                        stage="quality",
+                    )
+                )
+                review_final_video_node = "review-motion-graphics-review"
             review_gif_preview_node = next(node for node in nodes if node.node_id == "review-gif-preview")
-            review_gif_preview_node.depends_on = [review_video_output_node]
+            review_gif_preview_node.depends_on = [review_final_video_node]
             review_final_select_node = next(node for node in nodes if node.node_id == "review-final-select")
             review_final_select_node.depends_on = [
                 "review-render-image",
                 *(["review-upscale-image"] if use_upscale_for_i2v else []),
-                review_video_output_node,
+                review_final_video_node,
                 "review-gif-preview",
             ]
         summary_dependencies = ["render-image", "animate-video", "video-qa", "gif-preview"]
@@ -3041,6 +3068,7 @@ class TaskPlanner:
             "graph_overview": [node.node_id for node in nodes],
             "review_loop_enabled": review_loop_enabled,
             "video_speed": self._video_speed_config(goal),
+            "motion_graphics_enabled": motion_graphics_enabled,
             "review_notes": review_notes,
             "reference_video_source": reference_video_source,
             **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),

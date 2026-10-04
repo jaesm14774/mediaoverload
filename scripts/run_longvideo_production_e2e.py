@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -88,11 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--news-from-db",
         action="store_true",
-        help="Select one unseen family-safe news item from the configured MySQL news table",
-    )
-    parser.add_argument(
-        "--news-history-file",
-        help="JSON history file used to exclude previously selected DB news items",
+        help="Select one random family-safe news item from the configured MySQL news table",
     )
     parser.add_argument(
         "--news-context-file",
@@ -126,38 +121,13 @@ def _load_news_context(args: argparse.Namespace, output_root: Path) -> tuple[dic
         source = "file"
     elif args.news_from_db:
         service = NewsContextService()
-        history_path = Path(
-            args.news_history_file
-            or (output_root.parent / "news_selection_history.json")
-        ).expanduser().resolve()
-        history: list[dict[str, Any]] = []
-        if history_path.exists():
-            existing = json.loads(history_path.read_text(encoding="utf-8"))
-            if not isinstance(existing, list):
-                raise SystemExit("news history must contain a JSON array")
-            history = [item for item in existing if isinstance(item, dict)]
-        excluded = {
-            str(item.get("key") or service.selection_key(item.get("title", ""), item.get("keyword", "")))
-            for item in history
-            if str(item.get("key") or "").strip()
-        }
         selected = service.get_random_news(
             lookback_days=max(1, int(args.news_lookback_days)),
             limit=max(1, int(args.news_limit)),
-            exclude_keys=excluded,
         )
         if selected is None:
-            raise SystemExit("No unseen usable DB news item was available")
+            raise SystemExit("No usable DB news item was available")
         context = selected.to_dict()
-        history.append(
-            {
-                "key": service.selection_key(selected.title, selected.keyword),
-                **context,
-                "selected_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        history_path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
         source = "mysql:news_ch.news"
     else:
         context = {}

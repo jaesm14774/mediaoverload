@@ -46,12 +46,6 @@ routing:
     steps: 16
     model_profile: q2
 
-  # Scheduler runs use a persisted shuffle bag so a short run window cannot
-  # accidentally repeat the same strategy while still respecting weights.
-  route_diversity:
-    enabled: true
-    history_window: 24
-
   # These are applied only after workflow JSON candidates are resolved and
   # locally available required assets are checked.  Keep Krea available, but
   # do not make it the implicit first-choice winner for every image stage.

@@ -67,6 +67,11 @@ class ComfyImageSkills:
     @staticmethod
     def _resolve_prompt_bundle(context: SkillContext) -> dict[str, str]:
         media_type = str(context.plan.goal.media_type or "").strip().lower()
+        renders_native_h3_keyframe = media_type in {
+            "native_h3_story",
+            "native_h3_fl2va_story",
+            "native_h3_l2va_story",
+        }
         uses_opening_frame = media_type in {
             "text2img2video",
             "image_to_video",
@@ -82,7 +87,8 @@ class ComfyImageSkills:
             if not isinstance(prompt, str) or not prompt:
                 prompt = dependency_output.get("prompt")
             if isinstance(prompt, str) and prompt:
-                prompt = include_role_description(prompt, context.plan.goal)
+                if not renders_native_h3_keyframe:
+                    prompt = include_role_description(prompt, context.plan.goal)
                 prompt = apply_paper_storybook_art_direction(
                     prompt,
                     isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
@@ -91,7 +97,9 @@ class ComfyImageSkills:
                     "prompt": prompt,
                     "negative_prompt": str(dependency_output.get("negative_prompt", "")),
                 }
-        prompt = include_role_description(context.plan.goal.prompt, context.plan.goal)
+        prompt = str(context.plan.goal.prompt or "")
+        if not renders_native_h3_keyframe:
+            prompt = include_role_description(prompt, context.plan.goal)
         prompt = apply_paper_storybook_art_direction(
             prompt,
             isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},

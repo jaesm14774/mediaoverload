@@ -255,7 +255,6 @@ def _run_one(
     replicate: int,
     seed: int,
     matrix_root: Path,
-    news_history_path: Path,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     resolved_root = matrix_root.resolve()
@@ -270,7 +269,6 @@ def _run_one(
         "seed": seed,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "news_driven": True,
-        "news_history_path": str(news_history_path),
         "character_prompt_anchor": "Kirby",
         "subject_mode": "single",
         "stage_probe": True,
@@ -283,11 +281,6 @@ def _run_one(
     _write_json(_checked_matrix_path(resolved_root, run_dir / "run_config.json"), config_record)
     started = time.perf_counter()
     before = {path.name for path in (REPO_ROOT / "logs" / "runs").glob("*") if path.is_dir()}
-    try:
-        loaded_history = json.loads(news_history_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        loaded_history = []
-    news_history_count_before = len(loaded_history) if isinstance(loaded_history, list) else 0
     result: dict[str, Any] = {}
     error = ""
     try:
@@ -300,8 +293,6 @@ def _run_one(
                     preferred_generation_type=strategy,
                     output_dir=str(run_dir / "media"),
                     news_driven=True,
-                    news_history_path=str(news_history_path),
-                    routing_history_path=str(run_dir / "routing_history.json"),
                     rng=random.Random(seed),
                     selected_character_name="Kirby",
                     seed=seed,
@@ -344,14 +335,6 @@ def _run_one(
         _make_prompt_trace(Path(trace_path), run_dir)
 
     news = _news_context(result)
-    if not news:
-        try:
-            history = json.loads(news_history_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            history = []
-        if isinstance(history, list) and len(history) > news_history_count_before:
-            candidate = history[-1]
-            news = candidate if isinstance(candidate, dict) else {}
     media_paths = list((result.get("artifacts") or {}).get("media_paths") or []) if result else []
     status = str(result.get("status") or ("failed" if error else "unknown"))
     record = {
@@ -436,13 +419,6 @@ def main() -> int:
             raise SystemExit("Cannot resume with a different --runs-per-strategy value")
         if int(prior_config.get("seed_base", -1)) != args.seed_base:
             raise SystemExit("Cannot resume with a different --seed-base value")
-        news_history_path = _checked_matrix_path(matrix_root, matrix_root / "news_history.json")
-        if not news_history_path.is_file():
-            raise SystemExit("Cannot resume because the shared news history is missing")
-        saved_history_path = str(prior_config.get("news_history_path") or "")
-        if saved_history_path and Path(saved_history_path).resolve() != news_history_path.resolve():
-            raise SystemExit("Cannot resume because the configured news history path changed")
-
         for key, expected in runtime_settings.items():
             saved = prior_config.get(key)
             if saved is not None:
@@ -524,7 +500,6 @@ def main() -> int:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             matrix_root = Path(r"E:\comfyui\_extra\benchmarks\news_strategy_matrix") / stamp
         matrix_root.mkdir(parents=True, exist_ok=False)
-        news_history_path = _checked_matrix_path(matrix_root, matrix_root / "news_history.json")
         run_records = []
         matrix_config = {
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -534,7 +509,6 @@ def main() -> int:
             "enabled_strategies": enabled_strategies,
             "runs_per_strategy": args.runs_per_strategy,
             "seed_base": args.seed_base,
-            "news_history_path": str(news_history_path),
             **runtime_settings,
             "artifact_only": True,
             "review_mode": "stage_probe auto selection; no Discord review request",
@@ -573,8 +547,8 @@ def main() -> int:
                 safe_run_dir = _checked_matrix_path(matrix_root, run_dir)
                 safe_archive_path = _checked_matrix_path(matrix_root, archive_path)
                 shutil.move(str(safe_run_dir), str(safe_archive_path))
-            # Each replicate uses the same seed across strategy families while
-            # news is freshly queried and uniquely selected for every run.
+            # Each replicate uses the same seed across strategy families;
+            # every run independently samples from the available news pool.
             seed = int(args.seed_base) + replicate
             ordinal = len(run_records) + 1
             print(f"[{ordinal}/{total}] {strategy} run {replicate}/{args.runs_per_strategy} seed={seed}", flush=True)
@@ -583,7 +557,6 @@ def main() -> int:
                 replicate=replicate,
                 seed=seed,
                 matrix_root=matrix_root,
-                news_history_path=news_history_path,
                 args=args,
             )
             run_records.append(record)

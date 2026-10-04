@@ -212,5 +212,4 @@ class VideoConditioningTests(unittest.TestCase):
             result = skills.render_segment_video(SkillContext(plan=plan, node=node, state=state))
 
         self.assertEqual(result.status, "success")
-        self.assertIn("LLM segment direction", str(captured["prompt"]))
         self.assertIn("Keep the buoy visible", str(captured["prompt"]))

@@ -117,10 +117,6 @@ class NewsContextService:
             return False
         return any(character.isalnum() for character in title_text)
 
-    @staticmethod
-    def selection_key(title: str, keyword: str) -> str:
-        return f"{str(title or '').strip().casefold()}\u001f{str(keyword or '').strip().casefold()}"
-
     @classmethod
     def is_brand_safe_selection(cls, title: str, keyword: str) -> bool:
         text = f"{title} {keyword}".casefold()
@@ -138,7 +134,6 @@ class NewsContextService:
         lookback_days: int = 7,
         limit: int = 200,
         exclude_categories: list[str] | None = None,
-        exclude_keys: set[str] | None = None,
     ) -> NewsSelection | None:
         if not self.is_configured():
             _logger().info("news.fetch.skipped | reason=mysql_not_configured")
@@ -183,16 +178,8 @@ class NewsContextService:
             if self.is_usable_selection(row.get("title", ""), row.get("keyword", ""))
             and self.is_brand_safe_selection(row.get("title", ""), row.get("keyword", ""))
         ]
-        excluded = {str(key) for key in (exclude_keys or set()) if str(key).strip()}
-        if excluded:
-            rows = [
-                row
-                for row in rows
-                if self.selection_key(row.get("title", ""), row.get("keyword", "")) not in excluded
-            ]
         if not rows:
-            reason = "no_unseen_news_rows" if excluded else "no_usable_news_rows"
-            _logger().info("news.fetch.empty | reason=%s", reason)
+            _logger().info("news.fetch.empty | reason=no_usable_news_rows")
             return None
         selected = random.choice(rows)
         _logger().info("news.fetch.title | %s", str(selected.get("title") or "").strip())
@@ -624,6 +611,7 @@ class DiscordHumanReviewService:
         selection_required: bool = False,
         selection_limit: int | None = None,
         review_scope: str = "",
+        allow_continue: bool = False,
     ) -> HumanReviewDecision:
         filtered_media_paths = self._filter_media_paths(media_paths)
         normalized_selection_limit = None
@@ -665,6 +653,9 @@ class DiscordHumanReviewService:
                     selection_mode=selection_mode,
                     selection_required=selection_required,
                     selection_limit=normalized_selection_limit,
+                    allow_continue=(
+                        allow_continue and review_scope in {"final_video", "final_media"}
+                    ),
                 )
             )
         except Exception as exc:
@@ -688,6 +679,9 @@ class DiscordHumanReviewService:
                 ]
         elif status == "reject":
             normalized_status = "rejected"
+            selected_paths = []
+        elif status == "continue":
+            normalized_status = "continue_requested"
             selected_paths = []
         else:
             fallback_reason = {
@@ -841,6 +835,7 @@ async def _run_discord_file_feedback_process(
     selection_mode: str = "multi",
     selection_required: bool = False,
     selection_limit: int | None = None,
+    allow_continue: bool = False,
 ) -> tuple[str | None, str | None, str | None, list[int] | None, dict[str, Any]]:
     import discord
     from discord.ext import commands
@@ -895,7 +890,14 @@ async def _run_discord_file_feedback_process(
             await interaction.response.defer()
 
     class ResponseView(View):
-        def __init__(self, files: list[discord.File], content: str, timeout: float) -> None:
+        def __init__(
+            self,
+            files: list[discord.File],
+            content: str,
+            timeout: float,
+            *,
+            allow_continue: bool,
+        ) -> None:
             super().__init__(timeout=timeout)
             self.result: str | None = None
             self.user_name: str | None = None
@@ -923,6 +925,14 @@ async def _run_discord_file_feedback_process(
                 )
                 if edit_button is not None:
                     self.remove_item(edit_button)
+
+            if not allow_continue:
+                continue_button = next(
+                    (item for item in self.children if getattr(item, "label", "") == "Continue"),
+                    None,
+                )
+                if continue_button is not None:
+                    self.remove_item(continue_button)
 
             if allow_asset_selection:
                 selectable_files = self.files[:25]
@@ -1070,6 +1080,29 @@ async def _run_discord_file_feedback_process(
                 self.is_editing = False
             self.stop()
 
+        @discord.ui.button(label="Continue", style=discord.ButtonStyle.blurple)
+        async def continue_run(self, interaction: discord.Interaction, button: Button) -> None:
+            del button
+            if not await self.authorize(interaction):
+                return
+            async with self.state_lock:
+                if self.decision_finalized:
+                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
+                    return
+                self.decision_finalized = True
+                self.result = "continue"
+                self.user_name = str(interaction.user)
+                self.selected_files = []
+                self.edit_done.set()
+            await interaction.response.defer()
+            self.stop()
+            if self.message is not None:
+                await self.message.edit(
+                    content=f"{self.content[:1750]}\n\nContinue selected. Starting a new end-to-end run.",
+                    view=None,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+
     intents = discord.Intents.default()
     intents.message_content = True
     bot = commands.Bot(command_prefix="!", intents=intents)
@@ -1096,7 +1129,12 @@ async def _run_discord_file_feedback_process(
                     completed.set()
                     return
             files = [discord.File(path) for path in filepaths]
-            view = ResponseView(files, text or "Review request", timeout=timeout)
+            view = ResponseView(
+                files,
+                text or "Review request",
+                timeout=timeout,
+                allow_continue=allow_continue,
+            )
             message = await channel.send(
                 content=text or "Review request",
                 files=files,

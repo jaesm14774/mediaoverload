@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import random
 import logging
 import shutil
@@ -22,7 +21,6 @@ from agentic.app.character_workflow import (
     _publish_selection_limit,
     _asset_qualified_workflow_candidates,
     _route_generation_from_character_config,
-    _select_fresh_news,
     _resolve_output_dir,
     _resolve_publish_prompt,
     build_goal_payload_from_character_config,
@@ -933,7 +931,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 self.kirby_config,
                 prompt="",
                 preferred_generation_type="native_h3_story",
-                news_history_path=Path(temp_dir) / "news-history.json",
                 publish_after_generate=False,
             ))
 
@@ -941,7 +938,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["prompt_source"], "news")
         self.assertEqual(payload["constraints"]["prompt_mode"], "news")
         self.assertEqual(payload["constraints"]["news_context"]["keyword"], "panda")
-        self.assertIn("compact causal story", payload["constraints"]["native_h3_creative_brief"])
 
     def test_user_given_explicit_news_context_when_native_story_is_built_then_exact_source_is_preserved(self) -> None:
         """User Given a sourced article When a Native H3 story is built Then it keeps that article instead of selecting another."""
@@ -1019,13 +1015,13 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["news_context"], news)
         self.assertEqual(payload["constraints"]["native_h3_arc_instruction"], arc_guidance)
 
-    def test_news_driven_random_mode_overrides_generic_prompt_and_persists_selection(self) -> None:
+    def test_user_given_news_driven_random_mode_when_news_is_available_then_generic_prompt_is_overridden(self) -> None:
+        """User Given usable news When news-driven generation runs Then it uses the news without storing selection history."""
         news = NewsSelection(
             title="Taipei panda steals zongzi",
             keyword="panda",
             category="technology",
         )
-        history_payload: list[dict[str, object]] = []
         with tempfile.TemporaryDirectory() as temp_dir, patch(
             "agentic.app.character_workflow.NewsContextService.get_random_news",
             return_value=news,
@@ -1039,23 +1035,19 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "news_context": news.to_dict(),
             },
         ) as generate_prompt:
-            history_path = Path(temp_dir) / "news-history.json"
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
                 prompt="隨機產生一個有角色動作的作品",
                 preferred_generation_type="text2video",
                 news_driven=True,
-                news_history_path=str(history_path),
                 output_dir=str(Path(temp_dir) / "output"),
                 publish_after_generate=False,
             ))
-            history_payload = json.loads(history_path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["constraints"]["prompt_source"], "autonomous_llm")
         self.assertEqual(payload["constraints"]["news_context"]["title"], news.title)
         self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
-        self.assertEqual(history_payload[0]["title"], news.title)
 
     def test_weighted_news_run_selects_strategy_before_news_content_generation(self) -> None:
         news = NewsSelection(
@@ -1081,7 +1073,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 self.kirby_config,
                 prompt="",
                 news_driven=True,
-                news_history_path=str(Path(temp_dir) / "news-history.json"),
                 rng=random.Random(3),
                 output_dir=str(Path(temp_dir) / "output"),
                 publish_after_generate=False,
@@ -1091,28 +1082,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
         self.assertEqual(payload["prompt"], "Kirby turns the panda news into a playful multi-scene story")
         self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
-
-    def test_select_fresh_news_excludes_previous_keys_and_records_each_selection(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            history_path = Path(temp_dir) / "news-history.json"
-            calls: list[set[str]] = []
-            selections = [
-                NewsSelection(title="First headline", keyword="first"),
-                NewsSelection(title="Second headline", keyword="second"),
-            ]
-
-            class FakeNewsService:
-                def get_random_news(self, *, exclude_keys: set[str] | None = None, **_kwargs):
-                    calls.append(set(exclude_keys or set()))
-                    return selections[len(calls) - 1]
-
-            first = _select_fresh_news(FakeNewsService(), history_path)
-            second = _select_fresh_news(FakeNewsService(), history_path)
-
-        self.assertEqual(first.title, "First headline")
-        self.assertEqual(second.title, "Second headline")
-        self.assertEqual(calls[0], set())
-        self.assertEqual(calls[1], {"first headline\u001ffirst"})
 
     def test_build_goal_payload_merges_global_social_config_and_surfaces_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch(
@@ -1168,7 +1137,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
-                news_history_path=str(Path(temp_dir) / "news-history.json"),
             ))
 
         self.assertNotIn("twitter", payload["constraints"]["platforms"])

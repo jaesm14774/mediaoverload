@@ -11,6 +11,63 @@ from agentic.skills.comfy_workflow_skills import ComfyWorkflowSkills
 
 
 class ComfyWorkflowSkillsTests(unittest.TestCase):
+    def test_user_given_native_h3_opening_frame_when_comfy_prompt_is_built_then_character_behavior_does_not_distract_from_visual_identity(self) -> None:
+        """User Given a native H3 keyframe with explicit visual identity When Comfy builds its prompt Then it preserves appearance cues without appending unrelated character abilities."""
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby wipes the microwave interior",
+                media_type="native_h3_story",
+                style="storybook watercolor",
+                constraints={
+                    "character": "Kirby, Bandana Waddle Dee",
+                    "subject_context": {
+                        "subjects": [
+                            {
+                                "name": "Kirby",
+                                "role": "primary",
+                                "profile": {
+                                    "role_description": "round pink hero who can inhale and copy abilities",
+                                    "keywords": "round pink body, blue oval eyes, red feet",
+                                },
+                            },
+                            {
+                                "name": "Bandana Waddle Dee",
+                                "role": "secondary",
+                                "profile": {
+                                    "role_description": "warm, loyal friend",
+                                    "keywords": "small orange body, blue bandana",
+                                },
+                            },
+                        ]
+                    },
+                },
+            ),
+            workflow_name="krea2_turbo",
+            nodes=[],
+        )
+        node = ExecutionNode(node_id="render-opening", skill_name="image.render", depends_on=["native-story-prompt"])
+        state = RunState(
+            goal={},
+            metadata={},
+            node_outputs={
+                "native-story-prompt": {
+                    "opening_keyframe_prompt": (
+                        "Draw one storybook still. Main action: Kirby wipes the microwave's inner wall. "
+                        "Visual identity: Kirby: round pink body, blue oval eyes, red feet; "
+                        "Bandana Waddle Dee: small orange body, blue bandana."
+                    ),
+                    "negative_prompt": "text, duplicate characters",
+                }
+            },
+        )
+
+        bundle = ComfyImageSkills._resolve_prompt_bundle(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertIn("Kirby wipes the microwave's inner wall", bundle["prompt"])
+        self.assertIn("round pink body, blue oval eyes, red feet", bundle["prompt"])
+        self.assertIn("blue bandana", bundle["prompt"])
+        self.assertNotIn("inhale and copy abilities", bundle["prompt"])
+
     def test_user_given_i2v_image_prompt_when_render_bundle_is_built_then_no_action_lock_is_added(self) -> None:
         """User: Given an I2V opening prompt, When the shared art direction is applied, Then its wording stays intact without an action lock."""
         plan = ExecutionPlan(

@@ -149,7 +149,7 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
             "openrouter_vision_pool_mode": True,
             "openrouter_vision_models": [
                 "google/gemma-4-26b-a4b-it:free",
-                "nvidia/nemotron-nano-12b-v2-vl:free",
+                "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
             ],
         }
 
@@ -159,7 +159,7 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
             pool,
             [
                 "google/gemma-4-26b-a4b-it:free",
-                "nvidia/nemotron-nano-12b-v2-vl:free",
+                "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
             ],
         )
         self.assertEqual(backend["openrouter_vision_pool_source"], "env_static_list_filtered")

@@ -5,7 +5,9 @@ import json
 import os
 import random
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
 from urllib.parse import urlparse
@@ -42,6 +44,36 @@ DEFAULT_STATIC_MODEL_MODES = {
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "reasoning_off",
     "qwen/qwen3.8-27b:free": "structured",
 }
+
+_MODEL_SEQUENCE_ACTIVE: ContextVar[bool] = ContextVar(
+    "mediaoverload_model_sequence_active", default=False
+)
+_MODEL_SEQUENCE_PREFERRED_MODEL: ContextVar[str] = ContextVar(
+    "mediaoverload_model_sequence_preferred_model", default=""
+)
+
+
+def scoped_model_sequence(function):
+    """Keep related creative stages on one successful model without shared state."""
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        active_token = _MODEL_SEQUENCE_ACTIVE.set(True)
+        model_token = _MODEL_SEQUENCE_PREFERRED_MODEL.set("")
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _MODEL_SEQUENCE_PREFERRED_MODEL.reset(model_token)
+            _MODEL_SEQUENCE_ACTIVE.reset(active_token)
+
+    return wrapped
+
+
+def _remember_sequence_model(model_id: str) -> None:
+    if _MODEL_SEQUENCE_ACTIVE.get() and model_id:
+        _MODEL_SEQUENCE_PREFERRED_MODEL.set(model_id)
+
+
 _STATIC_MODEL_CONFIG_CACHE: dict[str, Any] | None = None
 
 
@@ -164,7 +196,17 @@ class FallbackChatModel:
         **kwargs,
     ) -> str:
         errors: list[str] = []
-        for index, model in enumerate(self._models):
+        models = list(self._models)
+        preferred_model_id = _MODEL_SEQUENCE_PREFERRED_MODEL.get()
+        if _MODEL_SEQUENCE_ACTIVE.get() and preferred_model_id:
+            preferred_model = next(
+                (model for model in models if self._model_id(model) == preferred_model_id),
+                None,
+            )
+            if preferred_model is not None:
+                models.remove(preferred_model)
+                models.insert(0, preferred_model)
+        for index, model in enumerate(models):
             if _deadline is not None and time.monotonic() >= _deadline:
                 raise ProviderRequestError("LLM provider fallback chain exceeded its total timeout.")
             self.last_attempt_model = self._model_id(model)
@@ -181,6 +223,7 @@ class FallbackChatModel:
             try:
                 result = model.chat_completion(messages, images=images, _deadline=attempt_deadline, **kwargs)
                 self.last_success_model = self._model_id(model)
+                _remember_sequence_model(self.last_success_model)
                 return result
             except ProviderRequestError as exc:
                 errors.append(f"{self.last_attempt_model or type(model).__name__}: {type(exc).__name__}: {exc}")
@@ -894,7 +937,11 @@ class OpenRouterRotatingModel:
     ) -> str:
         last_error: Exception | None = None
         candidates = list(self._candidates)
-        if self._random_each_call and len(candidates) > 1:
+        preferred_model_id = _MODEL_SEQUENCE_PREFERRED_MODEL.get()
+        if _MODEL_SEQUENCE_ACTIVE.get() and preferred_model_id in candidates:
+            candidates.remove(preferred_model_id)
+            candidates.insert(0, preferred_model_id)
+        elif self._random_each_call and len(candidates) > 1:
             random.SystemRandom().shuffle(candidates)
         requested_limit = kwargs.pop("max_models_per_call", None)
         if requested_limit is not None:
@@ -921,6 +968,7 @@ class OpenRouterRotatingModel:
                     **model_kwargs,
                 )
                 self.last_success_model = model_name
+                _remember_sequence_model(model_name)
                 return text
             except ProviderRequestError as exc:
                 last_error = exc

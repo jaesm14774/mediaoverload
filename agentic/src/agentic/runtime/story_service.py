@@ -53,15 +53,27 @@ class NativeH3StoryService:
         if recorder is not None:
             recorder.record_event("news.selected", news_context=resolved_news)
 
+        resolved_character = str(character or base_storyboard.get("character") or "").strip()
+        resolved_subject_context = dict(
+            subject_context
+            or base_storyboard.get("subject_context")
+            or {}
+        )
+        resolved_base_storyboard = dict(base_storyboard)
+        if resolved_character:
+            resolved_base_storyboard["character"] = resolved_character
+        if resolved_subject_context:
+            resolved_base_storyboard["subject_context"] = resolved_subject_context
+
         payload = self.llm_engine.generate_native_h3_storyboard(
-            character=character,
-            subject_context=dict(subject_context or {}),
+            character=resolved_character,
+            subject_context=resolved_subject_context,
             style=style,
             duration_seconds=duration_seconds,
-            base_storyboard=base_storyboard,
+            base_storyboard=resolved_base_storyboard,
             news_context=resolved_news,
             creative_brief=creative_brief,
             arc_guidance=arc_guidance,
             reference_analysis=dict(reference_analysis or {}),
         )
-        return self.storyboard_merger(base_storyboard, payload["story"]), payload
+        return self.storyboard_merger(resolved_base_storyboard, payload["story"]), payload

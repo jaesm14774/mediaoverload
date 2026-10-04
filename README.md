@@ -70,6 +70,24 @@ generation:
 
 Native H3 FL2VA 由原生 workflow 固定產生 15 秒故事影片，不套用角色層級的 speed transform。
 
+### Kirby 短片程式動態圖層（選用）
+
+`text2image2video` 可透過 `--motion-graphics` 在 H3 成片及速度調整後，加入 Pillow 逐幀繪製的字幕、爆發線、閃光或速度線。LLM 只能提供結構化圖層計畫，不能輸出或執行任意程式碼；視覺模型檢視抽樣畫格後，最多修訂兩輪。每輪都從相同的速度調整後原片重新合成，並保留原片音軌。技術 QA、預覽及 Discord 審片接收合成版；Discord 仍是最後的創作決定。此功能不改變預設路徑，也不會重畫 Kirby 本體。
+
+試作時加上 `--dry-run-publish`，仍會走 Discord 最終審查，但不會派送社群平台。
+
+```powershell
+python run_media_interface.py `
+  --character kirby `
+  --prompt "Kirby用一擊把失控玩具車打回安全路線" `
+  --generation-type text2image2video `
+  --duration-seconds 10 `
+  --motion-graphics `
+  --dry-run-publish
+```
+
+Kirby 角色設定預設使用 2 倍速，因此 10 秒生成片經速度處理後約為 5 秒，程式圖層會依最終時間軸安排。尚未啟用 ComfyUI、GPU 或 LLM 供應商時，可先用本機 FFmpeg 小片段驗證合成器；視覺偏好是否達到 5 組配對中至少 3 組勝出，仍須用實際 Krea→H3 成片盲測確認。
+
 ---
 
 ## 生成策略總覽
@@ -99,7 +117,7 @@ Native H3 FL2VA 由原生 workflow 固定產生 15 秒故事影片，不套用�
 
 ### `story_card` — 新聞觀點與感性字卡
 
-這個模式的核心順序是：`agent.story_card.write` → 每頁 style-locked text-to-image 背景 → `media.story_card.compose`。預設自動決定最少頁數：50 字以內才輸出 1 張，超過 50 字就按意思拆成 2–6 張；明確指定時仍可固定頁數，但每張都必須推進同一個事件，不能用感受與形容詞湊頁數。背景會以暖色繪本小劇場呈現，讓 selected character 在不同頁面產生可見的移動、姿勢與表情變化；配角只在角色包設定時出現，最多一名，且不得搶走文字與主角。文章先依事件、本質、情緒與文風選定看點，核對來源依據，再把來源內化成對讀者有新價值的知識、感受或提醒；`evidence_anchor` 只保存內部定位，不要求逐字引用，也不應把原文轉述成正文。保留原新聞的看點，允許有根據的評論；不強迫父愛故事、誤會反轉或勵志結尾。模型失敗不回落固定故事，template 模式不支援此路徑；背景 prompt 必須是英文，字卡 `text` 必須是繁體中文。仍只輸出靜態 PNG；若要單張卡內真正動畫，另立影片路由。
+這個模式的核心順序是：`agent.story_card.write` → 每頁 style-locked text-to-image 背景 → `media.story_card.compose`。預設自動決定最少頁數：40 字以內才輸出 1 張，超過 40 字就按意思拆成 2–6 張；明確指定時仍可固定頁數，但每張都必須推進同一個事件，不能用感受與形容詞湊頁數。背景會以暖色繪本小劇場呈現，讓 selected character 在不同頁面產生可見的移動、姿勢與表情變化；配角只在角色包設定時出現，最多一名，且不得搶走文字與主角。文章先依事件、本質、情緒與文風選定看點，核對來源依據，再把來源內化成對讀者有新價值的知識、感受或提醒；`evidence_anchor` 只保存內部定位，不要求逐字引用，也不應把原文轉述成正文。保留原新聞的看點，允許有根據的評論；不強迫父愛故事、誤會反轉或勵志結尾。模型失敗不回落固定故事，template 模式不支援此路徑；背景 prompt 必須是英文，字卡 `text` 必須是繁體中文。仍只輸出靜態 PNG；若要單張卡內真正動畫，另立影片路由。
 
 ```powershell
 python run_media_interface.py `
@@ -111,7 +129,7 @@ python run_media_interface.py `
   --no-publish
 ```
 
-不指定 `--generation-type` 時，bare CLI 會依 `configs/characters/kirby.yaml` 的 `generation_type_weights` 加權選策略；指定 `--generation-type story_card` 則是直接固定使用這個策略，不消耗 routing shuffle-bag。
+不指定 `--generation-type` 時，bare CLI 會依 `configs/characters/kirby.yaml` 的 `generation_type_weights` 加權隨機選策略；指定 `--generation-type story_card` 則是直接固定使用這個策略。
 
 分類、鋪陳、Prompt 與驗收見 [`docs/story_card_editorial_guide.md`](docs/story_card_editorial_guide.md)。原本的本地來源閱讀與 11 篇故事寫作拆解見 [`docs/story_card_research_11_03215.md`](docs/story_card_research_11_03215.md)。
 
@@ -519,15 +537,15 @@ python run_media_interface.py --character kirby --prompt '保留構圖與角色�
 # 11. 貼圖包：krea2_turbo -> minimax_h3_lowvram_i2v（動態貼圖階段）
 python run_media_interface.py --character kirby --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
 
-# 12. 心靈故事字卡：安靜角落背景 -> 依 50 字規則自動分頁
+# 12. 心靈故事字卡：安靜角落背景 -> 依 40 字規則自動分頁
 python run_media_interface.py --character kirby --generation-type story_card --news-driven --no-review --no-publish
 ```
 
 ### 自動路由與加權隨機
 
-角色流程先選角色，再選策略，最後才生成內容：scheduler/runtime 先依 YAML 的 `character.group_name` 從 DB 做 group weighted selection，再讀取 `generation.generation_type_weights` 做 strategy weighted selection，並把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不決定角色或 scheduler 要走哪一種 strategy。scheduler 會把候選 route 放進持久化 shuffle bag（狀態預設在 `agentic/state/routing_selection/<config>.json`），所以短窗口不會因隨機抽樣連續撞到同一路由，但整體仍遵守 YAML 權重。Kirby 目前的 strategy 權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`、`story_card: 1`。
+角色流程先選角色，再選策略，最後才生成內容：scheduler/runtime 先依 YAML 的 `character.group_name` 從 DB 做 group weighted selection，再讀取 `generation.generation_type_weights` 按權重隨機抽策略，並把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不決定角色或 scheduler 要走哪一種 strategy。每次抽選彼此獨立，因此短時間內可能重複同一策略；長期比例由 YAML 權重決定。Kirby 目前的 strategy 權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`、`story_card: 1`。
 
-固定 route 的 image/refine/transition workflow 會先經過 `AssetRegistry` 的 required-asset readiness，再依 `configs/routing.yaml` 的 `workflow_selection_weights` 選擇；空的 required-asset manifest 只代表未驗證，不會被當成 ready。當前這台 ComfyUI 只有 Krea 的 image assets 被明確驗證，因此 Krea 集中是資產可用性結果，不是機率失效；先補齊並登錄其他 workflow assets，權重才會在它們之間生效。explicit generation-type override 只固定策略家族，若 scheduler 有 RNG，stage workflow 仍會依權重抽樣。若要指定 routing bag 檔案，可設定 `SCHEDULER_ROUTING_HISTORY_PATH`。
+固定 route 的 image/refine/transition workflow 會先經過 `AssetRegistry` 的 required-asset readiness，再依 `configs/routing.yaml` 的 `workflow_selection_weights` 選擇；空的 required-asset manifest 只代表未驗證，不會被當成 ready。當前這台 ComfyUI 只有 Krea 的 image assets 被明確驗證，因此 Krea 集中是資產可用性結果，不是機率失效；先補齊並登錄其他 workflow assets，權重才會在它們之間生效。explicit generation-type override 只固定策略家族，若 scheduler 有 RNG，stage workflow 仍會依權重抽樣。
 
 `text2image2video` 的正常 review path 仍保留 6 張 raw keyframe 候選，但不再先跑未被 review 消費的 upscale。Discord 明確 Reject 仍會停止；若 review 發生 timeout、連線錯誤或沒有決策，`pre_video_review.failure_policy: fallback_to_top` 會選 deterministic top-ranked frame 繼續 I2V，並在 run manifest 留下 fallback evidence。
 
@@ -540,7 +558,7 @@ python run_media_interface.py --character kirby --prompt '幫我做一個有明�
 # 加權隨機：每次重新抽樣；抽樣後仍會完整走同一個 E2E + Discord gate
 $randomType = python -c "import random,sys; from pathlib import Path; sys.path.insert(0,'agentic/src'); from agentic.app.character_workflow import choose_media_type,load_character_config; print(choose_media_type(load_character_config(Path('configs/characters/kirby.yaml')), rng=random.Random())[0])"
 Write-Host "weighted random generation_type=$randomType"
-# news-driven 會抓取一則尚未使用的新聞；不要用舊 prompt 或舊 media path 代替
+# news-driven 每次會隨機抓取一則可用新聞；不要用舊 prompt 或舊 media path 代替
 python run_media_interface.py --character kirby --generation-type $randomType --news-driven
 ```
 
@@ -610,7 +628,7 @@ python run_media_interface.py `
 
 只有回填成功後，handoff artifact 才會轉成 `published` 並帶有可稽核的 Facebook receipt；Discord 推播失敗或未配置時，artifact 會保留未送達狀態。
 
-`--news-driven` 會把 `title + keyword` 寫入 `agentic/state/news_selection/<character>.json`，下一次隨機執行會排除已用新聞；沒有可用的新新聞時會直接 fail，不會用 generic prompt 或過去媒體充數。OpenRouter publish caption 預設會輪替已驗證 vision pool、每個模型最多 retry 2 次；可用 `AGENTIC_PUBLISH_CAPTION_MAX_RETRIES`、`AGENTIC_PUBLISH_CAPTION_MAX_MODELS_PER_CALL`（`0`/未設定代表整個 pool）、`AGENTIC_PUBLISH_CAPTION_TIMEOUT_SECONDS` 調整。所有 prompt/story LLM request 也可用 `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` 設定單次 request timeout（預設 30 秒）。
+`--news-driven` 每次從可用新聞中隨機選一則，允許不同執行再次抽到同一新聞；若沒有可用新聞會直接 fail，不會用 generic prompt 或過去媒體充數。OpenRouter publish caption 預設會輪替已驗證 vision pool、每個模型最多 retry 2 次；可用 `AGENTIC_PUBLISH_CAPTION_MAX_RETRIES`、`AGENTIC_PUBLISH_CAPTION_MAX_MODELS_PER_CALL`（`0`/未設定代表整個 pool）、`AGENTIC_PUBLISH_CAPTION_TIMEOUT_SECONDS` 調整。所有 prompt/story LLM request 也可用 `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` 設定單次 request timeout（預設 30 秒）。
 
 ---
 

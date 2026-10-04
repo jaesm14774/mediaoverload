@@ -26,6 +26,7 @@ from agentic.skills.comfy_image import register_comfy_image_skills
 from agentic.skills.comfy_workflow_skills import register_comfy_workflow_skills
 from agentic.skills.editing import register_editing_skills
 from agentic.skills.longvideo import register_longvideo_skills
+from agentic.skills.motion_graphics import register_motion_graphics_skills
 from agentic.skills.reference_video import register_reference_video_skills
 from agentic.skills.storyboard import register_storyboard_skills
 from agentic.tools.comfy import register_builtin_tools
@@ -80,6 +81,12 @@ def build_runtime(
     )
     register_media_service_tools(tool_registry, resolved_output_root, input_roots=input_roots)
     register_social_service_tools(tool_registry, resolved_output_root)
+    register_motion_graphics_skills(
+        skill_registry,
+        tool_registry,
+        resolved_output_root,
+        prompt_engine=prompt_engine,
+    )
     register_agent_primitive_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_agent_social_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
     register_comfy_image_skills(skill_registry, tool_registry, resolved_output_root)

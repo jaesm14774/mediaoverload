@@ -92,8 +92,13 @@ def main() -> None:
     parser.add_argument("--no-publish", action="store_true", help="Skip publish stage after generation")
     parser.add_argument("--no-review", action="store_true", help="Disable human review for this run; auto Ref2VA keeps generated references without a Discord selection gate")
     parser.add_argument("--stage-probe", action="store_true", help="Run the real multi-stage graph with six image candidates and vision-LLM auto-selection; never use this as publish approval")
-    parser.add_argument("--news-driven", action="store_true", help="Require a fresh unseen news item for this run")
+    parser.add_argument("--news-driven", action="store_true", help="Require a usable news item for this run")
     parser.add_argument("--enable-review-loop", action="store_true", help="Enable retry/review branches where supported")
+    parser.add_argument(
+        "--motion-graphics",
+        action="store_true",
+        help="Add declarative program-rendered motion graphics to a text2image2video short",
+    )
     parser.add_argument("--review-notes", type=str, default="", help="Review notes for planner retry branches")
     parser.add_argument("--output-dir", type=str, help="Override output directory")
     parser.add_argument("--comfy-host", type=str, help="Override ComfyUI host")
@@ -121,9 +126,6 @@ def main() -> None:
         return
 
     config_path = _resolve_config_path(args)
-    routing_history_path = (
-        REPO_ROOT / "agentic" / "state" / "routing_selection" / f"{config_path.stem}.json"
-    )
     # Keep strategy/character routing randomness independent from --seed,
     # which is reserved for reproducible media rendering.
     request = CharacterWorkflowRequest(
@@ -139,9 +141,9 @@ def main() -> None:
             reference_video_source=args.reference_video,
             reference_video_depth=args.reference_video_depth,
             reference_video_max_keyframes=args.reference_keyframes,
-            routing_history_path=str(routing_history_path),
             rng=random.Random(),
             seed=args.seed,
+            motion_graphics=args.motion_graphics,
         ),
         review=CharacterReviewOptions(
             dry_run_publish=args.dry_run_publish,

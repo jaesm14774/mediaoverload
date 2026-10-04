@@ -113,16 +113,16 @@ generation:
           motion: sparks, ribbons, glow, and geometric bursts amplify the visible action and resolve cleanly
           avoid: monochrome minimalism, random symbols, interface elements, and fake text
         tactile_tabletop:
-          label: warm tactile tabletop comedy
+          label: warm tactile miniature-world illustration
           prompt: >-
-            richly textured tabletop food or craft scene with warm practical light, visible crumbs and materials,
-            expressive small characters, and cozy physical scale contrast
+            richly textured miniature-world illustration with tactile handmade surfaces, warm directional light,
+            expressive small characters, and deliberate physical scale contrast
           composition: >-
-            use a close but spacious tabletop perspective with foreground objects, a usable middle surface,
-            and a soft environmental background that makes the gag feel situated
-          palette: toasted orange, cream, berry red, leafy green, and deep brown with appetizing highlights
-          motion: steam, wobbling food, utensils, cloth, and crumbs react to the central physical beat
-          avoid: empty white tableaus, generic product renders, and unreadable clutter
+            frame one dominant relationship across foreground, action space, and environment;
+            keep the focal action clear and leave room for the scene's emotional tone
+          palette: layered warm and cool colors with natural tonal transitions and deliberate contrast
+          motion: use restrained environmental motion that clarifies the source-linked cause and emotional tone
+          avoid: decorative food props, crumbs, utensils, generic product renders, and unreadable clutter
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: krea2_turbo_img2img
   # Writing-first Traditional-Chinese story cards. Every page is generated
@@ -130,17 +130,17 @@ generation:
   story_card:
     page_stage:
       workflow_name: krea2_turbo
-    # Auto keeps a short thought on one card and splits anything over 50
+    # Auto keeps a short thought on one card and splits anything over 40
     # characters into the smallest coherent set of pages.
     page_count: auto
-    width: 1080
-    height: 1350
+    width: 540
+    height: 675
     overlay_opacity: 176
     brand_label: CHARACTER NOTE
     # This is a group-level visual language. The resolved selected character
     # and companions are optional visual cues for the generator.
     visual:
-      scene_style: "warm textured-paper storybook illustration with layered scenery, visible watercolor pigment, atmospheric light, a restrained but chromatic palette, and a softly detailed open reading field"
+      scene_style: "warm watercolor illustration with layered scenery, visible pigment, atmospheric light, a restrained but chromatic palette, and a softly detailed environment"
       supporting_cast:
         - "tiny blue paper bird, triangular beak, round goggles, crooked cap, distinct from protagonist"
         - "tiny tangerine square creature, floppy ears, tiny messenger bag, distinct from protagonist"

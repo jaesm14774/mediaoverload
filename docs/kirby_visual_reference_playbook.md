@@ -4,7 +4,7 @@
 
 ## 指示與素材的邊界
 
-收集資料夾目前只有 8 張 PNG 與 5 部 MP4，沒有獨立的 Markdown、TXT、DOCX 或 PDF 指示文件。因此，社群影片畫面中的帳號列、追蹤按鈕、浮水印、平台 UI、貼文文字與音訊標記，都只視為來源包裝，不視為本專案要複製的創作指令。真正的工作要求是：逐張、逐部觀察後，將可取的可愛機制轉成現有 Kirby pipeline 的改善。
+2026-10-03 盤點到 55 張 JPG、27 張 PNG 與 10 部 MP4。素材中沒有獨立的 Markdown、TXT、DOCX 或 PDF 指示文件；畫面上的帳號列、追蹤按鈕、浮水印、平台 UI、貼文文字與音訊標記都是參考素材內容，不是本專案的創作指令。以下抽取構圖、材質、動作與情緒機制，不複製任何單一畫面。
 
 ## 逐張觀察
 
@@ -29,6 +29,46 @@
 4. `錄製內容 2026-08-18 222720.mp4`（5.1 秒）：白底中央只有 Kirby，透過非常細小的上下呼吸／身體擺動完成 loop。可取的是極簡背景、單一情緒、首尾近似、低成本但高辨識度的 loop；這是 animated-sticker prompt 最直接的參考。
 5. `錄製內容 2026-08-18 222856.mp4`（約 9.07 秒）：真實手、筷子、海苔與盤子和 2D 小貓直接互動；食物或海苔壓到小貓後，小貓扁掉、哭、再回彈並重新被吸引。可取的是明確的 cause → contact → reaction → settle，以及實拍物件與動畫角色之間的比例笑點。
 
+### 2026-10-03 全素材補充觀察
+
+本次接觸表涵蓋資料夾全部 82 張靜態圖，以及 10 部影片各自的開頭、約三分之一、約三分之二與結尾畫面。補充素材包含紙感水彩風景、乾淨賽璐璐動作、鮮明海報色塊、柔軟桌面／食物情境、群像與夢境式場景；影片則同時有完整的觸碰反應、極簡呼吸 loop、準備到揭示，以及只有微動的氣氛展示。這些不是一種可混成單一濾鏡的畫風。
+
+共同有效的畫面語法：
+
+- 先選一個可用縮圖讀懂的視覺主意，再選能支持它的單一媒材、色彩關係與景深。紙張顆粒、水彩暈染、硬邊賽璐璐、亮色圖形或桌面材質各自成套，不把多種表面詞堆在同一張圖。
+- 讓角色與新聞機制形成一個關係：角色正在承受、操作、回應或處在由機制塑出的環境裡。新聞 cue 不應像貼紙般漂在角色旁，也不能因為戲劇效果把實際行動者或因果關係改掉。
+- 用比例、包覆、支撐、拉力、遮蔽、軌跡或色溫帶視線；一個主要裝置／環境力量已足以支撐畫面，不靠一排象徵物解釋新聞。
+- 把可愛放在剪影、臉部、身體姿勢、觸感和尺度反差。可愛不等於每篇都搞笑；嚴肅事件用留白、光線和角色距離承載情緒，不把傷害或悲傷變成 gag。
+- Krea 首幀只凍結一個最能證明故事機制的瞬間。鏡頭角度、主體相對尺寸、前中後景與新聞視覺主意都要來自該篇故事，不套固定「角色加小背景物」版型。
+
+## 新聞到 Krea 的驗收情境
+
+- **User 想讓新聞生出有記憶點的角色畫面。** Given 新聞摘要已確認主要事件、因果順序、受影響對象與來源限制，When 系統建立 Native H3 分鏡與 Krea 開場關鍵影格提示詞，Then 兩者沿用同一個新聞到角色的視覺主意；角色正在參與、承受或回應新聞機制，畫面可無文字讀出一個具體關係，新聞 cue 不會被降成旁邊的小圖示。
+- **User 想讓人物案例套用正確的敘事規則。** Given 報導主軸是家庭、照護工作、人物關係或個人結果，即使事件由公益或公共服務機構提供協助，When 新聞企劃選擇 source_category，Then 分類為 `human_interest`；只有新聞主軸是服務本身的推出、改變或提供方式時，才選 `product_or_service`。
+- **User 想讓每則新聞保有自己的美術氣質。** Given 已選定角色與一套媒材風格，When Krea 開場圖生成，Then prompt 同時保留角色既定風格與故事專屬的構圖、色彩、鏡頭和情緒，不用通用中景覆蓋分鏡，也不把 watercolor、3D、賽璐璐等媒材混成一鍋。
+- **User 想用可愛角色說嚴肅事件。** Given 新聞沒有合理的笑點或角色不能成為真實事件的行動者，When 產生視覺轉譯，Then 用可信的比喻或角色反應呈現事件，不捏造人物遭遇，不讓角色觸發報導中的自動事件，也不拿受害、死亡或悲傷當笑料。
+- **User 想讓嚴肅新聞仍有讓人停下來看的畫面。** Given 報導涉及軍事升級、衝突、災害或其他重大現實利害，When 系統挑選情緒、角色位置與 Krea 美術方向，Then 不因隨機選到的風格名稱而硬塞笑點，也不把角色扮成真實決策者、部隊或受害者；用忠於新聞機制的尺度、環境變化與角色目擊反應，呈現克制的緊張、關切或敬畏，且 H3 分鏡與 Krea 首幀共用同一視覺主意。
+- **User 想要看見新聞專屬的「oh my god」點子。** Given 新聞中的觸發條件、行動順序與結果已核對，When 系統選擇比喻與視覺揭示，Then 主畫面必須呈現該新聞獨有的因果關係與一個令人意外但忠於來源的視覺轉折；若同一個保險箱、盾牌、機器人或其他題材圖示可以套在許多無關新聞上，就重新構思，不把抽象文字觸發條件改成來源未提及的密碼、數字或按鈕操作。
+- **User 想用可愛角色呈現照護新聞，同時保留當事人的尊嚴。** Given 報導涉及身障、疾病、照護、貧困或創傷中的服務對象，When 系統安排角色與情緒，Then 角色只能以尊重的旁觀者或有來源根據的助人者比喻出現，不把接受照護者畫成動物、怪物、道具或笑點，不代替其虛構反應、身體狀態、結果或時間線，並讓有來源根據的照護行動承載情緒。
+- **User 想讓 Krea 首幀一眼抓住新聞主意。** Given 分鏡已選出來源特有的機制與後續揭示，When 系統建立開場關鍵影格提示詞，Then 開場凍結一個可縮圖辨認的來源特有張力或視覺關係，不只是角色走進場景或站在題材 cue 旁，且不提前演完後續 payoff。
+- **User 想讓主角和新聞主意融成同一個畫面。** Given 分鏡已選定主角與新聞特有的視覺機制，When Krea 生成開場關鍵影格，Then 主角在同一構圖中清楚可辨，並實際動作或回應該機制；不能只畫環境、比喻 cue，或把主角延後到後續分鏡才登場。
+- **User 想讓指定的新聞 cue 在 Krea 圖裡真的看得見。** Given 分鏡已選出明確的可畫 cue，When Krea 組合材質與環境，Then cue 必須有可辨識的外形或色彩差異，並與主角動作直接相連；普通相似背景物不能算已呈現該 cue。
+- **User 想讓抽象的長期陪伴在首幀中可讀。** Given 新聞描述反覆到訪，而視覺比喻選擇以足跡連接巷弄住家，When Krea 生成開場圖，Then 足跡要以清晰的顏色和鞋印外形畫在路面上，不得變成石板凹洞或陰影；角色全身、臉與路徑需同框可辨，不用特寫把路徑或角色裁掉。
+- **User 想讓長期照護故事保留真實時間感。** Given 報導中的進展來自反覆拜訪或長期建立信任，When 系統安排短片動作與 Krea 首幀，Then 觀眾能讀出持續投入，不會把結果誤讀成一次敲門或短暫等待換來的即時回應，也不虛構次數、日期、天氣或服務對象反應。
+- **User 想讓反覆投入成為隱喻，而不是虛構次數。** Given 新聞提到重複拜訪但沒有明確次數，When 分鏡把它轉成足跡、燈點或路徑，Then 不得逐個新增或標記成第幾次拜訪；路徑作為未計數的累積意象從開場已存在，主角在每拍仍可見或正在行動。
+- **User 想保留報導中真正發生的轉折。** Given 報導記載一戶曾多次拒訪的家庭後來願意開門談話，When 系統安排短片 payoff，Then 只在累積投入已先被看見後呈現這一戶的門微開；不虛構訪視次數或服務對象的畫面反應，也不暗示所有住戶都已接受服務。
+- **User 想把重要揭示留給影片。** Given 新聞故事用足跡表示長期投入，When 系統建立 Krea 開場圖，Then 只露出一段已存在、未計數的路徑，讓它在牆角後消失；完整路徑留給稍後的鏡頭揭示，開場的門仍關著。
+- **User 想讓反覆拜訪的路徑即使換了說法也保有識別性。** Given 企劃把足跡比喻寫成「土路」或「路徑」，When 系統補強 Krea 開場提示詞，Then 仍要畫出覆在地面的赭金色鞋印輪廓，不能只把整條路染成赭色或加上普通石頭。
+- **User 想讓新聞的起點與比喻同框。** Given 故事的轉折發生在一扇關閉的住家門前，When Krea 生成開場圖，Then 角色、完整門板與門框、門檻及近段鞋印同框可辨；角色站在門旁而不是沿巷行走，牆角遮住路徑後段。
+- **User 想讓來源支持的轉折在短片中可見。** Given 同一戶後來確實開門交談，When H3 排列 climax，Then 門從關閉移動到清楚可辨的微開狀態並停住，角色有可讀反應；不只用細微眨眼代替門的狀態改變，也不畫出報導未提供的住戶形象。
+- **User 想保留報導中做出回應者的能動性。** Given 新聞明確記載家庭成員最後開門交談，When Native H3 修訂這個轉折，Then 不把門寫成自行開啟；以不識別身分的必要動作（例如門內一隻手開門）表達來源支持的回應，不補出臉或未報導的反應。
+- **User 想讓 H3 收到唯一一致的事件順序。** Given 有序鏡頭將來源結果安排在後段，而模型另回傳互相矛盾的 story spine，When 系統合併分鏡，Then premise 與 stakes 從前段鏡頭產生，climax 對應狀態改變鏡頭，resolution 對應最後停格；後果不得提早出現在 stakes。
+- **User 想讓影片真正演出新聞揭示。** Given 故事有一個稍後才發生的來源支持結果，When 系統把分鏡整理成 H3 的 premise、stakes、climax、resolution，Then 開場與 stakes 保持結果未發生，climax 才呈現觸發變化的動作，resolution 只呈現來源支持的後果，不重複或提前洩漏 payoff。
+- **User 想讓新聞計畫一路保有同一個創意判斷。** Given 一個 Native H3 故事要經過新聞計畫、分鏡與一次修訂，When 首個階段成功使用文字模型，Then 後續階段優先沿用同一個成功模型以保留來源理解與視覺主意；只有該模型失敗時，才由既有 fallback 接手。
+- **User 想在 Windows 上完成巢狀輸出目錄中的影片後處理。** Given H3 已在長路徑下產生可讀 MP4，When 系統調整影片速度，Then 後處理輸出使用精簡的執行目錄並成功寫出影片，不因新增的提示詞 slug 把路徑推過 Windows 長度限制。
+
+這是提示詞和故事規劃的行為契約，不是自動美感 gate。Krea／GPU 實際輸出仍須由人檢視，Discord 保留最後的主觀創意決定。
+
 ## 已吸收的共同機制
 
 - 一支短片只需要一個 dominant prop 或環境力量；道具要真的造成角色的反應。
@@ -43,8 +83,9 @@
 
 | 層 | 落地內容 |
 | --- | --- |
-| Kirby config | `generation.visual_style_contract` 增加 tactile pastel、scale contrast、單一 palette、可回放 ending；creative brief 加入 prop-caused reaction 與 settled payoff。 |
+| Kirby config | 早期 `generation.visual_style_contract` 試驗已移除；風格與故事構圖由每次生成的 style/story prompt 明確帶入，主觀畫面品質交由人工檢視。 |
 | Native storyboard | `native_h3_15s.yaml` 提供 generic dynamic-news timing、continuity、可讀反應與 loop echo 的 production contract；角色外觀由 resolved `character_profile` 提供。 |
+| Krea keyframes | `format_native_h3_keyframe_prompt()` carries `news_trace.visual_translation`, character integration, source boundary, the selected shot camera, and story-specific `world.visual_language` into the opening still; source cues are composed with the character's action or response instead of defaulting to background icons. |
 | H3 prompt | `compose_minimax_h3_prompt()` 使用共用 Visual Action Contract，加入 causal mechanism、scale-and-silhouette、reaction 與 settled payoff。 |
 | 一般短片與貼圖 prompt | 短片改成單一完整 physical action；animated sticker 改成 anticipation → impact → settle；所有影片 route 都要求動作造成可見狀態變化。 |
 | Routing | 一般短片的 source default 為 10 秒；食物／桌面互動、反應 loop、誇張伸縮、小角色對大物件等需求仍走最適合的既有 route。品質 contract 由 `text2image2video`、`text2longvideo`、Native H3 與 `game_sprite` 共用，不新增相近 strategy。 |
