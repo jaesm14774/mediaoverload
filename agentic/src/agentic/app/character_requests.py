@@ -47,7 +47,6 @@ class CharacterRuntimeOptions:
     comfy_port: int | None = None
     comfy_root: str | None = None
     asset_root: Path | None = None
-    auto_download_assets: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,3 +56,14 @@ class CharacterWorkflowRequest:
     generation: CharacterGenerationOptions = field(default_factory=CharacterGenerationOptions)
     review: CharacterReviewOptions = field(default_factory=CharacterReviewOptions)
     runtime: CharacterRuntimeOptions = field(default_factory=CharacterRuntimeOptions)
+
+
+SUBJECT_MODE_SINGLE = "single"
+
+SUBJECT_MODE_INTERACTION = "two_character_interaction"
+
+SUBJECT_MODE_RANDOM = "random"
+
+CONCRETE_SUBJECT_MODES = frozenset({SUBJECT_MODE_SINGLE, SUBJECT_MODE_INTERACTION})
+
+SUPPORTED_SUBJECT_MODES = frozenset({*CONCRETE_SUBJECT_MODES, SUBJECT_MODE_RANDOM})

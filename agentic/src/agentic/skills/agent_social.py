@@ -8,10 +8,11 @@ from typing import Any
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.platform_content import (
     build_platform_bundle,
+    enrich_publish_bundle,
     sanitize_hashtags,
 )
 from agentic.runtime.post_strategy import resolve_post_strategy
-from agentic.runtime.prompt_engine import PromptEngine
+from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.tools.context_services import DiscordHumanReviewService
 from agentic.tools.publishing_adapter import build_dispatch_plan, merge_platform_delivery_variants
@@ -25,13 +26,13 @@ class AgentSocialSkills:
         self,
         tools: ToolRegistry,
         output_root: Path,
-        prompt_engine: PromptEngine | None = None,
+        prompt_engine: LLMPromptEngine | None = None,
         discord_review: Any | None = None,
     ) -> None:
         self.tools = tools
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
-        self.prompt_engine = prompt_engine or PromptEngine()
+        self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
         self.discord_review = discord_review or DiscordHumanReviewService(output_root=self.output_root)
 
     def prepare_caption(self, context: SkillContext) -> SkillResult:
@@ -83,6 +84,7 @@ class AgentSocialSkills:
                     visual_grounding=context.plan.goal.constraints.get("visual_grounding"),
                 ),
             )
+            bundle = enrich_publish_bundle(bundle, context.plan.goal, platforms, selected_media)
         return SkillResult(
             status="success",
             outputs={
@@ -885,7 +887,7 @@ def register_agent_social_skills(
     skill_registry: SkillRegistry,
     tool_registry: ToolRegistry,
     output_root: Path,
-    prompt_engine: PromptEngine | None = None,
+    prompt_engine: LLMPromptEngine | None = None,
 ) -> None:
     skills = AgentSocialSkills(tool_registry, output_root, prompt_engine=prompt_engine)
     skill_registry.register("publish.media.ingest", skills.ingest_media, "Ingest candidate media for publish/review plans")

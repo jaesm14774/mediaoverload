@@ -37,6 +37,10 @@ temp/
 .claude/
 .ipynb_checkpoints/
 .pytest_cache/
+.ruff_cache/
+.coverage*
+agentic/build/
+*.egg-info/
 .mypy_cache/
 .dmypy.json
 dmypy.json

@@ -8,11 +8,12 @@ import pytest
 
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
-from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
+from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.llm_client import PromptGenerationError
 from agentic.runtime.registry import ToolRegistry
 from agentic.skills.longvideo import LongVideoSkills
 from agentic.storyboard import format_native_h3_prompt
-from agentic.tools.wan2gp import Wan2GPToolset
+from agentic.tools.comfy_h3 import ComfyH3Toolset
 
 
 class RecordedTextModel:
@@ -50,8 +51,8 @@ def segment_context(prompt: object) -> SkillContext:
     }
     node = ExecutionNode(
         node_id="segment-video-01", skill_name="longvideo.render_segment_video",
-        inputs={"segment_index": 0, "recipe": "t2v", "workflow_name": "wan2gp_h3_t2va",
-                "render_tool": "wan2gp.render_h3", "length": 120, "steps": 16},
+        inputs={"segment_index": 0, "recipe": "t2v", "workflow_name": "minimax_h3_t2va",
+                "render_tool": "comfy.render_h3", "length": 120, "steps": 16},
         depends_on=["segment-prompt-01"],
     )
     state = RunState(goal={}, metadata={}, node_outputs={
@@ -82,10 +83,8 @@ def test_user_given_llm_scene_when_rendered_then_h3_receives_only_that_descripti
     context.state.node_outputs["segment-prompt-01"] = prepared
     renderer = CapturingVideoRenderer()
     tools = ToolRegistry()
-    tools.register("wan2gp.render_h3", renderer, "Comfy GPU boundary")
-    tools.register("wan2gp.render_h3", renderer, "Comfy GPU boundary")
-    tools.register("wan2gp.render_h3", renderer, "Comfy GPU boundary")
-    context.node.inputs["render_tool"] = "wan2gp.render_h3" if recipe == "t2v" else "wan2gp.render_h3"
+    tools.register("comfy.render_h3", renderer, "Comfy GPU boundary")
+    context.node.inputs["render_tool"] = "comfy.render_h3"
 
     result = LongVideoSkills(tools, tmp_path).render_segment_video(context)
 
@@ -140,7 +139,7 @@ def test_user_given_invalid_prompt_when_render_requested_then_h3_is_not_submitte
     """User Given a non-description prompt, When rendering is requested, Then it fails before submission to the GPU provider."""
     renderer = CapturingVideoRenderer()
     tools = ToolRegistry()
-    tools.register("wan2gp.render_h3", renderer, "Comfy GPU boundary")
+    tools.register("comfy.render_h3", renderer, "Comfy GPU boundary")
 
     with pytest.raises(ValueError, match="prompt"):
         LongVideoSkills(tools, tmp_path).render_segment_video(segment_context(prompt))
@@ -150,12 +149,12 @@ def test_user_given_invalid_prompt_when_render_requested_then_h3_is_not_submitte
 
 @pytest.mark.parametrize("mode", ["t2va", "i2va", "fl2va", "l2va", "ref2va"])
 def test_user_given_nested_prompt_at_tool_entry_when_called_then_h3_rejects_it(tmp_path: Path, mode: str) -> None:
-    """User Given a nested prompt at any H3 tool entry, When the tool is called, Then invalid content is rejected before contacting WanGP."""
+    """User Given a nested prompt at any H3 tool entry, When the tool is called, Then invalid content is rejected before contacting ComfyUI."""
     repo = Path(__file__).resolve().parents[2]
-    toolset = Wan2GPToolset(AssetRegistry(repo / "agentic", asset_root=repo), tmp_path)
+    toolset = ComfyH3Toolset(AssetRegistry(repo / "agentic", asset_root=repo), tmp_path)
 
     with pytest.raises(ValueError, match="prompt"):
-        toolset.execute({"workflow_name": f"wan2gp_h3_{mode}", "run_dir": str(tmp_path / "run"), "prompt": {"description": "Kirby runs."}})
+        toolset.execute({"workflow_name": f"minimax_h3_{mode}", "run_dir": str(tmp_path / "run"), "prompt": {"description": "Kirby runs."}})
 
 
 def test_user_given_native_story_when_formatted_then_h3_gets_scene_without_editorial_context() -> None:
@@ -200,7 +199,7 @@ def test_user_given_native_description_when_rendered_then_every_h3_mode_validate
     context = SkillContext(plan=ExecutionPlan(goal=goal, workflow_name="native", nodes=[node]), node=node, state=state)
     renderer = CapturingVideoRenderer()
     tools = ToolRegistry()
-    for tool_name in ("wan2gp.render_h3",):
+    for tool_name in ("comfy.render_h3",):
         tools.register(tool_name, renderer, "Comfy GPU boundary")
     skills = LongVideoSkills(tools, tmp_path)
     render = {"t2va": skills.render_native_h3_t2v, "i2va": skills.render_native_h3,

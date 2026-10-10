@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.registry import ToolRegistry
@@ -28,11 +27,10 @@ class BuiltinTools:
 
     def ensure_workflow_ready(self, payload: dict[str, object]) -> dict[str, object]:
         workflow_name = str(payload["workflow_name"])
-        auto_download = bool(payload.get("auto_download", False))
-        return self.asset_registry.ensure_workflow_ready(workflow_name, auto_download)
+        return self.asset_registry.ensure_workflow_ready(workflow_name)
 
 def register_builtin_tools(tool_registry: ToolRegistry, asset_registry: AssetRegistry) -> None:
     tools = BuiltinTools(asset_registry)
     tool_registry.register("workflow.load_manifest", tools.load_manifest, "Load workflow metadata (from configs/workflow JSON)")
     tool_registry.register("workflow.materialize", tools.materialize_workflow, "Materialize workflow template path")
-    tool_registry.register("asset.ensure_workflow_ready", tools.ensure_workflow_ready, "Prepare workflow assets")
+    tool_registry.register("asset.ensure_workflow_ready", tools.ensure_workflow_ready, "Check required workflow assets")

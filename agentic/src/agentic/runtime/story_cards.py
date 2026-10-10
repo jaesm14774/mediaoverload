@@ -681,7 +681,7 @@ def render_story_card_images(
             min_size=max(12, round(28 * scale)),
             size_step=max(1, round(2 * scale)),
         )
-        body_height = len(body_lines) * (body_font.size + body_spacing)
+        len(body_lines) * (body_font.size + body_spacing)
         y = body_start
         for line in body_lines:
             draw.text((int(width * 0.12), y), line, font=body_font, fill=body_color)

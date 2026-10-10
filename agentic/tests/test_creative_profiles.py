@@ -4,7 +4,7 @@ import random
 import unittest
 from pathlib import Path
 
-from agentic.app.character_workflow import build_goal_payload_from_character_config
+from agentic.app.character_payload import build_goal_payload_from_character_config
 from agentic.app.creative_profiles import resolve_creative_profile
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.contracts import GoalRequest

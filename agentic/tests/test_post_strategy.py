@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from agentic.runtime.prompt_tasks.publishing import normalize_hashtag_text
+
 import unittest
 
 from agentic.runtime.contracts import GoalRequest
@@ -119,13 +121,13 @@ class PostStrategyTests(unittest.TestCase):
 
         self.assertEqual(result["hashtags"], "")
         self.assertEqual(
-            LLMPromptEngine._normalize_hashtag_text("", required_hashtags=["crystal"]),
+            normalize_hashtag_text("", required_hashtags=["crystal"]),
             "",
         )
 
     def test_generic_reach_bait_is_not_a_content_hashtag(self) -> None:
         self.assertEqual(
-            LLMPromptEngine._normalize_hashtag_text("#FYP #ForYou #crystal #ExplorePage"),
+            normalize_hashtag_text("#FYP #ForYou #crystal #ExplorePage"),
             "#crystal",
         )
 

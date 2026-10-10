@@ -17,7 +17,6 @@ from agentic.runtime.model_backends import (
     OpenRouterRotatingModel,
     ProviderRequestError,
     build_model,
-    provider_credentials_present,
     provider_default_model,
     provider_spec,
 )

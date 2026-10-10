@@ -32,4 +32,11 @@ docker-compose.yml
 
 # 文檔
 *.md
+!agentic/README.md
 LICENSE
+
+# Generated package metadata and developer tooling
+agentic/build/
+**/*.egg-info/
+.ruff_cache/
+.coverage*

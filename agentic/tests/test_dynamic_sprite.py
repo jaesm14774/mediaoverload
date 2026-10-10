@@ -12,14 +12,12 @@ if str(SRC) not in sys.path:
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, SkillContext
 from agentic.runtime.llm_engine import LLMPromptEngine
+from provider_fakes import ScriptedLLMManager
 from agentic.runtime.prompting import build_game_sprite_reference_context, normalize_dynamic_sprite_beats
 from agentic.runtime.planner import TaskPlanner
-from agentic.app.character_workflow import (
-    _load_global_routing_config,
-    _route_generation_from_character_config,
-    build_goal_payload_from_character_config,
-    load_character_config,
-)
+from agentic.app.generation_routing import _load_global_routing_config, _route_generation_from_character_config
+from agentic.app.character_payload import build_goal_payload_from_character_config
+from agentic.app.character_config import load_character_config
 from agentic.skills.agent_primitives import AgentMediaSkills
 from agentic.tools.sprite_adapter import SpriteAdapter
 from character_workflow_helpers import make_character_workflow_request
@@ -235,43 +233,10 @@ def test_dynamic_sprite_recovers_when_schema_clamps_later_beats_to_one() -> None
 
 def test_user_given_a_model_motion_prompt_when_planned_then_it_is_not_rewritten_by_a_creative_gate() -> None:
     """User Given a model motion prompt When the plan is normalized Then the motion prompt is preserved."""
-
-    class StubEngine(LLMPromptEngine):
-        def _require_manager(self):
-            return object()
-
-        def _chat_json_with_recorder(self, _manager, _system, _prompt, *, schema_name, **_kwargs):
-            if schema_name == "dynamic_game_sprite_prompts":
-                return {
-                    "motion_name": "unsafe_generated_motion",
-                    "layout_mode": "single_motion",
-                    "image_prompt": "one clean jelly star",
-                    "video_prompt": "The body compresses its round body into a tight spring coil.",
-                    "negative_prompt": "no clutter",
-                    "animation_kind": "one_shot",
-                    "fps": 12,
-                    "video_duration_seconds": 5,
-                    "frame_map": [
-                        {"index": index, "beat": f"beat_{index}", "description": "motion"}
-                        for index in range(16)
-                    ],
-                }
-            raise RuntimeError("unexpected prompt request")
-
-        def _mark_llm_payload(self, payload):
-            return payload
-
-    plan = StubEngine(mode="llm").build_dynamic_sprite_motion_plan(
-        GoalRequest(
-            prompt="a jelly star compresses into a spring and returns",
-            media_type="game_sprite",
-            style="bright toy game art",
-            constraints={"character": "jelly star"},
-        )
-    )
-
-    assert "compresses its round body into a tight spring coil" in plan["video_prompt"].lower()
-    assert plan["negative_prompt"] == ""
+    manager = ScriptedLLMManager([{'motion_name': 'unsafe_generated_motion', 'layout_mode': 'single_motion', 'image_prompt': 'one clean jelly star', 'video_prompt': 'The body compresses its round body into a tight spring coil.', 'negative_prompt': 'no clutter', 'animation_kind': 'one_shot', 'fps': 12, 'video_duration_seconds': 5, 'frame_map': [{'index': index, 'beat': f'beat_{index}', 'description': 'motion'} for index in range(16)]}])
+    plan = LLMPromptEngine(mode='llm', manager=manager).build_dynamic_sprite_motion_plan(GoalRequest(prompt='a jelly star compresses into a spring and returns', media_type='game_sprite', style='bright toy game art', constraints={'character': 'jelly star'}))
+    assert 'compresses its round body into a tight spring coil' in plan['video_prompt'].lower()
+    assert plan['negative_prompt'] == ''
 
 
 def test_user_given_a_game_sprite_prompt_when_no_model_is_available_then_fallback_keeps_the_prompt() -> None:
@@ -301,7 +266,6 @@ def test_game_sprite_plan_has_no_human_review_or_fixed_action_nodes() -> None:
         "game_sprite",
         8,
         "bright toy game art",
-        False,
         {"character": "jelly star"},
     )
 
@@ -345,7 +309,7 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
             node_id="sprite-motion-video",
             skill_name="media.image.animate",
             inputs={
-                "workflow_name": "wan2gp_h3_i2va",
+                "workflow_name": "minimax_h3_i2va",
                 "image_path": str(tmp_path / "master.png"),
                 "width": 608,
                 "height": 352,
@@ -361,13 +325,13 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
     assert result.status == "success"
     assert len(calls) == 1
     tool_name, payload = calls[0]
-    assert tool_name == "wan2gp.render_h3"
+    assert tool_name == "comfy.render_h3"
     assert payload["length"] == 124
     assert payload["steps"] == 16
 
 
 def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
-    """User Given the Kirby configuration When game-sprite generation is requested Then its WanGP workflow and inspiration context reach the goal."""
+    """User Given the Kirby configuration When game-sprite generation is requested Then its ComfyUI workflow and inspiration context reach the goal."""
 
     repo_root = Path(__file__).resolve().parents[2]
     kirby_config = repo_root / "configs" / "characters" / "kirby.yaml"
@@ -387,7 +351,7 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
     assert payload["constraints"]["sprite_video_length"] == 192
     assert payload["constraints"]["sprite_chroma_color"] == "random"
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
-    assert payload["constraints"]["video_workflow_name"] == "wan2gp_h3_i2va"
+    assert payload["constraints"]["video_workflow_name"] == "minimax_h3_i2va"
     assert payload["constraints"]["sprite_source_width"] == 1024
     assert payload["constraints"]["sprite_source_height"] == 576
     assert payload["constraints"]["sprite_h3_model_profile"] == "q4"

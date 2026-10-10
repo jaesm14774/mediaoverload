@@ -1,6 +1,6 @@
 """Runtime primitives."""
 
-from agentic.runtime.prompt_engine import PromptEngine
+from agentic.runtime.llm_engine import LLMPromptEngine
 
-__all__ = ["PromptEngine"]
+__all__ = ["LLMPromptEngine"]
 

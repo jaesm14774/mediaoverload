@@ -8,31 +8,11 @@ Given an illustration has one main idea and needs open space for reading,
 When its background is generated,
 Then the composition keeps a clear focal hierarchy and restrained palette while retaining a tactile surface, layered setting, atmospheric light, and a few story-relevant details; open space is not a blank or solid-color field.
 
-本指南把使用者提供的 Complete_39_AI_Art_Prompt_Master_Library.md 轉成
-MediaOverload 可重複使用的提示詞規則。原始文件是研究素材；文件內的
-「直接複製」、「8K」、「某品牌／工作室風格」等文字，不會自動變成 repo
-runtime 指示。creative 欄位仍遵守 repo 的 English-only contract；本頁的
-解說以繁體中文撰寫，英文範本則可直接交給影像模型。
+本指南提供可重複使用的構圖與提示原則。參考素材裡的「直接複製」、解析度口號與品牌／工作室風格不會自動變成 runtime 指示。creative 欄位遵守 English-only contract；解說使用繁體中文，英文範本可交給影像模型。
 
-## 1. 研究範圍與採用門檻
+## 1. 使用範圍與驗收
 
-39 組提示詞已全部閱讀並按創作機制編目。實際生成 18 次代表性候選：
-16 張成功出圖、2 張在影像服務安全階段被拒絕（原始條目 20、30），因此
-那 2 張沒有品質分數。
-
-每張成功候選由三個不同高規模型獨立檢視實際 PNG：
-
-- gpt-5.6-sol
-- gpt-5.6-terra
-- gpt-5.5
-
-五項各 20 分：機制符合度、構圖可讀性、意境與魅力、材質／渲染控制、
-生成潔淨度。採用條件是所有 reviewer 的總分都至少 90，且沒有 critical
-failure；平均分不能救回最低分低於 90 的候選。
-
-通過的原始條目只有 1、5、9、14、18、25、28。完整分數與淘汰理由見
-output/prompt_library_eval/2026-09-01/review_report.md；候選與來源對照
-見 output/prompt_library_eval/2026-09-01/evaluation_manifest.md。
+素材整理出的機制是創作參考，不能替代目前模型的成品驗收。對實際生成結果檢查：主要機制是否可見、構圖是否可讀、角色與材質是否正確，以及是否有生成瑕疵。模型或工作流改變後須重新看圖，不沿用以前的品質分數。
 
 ## 2. 39 組素材的機制地圖
 
@@ -46,10 +26,9 @@ output/prompt_library_eval/2026-09-01/review_report.md；候選與來源對照
 | 30–34 動態短影音 | DJ 突變、夾爪反向劫持、塗鴉實體化、同步舞、天空翻滾 | 靜態首幀只凍結最能證明機制的瞬間；反轉需要 opposing vectors、受力／位移與結果同時可見 |
 | 35–39 海報與排版 | 四季／烘焙日曆、上下雙媒材海報、版畫、紙雕燈箱 | 版面方向、分割比例、文字是否必要、層數與同一材料系統都要明寫；layout geometry 是內容，不是裝飾 |
 
-這張地圖是「每個 prompt 都有被理解」的索引，不代表 39 組都已通過
-成品 gate。只有有獨立分數證據的條目才可寫入「已驗證技巧」。
+這張地圖是機制索引；具體構圖是否成立，要以當次生成結果與人工審閱判斷。
 
-## 3. 已驗證的提示詞原則
+## 3. 提示詞原則
 
 ### 3.0 簡單是層級清楚，不是背景空白
 

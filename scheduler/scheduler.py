@@ -59,7 +59,6 @@ class SchedulerConfig:
     comfy_host: str | None
     comfy_port: int | None
     comfy_root: str | None
-    auto_download_assets: bool
     preferred_generation_type: str | None
     duration_seconds: int | None
     sleep_seconds: int
@@ -134,7 +133,6 @@ def load_scheduler_config() -> SchedulerConfig:
         comfy_host=str(os.getenv("SCHEDULER_COMFY_HOST", "")).strip() or None,
         comfy_port=int(comfy_port_raw) if comfy_port_raw else None,
         comfy_root=str(os.getenv("SCHEDULER_COMFY_ROOT", "")).strip() or None,
-        auto_download_assets=_parse_bool(os.getenv("SCHEDULER_AUTO_DOWNLOAD_ASSETS"), default=False),
         preferred_generation_type=str(os.getenv("SCHEDULER_PREFERRED_GENERATION_TYPE", "")).strip() or None,
         duration_seconds=int(duration_raw) if duration_raw else None,
         sleep_seconds=max(5, int(os.getenv("SCHEDULER_SLEEP_SECONDS", "30"))),
@@ -185,7 +183,6 @@ def run_scheduled_job(
             comfy_host=config.comfy_host,
             comfy_port=config.comfy_port,
             comfy_root=config.comfy_root,
-            auto_download_assets=config.auto_download_assets,
         ),
     )
     while True:

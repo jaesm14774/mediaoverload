@@ -43,7 +43,7 @@ _REVIEW_FIELDS = {
     "no_review",
     "stage_probe",
 }
-_RUNTIME_FIELDS = {"comfy_host", "comfy_port", "comfy_root", "asset_root", "auto_download_assets"}
+_RUNTIME_FIELDS = {"comfy_host", "comfy_port", "comfy_root", "asset_root"}
 
 
 def _test_resolved_selection(config_path: Path) -> tuple[str, dict[str, Any]] | None:

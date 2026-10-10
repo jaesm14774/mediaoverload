@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from agentic.app.character_workflow import build_goal_payload_from_character_config
+from agentic.app.character_payload import build_goal_payload_from_character_config
 from character_workflow_helpers import make_character_workflow_request
 from agentic.app.main import build_runtime
 from agentic.runtime.contracts import RunState
@@ -41,7 +39,6 @@ class H3ModePlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         return planner.build_plan(goal)
@@ -61,7 +58,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(render.inputs["height"], plan.goal.constraints["canvas_height"])
         self.assertEqual(render.inputs["length"], 362)
         self.assertEqual(render.inputs["model_profile"], "q4")
-        self.assertEqual(plan.metadata["native_h3"]["backend"], "wan2gp")
+        self.assertEqual(plan.metadata["native_h3"]["backend"], "comfyui")
         speed = next(node for node in plan.nodes if node.node_id == "native-h3-speed")
         self.assertEqual(speed.inputs["speed"], 2.0)
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
@@ -85,7 +82,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertTrue(ending.inputs["use_prior_frame"])
         self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
         self.assertTrue(render.inputs["use_last_frame"])
-        self.assertEqual(plan.workflow_name, "wan2gp_h3_fl2va")
+        self.assertEqual(plan.workflow_name, "minimax_h3_fl2va")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
 
     def test_fl2va_review_builds_six_opening_conditioned_ending_candidates(self) -> None:
@@ -121,7 +118,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(review.inputs["limit"], 4)
         reference = next(node for node in plan.nodes if node.node_id == "native-ref2va-reference-check")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-        self.assertEqual(plan.workflow_name, "wan2gp_h3_ref2va")
+        self.assertEqual(plan.workflow_name, "minimax_h3_ref2va")
         self.assertEqual(reference.skill_name, "longvideo.validate_native_h3_references")
         self.assertEqual(render.skill_name, "longvideo.render_native_h3_ref2va")
         self.assertFalse(plan.metadata["reference_audio_enabled"])
@@ -147,7 +144,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(plan.metadata["recipe"], "text2image2native_h3_ref2va")
         self.assertEqual(
             plan.metadata["selected_workflows"],
-            {"image": "krea2_turbo", "video": "wan2gp_h3_ref2va"},
+            {"image": "krea2_turbo", "video": "minimax_h3_ref2va"},
         )
 
     def test_native_t2v_stays_prompt_only_even_with_shared_review_enabled(self) -> None:
@@ -158,8 +155,8 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertNotIn("native-opening-keyframe", node_ids)
         self.assertNotIn("native-opening-review", node_ids)
         self.assertEqual(render.skill_name, "longvideo.render_native_h3_t2v")
-        self.assertEqual(render.tool_name, "wan2gp.render_h3")
-        self.assertEqual(plan.workflow_name, "wan2gp_h3_t2va")
+        self.assertEqual(render.tool_name, "comfy.render_h3")
+        self.assertEqual(plan.workflow_name, "minimax_h3_t2va")
         self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
 
     def test_pre_video_l2va_uses_six_candidates_and_one_approved_last_frame(self) -> None:
@@ -195,7 +192,6 @@ class H3ModePlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         plan = planner.build_plan(goal)
@@ -228,7 +224,6 @@ class H3ModePlanTests(unittest.TestCase):
                 media_type=payload["media_type"],
                 duration_seconds=payload["duration_seconds"],
                 style=payload["style"],
-                auto_download_assets=False,
                 constraints=payload["constraints"],
             )
             plan = planner.build_plan(goal)
@@ -274,7 +269,6 @@ class H3ModePlanTests(unittest.TestCase):
                 media_type=payload["media_type"],
                 duration_seconds=payload["duration_seconds"],
                 style=payload["style"],
-                auto_download_assets=False,
                 constraints=payload["constraints"],
             )
             plan = planner.build_plan(goal)

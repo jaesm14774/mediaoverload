@@ -19,7 +19,6 @@ class VideoCanvasPlanTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=6,
             style="tactile storybook watercolor",
-            auto_download_assets=False,
             constraints={
                 "canvas_width": 640,
                 "canvas_height": 360,

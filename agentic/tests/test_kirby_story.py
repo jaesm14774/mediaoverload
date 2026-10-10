@@ -6,7 +6,6 @@ from pathlib import Path
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.prompting import (
     build_goal_brief,
-    build_minimax_h3_prompt,
     build_story_segments,
     validate_story_segments,
 )

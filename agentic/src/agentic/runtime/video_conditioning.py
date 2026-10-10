@@ -19,7 +19,7 @@ class RecipeContract:
     anchor_positions: tuple[str, ...] = ()
     reference_types: tuple[str, ...] = ()
     continuation: str = "none"
-    render_tool: str = "wan2gp.render_h3"
+    render_tool: str = "comfy.render_h3"
     reference_selection_limit: int = 0
     reference_minimum: int = 0
     reference_maximum: int = 0
@@ -41,7 +41,7 @@ class RecipeContract:
             anchor_positions=tuple(str(item) for item in anchors or ()),
             reference_types=tuple(str(item) for item in references or ()),
             continuation=str(values.get("continuation") or "none"),
-            render_tool=str(values.get("render_tool") or "wan2gp.render_h3"),
+            render_tool=str(values.get("render_tool") or "comfy.render_h3"),
             reference_selection_limit=max(0, limit),
             reference_minimum=max(0, minimum),
             reference_maximum=max(0, maximum),

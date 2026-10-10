@@ -33,10 +33,8 @@ from agentic.app.character_requests import (  # noqa: E402
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
-from agentic.app.character_workflow import (  # noqa: E402
-    CONFIG_MEDIA_TYPE_MAP,
-    run_character_workflow,
-)
+from agentic.runtime.strategies import CONFIG_MEDIA_TYPE_MAP
+from agentic.app.character_workflow import run_character_workflow
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -308,7 +306,6 @@ def _run_one(
                     comfy_host=args.comfy_host,
                     comfy_port=args.comfy_port,
                     comfy_root=Path(args.comfy_root).resolve(),
-                    auto_download_assets=False,
                 ),
             )
         )

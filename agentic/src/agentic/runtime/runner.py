@@ -39,7 +39,6 @@ class WorkflowRunner:
                 "media_type": plan.goal.media_type,
                 "duration_seconds": plan.goal.duration_seconds,
                 "style": plan.goal.style,
-                "auto_download_assets": plan.goal.auto_download_assets,
                 "constraints": plan.goal.constraints,
             },
             metadata=plan.metadata,

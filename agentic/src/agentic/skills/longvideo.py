@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,7 @@ from agentic.runtime.prompting import (
     include_role_description,
     validate_story_segments,
 )
-from agentic.runtime.prompt_engine import PromptEngine
+from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
 from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
@@ -128,7 +127,7 @@ class LongVideoSkills:
         tools: ToolRegistry,
         output_root: Path,
         story_service: NativeH3StoryService | None = None,
-        prompt_engine: PromptEngine | None = None,
+        prompt_engine: LLMPromptEngine | None = None,
     ) -> None:
         self.tools = tools
         self.output_root = output_root
@@ -136,7 +135,7 @@ class LongVideoSkills:
         # The application composition root injects shared services; defaults
         # keep this skill usable in focused unit tests.
         self.story_service = story_service or NativeH3StoryService()
-        self.prompt_engine = prompt_engine or PromptEngine()
+        self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
 
     def expand_idea(self, context: SkillContext) -> SkillResult:
         prompt = str(context.node.inputs["prompt"])
@@ -184,7 +183,6 @@ class LongVideoSkills:
             "asset.ensure_workflow_ready",
             {
                 "workflow_name": context.node.inputs["workflow_name"],
-                "auto_download": context.node.inputs.get("auto_download", False),
             },
         )
         return asset_check_result(result, "Checked workflow assets.")
@@ -386,7 +384,7 @@ class LongVideoSkills:
             for part in (str(segment.get("visual") or "").strip(), context.plan.goal.style.strip())
             if part
         )
-        if workflow_name.startswith("wan2gp_h3_"):
+        if workflow_name.startswith("minimax_h3_"):
             prompt = require_h3_prompt(
                 prepared_prompt_output.get("prompt") if isinstance(prepared_prompt_output, dict) else None
             )
@@ -395,7 +393,7 @@ class LongVideoSkills:
         height = context.node.inputs.get("height") or constraints.get("canvas_height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
         length = context.node.inputs.get("length") or constraints.get("longvideo_length") or constraints.get("longvideo_h3_length")
         steps = context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps")
-        if workflow_name.startswith("wan2gp_h3_"):
+        if workflow_name.startswith("minimax_h3_"):
             width = width or 512
             height = height or 288
             length = length or 124
@@ -433,7 +431,7 @@ class LongVideoSkills:
         if reference_manifest:
             payload["reference_manifest"] = reference_manifest
 
-        tool_name = "wan2gp.render_h3"
+        tool_name = str(context.node.inputs.get("render_tool") or "comfy.render_h3")
         result = self.tools.call(tool_name, payload)
         outputs: dict[str, object] = {
             **result,
@@ -525,7 +523,7 @@ class LongVideoSkills:
             payload["seed"] = int(seed)
         if use_last_frame:
             payload["last_image_path"] = last_frame
-        result = self.tools.call("wan2gp.render_h3", payload)
+        result = self.tools.call("comfy.render_h3", payload)
         outputs: dict[str, object] = {
             **result,
             "first_frame_path": first_frame,
@@ -713,7 +711,7 @@ class LongVideoSkills:
             payload["seed"] = int(seed)
         return self._run_native_h3_render(
             _NativeH3Render(
-                tool_name="wan2gp.render_h3",
+                tool_name="comfy.render_h3",
                 payload=payload,
                 outputs={
                 "first_frame_path": "",
@@ -797,7 +795,7 @@ class LongVideoSkills:
             payload["seed"] = int(seed)
         return self._run_native_h3_render(
             _NativeH3Render(
-                tool_name="wan2gp.render_h3",
+                tool_name="comfy.render_h3",
                 payload=payload,
                 outputs={
                 "reference_manifest": references,
@@ -881,7 +879,7 @@ class LongVideoSkills:
             payload["seed"] = int(seed)
         return self._run_native_h3_render(
             _NativeH3Render(
-                tool_name="wan2gp.render_h3",
+                tool_name="comfy.render_h3",
                 payload=payload,
                 outputs=self._native_h3_story_outputs(story, prompt=require_h3_prompt(story["prompt"]), render_mode="text_to_video"),
                 log=f"Rendered one continuous native H3 text-to-video story with '{workflow_name}'.",
@@ -1088,7 +1086,7 @@ def register_longvideo_skills(
     tool_registry: ToolRegistry,
     output_root: Path,
     story_service: NativeH3StoryService | None = None,
-    prompt_engine: PromptEngine | None = None,
+    prompt_engine: LLMPromptEngine | None = None,
 ) -> None:
     skills = LongVideoSkills(
         tool_registry,

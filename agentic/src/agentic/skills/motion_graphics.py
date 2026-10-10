@@ -6,7 +6,7 @@ from typing import Any
 
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.motion_graphics import MotionGraphicsPlan
-from agentic.runtime.prompt_engine import PromptEngine
+from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import build_run_dir
 
@@ -15,7 +15,7 @@ class MotionGraphicsSkills:
     def __init__(self, tools: ToolRegistry, output_root: Path, prompt_engine: Any | None = None) -> None:
         self.tools = tools
         self.output_root = output_root
-        self.prompt_engine = prompt_engine or PromptEngine()
+        self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
 
     def compose_and_review(self, context: SkillContext) -> SkillResult:
         if not context.node.depends_on:

@@ -31,7 +31,7 @@ from agentic.app.character_requests import (  # noqa: E402
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
-from agentic.app.character_workflow import run_character_workflow  # noqa: E402
+from agentic.app.character_workflow import run_character_workflow
 
 
 CASE_PROMPTS: tuple[str, ...] = (
@@ -221,7 +221,6 @@ def _run_case(
                         comfy_host=args.comfy_host,
                         comfy_port=int(args.comfy_port),
                         comfy_root=Path(args.comfy_root).resolve(),
-                        auto_download_assets=False,
                     ),
                 )
             )

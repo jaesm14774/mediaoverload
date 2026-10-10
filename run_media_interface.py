@@ -109,7 +109,6 @@ def main() -> None:
         default=_default_comfy_root(),
         help="ComfyUI root for asset checks (default: COMFYUI_ROOT or D:\\ComfyUI_windows_portable)",
     )
-    parser.add_argument("--auto-download-assets", action="store_true", help="Allow automatic workflow asset preparation")
     args = parser.parse_args()
 
     if args.complete_facebook_profile_handoff:
@@ -126,7 +125,6 @@ def main() -> None:
         return
 
     config_path = _resolve_config_path(args)
-    print("H3 影片生成：Powered by WanGP", file=sys.stderr, flush=True)
     # Keep strategy/character routing randomness independent from --seed,
     # which is reserved for reproducible media rendering.
     request = CharacterWorkflowRequest(
@@ -161,7 +159,6 @@ def main() -> None:
             comfy_host=args.comfy_host,
             comfy_port=args.comfy_port,
             comfy_root=args.comfy_root,
-            auto_download_assets=args.auto_download_assets,
         ),
     )
     result = run_character_workflow(request)

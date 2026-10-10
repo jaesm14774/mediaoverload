@@ -14,7 +14,6 @@ class GoalRequest:
     media_type: str = "long_video"
     duration_seconds: int = 30
     style: str = "cinematic surreal"
-    auto_download_assets: bool = False
     constraints: dict[str, Any] = field(default_factory=dict)
 
 

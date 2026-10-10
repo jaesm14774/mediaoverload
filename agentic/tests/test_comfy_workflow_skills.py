@@ -133,10 +133,10 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
         tools = ToolRegistry()
 
         def render(payload: dict[str, object]) -> dict[str, object]:
-            calls.append(("wan2gp.render_h3", payload))
+            calls.append(("comfy.render_h3", payload))
             return {"saved_files": ["C:/renders/video.mp4"]}
 
-        tools.register("wan2gp.render_h3", render, "test")
+        tools.register("comfy.render_h3", render, "test")
         with tempfile.TemporaryDirectory() as temp_dir:
             skills = ComfyWorkflowSkills(tools, Path(temp_dir))
             plan = ExecutionPlan(
@@ -153,7 +153,7 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
                 node_id="animate-video",
                 skill_name="image.animate",
                 inputs={
-                    "workflow_name": "wan2gp_h3_i2va",
+                    "workflow_name": "minimax_h3_i2va",
                     "image_path": "C:/renders/frame.png",
                     "prompt": "Kirby jumps",
                     "width": 640,
@@ -169,7 +169,7 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(calls[0][0], "wan2gp.render_h3")
+        self.assertEqual(calls[0][0], "comfy.render_h3")
         self.assertEqual(calls[0][1]["seed"], 123456)
         self.assertEqual(calls[0][1]["width"], 640)
         self.assertEqual(calls[0][1]["height"], 360)

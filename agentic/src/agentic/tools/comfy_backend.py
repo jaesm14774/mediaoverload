@@ -74,12 +74,10 @@ class AgenticComfyCommunicator:
             data=b"".join(parts),
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
-        try:
-            response = request.urlopen(req, timeout=60)
+        with request.urlopen(req, timeout=60) as response:
             result = json.loads(response.read().decode("utf-8"))
-            return str(result.get("name", filename))
-        except Exception:
-            return filename
+        name = str(result["name"])
+        return f"{result['subfolder']}/{name}" if result.get("subfolder") else name
 
     def get_media_file(self, filename: str, subfolder: str, folder_type: str) -> bytes:
         query = parse.urlencode({"filename": filename, "subfolder": subfolder, "type": folder_type})
@@ -100,9 +98,9 @@ class AgenticComfyCommunicator:
     def free_memory(self) -> None:
         """Release cached models explicitly during image OOM recovery.
 
-        Successful images retain their model cache. WanGP owns the release
-        at the image-to-video boundary. Cleanup failure must not hide the
-        original generation error.
+        Successful jobs retain their cache; ComfyUI manages model residency
+        when the next workflow needs memory. Cleanup failure must not hide
+        the original generation error.
         """
         payload = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
         req = request.Request(
