@@ -40,8 +40,8 @@ routing:
     review_policy: opening_only
     continuity_mode: rendered_tail
     workflow_names:
-      - minimax_h3_lowvram_i2v
-      - minimax_h3_lowvram_15s_fl2va_i2v
+      - wan2gp_h3_i2va
+      - wan2gp_h3_fl2va
     length: 120
     steps: 16
     model_profile: q2
@@ -68,16 +68,11 @@ routing:
       kirby_continuity_img2img: 1
       kirby_identity_img2img: 1
     video_workflow_name:
-      minimax_h3_lowvram_i2v: 3
-      minimax_h3_lowvram_t2v: 3
-      minimax_h3_lowvram_15s_fl2va_i2v: 3
-      minimax_h3_ref2va: 2
-      minimax_h3_native_t2v: 1
+      wan2gp_h3_i2va: 3
+      wan2gp_h3_t2va: 3
+      wan2gp_h3_fl2va: 3
+      wan2gp_h3_ref2va: 2
 
-  # Optional LLM inspiration belongs to the strategy contract, not to a
-  # character config or a separate runtime registry. The motion planner may
-  # sample these notes per request; it never assigns, persists, or validates
-  # character abilities against them.
   strategy_contexts:
     game_sprite:
       reference_pack_version: game_sprite_action_references_v1
@@ -287,8 +282,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_t2v
-        - minimax_h3_native_t2v
+        - wan2gp_h3_t2va
     text2image2video:
       image_workflow_name:
         - krea2_turbo
@@ -298,7 +292,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_i2v
+        - wan2gp_h3_i2va
       upscale_workflow_name:
         - Tile Upscaler SDXL
     text2longvideo:
@@ -310,9 +304,9 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_i2v
+        - wan2gp_h3_i2va
       transition_workflow_name:
-        - minimax_h3_lowvram_15s_fl2va_i2v
+        - wan2gp_h3_fl2va
     native_h3_story:
       image_workflow_name:
         - krea2_turbo
@@ -322,7 +316,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_15s_fl2va_i2v
+        - wan2gp_h3_i2va
       refine_workflow_name:
         - krea2_turbo_img2img
         - image_to_image
@@ -330,8 +324,7 @@ routing:
         - kirby_identity_img2img
     native_h3_t2v_story:
       video_workflow_name:
-        - minimax_h3_lowvram_t2v
-        - minimax_h3_native_t2v
+        - wan2gp_h3_t2va
     native_h3_fl2va_story:
       image_workflow_name:
         - krea2_turbo
@@ -341,7 +334,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_15s_fl2va_i2v
+        - wan2gp_h3_fl2va
     native_h3_l2va_story:
       image_workflow_name:
         - krea2_turbo
@@ -351,10 +344,10 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_15s_fl2va_i2v
+        - wan2gp_h3_l2va
     native_h3_ref2va:
       video_workflow_name:
-        - minimax_h3_ref2va
+        - wan2gp_h3_ref2va
     text2image2native_h3_ref2va:
       image_workflow_name:
         - krea2_turbo
@@ -364,7 +357,7 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_ref2va
+        - wan2gp_h3_ref2va
     text2image2image:
       image_workflow_name:
         - krea2_turbo
@@ -387,14 +380,14 @@ routing:
         - nova_model_plus_z_image_anime
         - kirby_keyframe_anima
       video_workflow_name:
-        - minimax_h3_lowvram_i2v
+        - wan2gp_h3_i2va
     # Additive game asset route. Its stage contract is separate from the
     # existing strategies while the route remains available to selection.
     game_sprite:
       image_workflow_name:
         - krea2_turbo
       video_workflow_name:
-        - minimax_h3_lowvram_i2v
+        - wan2gp_h3_i2va
 
   count_policies:
     story_card:
@@ -951,32 +944,30 @@ routing:
         - character appearance reference
         - anime consistency
         - keyframe cleanup
-      minimax_h3_lowvram_t2v:
+      wan2gp_h3_t2va:
         - text to video
         - prompt driven video
         - native audio
         - continuous short story
         - camera movement
-      minimax_h3_native_t2v:
-        - native H3 text to video fallback
-        - official INT8 H3 model
-        - prompt driven video
-        - native stereo audio
-        - higher quality fallback
-      minimax_h3_lowvram_i2v:
+      wan2gp_h3_i2va:
         - image to video
         - animate still image
         - cinematic motion
         - camera move
         - short sequence
-      minimax_h3_lowvram_15s_fl2va_i2v:
+      wan2gp_h3_fl2va:
         - first and last frame video
         - H3 I2VA
         - H3 FL2VA
         - H3 L2VA
         - low VRAM 15 second story
         - native audio
-      minimax_h3_ref2va:
+      wan2gp_h3_l2va:
+        - last frame video
+        - landing image
+        - native stereo audio
+      wan2gp_h3_ref2va:
         - reference to video
         - multiple reference images
         - reference video motion
@@ -1052,48 +1043,48 @@ routing:
           - "比 continuity 路線允許更多身份細節重繪。"
         tradeoffs:
           - "需要 Anima 資產，較高 denoise 可能改變原始構圖。"
-      minimax_h3_lowvram_15s_fl2va_i2v:
-        summary: "MiniMax H3 低 VRAM 15 秒影像條件 workflow；同一個 ImageToVideo node 可依輸入綁定 first frame、last frame 或兩者。"
+      wan2gp_h3_fl2va:
+        summary: "MiniMax H3 低 VRAM 15 秒影像條件 workflow；WanGP 官方 API 依策略綁定 image_start、image_end 或兩者。"
         strengths:
-          - "graph 明確包含 optional `first_frame` 與 `last_frame`，因此可承載 I2VA、FL2VA 與 L2VA 三種契約。"
-          - "使用 Q4 GGUF、system-RAM Spectrum accelerator 與 H3 audio VAE，適合目前的 balanced-lowvram profile。"
-          - "輸出 CreateVideo 並合成原生 stereo audio。"
+          - "WanGP settings 明確包含 optional `image_start` 與 `image_end`，因此可承載 I2VA、FL2VA 與 L2VA 三種契約。"
+          - "使用 Q4 GGUF、WanGP Profile 4 / Sage2 / Spectrum 與 H3 audio VAE，適合目前的 balanced-lowvram profile。"
+          - "輸出 MP4 與 H3 原生 stereo audio。"
         tradeoffs:
           - "它不是純 T2V；至少需要由上游產生或審核可用的 frame condition。"
           - "15 秒與低 VRAM 設定是固定取向，長篇內容應改用 text2longvideo。"
-      minimax_h3_native_t2v:
-        summary: "MiniMax H3 官方 INT8 native T2V fallback workflow，以 prompt 直接生成影片與原生音訊。"
+      wan2gp_h3_l2va:
+        summary: "WanGP H3 Last Frame 路線，只有 image_end，沒有固定首幀。"
         strengths:
-          - "graph 的 MiniMaxH3ImageToVideo node 沒有 first_frame 或 last_frame input，契約是純 prompt T2V。"
-          - "使用官方 INT8 diffusion、NVFP4 text encoder 與 H3 video/audio VAE。"
+          - "使用 E flag，讓影片落在指定的結尾畫面。"
+          - "Q4 GGUF、Profile 4、Sage2 與 H3 原生音訊。"
         tradeoffs:
-          - "沒有畫面條件輸入，不能保證既有角色圖的身份或構圖延續；低 VRAM profile 優先使用 minimax_h3_lowvram_t2v。"
-      minimax_h3_ref2va:
+          - "必須提供可讀取的尾幀圖片；角色開場構圖由模型生成。"
+      wan2gp_h3_ref2va:
         summary: "MiniMax H3 Reference-to-Video workflow，runtime 綁定多張圖片與可選參考影片，不接受 reference audio。"
         strengths:
-          - "graph 使用 `MiniMaxH3ReferenceToVideo` node，reference slots 在 runtime 由已驗證 manifest 動態注入。"
+          - "WanGP 使用專屬 Ref2VA checkpoint，依已驗證 manifest 綁定 image_refs / video_guide 輸入。"
           - "適合需要共同保留角色身份、風格、場景、道具或 motion/camera 語言的多素材需求。"
           - "輸出原生 H3 video 與 generated stereo audio，reference audio 被明確排除。"
         tradeoffs:
           - "已配置但缺檔或不可讀的 image/video manifest 會被拒絕；空 manifest 則可走六張候選圖加 Discord 選擇 gate。單一首圖需求應改用一般 I2V。"
           - "reference 約束越多，prompt 與素材角色標註越重要，也會增加 runtime 資源壓力。"
-      minimax_h3_lowvram_t2v:
+      wan2gp_h3_t2va:
         summary: "MiniMax H3 原生 text-to-video workflow，適合純 prompt 驅動的連續短片，並保留 H3 原生音訊輸出。"
         strengths:
           - "適合探索新的場景、動作與鏡頭，不需要先準備輸入圖片。"
           - "H3 原生 audio VAE 會依 prompt 產生聲音，適合有環境聲或效果音的短片。"
           - "適合 text2video 與沒有既有首幀約束的單一連續故事。"
         tradeoffs:
-          - "若角色外觀或開場構圖必須延續既有圖片，應改選 `minimax_h3_lowvram_i2v`。"
-      minimax_h3_lowvram_i2v:
+          - "若角色外觀或開場構圖必須延續既有圖片，應改選 `wan2gp_h3_i2va`。"
+      wan2gp_h3_i2va:
         summary: "MiniMax H3 原生 image-to-video workflow，適合把已定稿圖片轉成帶原生音訊的短影片。"
         strengths:
           - "以輸入圖片鎖定角色身份與開場構圖，再生成連續動作、鏡頭運動與聲音。"
           - "適合 text2image2video、text2longvideo 與動態貼圖的片段動畫核心。"
-          - "balanced-lowvram profile 使用 608x352、24 fps 與 system-RAM offload。"
+          - "WanGP Profile 4 使用 608x352、24 fps 與 system-RAM offload。"
         tradeoffs:
           - "需要先有可讀取的輸入圖片與 H3 模型資產，VRAM／system RAM 壓力高於一般生圖。"
-          - "若沒有既有畫面控制需求，純 prompt 的 `minimax_h3_lowvram_t2v` 更直接。"
+          - "若沒有既有畫面控制需求，純 prompt 的 `wan2gp_h3_t2va` 更直接。"
       Tile Upscaler SDXL:
         summary: "最終放大與細節回填 workflow，適合交付前提升解析度、紋理細節與局部清晰度。"
         strengths:

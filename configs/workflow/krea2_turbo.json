@@ -1,12 +1,12 @@
 {
   "1": {
     "inputs": {
-      "unet_name": "krea2_turbo_bf16-Q4_0.gguf",
+      "unet_name": "Krea2-Turbo-W4A4-noLowRank.safetensors",
       "weight_dtype": "default"
     },
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "_meta": {
-      "title": "Krea 2 Turbo Q4_0 diffusion"
+      "title": "Krea 2 Turbo native W4A4 diffusion"
     }
   },
   "2": {

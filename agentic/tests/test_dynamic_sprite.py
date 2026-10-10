@@ -74,6 +74,8 @@ def test_game_sprite_reference_pack_is_ephemeral_inspiration_not_a_moveset() -> 
 
 
 def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() -> None:
+    """User Given configured sprite inspiration When prompts are prepared Then the LLM receives optional visual notes without a fixed moveset."""
+
     repo_root = Path(__file__).resolve().parents[2]
     class FakeTextModel:
         def __init__(self) -> None:
@@ -343,7 +345,7 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
             node_id="sprite-motion-video",
             skill_name="media.image.animate",
             inputs={
-                "workflow_name": "minimax_h3_lowvram_i2v",
+                "workflow_name": "wan2gp_h3_i2va",
                 "image_path": str(tmp_path / "master.png"),
                 "width": 608,
                 "height": 352,
@@ -359,12 +361,14 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
     assert result.status == "success"
     assert len(calls) == 1
     tool_name, payload = calls[0]
-    assert tool_name == "comfy.workflow.image_to_video"
+    assert tool_name == "wan2gp.render_h3"
     assert payload["length"] == 124
     assert payload["steps"] == 16
 
 
 def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
+    """User Given the Kirby configuration When game-sprite generation is requested Then its WanGP workflow and inspiration context reach the goal."""
+
     repo_root = Path(__file__).resolve().parents[2]
     kirby_config = repo_root / "configs" / "characters" / "kirby.yaml"
     payload = build_goal_payload_from_character_config(
@@ -383,10 +387,10 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
     assert payload["constraints"]["sprite_video_length"] == 192
     assert payload["constraints"]["sprite_chroma_color"] == "random"
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
-    assert payload["constraints"]["video_workflow_name"] == "minimax_h3_lowvram_i2v"
+    assert payload["constraints"]["video_workflow_name"] == "wan2gp_h3_i2va"
     assert payload["constraints"]["sprite_source_width"] == 1024
     assert payload["constraints"]["sprite_source_height"] == 576
-    assert payload["constraints"]["sprite_h3_model_profile"] == "q2"
+    assert payload["constraints"]["sprite_h3_model_profile"] == "q4"
     assert payload["constraints"]["strategy_context"]["reference_pack_version"] == "game_sprite_action_references_v1"
     assert len(payload["constraints"]["strategy_context"]["creative_inspiration"]) == 25
 

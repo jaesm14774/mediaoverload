@@ -1,0 +1,7 @@
+{
+  "provider": "wan2gp", "h3_mode": "ref2va",
+  "summary": "H3 ordered appearance and motion references to video with generated audio. Powered by WanGP.",
+  "media_types": ["native_h3_ref2va", "long_video"],
+  "recommended_defaults": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 16, "model_profile": "q4"},
+  "conditioning": {"provider": "wan2gp", "recipes": {"reference_bundle": {"references": ["image", "video"], "reference_minimum": 1, "reference_maximum": 4, "reference_selection_limit": 4, "continuation": "none", "render_tool": "wan2gp.render_h3"}}}
+}

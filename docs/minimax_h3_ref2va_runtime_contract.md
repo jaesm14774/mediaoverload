@@ -1,39 +1,16 @@
-# MiniMax H3 Ref2VA runtime contract
+# H3 Ref2VA runtime contract
 
-The Ref2VA base workflow is intentionally empty of reference loaders. The Python binding creates only the loader nodes required by the current run:
+H3 rendering is **Powered by WanGP**. See [installation and complete mode mapping](wan2gp_h3.md).
 
-- `1..N` accepted images become `LoadImage` nodes wired to `ref_images.ref_image_*`.
-- `1..N` accepted videos become `VHS_LoadVideoPath` nodes wired to `ref_videos.ref_video_*`.
-- Unused image/video slots are not filled with placeholders and are not sent as `None` conditioning entries.
-- Reference audio is never connected. The workflow still decodes H3's generated audio output.
+Ref2VA requires the dedicated `minimax_h3_ref2va_pruned` model definition, not the FL2VA model with an image attached. The production template is `wan2gp_h3_ref2va`; the registered tool is `wan2gp.render_h3`.
 
-`minimax_h3_ref2va.json` is the single canonical Ref2VA workflow. Model selection is runtime data, not another workflow file:
+References are validated before GPU submission. Every record has a readable path, type, role, retained feature and stable prompt label. Duplicate files, unsupported media, missing references and audio references are rejected. Up to nine image and three video references are accepted.
 
-- `model_profile: q4` keeps the RTX 4060 GGUF loaders.
-- `model_profile: q2` keeps the Q4 Ref2VA diffusion model but swaps only the text encoder to Q2_K for OOM fallback.
-- `model_profile: native` patches the diffusion/text loader classes and model names in memory before queueing.
-- `model_overrides` can explicitly patch node IDs `1` and `2` with `class_type` and `inputs` when an API caller needs a custom model set.
+- Ordered images become `image_refs` with `video_prompt_type=I`. The `I` choice retains the requested canvas; `KI` is not used because it lets the first reference define output dimensions.
+- Ordered videos become `video_guide`, `video_guide2` and `video_guide3`, with `V-U`, `V+-U` or `V+*-U`. They are references, not denoise/control inputs. Combined image/video bundles concatenate these flags.
+- `<Picture N>` and `<Video N>` labels remain in the same order as the input records. References do not become timeline anchors unless the caller separately supplies a valid frame anchor.
+- Reference audio is disabled. H3 generates native output audio; the source video's soundtrack is not requested as an audio reference.
 
-Typical API payload:
+Each render writes the effective WanGP settings, reference manifest, lineage, file hashes, progress events, timing and ffprobe result into its run directory. The worker uses the public API, remains initialized between jobs, and releases model memory after each completed generation. Missing conditioning never falls through to T2VA or another backend.
 
-```json
-{
-  "workflow_name": "minimax_h3_ref2va",
-  "model_profile": "q4",
-  "reference_manifest": [{"path": "D:/.../identity.png", "type": "image"}]
-}
-```
-
-This low-level binding receives a validated manifest. At planner level,
-`native_h3_ref2va` with an empty configured manifest first creates six image
-candidates and waits for Discord selection; the selected assets are then
-normalized into the manifest shown above. `text2image2native_h3_ref2va` names
-the same candidate stage explicitly.
-
-The native profile still requires its model files to exist in the configured D: or E: ComfyUI model directories; selecting it does not download anything implicitly.
-
-These are valid and distinct modes: image-only, video-only, and explicitly mixed image+video. On an RTX 4060, start with one identity image; add a second image only when it contributes a different view or controlled appearance detail. Add a reference video only when motion, camera, or timing is actually needed. Sending duplicate image and video content increases VRAM and runtime without adding a useful constraint.
-
-For Discord or other human review flows, Ref2VA candidates pass through `publish.media.ingest` and `review.assets.select` with `review_all_candidates: true`. The validator consumes only the selected assets and builds the final reference manifest. The ordinary image-to-video route does not use this multi-reference behavior: it resolves the first approved image only.
-
-The effective limits are configurable (`reference_max_images` up to 9 and `reference_max_videos` up to 3), but the runtime never assumes that all limits are populated. `reference_frame_cap` may be used to cap an expensive reference video. Keep all model, cache, and output paths on D: or E: for the current local setup; the repository remains on C:.
+Q4 is the verified production default. A Q2 text-encoder definition is registered for explicit selection, with no automatic switch on failure. The API requires the original audio-VAE serialization; Comfy's fused audio VAE is not a valid substitute file.

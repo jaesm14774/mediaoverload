@@ -157,9 +157,9 @@ class WorkflowRunnerTests(unittest.TestCase):
             @staticmethod
             def call(name: str, payload: dict[str, object]) -> dict[str, object]:
                 self.assertEqual(name, "asset.ensure_workflow_ready")
-                self.assertEqual(payload["workflow_name"], "minimax_h3_lowvram_i2v")
+                self.assertEqual(payload["workflow_name"], "wan2gp_h3_i2va")
                 return {
-                    "workflow_name": "minimax_h3_lowvram_i2v",
+                    "workflow_name": "wan2gp_h3_i2va",
                     "asset_status": [
                         {"asset": "minimax_h3_fl2va_pruned_fp8_Q4_0.gguf", "status": "missing", "action": "manual_setup"},
                         {"asset": "qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf", "status": "missing", "action": "manual_setup"},
@@ -176,7 +176,7 @@ class WorkflowRunnerTests(unittest.TestCase):
             node=ExecutionNode(
                 node_id="video-asset-check",
                 skill_name="media.ensure_workflow",
-                inputs={"workflow_name": "minimax_h3_lowvram_i2v", "auto_download": False},
+                inputs={"workflow_name": "wan2gp_h3_i2va", "auto_download": False},
             ),
             state={},
         )
@@ -200,14 +200,14 @@ class WorkflowRunnerTests(unittest.TestCase):
         context = SkillContext(
             plan=ExecutionPlan(
                 goal=GoalRequest(prompt="Qixi portrait video", media_type="image_to_video"),
-                workflow_name="minimax_h3_lowvram_i2v",
+                workflow_name="wan2gp_h3_i2va",
                 nodes=[],
             ),
             node=ExecutionNode(
                 node_id="i2v-render",
                 skill_name="media.image.animate",
                 inputs={
-                    "workflow_name": "minimax_h3_lowvram_i2v",
+                    "workflow_name": "wan2gp_h3_i2va",
                     "image_path": "C:/input/keyframe.png",
                     "width": 576,
                     "height": 1024,
@@ -220,7 +220,7 @@ class WorkflowRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0], "comfy.workflow.image_to_video")
+        self.assertEqual(calls[0][0], "wan2gp.render_h3")
         self.assertEqual(calls[0][1]["width"], 576)
         self.assertEqual(calls[0][1]["height"], 1024)
 

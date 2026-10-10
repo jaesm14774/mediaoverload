@@ -1,3 +1,5 @@
+> H3 generation backend: **Powered by WanGP**. See [current workflows and runtime contracts](wan2gp_h3.md).
+
 # Native MiniMax H3 story recipe
 
 The five Native H3 modes are first-class MiniMax H3 generation types:
@@ -5,7 +7,7 @@ The five Native H3 modes are first-class MiniMax H3 generation types:
 `native_h3_l2va_story`, and `native_h3_ref2va`. The composed
 `text2image2native_h3_ref2va` route adds an explicit candidate-image stage.
 They use the same automation surface as every other media strategy; generation starts at
-`run_media_interface.py` or the scheduler and reaches ComfyUI through the
+`run_media_interface.py` or the scheduler and reaches WanGP through the
 agentic runtime.
 
 ## Native H3 generation
@@ -19,12 +21,12 @@ inspection records technical evidence for Discord, which owns creative review.
 
 The production route uses `configs/storyboards/native_h3_15s.yaml` for its
 duration and renderer settings. Direct H3 rendering is capped
-at 362 frames (~15 seconds): the local ComfyUI H3 node documents 124-362 frames
-as the trained range. A 20-second direct request is rejected before
+at 362 frames (~15 seconds): the configured WanGP H3 routes support up to 362 delivered frames.
+A 20-second direct request is rejected before
 submission; the system does not silently shorten it or substitute a fallback.
 
 `native_h3_t2v_story` is the direct text-to-video route. It calls the existing
-`comfy.workflow.text_to_video` tool and has no keyframe/image nodes.
+`wan2gp.render_h3` tool and has no keyframe/image nodes.
 `native_h3_story` is the first-frame image-to-video route; `native_h3_fl2va_story`
 adds a reviewed landing frame, `native_h3_l2va_story` keeps only the reviewed
 landing frame, and `native_h3_ref2va` consumes either a validated manifest or
@@ -39,8 +41,8 @@ schedule / run_media_interface.py
   -> routing.yaml generation_type + workflow candidates
   -> TaskPlanner dispatches the selected Native H3 route
   -> SkillRegistry / WorkflowRunner
-  -> ComfyWorkflowToolset
-  -> ComfyUI API graph
+  -> Wan2GPToolset / wan2gp.render_h3
+  -> isolated worker / official WanGP Python API
 ```
 
 The native graph is:
@@ -110,8 +112,8 @@ The reusable recipe lives in:
   16 steps, and workflow names.
 - `configs/storyboards/native_h3_15s.yaml` — native H3 duration and story input
   settings; the current prompt supplies the creative direction.
-- `configs/workflow/minimax_h3_lowvram_15s_fl2va_i2v.json` — visible ComfyUI
-  API graph with first and last frame LoadImage bindings.
+- `configs/workflow/wan2gp_h3_fl2va.json` — WanGP workflow metadata;
+  the renderer maps first and last images to `image_start` / `image_end` with `SE`.
 
 To make another scheduled story, set its character profile, renderer settings,
 and prompt in the character or routing configuration.
@@ -216,8 +218,8 @@ are reused without a second editorial gate.
 ## Automated social publishing
 
 Publishing stays on the same goal/plan/skill/tool path. There is no separate
-uploader script. Use the formal repo entry point after the ComfyUI server and
-the scheduler dependencies are ready:
+uploader script. Use the formal repo entry point after the ComfyUI image server,
+isolated WanGP installation and scheduler dependencies are ready:
 
 ```powershell
 python run_media_interface.py `
@@ -265,8 +267,8 @@ outcomes. The runtime never silently selects candidate 1.
 After approval, the selected image is immutable: it is passed directly to the
 MiniMax H3 I2V workflow without identity img2img refinement or automatic
 opening-frame regeneration. The ending keyframe is generated only when
-`use_last_frame: true`; otherwise the Comfy last-frame input is explicitly
-cleared. The final publish/review plan requires a Discord decision before safe
+`use_last_frame: true`; otherwise I2VA submits only the opening image with `S`.
+The final publish/review plan requires a Discord decision before safe
 POC publishing.
 
 `--no-review` is an explicit bypass: it does not send an interactive Discord

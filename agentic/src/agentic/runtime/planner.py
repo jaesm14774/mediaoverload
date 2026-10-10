@@ -44,8 +44,8 @@ class TaskPlanner:
     DEFAULT_IMAGE_WORKFLOWS = ("krea2_turbo",)
     DEFAULT_REFINE_WORKFLOWS = ("krea2_turbo_img2img",)
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
-    DEFAULT_T2V_WORKFLOWS = ("minimax_h3_lowvram_t2v", "minimax_h3_native_t2v")
-    DEFAULT_I2V_WORKFLOWS = ("minimax_h3_lowvram_i2v",)
+    DEFAULT_T2V_WORKFLOWS = ("wan2gp_h3_t2va",)
+    DEFAULT_I2V_WORKFLOWS = ("wan2gp_h3_i2va",)
 
     def __init__(self, asset_registry: AssetRegistry, idea_director: IdeaDirector | None = None) -> None:
         self.asset_registry = asset_registry
@@ -117,7 +117,7 @@ class TaskPlanner:
         return {
             "width": int(goal.constraints.get("canvas_width") or defaults.get("width", 608)),
             "height": int(goal.constraints.get("canvas_height") or defaults.get("height", 352)),
-            "length": int(goal.constraints.get("native_h3_length") or defaults.get("length", 362)),
+            "length": int(goal.constraints.get("native_h3_length") or max(107, math.ceil((min(15, goal.duration_seconds) * 24 - 5) / 17) * 17 + 5)),
             "steps": int(goal.constraints.get("native_h3_steps") or defaults.get("steps", default_steps)),
             "video_count": TaskPlanner._constraint_int(goal, "video_count", 1),
         }
@@ -144,9 +144,9 @@ class TaskPlanner:
             "expected_fps": fps,
             "target_duration": target_duration,
             "duration_tolerance": 0.6,
-            "require_audio": manifest.name.startswith("minimax_h3_"),
-            "require_stereo_audio": manifest.name.startswith("minimax_h3_"),
-            "analyze_audio": manifest.name.startswith("minimax_h3_"),
+            "require_audio": manifest.name.startswith("wan2gp_h3_"),
+            "require_stereo_audio": manifest.name.startswith("wan2gp_h3_"),
+            "analyze_audio": manifest.name.startswith("wan2gp_h3_"),
             "frame_count": 6,
             "columns": 3,
             "scale_width": 480,
@@ -375,7 +375,7 @@ class TaskPlanner:
                 source_node=video_node,
                 node_id="native-h3-canvas",
             )
-        final_qa_inputs = dict(qa_inputs or {})
+        final_qa_inputs = {"require_audio": True, "require_stereo_audio": True, "analyze_audio": True, **(qa_inputs or {})}
         if final_qa_inputs.get("expected_fps") in {None, ""}:
             final_qa_inputs["expected_fps"] = float(
                 goal.constraints.get("native_h3_frame_rate") or 24
@@ -507,7 +507,7 @@ class TaskPlanner:
         )
         video_manifest = self._manifest_from_goal_constraints(
             goal,
-            *self.DEFAULT_I2V_WORKFLOWS,
+            ("wan2gp_h3_fl2va" if goal.media_type == "native_h3_fl2va_story" or goal.constraints.get("native_h3_use_last_frame") else "wan2gp_h3_i2va"),
             constraint_keys=(
                 "video_workflow_name",
                 "native_h3_workflow_name",
@@ -516,21 +516,13 @@ class TaskPlanner:
             allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
         )
         render_config = self._native_h3_render_config(goal, video_manifest)
-        lowvram_fl2va = (
-            goal.media_type == "native_h3_fl2va_story"
-            and video_manifest.name.startswith("minimax_h3_lowvram_")
-        )
-        # The low-VRAM FL2VA graph is still the full 15-second workflow. Its
-        # manifest defaults (608x352, 362 frames) are the source of truth;
-        # silently replacing them with a 124-frame preview made the output
-        # disagree with the configured story duration.
         width = render_config["width"]
         height = render_config["height"]
         length = int(goal.constraints.get("native_h3_fl2va_length") or render_config["length"])
         steps = int(goal.constraints.get("native_h3_fl2va_steps") or render_config["steps"])
         video_count = render_config["video_count"]
         model_profile = str(
-            goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_fl2va else "q4")
+            goal.constraints.get("native_h3_model_profile") or "q4"
         )
         pre_video_review = self._pre_video_review_enabled(goal)
         pre_video_requires_human = self._pre_video_review_requires_human(goal)
@@ -772,7 +764,7 @@ class TaskPlanner:
                     inputs=render_inputs,
                     depends_on=["native-story-prompt", "native-video-asset-check", "native-keyframe-source-check"],
                     tags=["render", "video", "native-h3"],
-                    tool_name="comfy.workflow.image_to_video",
+                    tool_name="wan2gp.render_h3",
                     stage="render",
                 ),
                 *self._native_h3_finalize_nodes(
@@ -786,8 +778,6 @@ class TaskPlanner:
                             "expected_height": height,
                             "expected_fps": float(goal.constraints.get("native_h3_frame_rate") or 24),
                         }
-                        if lowvram_fl2va
-                        else None
                     ),
                 ),
             ]
@@ -798,7 +788,7 @@ class TaskPlanner:
             "selected_workflow": video_manifest.name,
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "use_last_frame": use_last_frame, "frame_pair_strategy": frame_pair_strategy if use_last_frame else "", "experiment_seed": experiment_seed, "lowvram_preview": lowvram_fl2va},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "keyframe_candidate_count": keyframe_candidate_count, "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "use_last_frame": use_last_frame, "frame_pair_strategy": frame_pair_strategy if use_last_frame else "", "experiment_seed": experiment_seed, "backend": "wan2gp"},
             **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
             "graph_overview": [node.node_id for node in nodes],
         }
@@ -818,24 +808,22 @@ class TaskPlanner:
         """Build one continuous native H3 text-to-video story without keyframes."""
         video_manifest = self._manifest_from_goal_constraints(
             goal,
-            "minimax_h3_lowvram_t2v",
-            "minimax_h3_native_t2v",
+            "wan2gp_h3_t2va",
             constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
             allowed_media_types={"text2video", "long_video"},
         )
         render_config = self._native_h3_render_config(goal, video_manifest)
-        lowvram_t2v = video_manifest.name.startswith("minimax_h3_lowvram_")
         width = render_config["width"]
         height = render_config["height"]
         length = int(
             goal.constraints.get("native_h3_t2v_length")
             or goal.constraints.get("native_h3_length")
-            or (124 if lowvram_t2v else render_config["length"])
+            or render_config["length"]
         )
         steps = int(
             goal.constraints.get("native_h3_t2v_steps")
             or goal.constraints.get("native_h3_steps")
-            or (16 if lowvram_t2v else render_config["steps"])
+            or render_config["steps"]
         )
         video_count = render_config["video_count"]
         frame_rate = float(goal.constraints.get("native_h3_frame_rate") or 24)
@@ -884,12 +872,12 @@ class TaskPlanner:
                     "model_profile": str(
                         goal.constraints.get("native_h3_t2v_model_profile")
                         or goal.constraints.get("native_h3_model_profile")
-                        or ("q2" if lowvram_t2v else "q4")
+                        or "q4"
                     ),
                 },
                 depends_on=["native-story-prompt", "native-video-asset-check"],
                 tags=["render", "video", "native-h3", "t2v"],
-                tool_name="comfy.workflow.text_to_video",
+                tool_name="wan2gp.render_h3",
                 stage="render",
             ),
             *self._native_h3_finalize_nodes(
@@ -916,7 +904,7 @@ class TaskPlanner:
                 "steps": steps,
                 "target_duration": render_duration,
                 "requested_duration": int(goal.duration_seconds),
-                "lowvram_preview": lowvram_t2v,
+                "backend": "wan2gp",
             },
             "render_mode": "text_to_video",
             **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
@@ -946,12 +934,11 @@ class TaskPlanner:
         )
         video_manifest = self._manifest_from_goal_constraints(
             goal,
-            "minimax_h3_lowvram_15s_fl2va_i2v",
+            "wan2gp_h3_l2va",
             constraint_keys=("video_workflow_name", "native_h3_workflow_name", "workflow_name"),
             allowed_media_types={"image_to_video", "image_to_video_audio", "long_video"},
         )
         render_config = self._native_h3_render_config(goal, video_manifest)
-        lowvram_l2va = video_manifest.name.startswith("minimax_h3_lowvram_")
         # L2VA uses the configured 15-second H3 workflow in production. Do
         # not silently downgrade it to the 124-frame low-VRAM preview; the
         # post-render speed node is responsible for the requested 2x timing
@@ -962,7 +949,7 @@ class TaskPlanner:
         steps = int(goal.constraints.get("native_h3_l2va_steps") or render_config["steps"])
         video_count = render_config["video_count"]
         model_profile = str(
-            goal.constraints.get("native_h3_model_profile") or ("q2" if lowvram_l2va else "q4")
+            goal.constraints.get("native_h3_model_profile") or "q4"
         )
         storyboard_path = self._native_h3_storyboard_path(goal, "native_h3_l2va_story")
         reference_node = self._reference_video_analysis_node(goal)
@@ -1068,7 +1055,7 @@ class TaskPlanner:
                     },
                     depends_on=["native-story-prompt", "native-video-asset-check", "native-l2va-frame-source-check"],
                     tags=["render", "video", "native-h3", "l2va"],
-                    tool_name="comfy.workflow.image_to_video",
+                    tool_name="wan2gp.render_h3",
                     stage="render",
                 ),
                 *self._native_h3_finalize_nodes(
@@ -1083,8 +1070,6 @@ class TaskPlanner:
                             "expected_height": height,
                             "expected_fps": float(goal.constraints.get("native_h3_frame_rate") or 24),
                         }
-                        if lowvram_l2va
-                        else None
                     ),
                 ),
             ]
@@ -1095,7 +1080,7 @@ class TaskPlanner:
             "selected_workflow": video_manifest.name,
             "keyframe_workflow": image_manifest.name,
             "required_assets": [asset.to_dict() for asset in (*image_manifest.required_assets, *video_manifest.required_assets)],
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "lowvram_preview": lowvram_l2va},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "require_human_review": require_human_review, "stage_probe_auto_select": stage_probe_auto_select, "backend": "wan2gp"},
             "render_mode": "last_frame_to_video",
             **({"reference_video": self._reference_video_metadata(goal)} if reference_node else {}),
             "graph_overview": [node.node_id for node in nodes],
@@ -1136,7 +1121,7 @@ class TaskPlanner:
             )
         video_manifest = self._manifest_from_goal_constraints(
             goal,
-            "minimax_h3_ref2va",
+            "wan2gp_h3_ref2va",
             constraint_keys=("video_workflow_name", "native_h3_ref2va_workflow_name", "workflow_name"),
             allowed_media_types={"native_h3_ref2va", "long_video"},
         )
@@ -1335,7 +1320,7 @@ class TaskPlanner:
                     },
                     depends_on=["native-story-prompt", "native-video-asset-check", "native-ref2va-reference-check"],
                     tags=["render", "video", "native-h3", "ref2va"],
-                    tool_name="comfy.workflow.reference_to_video",
+                    tool_name="wan2gp.render_h3",
                     stage="render",
                 ),
             ]
@@ -1345,7 +1330,14 @@ class TaskPlanner:
                 goal,
                 tags=["native-h3", "ref2va"],
                 include_keyframe_source_check=False,
-                qa_inputs={"frame_count": 12, "columns": 4},
+                qa_inputs={
+                    "target_duration": length / 24,
+                    "expected_width": width,
+                    "expected_height": height,
+                    "expected_fps": 24,
+                    "frame_count": 12,
+                    "columns": 4,
+                },
             )
         )
         required_assets = [asset.to_dict() for asset in video_manifest.required_assets]
@@ -1371,7 +1363,7 @@ class TaskPlanner:
             "reference_candidate_count": reference_candidate_count if auto_reference_generation else 0,
             "reference_selection_limit": reference_selection_limit,
             "reference_audio_enabled": False,
-            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "reference_image_size": str(goal.constraints.get("native_h3_reference_image_size") or "match"), "stage_probe_auto_select": stage_probe_auto_select},
+            "native_h3": {"width": width, "height": height, "length": length, "steps": steps, "target_duration": int(goal.duration_seconds), "reference_image_size": str(goal.constraints.get("native_h3_reference_image_size") or "match"), "stage_probe_auto_select": stage_probe_auto_select, "backend": "wan2gp"},
             "render_mode": "reference_to_video",
             "graph_overview": [node.node_id for node in nodes],
         }
@@ -2822,7 +2814,7 @@ class TaskPlanner:
                     },
                     depends_on=animate_dependencies,
                     tags=["render", "video"],
-                    tool_name="comfy.workflow.image_to_video",
+                    tool_name="wan2gp.render_h3",
                     stage="render",
                 ),
                 ExecutionNode(
@@ -2976,7 +2968,7 @@ class TaskPlanner:
                             "video-asset-check",
                         ],
                         tags=["render", "video", "retry"],
-                        tool_name="comfy.workflow.image_to_video",
+                        tool_name="wan2gp.render_h3",
                         stage="render",
                     ),
                     ExecutionNode(
@@ -3826,7 +3818,7 @@ class TaskPlanner:
                 },
                 depends_on=["sprite-motion-plan", "sprite-master-image", "sprite-video-assets"],
                 tags=["render", "video", "sprite", "h3"],
-                tool_name="comfy.workflow.image_to_video",
+                tool_name="wan2gp.render_h3",
                 stage="render",
             ),
             ExecutionNode(
@@ -3950,7 +3942,7 @@ class TaskPlanner:
                 },
                 depends_on=["motion-prompt", "video-asset-check"],
                 tags=["render", "video", "sticker"],
-                tool_name="comfy.workflow.image_to_video",
+                tool_name="wan2gp.render_h3",
                 stage="render",
             ),
             ExecutionNode(
@@ -4001,7 +3993,7 @@ class TaskPlanner:
                         },
                         depends_on=["review-refine-prompt", "render-stickers", "video-asset-check"],
                         tags=["render", "video", "sticker", "retry"],
-                        tool_name="comfy.workflow.image_to_video",
+                        tool_name="wan2gp.render_h3",
                         stage="render",
                     ),
                     ExecutionNode(

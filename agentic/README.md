@@ -1,5 +1,8 @@
 # Agentic Runtime
 
+H3 影片生成已改為 **Powered by WanGP**：文生影、首幀、首尾幀、尾幀、參考圖／影片共五種策略。Krea 生圖維持 ComfyUI。設定與實測見 [WanGP H3 workflows](../docs/wan2gp_h3.md)。
+
+
 `agentic/` is the media runtime for explicit planners, execution graphs, skills, tools, memories, and an asset registry. It gives AI agents a composable surface for designing and refining workflows without coupling generation logic to a service hierarchy.
 
 ## Design Principles

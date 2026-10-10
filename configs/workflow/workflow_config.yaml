@@ -8,18 +8,18 @@
 #   - audio_prompt: 音訊提示詞節點
 
 workflows:
-  # Krea2 uses the local GGUF profile selected for the RTX 4060 8GB machine.
+  # Krea2 uses native ConvRot W4A4 kernels on the RTX 4060 8GB machine.
   # The registry reports these as missing until they are manually installed;
   # the manifest does not auto-download them.
   "krea2_turbo.json":
-    summary: "Krea 2 Turbo Q4_0 GGUF local T2I profile"
+    summary: "Krea 2 Turbo native W4A4 local T2I profile"
     required_assets:
-      - name: "krea2_turbo_bf16-Q4_0.gguf"
+      - name: "Krea2-Turbo-W4A4-noLowRank.safetensors"
         kind: "diffusion_model"
-        target_dir: "ComfyUI/models/unet"
-        source: "https://huggingface.co/molbal/krea2-gguf/resolve/main/krea2_turbo_bf16-Q4_0.gguf"
-        expected_size: 8314016800
-        sha256: "3d28960e1f3385b27a224c6968a0acc02b07194758247e576ee0c5caaab4f1cf"
+        target_dir: "ComfyUI/models/diffusion_models"
+        source: "https://huggingface.co/AlperKTS/Krea-2-SVDQuant-ComfyUI/resolve/main/checkpoints/Krea2-Turbo-W4A4-noLowRank.safetensors"
+        expected_size: 8057520008
+        sha256: "f16df7a51f632d0743fb5402d47609ec0572a0fbcda9a4a2bf971f177bde101f"
       - name: "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
         kind: "text_encoder"
         target_dir: "ComfyUI/models/clip"
@@ -33,14 +33,14 @@ workflows:
         expected_size: 253806246
         sha256: "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
   "krea2_turbo_img2img.json":
-    summary: "Krea 2 Turbo Q4_0 GGUF local img2img continuity profile"
+    summary: "Krea 2 Turbo native W4A4 local img2img continuity profile"
     required_assets:
-      - name: "krea2_turbo_bf16-Q4_0.gguf"
+      - name: "Krea2-Turbo-W4A4-noLowRank.safetensors"
         kind: "diffusion_model"
-        target_dir: "ComfyUI/models/unet"
-        source: "https://huggingface.co/molbal/krea2-gguf/resolve/main/krea2_turbo_bf16-Q4_0.gguf"
-        expected_size: 8314016800
-        sha256: "3d28960e1f3385b27a224c6968a0acc02b07194758247e576ee0c5caaab4f1cf"
+        target_dir: "ComfyUI/models/diffusion_models"
+        source: "https://huggingface.co/AlperKTS/Krea-2-SVDQuant-ComfyUI/resolve/main/checkpoints/Krea2-Turbo-W4A4-noLowRank.safetensors"
+        expected_size: 8057520008
+        sha256: "f16df7a51f632d0743fb5402d47609ec0572a0fbcda9a4a2bf971f177bde101f"
       - name: "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
         kind: "text_encoder"
         target_dir: "ComfyUI/models/clip"
@@ -67,53 +67,3 @@ workflows:
   "Tile Upscaler SDXL.json":
     node_aliases:
       load_image: "225"
-
-  "minimax_h3_lowvram_i2v.json":
-    conditioning:
-      provider: "minimax_h3"
-      recipes:
-        anchor_first:
-          anchors: [first]
-          continuation: "none"
-          render_tool: "comfy.workflow.image_to_video"
-
-  "minimax_h3_lowvram_t2v.json":
-    conditioning:
-      provider: "minimax_h3"
-      recipes:
-        t2v:
-          continuation: "none"
-          render_tool: "comfy.workflow.text_to_video"
-
-  "minimax_h3_native_t2v.json":
-    conditioning:
-      provider: "minimax_h3"
-      recipes:
-        t2v:
-          continuation: "none"
-          render_tool: "comfy.workflow.text_to_video"
-
-  "minimax_h3_lowvram_15s_fl2va_i2v.json":
-    conditioning:
-      provider: "minimax_h3"
-      recipes:
-        anchor_first_last:
-          anchors: [first, last]
-          continuation: "rendered_tail"
-          render_tool: "comfy.workflow.image_to_video"
-        anchor_last:
-          anchors: [last]
-          continuation: "none"
-          render_tool: "comfy.workflow.image_to_video"
-
-  "minimax_h3_ref2va.json":
-    conditioning:
-      provider: "minimax_h3"
-      recipes:
-        reference_bundle:
-          references: [image, video]
-          reference_minimum: 1
-          reference_maximum: 4
-          reference_selection_limit: 4
-          continuation: "none"
-          render_tool: "comfy.workflow.reference_to_video"

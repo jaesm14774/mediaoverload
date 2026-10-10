@@ -79,7 +79,10 @@ class ComfyImageSkills:
             "native_h3_story",
             "native_h3_fl2va_story",
             "native_h3_l2va_story",
-        }
+        } or (
+            str(context.node.inputs.get("anchor_position") or "").strip().casefold() == "first"
+            and context.node.inputs.get("segment_index") == 0
+        )
         for dependency in reversed(context.node.depends_on):
             dependency_output = context.state[dependency]
             prompt_key = "opening_keyframe_prompt" if uses_opening_frame else "prompt"

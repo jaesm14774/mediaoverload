@@ -134,7 +134,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(long_video["constraints"]["segment_count"], 6)
         self.assertNotIn("storyboard_path", long_video["constraints"])
         self.assertEqual(long_video["character_config_summary"]["longvideo"]["default_duration_seconds"], 30)
-        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_lowvram_i2v")
+        self.assertEqual(long_video["constraints"]["video_workflow_name"], "wan2gp_h3_i2va")
 
         production_long_video = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -613,7 +613,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "generation_type": "sticker_pack",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                    "video_workflow_name": "minimax_h3_lowvram_i2v",
+                    "video_workflow_name": "wan2gp_h3_i2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "",
@@ -640,14 +640,14 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["media_type"], "sticker_pack")
         self.assertEqual(payload["selected_workflow_name"], "nova-anime-xl")
         self.assertEqual(payload["constraints"]["workflow_name"], "nova-anime-xl")
-        self.assertEqual(payload["constraints"]["video_workflow_name"], "minimax_h3_lowvram_i2v")
+        self.assertEqual(payload["constraints"]["video_workflow_name"], "wan2gp_h3_i2va")
         self.assertEqual(payload["constraints"]["video_count"], 2)
         self.assertEqual(payload["constraints"]["selection_limit"], 5)
         self.assertEqual(payload["constraints"]["images_per_prompt"], 2)
         self.assertEqual(payload["constraints"]["routing_prompt_mode"], "llm")
         self.assertEqual(payload["routing_summary"]["strategy"], "sticker_pack")
         self.assertEqual(payload["routing_summary"]["primary_workflow"], "nova-anime-xl")
-        self.assertEqual(payload["routing_summary"]["workflow_plan"]["video_workflow_name"], "minimax_h3_lowvram_i2v")
+        self.assertEqual(payload["routing_summary"]["workflow_plan"]["video_workflow_name"], "wan2gp_h3_i2va")
         self.assertEqual(payload["routing_summary"]["count_plan"]["review_selection_limit"], 5)
 
     def test_publish_prompt_inherits_rendered_native_h3_story(self) -> None:
@@ -860,7 +860,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "generation_type": "text2video",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                    "video_workflow_name": "minimax_h3_lowvram_t2v",
+                    "video_workflow_name": "wan2gp_h3_t2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "",
@@ -1114,7 +1114,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "generation_type": "text2video",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                    "video_workflow_name": "minimax_h3_lowvram_t2v",
+                    "video_workflow_name": "wan2gp_h3_t2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "",
@@ -1224,7 +1224,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "generation_type": "text2video",
                     "workflow_plan": {
                         "image_workflow_name": "nova-anime-xl",
-                        "video_workflow_name": "minimax_h3_lowvram_t2v",
+                        "video_workflow_name": "wan2gp_h3_t2va",
                         "refine_workflow_name": "",
                         "transition_workflow_name": "",
                         "upscale_workflow_name": "",
@@ -1265,7 +1265,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "generation_type": "text2image2video",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                        "video_workflow_name": "minimax_h3_lowvram_i2v",
+                        "video_workflow_name": "wan2gp_h3_i2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "Tile Upscaler SDXL",

@@ -1,0 +1,7 @@
+{
+  "provider": "wan2gp", "h3_mode": "t2va",
+  "summary": "H3 text to video and native audio. Powered by WanGP.",
+  "media_types": ["text2video", "long_video"],
+  "recommended_defaults": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 16, "model_profile": "q4"},
+  "conditioning": {"provider": "wan2gp", "recipes": {"t2v": {"continuation": "none", "render_tool": "wan2gp.render_h3"}}}
+}

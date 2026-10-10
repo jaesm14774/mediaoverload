@@ -11,6 +11,34 @@ from agentic.skills.comfy_workflow_skills import ComfyWorkflowSkills
 
 
 class ComfyWorkflowSkillsTests(unittest.TestCase):
+    def test_user_given_first_long_video_anchor_when_comfy_prompt_is_built_then_opening_keyframe_is_selected(self) -> None:
+        """User: Given the first long-video anchor has an opening keyframe, When Comfy builds its image prompt, Then it uses the frozen anticipation prompt."""
+        plan = ExecutionPlan(
+            goal=GoalRequest(prompt="the hero crosses a puddle", media_type="long_video", style="storybook"),
+            workflow_name="long_video",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="segment-frame-01",
+            skill_name="media.image.generate_keyframe",
+            inputs={"segment_index": 0, "anchor_position": "first"},
+            depends_on=["segment-prompt-01"],
+        )
+        state = RunState(
+            goal={},
+            metadata={},
+            node_outputs={
+                "segment-prompt-01": {
+                    "prompt": "the hero hops across the puddle",
+                    "opening_keyframe_prompt": "The hero leans toward the puddle before jumping.",
+                }
+            },
+        )
+
+        bundle = ComfyImageSkills._resolve_prompt_bundle(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertTrue(bundle["prompt"].startswith("The hero leans toward the puddle before jumping."))
+
     def test_user_given_native_h3_opening_frame_when_comfy_prompt_is_built_then_character_behavior_does_not_distract_from_visual_identity(self) -> None:
         """User Given a native H3 keyframe with explicit visual identity When Comfy builds its prompt Then it preserves appearance cues without appending unrelated character abilities."""
         plan = ExecutionPlan(
@@ -105,10 +133,10 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
         tools = ToolRegistry()
 
         def render(payload: dict[str, object]) -> dict[str, object]:
-            calls.append(("comfy.workflow.image_to_video", payload))
+            calls.append(("wan2gp.render_h3", payload))
             return {"saved_files": ["C:/renders/video.mp4"]}
 
-        tools.register("comfy.workflow.image_to_video", render, "test")
+        tools.register("wan2gp.render_h3", render, "test")
         with tempfile.TemporaryDirectory() as temp_dir:
             skills = ComfyWorkflowSkills(tools, Path(temp_dir))
             plan = ExecutionPlan(
@@ -125,7 +153,7 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
                 node_id="animate-video",
                 skill_name="image.animate",
                 inputs={
-                    "workflow_name": "minimax_h3_lowvram_i2v",
+                    "workflow_name": "wan2gp_h3_i2va",
                     "image_path": "C:/renders/frame.png",
                     "prompt": "Kirby jumps",
                     "width": 640,
@@ -141,7 +169,7 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(calls[0][0], "comfy.workflow.image_to_video")
+        self.assertEqual(calls[0][0], "wan2gp.render_h3")
         self.assertEqual(calls[0][1]["seed"], 123456)
         self.assertEqual(calls[0][1]["width"], 640)
         self.assertEqual(calls[0][1]["height"], 360)

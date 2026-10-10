@@ -766,6 +766,8 @@ class FFmpegAdapter:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
                 timeout=FFMPEG_COMMAND_TIMEOUT_SECONDS,
             )

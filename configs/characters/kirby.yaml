@@ -12,7 +12,6 @@ generation:
   video_speed:
     enabled: true
     factor: 2.0
-  h3_profile: balanced-lowvram
   # Use single, two_character_interaction, or random. random requires
   # subject_mode_weights with positive weights for the concrete modes.
   subject_mode: random
@@ -151,8 +150,8 @@ generation:
   # weighted-random selection.
   game_sprite:
     keyframe_workflow_name: krea2_turbo
-    video_workflow_name: minimax_h3_lowvram_i2v
-    h3_model_profile: q2
+    video_workflow_name: wan2gp_h3_i2va
+    h3_model_profile: q4
     duration_seconds: 8
     source_width: 1024
     source_height: 576
@@ -168,7 +167,7 @@ generation:
   native_h3_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
-    workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
+    workflow_name: wan2gp_h3_i2va
     keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 6
     require_human_review: true
@@ -182,7 +181,7 @@ generation:
   native_h3_t2v_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
-    workflow_name: minimax_h3_lowvram_t2v
+    workflow_name: wan2gp_h3_t2va
     length: 362
     steps: 16
     frame_rate: 24
@@ -192,7 +191,7 @@ generation:
   native_h3_fl2va_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
-    workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
+    workflow_name: wan2gp_h3_fl2va
     keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 6
     require_human_review: true
@@ -206,7 +205,7 @@ generation:
   native_h3_l2va_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
-    workflow_name: minimax_h3_lowvram_15s_fl2va_i2v
+    workflow_name: wan2gp_h3_l2va
     keyframe_workflow_name: krea2_turbo
     keyframe_candidate_count: 1
     require_human_review: true
@@ -220,7 +219,7 @@ generation:
   native_h3_ref2va:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
-    workflow_name: minimax_h3_ref2va
+    workflow_name: wan2gp_h3_ref2va
     reference_manifest: []
     reference_image_size: match
     reference_candidate_count: 6
@@ -238,13 +237,13 @@ generation:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
     keyframe_workflow_name: krea2_turbo
-    workflow_name: minimax_h3_ref2va
+    workflow_name: wan2gp_h3_ref2va
     reference_candidate_count: 6
     reference_selection_limit: 4
     reference_max_images: 9
     reference_max_videos: 3
     reference_image_size: match
-    model_profile: q2
+    model_profile: q4
     require_human_review: true
     length: 362
     steps: 20
