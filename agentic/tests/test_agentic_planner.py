@@ -25,7 +25,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image_refine",
             duration_seconds=30,
             style="cinematic surreal",
-            auto_download_assets=False,
             constraints={"input_image_path": "C:\\stub.png"},
         )
         plan = self.planner.build_plan(goal)
@@ -39,7 +38,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="video_narrate",
             duration_seconds=30,
             style="cinematic surreal",
-            auto_download_assets=False,
             constraints={"input_video_path": "C:\\clip.mp4", "text": "Hello world"},
         )
         plan = self.planner.build_plan(goal)
@@ -56,7 +54,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image_sequence_edit",
             duration_seconds=9,
             style="editorial surreal",
-            auto_download_assets=False,
             constraints={
                 "edit_input_paths": ["/tmp/one.png", "/tmp/two.png", "/tmp/three.png"],
                 "edit_profile": "editorial_kinetic_v1",
@@ -79,7 +76,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image_sequence_edit",
             duration_seconds=9,
             style="playful",
-            auto_download_assets=False,
             constraints={
                 "edit_input_paths": ["/tmp/one.png", "/tmp/two.png", "/tmp/three.png"],
             },
@@ -96,7 +92,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image_sequence_edit",
             duration_seconds=15,
             style="cinematic",
-            auto_download_assets=False,
             constraints={
                 "edit_input_paths": ["/tmp/one.mp4", "/tmp/two.mp4", "/tmp/three.mp4"],
             },
@@ -113,7 +108,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image_sequence_edit",
             duration_seconds=9,
             style="editorial",
-            auto_download_assets=False,
             constraints={
                 "edit_plan": {
                     "clips": [{"path": "/tmp/one.png"}, {"path": "/tmp/two.png"}],
@@ -185,7 +179,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image_sequence_edit",
             duration_seconds=4,
             style="playful",
-            auto_download_assets=False,
             constraints={"drama_plan": drama_plan},
         )
 
@@ -205,14 +198,13 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2video",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={},
         )
         plan = self.planner.build_plan(goal)
         self.assertEqual(plan.workflow_name, "text2video_v1")
         self.assertIn("animate-video", [node.node_id for node in plan.nodes])
         video_check = next(node for node in plan.nodes if node.node_id == "video-asset-check")
-        self.assertEqual(video_check.inputs["workflow_name"], "wan2gp_h3_t2va")
+        self.assertEqual(video_check.inputs["workflow_name"], "minimax_h3_t2va")
 
     def test_stage_probe_text2video_reviews_cover_without_conditioning_video(self) -> None:
         goal = self.planner.create_goal(
@@ -220,10 +212,9 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2video",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "image_workflow_name": "krea2_turbo",
-                "video_workflow_name": "wan2gp_h3_t2va",
+                "video_workflow_name": "minimax_h3_t2va",
                 "image_count": 6,
                 "enable_stage_review": True,
                 "stage_probe_auto_select": True,
@@ -338,7 +329,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2img",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={},
         )
         plan = self.planner.build_plan(goal)
@@ -351,7 +341,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "workflow_name": "krea2_turbo",
                 "image_count": 4,
@@ -373,7 +362,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2img",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "image_workflow_name": "krea2_turbo",
                 "refine_workflow_name": "krea2_turbo_img2img",
@@ -394,7 +382,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="sticker_pack",
             duration_seconds=30,
             style="sticker illustration",
-            auto_download_assets=False,
             constraints={"character": "Kirby"},
         )
         plan = self.planner.build_plan(goal)
@@ -416,7 +403,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="sticker_pack",
             duration_seconds=30,
             style="LINE sticker",
-            auto_download_assets=False,
             constraints={
                 "character": "Kirby",
                 "workflow_name": "krea2_turbo",
@@ -436,7 +422,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="animated_sticker",
             duration_seconds=8,
             style="LINE sticker illustration",
-            auto_download_assets=False,
             constraints={"character": "Kirby"},
         )
         plan = self.planner.build_plan(goal)
@@ -462,7 +447,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="animated_sticker",
             duration_seconds=8,
             style="LINE sticker illustration",
-            auto_download_assets=False,
             constraints={
                 "character": "Kirby",
                 "enable_review_loop": True,
@@ -484,7 +468,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={"use_tts": True},
         )
         plan = self.planner.build_plan(goal)
@@ -508,7 +491,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "use_tts": False,
                 "longvideo_edit_profile": "xfade_clean_v1",
@@ -529,7 +511,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "use_tts": False,
                 "longvideo_edit_profile": "xfade_clean_v1",
@@ -549,7 +530,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "use_tts": False,
                 "enable_review_loop": True,
@@ -577,7 +557,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="carousel",
             duration_seconds=30,
             style="editorial anime postcard",
-            auto_download_assets=False,
             constraints={},
         )
         plan = self.planner.build_plan(goal)
@@ -600,7 +579,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="publish_review",
             duration_seconds=30,
             style="social promo",
-            auto_download_assets=False,
             constraints={
                 "media_paths": ["C:\\asset_1.png", "C:\\asset_2.gif"],
                 "platforms": ["instagram"],
@@ -635,7 +613,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="publish_review",
             duration_seconds=0,
             style="polished 2D anime",
-            auto_download_assets=False,
             constraints={
                 "media_paths": ["C:\\asset_1.png", "C:\\asset_2.png"],
                 "platforms": ["instagram_graph", "facebook"],
@@ -656,7 +633,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2video",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={"review_notes": "needs stronger motion and less empty space"},
         )
         plan = self.planner.build_plan(goal)
@@ -674,7 +650,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=20,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={},
         )
         plan = self.planner.build_plan(goal)
@@ -687,7 +662,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=5,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={"duration_override_seconds": 5, "video_frame_rate": 24},
         )
         plan = self.planner.build_plan(goal)
@@ -701,7 +675,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=10,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={"video_speed": {"enabled": True, "factor": 2}},
         )
 
@@ -720,7 +693,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="native_h3_story",
             duration_seconds=15,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={"native_h3_storyboard_path": "configs/storyboards/native_h3_15s.yaml"},
         )
         plan = self.planner.build_plan(goal)
@@ -733,7 +705,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=20,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={"enable_stage_review": True},
         )
         plan = self.planner.build_plan(goal)
@@ -753,7 +724,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=15,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "pre_video_review_enabled": True,
                 "pre_video_candidate_count": 6,
@@ -777,7 +747,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=5,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "pre_video_review_enabled": True,
                 "pre_video_candidate_count": 6,
@@ -800,7 +769,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2video",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={"enable_stage_review": True},
         )
         plan = self.planner.build_plan(goal)
@@ -820,12 +788,11 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2video",
             duration_seconds=15,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "pre_video_review_enabled": True,
                 "pre_video_candidate_count": 6,
                 "pre_video_review_require_human": True,
-                "video_workflow_name": "wan2gp_h3_t2va",
+                "video_workflow_name": "minimax_h3_t2va",
             },
         )
         plan = self.planner.build_plan(goal)
@@ -834,7 +801,7 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(render.inputs["image_count"], 1)
         self.assertNotIn("stage-review-select", [node.node_id for node in plan.nodes])
-        self.assertEqual(animate.inputs["workflow_name"], "wan2gp_h3_t2va")
+        self.assertEqual(animate.inputs["workflow_name"], "minimax_h3_t2va")
         self.assertNotIn("stage-review-select", animate.depends_on)
 
     def test_pre_video_gate_only_expands_first_long_video_segment(self) -> None:
@@ -843,7 +810,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "pre_video_review_enabled": True,
                 "pre_video_candidate_count": 6,
@@ -870,7 +836,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "enable_stage_review": True,
             },
@@ -892,10 +857,9 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=20,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "image_workflow_name": "krea2_turbo",
-                "video_workflow_name": "wan2gp_h3_i2va",
+                "video_workflow_name": "minimax_h3_i2va",
                 "upscale_workflow_name": "Tile Upscaler SDXL",
                 "image_count": 3,
             },
@@ -906,7 +870,7 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(render_node.inputs["workflow_name"], "krea2_turbo")
         self.assertEqual(render_node.inputs["image_count"], 3)
-        self.assertEqual(video_check_node.inputs["workflow_name"], "wan2gp_h3_i2va")
+        self.assertEqual(video_check_node.inputs["workflow_name"], "minimax_h3_i2va")
 
     def test_text2img2video_without_pre_video_review_renders_one_keyframe(self) -> None:
         goal = self.planner.create_goal(
@@ -914,7 +878,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=5,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "pre_video_review_enabled": False,
                 "image_count": 1,
@@ -932,7 +895,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=5,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "pre_video_review_enabled": False,
                 "image_count": 1,
@@ -955,7 +917,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2img2video",
             duration_seconds=5,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "enable_review_loop": True,
                 "skip_upscale_for_i2v": True,
@@ -979,7 +940,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="image",
             duration_seconds=0,
             style="anime key visual",
-            auto_download_assets=False,
         )
         plan = self.planner.build_plan(goal)
         render_node = next(node for node in plan.nodes if node.node_id == "render-image")
@@ -991,12 +951,11 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "segment_count": 4,
                 "review_selection_limit": 5,
                 "review_notes": "stronger motion and cleaner framing",
-                "video_workflow_name": "wan2gp_h3_i2va",
+                "video_workflow_name": "minimax_h3_i2va",
             },
         )
         plan = self.planner.build_plan(goal)
@@ -1006,7 +965,7 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(script_plan.inputs["segment_count"], 4)
         self.assertEqual(review_select.inputs["limit"], 5)
-        self.assertEqual(segment_video.inputs["workflow_name"], "wan2gp_h3_i2va")
+        self.assertEqual(segment_video.inputs["workflow_name"], "minimax_h3_i2va")
 
 
     def test_long_video_final_duration_is_trimmed_after_segment_concat(self) -> None:
@@ -1015,7 +974,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "segment_count": 4,
             },
@@ -1034,7 +992,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "segment_count": 4,
                 "video_speed": {"enabled": True, "factor": 2},
@@ -1052,7 +1009,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "segment_count": 2,
                 "enable_review_loop": True,
@@ -1067,7 +1023,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={
                 "segment_count": 4,
                 "longvideo_length": 1001,
@@ -1082,7 +1037,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=20,
             style="anime cinematic travel film",
-            auto_download_assets=False,
             constraints={},
         )
         plan = self.planner.build_plan(goal)
@@ -1091,15 +1045,15 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(plan.metadata["segment_count"], 4)
         self.assertEqual(plan.metadata["recipe_sequence"], ["anchor_first", "anchor_first_last", "anchor_first_last", "anchor_first_last"])
         self.assertEqual([node.inputs["workflow_name"] for node in videos], [
-            "wan2gp_h3_i2va",
-            "wan2gp_h3_fl2va",
-            "wan2gp_h3_fl2va",
-            "wan2gp_h3_fl2va",
+            "minimax_h3_i2va",
+            "minimax_h3_fl2va",
+            "minimax_h3_fl2va",
+            "minimax_h3_fl2va",
         ])
         self.assertEqual([node.inputs["length"] for node in videos], [120, 120, 120, 120])
         self.assertTrue(all(node.inputs["conditioning_plan"]["anchors"] for node in videos))
         self.assertTrue(any(node.node_id == "image-asset-check" for node in plan.nodes))
-        self.assertTrue(any(node.node_id == "transition-asset-check" for node in plan.nodes))
+        self.assertTrue(any(node.node_id == "refine-asset-check" for node in plan.nodes))
         tails = [node for node in plan.nodes if node.node_id.startswith("segment-tail-")]
         self.assertEqual(len(tails), 4)
         self.assertEqual(videos[1].inputs["conditioning_plan"]["continuation_node"], "segment-tail-01")
@@ -1111,7 +1065,6 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=30,
             style="polished 2D anime cinematic",
-            auto_download_assets=False,
             constraints={
                 "longvideo_production_profile": "text2longvideo",
                 "segment_count": 6,
@@ -1150,17 +1103,16 @@ class AgenticPlannerTests(unittest.TestCase):
             media_type="text2video",
             duration_seconds=30,
             style="anime key visual",
-            auto_download_assets=False,
             constraints={
                 "image_workflow_name": "nova-anime-xl",
-                "video_workflow_name": "wan2gp_h3_t2va",
+                "video_workflow_name": "minimax_h3_t2va",
                 "video_count": 3,
             },
         )
         plan = self.planner.build_plan(goal)
         animate_node = next(node for node in plan.nodes if node.node_id == "animate-video")
 
-        self.assertEqual(animate_node.inputs["workflow_name"], "wan2gp_h3_t2va")
+        self.assertEqual(animate_node.inputs["workflow_name"], "minimax_h3_t2va")
         self.assertEqual(animate_node.inputs["video_count"], 3)
 
 

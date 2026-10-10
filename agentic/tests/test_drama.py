@@ -16,7 +16,6 @@ from agentic.runtime.drama import (
     SfxCue,
     compile_drama_plan,
 )
-from agentic.runtime.registry import ToolRegistry
 from agentic.skills.editing import EditingSkills
 
 

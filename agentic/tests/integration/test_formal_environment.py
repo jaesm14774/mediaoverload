@@ -12,7 +12,8 @@ from agentic.app.character_requests import (
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
-from agentic.app.character_workflow import build_goal_payload_from_character_config, resolve_character_selection
+from agentic.app.character_payload import build_goal_payload_from_character_config
+from agentic.app.character_selection import resolve_character_selection
 
 
 pytestmark = pytest.mark.integration

@@ -67,3 +67,136 @@ workflows:
   "Tile Upscaler SDXL.json":
     node_aliases:
       load_image: "225"
+
+  minimax_h3_t2va.json:
+    summary: MiniMax H3 T2VA through ComfyUI with native stereo audio
+    media_types:
+    - text2video
+    - long_video
+    recommended_defaults:
+      width: 608
+      height: 352
+      length: 124
+      frame_rate: 24
+      steps: 16
+      model_profile: q4
+    conditioning:
+      provider: comfyui
+      recipes:
+        t2v:
+          continuation: none
+          render_tool: comfy.render_h3
+      h3_mode: t2va
+      allowed_modes:
+      - t2va
+
+  minimax_h3_i2va.json:
+    summary: MiniMax H3 I2VA through ComfyUI with native stereo audio
+    media_types:
+    - image_to_video
+    - image_to_video_audio
+    - long_video
+    recommended_defaults:
+      width: 608
+      height: 352
+      length: 240
+      frame_rate: 24
+      steps: 16
+      model_profile: q4
+    conditioning:
+      provider: comfyui
+      recipes:
+        anchor_first:
+          anchors:
+          - first
+          continuation: none
+          render_tool: comfy.render_h3
+      h3_mode: i2va
+      allowed_modes:
+      - i2va
+
+  minimax_h3_fl2va.json:
+    summary: MiniMax H3 FL2VA through ComfyUI with native stereo audio
+    media_types:
+    - image_to_video
+    - image_to_video_audio
+    - long_video
+    recommended_defaults:
+      width: 608
+      height: 352
+      length: 362
+      frame_rate: 24
+      steps: 16
+      model_profile: q4
+    conditioning:
+      provider: comfyui
+      recipes:
+        anchor_first_last:
+          anchors:
+          - first
+          - last
+          continuation: rendered_tail
+          render_tool: comfy.render_h3
+        anchor_last:
+          anchors:
+          - last
+          continuation: none
+          render_tool: comfy.render_h3
+      h3_mode: fl2va
+      allowed_modes:
+      - fl2va
+      - l2va
+      - i2va
+
+  minimax_h3_l2va.json:
+    summary: MiniMax H3 L2VA through ComfyUI with native stereo audio
+    media_types:
+    - image_to_video
+    - image_to_video_audio
+    - long_video
+    recommended_defaults:
+      width: 608
+      height: 352
+      length: 362
+      frame_rate: 24
+      steps: 16
+      model_profile: q4
+    conditioning:
+      provider: comfyui
+      recipes:
+        anchor_last:
+          anchors:
+          - last
+          continuation: none
+          render_tool: comfy.render_h3
+      h3_mode: l2va
+      allowed_modes:
+      - l2va
+
+  minimax_h3_ref2va.json:
+    summary: MiniMax H3 REF2VA through ComfyUI with native stereo audio
+    media_types:
+    - native_h3_ref2va
+    - long_video
+    recommended_defaults:
+      width: 608
+      height: 352
+      length: 124
+      frame_rate: 24
+      steps: 16
+      model_profile: q4
+    conditioning:
+      provider: comfyui
+      recipes:
+        reference_bundle:
+          references:
+          - image
+          - video
+          reference_minimum: 1
+          reference_maximum: 4
+          reference_selection_limit: 4
+          continuation: none
+          render_tool: comfy.render_h3
+      h3_mode: ref2va
+      allowed_modes:
+      - ref2va

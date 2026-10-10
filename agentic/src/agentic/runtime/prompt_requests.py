@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,3 +35,6 @@ class JsonChatRequest:
     max_models_per_call: int | None = None
     repair_attempts: int = 2
     use_response_format: bool = True
+    language_contract: str = ""
+    output_contract: str = ""
+    validate_response: Callable[[Any], Any] | None = None

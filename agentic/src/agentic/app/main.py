@@ -14,7 +14,6 @@ from agentic.memory import PortfolioMemory, RunMemory
 from agentic.runtime.creativity import IdeaDirector, RetryPolicy
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.observability import RunRecorder
-from agentic.runtime.prompt_engine import PromptEngine
 from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
@@ -28,13 +27,10 @@ from agentic.skills.editing import register_editing_skills
 from agentic.skills.longvideo import register_longvideo_skills
 from agentic.skills.motion_graphics import register_motion_graphics_skills
 from agentic.skills.reference_video import register_reference_video_skills
-from agentic.skills.storyboard import register_storyboard_skills
 from agentic.tools.comfy import register_builtin_tools
-from agentic.tools.authoring import register_authoring_tools
 from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
-from agentic.tools.wan2gp import register_wan2gp_tools
+from agentic.tools.comfy_h3 import register_comfy_h3_tools
 from agentic.tools.context_services import NewsContextService
-from agentic.tools.local import register_local_tools
 from agentic.tools.media_services import register_media_service_tools
 from agentic.tools.social_services import register_social_service_tools
 
@@ -68,11 +64,8 @@ def build_runtime(
         mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
         recorder=recorder,
     )
-    prompt_engine = PromptEngine(llm_engine=llm_engine)
 
     register_builtin_tools(tool_registry, asset_registry)
-    register_authoring_tools(tool_registry, asset_registry, root)
-    register_local_tools(tool_registry, resolved_output_root)
     register_comfy_workflow_tools(
         tool_registry,
         asset_registry,
@@ -80,17 +73,17 @@ def build_runtime(
         comfy_host=comfy_host,
         comfy_port=comfy_port,
     )
-    register_wan2gp_tools(tool_registry, asset_registry, resolved_output_root, comfy_host, comfy_port)
+    register_comfy_h3_tools(tool_registry, asset_registry, resolved_output_root, comfy_host, comfy_port)
     register_media_service_tools(tool_registry, resolved_output_root, input_roots=input_roots)
     register_social_service_tools(tool_registry, resolved_output_root)
     register_motion_graphics_skills(
         skill_registry,
         tool_registry,
         resolved_output_root,
-        prompt_engine=prompt_engine,
+        prompt_engine=llm_engine,
     )
-    register_agent_primitive_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
-    register_agent_social_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=prompt_engine)
+    register_agent_primitive_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=llm_engine)
+    register_agent_social_skills(skill_registry, tool_registry, resolved_output_root, prompt_engine=llm_engine)
     register_comfy_image_skills(skill_registry, tool_registry, resolved_output_root)
     register_comfy_workflow_skills(skill_registry, tool_registry, resolved_output_root)
     register_editing_skills(
@@ -102,14 +95,13 @@ def build_runtime(
         skill_registry,
         tool_registry,
         resolved_output_root,
-        prompt_engine=prompt_engine,
+        prompt_engine=llm_engine,
         story_service=NativeH3StoryService(
             llm_engine=llm_engine,
             news_service=NewsContextService(),
         ),
     )
     register_reference_video_skills(skill_registry, tool_registry, resolved_output_root)
-    register_storyboard_skills(skill_registry, tool_registry)
 
     idea_director = IdeaDirector()
     retry_policy = RetryPolicy(max_attempts=3)
@@ -168,7 +160,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration-seconds", type=int, default=30, help="Target duration")
     parser.add_argument("--style", default="cinematic surreal", help="Preferred visual style")
     parser.add_argument("--execute", action="store_true", help="Execute the generated plan")
-    parser.add_argument("--auto-download-assets", action="store_true", help="Allow auto asset preparation")
     parser.add_argument("--output-dir", help="Optional output directory for artifact-producing workflows")
     parser.add_argument("--width", type=int, help="Output video width in pixels for image-to-video workflows")
     parser.add_argument("--height", type=int, help="Output video height in pixels for image-to-video workflows")
@@ -290,7 +281,6 @@ def main() -> None:
         media_type=args.media_type,
         duration_seconds=args.duration_seconds,
         style=args.style,
-        auto_download_assets=args.auto_download_assets,
         constraints={
             "input_image_path": args.input_image,
             "input_video_path": args.input_video,

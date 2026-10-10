@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 
 from agentic.assets.registry import AssetRegistry
-from agentic.app.character_workflow import build_goal_payload_from_character_config, collect_media_paths_from_run_result
+from agentic.app.character_payload import build_goal_payload_from_character_config
+from agentic.app.character_publishing import collect_media_paths_from_run_result
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
 from agentic.runtime.motion_graphics import MotionGraphicsPlan
 from agentic.runtime.planner import TaskPlanner
@@ -155,7 +156,6 @@ class MotionGraphicsTests(unittest.TestCase):
                 media_type="text2img2video",
                 duration_seconds=5,
                 style="playful",
-                auto_download_assets=False,
             )
         )
         enabled_plan = planner.build_plan(
@@ -164,7 +164,6 @@ class MotionGraphicsTests(unittest.TestCase):
                 media_type="text2img2video",
                 duration_seconds=5,
                 style="playful",
-                auto_download_assets=False,
                 constraints={
                     "enable_motion_graphics": True,
                     "video_speed": {"enabled": True, "factor": 2.0},

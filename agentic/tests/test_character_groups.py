@@ -13,10 +13,8 @@ from agentic.app.character_requests import (
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
-from agentic.app.character_workflow import (
-    build_goal_payload_from_character_config,
-    resolve_character_selection,
-)
+from agentic.app.character_payload import build_goal_payload_from_character_config
+from agentic.app.character_selection import resolve_character_selection
 from agentic.skills.longvideo import _apply_selected_character_to_storyboard
 from agentic.tools.context_services import CharacterGroupSelectionService
 from character_workflow_helpers import make_character_workflow_request

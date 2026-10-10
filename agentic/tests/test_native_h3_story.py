@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from agentic.runtime.prompt_tasks.native_h3 import sanitize_native_h3_creative_brief
+from agentic.runtime.prompt_tasks.native_h3 import format_native_h3_arc_guidance
+
 import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agentic.app.character_workflow import build_goal_payload_from_character_config
+from agentic.app.character_payload import build_goal_payload_from_character_config
 from character_workflow_helpers import make_character_workflow_request
 from agentic.app.main import build_runtime
-from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
+from agentic.runtime.llm_engine import LLMPromptEngine
+from provider_fakes import ScriptedLLMManager
+from agentic.runtime.llm_client import PromptGenerationError
 from agentic.runtime.model_backends import OpenRouterModelCatalog
 from agentic.runtime.contracts import RunState
 from agentic.skills.agent_primitives import AgentMediaSkills
@@ -21,6 +26,10 @@ from agentic.storyboard import (
     merge_native_h3_storyboard,
 )
 from agentic.tools.context_services import NewsContextService
+
+
+def _unavailable_manager(backend):
+    raise ValueError("OpenRouter API key missing; KeyError: gemini_api_token")
 
 
 class NativeH3StoryPlanTests(unittest.TestCase):
@@ -48,14 +57,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         plan = planner.build_plan(goal)
 
         self.assertEqual(goal.media_type, "native_h3_story")
         self.assertEqual(goal.duration_seconds, 15)
-        self.assertEqual(plan.workflow_name, "wan2gp_h3_i2va")
+        self.assertEqual(plan.workflow_name, "minimax_h3_i2va")
         node_ids = [node.node_id for node in plan.nodes]
         expected_node_ids = [
             "native-story-prompt",
@@ -121,7 +129,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native_h3_use_last_frame": True,
             "native_h3_keyframe_candidate_count": 1,
             "native_h3_keyframe_workflow_name": "krea2_turbo",
-            "workflow_name": "wan2gp_h3_fl2va",
+            "workflow_name": "minimax_h3_fl2va",
             "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
             "require_human_review": False,
             "enable_review_loop": False,
@@ -134,7 +142,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 media_type="native_h3_fl2va_story",
                 duration_seconds=15,
                 style="hand-drawn paper storybook animation",
-                auto_download_assets=False,
                 constraints={**common_constraints, "native_h3_frame_pair_strategy": strategy},
             )
             return planner.build_plan(goal)
@@ -186,7 +193,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         plan = planner.build_plan(goal)
@@ -234,7 +240,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         plan = planner.build_plan(goal)
@@ -263,7 +268,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         plan = planner.build_plan(goal)
@@ -377,11 +381,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("gold Skill star", ending_prompt)
 
     def test_user_given_h3_template_when_loaded_then_prompt_comes_from_the_current_story(self) -> None:
-        """User Given a WanGP H3 template When loaded Then it contains no stale example scene prompt."""
-        workflow_path = self.repo_root / "configs" / "workflow" / "wan2gp_h3_fl2va.json"
+        """User Given a ComfyUI H3 template When loaded Then it contains no stale example scene prompt."""
+        workflow_path = self.repo_root / "configs" / "workflow" / "minimax_h3_fl2va.json"
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        self.assertEqual(workflow["provider"], "wan2gp")
-        self.assertNotIn("prompt", workflow)
+        for node in workflow.values():
+            inputs = node.get("inputs", {})
+            if "prompt" in inputs:
+                self.assertFalse(str(inputs["prompt"]).strip())
 
     def test_human_selected_opening_frame_is_immutable(self) -> None:
         class FakeTools:
@@ -586,19 +592,18 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             media_type=payload["media_type"],
             duration_seconds=payload["duration_seconds"],
             style=payload["style"],
-            auto_download_assets=False,
             constraints=payload["constraints"],
         )
         plan = planner.build_plan(goal)
 
         self.assertEqual(goal.media_type, "native_h3_t2v_story")
         self.assertEqual(goal.duration_seconds, 15)
-        self.assertEqual(plan.workflow_name, "wan2gp_h3_t2va")
+        self.assertEqual(plan.workflow_name, "minimax_h3_t2va")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-        self.assertEqual(render.tool_name, "wan2gp.render_h3")
+        self.assertEqual(render.tool_name, "comfy.render_h3")
         self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
         self.assertEqual(plan.metadata["native_h3"]["length"], 362)
-        self.assertEqual(plan.metadata["native_h3"]["backend"], "wan2gp")
+        self.assertEqual(plan.metadata["native_h3"]["backend"], "comfyui")
         self.assertEqual(plan.metadata["native_h3"]["steps"], 16)
         self.assertNotIn("native-opening-keyframe", [node.node_id for node in plan.nodes])
         self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
@@ -622,70 +627,20 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("orbital rotation", prompt)
 
     def test_native_h3_story_is_generated_from_news_and_replaces_fixed_plot(self) -> None:
-        base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
-        generated_story = {
-            "name": "Kirby and the Lantern Current",
-            "base_prompt": "Kirby is the only protagonist in a moonlit canal city where floating lanterns drift against the tide.",
-            "opening_keyframe_prompt": "Opening frame: Kirby stands on a canal bridge as one runaway lantern pulls a ribbon of light into a whirlpool below.",
-            "ending_keyframe_prompt": "Ending frame: Kirby rests beside the calm canal while the rescued lanterns form a warm constellation above the water.",
-            "negative_prompt": "humans, extra characters, duplicate Kirby, text, watermark, hard cut, identity drift",
-            "news_trace": {
-                "contract_version": 2,
-                "source_title": "city lantern outage paraphrased by provider",
-                "source_concepts": ["lantern"],
-                "visual_translation": "The outage becomes a runaway city lantern pulled toward a canal whirlpool.",
-                "news_mechanism": "the runaway lantern is pulled toward the canal whirlpool",
-                "news_consequence": "the lantern rises above the canals after the current reverses",
-                "visual_anchors": ["lantern", "whirlpool", "canals"],
-                "anchor_roles": ["context", "mechanism", "consequence"],
-                "integration": "Kirby protects the lantern while the outage makes the lantern the urgent mission.",
-            },
-            "story_spine": {
-                "premise": "A sudden current is dragging the city's guiding lanterns into a dark canal whirlpool.",
-                "objective": "Kirby must redirect the runaway lantern before the city loses its safe path home.",
-                "obstacle": "The current is accelerating and the lantern cable is about to snap.",
-                "stakes": "Without the lantern, the canal city will be swallowed by darkness.",
-                "emotional_arc": "curiosity becomes urgency, courage, and relief",
-                "climax": "Kirby anchors the lantern against the current and sends its light back across the canals.",
-                "resolution": "The lanterns settle into a warm constellation and the canal becomes safe again.",
-            },
-            "world": {
-                "setting": "a moonlit canal city with narrow bridges and reflective water",
-                "visual_language": "indigo night, amber lantern light, soft watercolor anime edges",
-                "continuity_rules": [
-                    "The same canal bridge and lantern cable remain visible across the story.",
-                    "The current always pulls from screen left toward the whirlpool on screen right.",
-                ],
-            },
-            "native_audio": "water rush, cable tension, quick footsteps, one bright lantern chime, then calm night ambience",
-            "native_shots": [
-                {"time": "0-4s", "title": "Hook - the lantern is pulled away", "action": "A lantern tears loose and drags light toward the whirlpool while Kirby reaches for its cable.", "camera": "Wide bridge reveal pushing into Kirby and the moving lantern.", "state_change": "Kirby understands the lantern is the city's only safe guide and commits to stopping it."},
-                {"time": "4-10s", "title": "Escalation - anchor the current", "action": "Kirby slides along the wet bridge and wraps the cable around a post as the current pulls harder.", "camera": "Smooth side track with the cable and whirlpool kept in the same geography.", "state_change": "The cable holds for a moment, but the bridge begins to crack under the force."},
-                {"time": "10-15s", "title": "Payoff - light returns", "action": "Kirby releases a burst of warm light through the cable, the current reverses, and the lantern rises above the canals.", "camera": "Follow the light upward, then settle into a calm wide ending frame.", "state_change": "The lanterns form a safe constellation and the original danger is visibly resolved."},
-            ],
-        }
-        engine = LLMPromptEngine(mode="llm")
-        with patch.object(engine, "_require_manager", return_value=object()), patch.object(
-            LLMPromptEngine, "_chat_json", return_value={"story": generated_story, "creative_seed": "lantern-current", "source": "native_h3_llm"}
-        ), patch.object(engine, "backend_info", return_value={"provider": "test"}):
-            result = engine.generate_native_h3_storyboard(
-                character="Kirby",
-                style="polished 2D anime",
-                duration_seconds=15,
-                base_storyboard=base_storyboard,
-                news_context={"title": "city lantern outage", "keyword": "canal safety"},
-            )
-
-        merged = merge_native_h3_storyboard(base_storyboard, result["story"])
-        prompt = format_native_h3_prompt(merged, style="polished 2D anime", duration_seconds=15)
-        self.assertEqual(result["prompt_mode"], "llm")
-        self.assertEqual(result["story"]["news_trace"]["source_title"], "city lantern outage")
-        self.assertEqual(merged["name"], "Kirby and the Lantern Current")
-        self.assertEqual(len(merged["native_shots"]), 3)
-        self.assertNotIn("segments", merged)
-        self.assertIn("lantern", prompt.lower())
-        self.assertNotIn("golden star seed", prompt.lower())
-        self.assertNotIn("dark sky rift", prompt.lower())
+        base_storyboard = load_storyboard(self.repo_root / 'configs/storyboards/native_h3_15s.yaml')
+        generated_story = {'name': 'Kirby and the Lantern Current', 'base_prompt': 'Kirby is the only protagonist in a moonlit canal city where floating lanterns drift against the tide.', 'opening_keyframe_prompt': 'Opening frame: Kirby stands on a canal bridge as one runaway lantern pulls a ribbon of light into a whirlpool below.', 'ending_keyframe_prompt': 'Ending frame: Kirby rests beside the calm canal while the rescued lanterns form a warm constellation above the water.', 'negative_prompt': 'humans, extra characters, duplicate Kirby, text, watermark, hard cut, identity drift', 'news_trace': {'contract_version': 2, 'source_title': 'city lantern outage paraphrased by provider', 'source_concepts': ['lantern'], 'visual_translation': 'The outage becomes a runaway city lantern pulled toward a canal whirlpool.', 'news_mechanism': 'the runaway lantern is pulled toward the canal whirlpool', 'news_consequence': 'the lantern rises above the canals after the current reverses', 'visual_anchors': ['lantern', 'whirlpool', 'canals'], 'anchor_roles': ['context', 'mechanism', 'consequence'], 'integration': 'Kirby protects the lantern while the outage makes the lantern the urgent mission.'}, 'story_spine': {'premise': "A sudden current is dragging the city's guiding lanterns into a dark canal whirlpool.", 'objective': 'Kirby must redirect the runaway lantern before the city loses its safe path home.', 'obstacle': 'The current is accelerating and the lantern cable is about to snap.', 'stakes': 'Without the lantern, the canal city will be swallowed by darkness.', 'emotional_arc': 'curiosity becomes urgency, courage, and relief', 'climax': 'Kirby anchors the lantern against the current and sends its light back across the canals.', 'resolution': 'The lanterns settle into a warm constellation and the canal becomes safe again.'}, 'world': {'setting': 'a moonlit canal city with narrow bridges and reflective water', 'visual_language': 'indigo night, amber lantern light, soft watercolor anime edges', 'continuity_rules': ['The same canal bridge and lantern cable remain visible across the story.', 'The current always pulls from screen left toward the whirlpool on screen right.']}, 'native_audio': 'water rush, cable tension, quick footsteps, one bright lantern chime, then calm night ambience', 'native_shots': [{'time': '0-4s', 'title': 'Hook - the lantern is pulled away', 'action': 'A lantern tears loose and drags light toward the whirlpool while Kirby reaches for its cable.', 'camera': 'Wide bridge reveal pushing into Kirby and the moving lantern.', 'state_change': "Kirby understands the lantern is the city's only safe guide and commits to stopping it."}, {'time': '4-10s', 'title': 'Escalation - anchor the current', 'action': 'Kirby slides along the wet bridge and wraps the cable around a post as the current pulls harder.', 'camera': 'Smooth side track with the cable and whirlpool kept in the same geography.', 'state_change': 'The cable holds for a moment, but the bridge begins to crack under the force.'}, {'time': '10-15s', 'title': 'Payoff - light returns', 'action': 'Kirby releases a burst of warm light through the cable, the current reverses, and the lantern rises above the canals.', 'camera': 'Follow the light upward, then settle into a calm wide ending frame.', 'state_change': 'The lanterns form a safe constellation and the original danger is visibly resolved.'}]}
+        engine = LLMPromptEngine(mode='llm', manager=ScriptedLLMManager([{'story': generated_story, 'creative_seed': 'lantern-current', 'source': 'native_h3_llm'}], repeat_last=True))
+        result = engine.generate_native_h3_storyboard(character='Kirby', style='polished 2D anime', duration_seconds=15, base_storyboard=base_storyboard, news_context={'title': 'city lantern outage', 'keyword': 'canal safety'})
+        merged = merge_native_h3_storyboard(base_storyboard, result['story'])
+        prompt = format_native_h3_prompt(merged, style='polished 2D anime', duration_seconds=15)
+        self.assertEqual(result['prompt_mode'], 'llm')
+        self.assertEqual(result['story']['news_trace']['source_title'], 'city lantern outage')
+        self.assertEqual(merged['name'], 'Kirby and the Lantern Current')
+        self.assertEqual(len(merged['native_shots']), 3)
+        self.assertNotIn('segments', merged)
+        self.assertIn('lantern', prompt.lower())
+        self.assertNotIn('golden star seed', prompt.lower())
+        self.assertNotIn('dark sky rift', prompt.lower())
 
     def test_user_given_source_context_when_native_prompt_is_formatted_then_only_described_scene_reaches_h3(self) -> None:
         """User Given source context and a final scene, When formatted, Then H3 receives the described action rather than source explanations or role mappings."""
@@ -711,35 +666,11 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
     def test_user_given_readable_text_visual_when_native_h3_story_is_generated_then_story_is_not_rejected(self) -> None:
         """User: Given a story mentions a readable document, When Native H3 prepares its render data, Then that creative detail does not block generation."""
-        storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
-        invalid_story = {
-            "base_prompt": "Kirby reaches for a glowing document covered in financial symbols.",
-            "native_shots": [
-                {"time": "0-4s", "action": "Kirby runs toward the loose lantern."},
-                {"time": "4-10s", "action": "Kirby catches the lantern cable."},
-                {"time": "10-15s", "action": "Kirby anchors the lantern safely."},
-            ],
-        }
-        calls: list[str] = []
-
-        def fake_chat(request):
-            calls.append(str(request.user_prompt))
-            return {"story": invalid_story, "creative_seed": "lantern-current", "source": "native_h3_llm"}
-
-        engine = LLMPromptEngine(mode="llm")
-        with patch.object(engine, "_require_manager", return_value=object()), patch.object(
-            LLMPromptEngine, "_chat_json", side_effect=fake_chat
-        ), patch.object(engine, "backend_info", return_value={"provider": "test"}):
-            result = engine.generate_native_h3_storyboard(
-                character="Kirby",
-                style="polished 2D anime",
-                duration_seconds=15,
-                base_storyboard=storyboard,
-                news_context={"title": "city lantern outage", "keyword": "canal safety"},
-            )
-
-        self.assertEqual(len(calls), 3)
-        self.assertIn("document", result["story"]["base_prompt"])
+        storyboard = load_storyboard(self.repo_root / 'configs/storyboards/native_h3_15s.yaml')
+        invalid_story = {'base_prompt': 'Kirby reaches for a glowing document covered in financial symbols.', 'native_shots': [{'time': '0-4s', 'action': 'Kirby runs toward the loose lantern.'}, {'time': '4-10s', 'action': 'Kirby catches the lantern cable.'}, {'time': '10-15s', 'action': 'Kirby anchors the lantern safely.'}]}
+        engine = LLMPromptEngine(mode='llm', manager=ScriptedLLMManager([{'story': invalid_story, 'creative_seed': 'lantern-current', 'source': 'native_h3_llm'}], repeat_last=True))
+        result = engine.generate_native_h3_storyboard(character='Kirby', style='polished 2D anime', duration_seconds=15, base_storyboard=storyboard, news_context={'title': 'city lantern outage', 'keyword': 'canal safety'})
+        self.assertIn('document', result['story']['base_prompt'])
 
     def test_news_selection_rejects_placeholder_titles(self) -> None:
         self.assertFalse(NewsContextService.is_usable_selection("...", "gold;reserve"))
@@ -826,7 +757,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
 
     def test_native_h3_creative_brief_is_not_filtered_by_topic_or_digits(self) -> None:
-        preserved = LLMPromptEngine._sanitize_native_h3_creative_brief(
+        preserved = sanitize_native_h3_creative_brief(
             "stock ticker 810.06, chart, report, and glowing symbols"
         )
         self.assertIn("810.06", preserved)
@@ -839,7 +770,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "then resolve with the distinct species discovery; preserve the article's reported facts."
         )
 
-        directive = LLMPromptEngine._format_native_h3_arc_guidance(guidance)
+        directive = format_native_h3_arc_guidance(guidance)
 
         self.assertIn(guidance, directive)
         self.assertIn("article remains authoritative for facts", directive)
@@ -1396,23 +1327,23 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "Do not show readable interfaces or abstract symbols."
         )
 
-        sanitized = LLMPromptEngine._sanitize_native_h3_creative_brief(brief)
+        sanitized = sanitize_native_h3_creative_brief(brief)
 
         self.assertIn("compact causal story", sanitized)
         self.assertIn("Do not show readable interfaces", sanitized)
 
     def test_native_h3_story_does_not_fallback_when_llm_is_unavailable(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=None)
+        """User Given an unavailable LLM provider When generating content Then its declared failure policy and diagnostic are preserved."""
+        engine = LLMPromptEngine(mode="llm", manager_factory=_unavailable_manager)
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
-        with patch.object(engine, "_manager_or_none", return_value=None):
-            with self.assertRaises(PromptGenerationError):
-                engine.generate_native_h3_storyboard(
-                    character="Kirby",
-                    style="polished 2D anime",
-                    duration_seconds=15,
-                    base_storyboard=storyboard,
-                    news_context={"title": "test", "keyword": "test"},
-                )
+        with self.assertRaises(PromptGenerationError):
+            engine.generate_native_h3_storyboard(
+                character="Kirby",
+                style="polished 2D anime",
+                duration_seconds=15,
+                base_storyboard=storyboard,
+                news_context={"title": "test", "keyword": "test"},
+            )
 
     def test_native_h3_inspection_is_non_blocking_for_discord_review(self) -> None:
         class FakeTools:

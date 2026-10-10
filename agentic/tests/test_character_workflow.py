@@ -13,22 +13,12 @@ from unittest.mock import patch
 
 import yaml
 
-from agentic.app.character_workflow import (
-    _effective_publish_after_generate,
-    _extract_failure_details,
-    _extract_publish_visual_grounding,
-    _collect_count_policies,
-    _publish_selection_limit,
-    _asset_qualified_workflow_candidates,
-    _route_generation_from_character_config,
-    _resolve_output_dir,
-    _resolve_publish_prompt,
-    build_goal_payload_from_character_config,
-    collect_media_paths_from_run_result,
-    load_character_config,
-    resolve_character_selection,
-    run_character_workflow,
-)
+from agentic.app.character_publishing import _effective_publish_after_generate, _publish_selection_limit, _resolve_publish_prompt, collect_media_paths_from_run_result
+from agentic.app.character_workflow import _extract_failure_details, run_character_workflow
+from agentic.app.generation_routing import _collect_count_policies, _asset_qualified_workflow_candidates, _route_generation_from_character_config
+from agentic.app.character_config import _resolve_output_dir, load_character_config
+from agentic.app.character_payload import build_goal_payload_from_character_config
+from agentic.app.character_selection import resolve_character_selection
 from character_workflow_helpers import make_character_workflow_request
 from agentic.tools.context_services import NewsContextService, NewsSelection
 from agentic.app.main import _allow_runtime_output_for_visual_evidence
@@ -134,7 +124,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(long_video["constraints"]["segment_count"], 6)
         self.assertNotIn("storyboard_path", long_video["constraints"])
         self.assertEqual(long_video["character_config_summary"]["longvideo"]["default_duration_seconds"], 30)
-        self.assertEqual(long_video["constraints"]["video_workflow_name"], "wan2gp_h3_i2va")
+        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_i2va")
 
         production_long_video = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -287,8 +277,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_empty_asset_manifest_is_not_treated_as_ready_for_routing(self) -> None:
         class Registry:
-            def ensure_workflow_ready(self, name, auto_download):
-                del auto_download
+            def ensure_workflow_ready(self, name):
                 if name == "ready":
                     return {"asset_status": [{"status": "ready"}]}
                 return {"asset_status": []}
@@ -301,7 +290,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
     def test_weighted_route_selects_strategy_before_content_prompt(self) -> None:
         config = load_character_config(self.kirby_config)
         config["generation"]["generation_type_weights"] = {"story_card": 1}
-        with patch("agentic.app.character_workflow.load_character_config", return_value=config):
+        with patch("agentic.app.character_payload.load_character_config", return_value=config):
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
@@ -338,7 +327,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         config = load_character_config(self.kirby_config)
         config["generation"]["generation_type_weights"] = {"sticker_pack": 1}
 
-        with patch("agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy") as route:
+        with patch("agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy") as route:
             result = _route_generation_from_character_config(
                 self.repo_root,
                 config,
@@ -608,12 +597,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_build_goal_payload_uses_llm_routed_strategy_and_workflow(self) -> None:
         with patch(
-            "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             return_value={
                 "generation_type": "sticker_pack",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                    "video_workflow_name": "wan2gp_h3_i2va",
+                    "video_workflow_name": "minimax_h3_i2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "",
@@ -640,14 +629,14 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["media_type"], "sticker_pack")
         self.assertEqual(payload["selected_workflow_name"], "nova-anime-xl")
         self.assertEqual(payload["constraints"]["workflow_name"], "nova-anime-xl")
-        self.assertEqual(payload["constraints"]["video_workflow_name"], "wan2gp_h3_i2va")
+        self.assertEqual(payload["constraints"]["video_workflow_name"], "minimax_h3_i2va")
         self.assertEqual(payload["constraints"]["video_count"], 2)
         self.assertEqual(payload["constraints"]["selection_limit"], 5)
         self.assertEqual(payload["constraints"]["images_per_prompt"], 2)
         self.assertEqual(payload["constraints"]["routing_prompt_mode"], "llm")
         self.assertEqual(payload["routing_summary"]["strategy"], "sticker_pack")
         self.assertEqual(payload["routing_summary"]["primary_workflow"], "nova-anime-xl")
-        self.assertEqual(payload["routing_summary"]["workflow_plan"]["video_workflow_name"], "wan2gp_h3_i2va")
+        self.assertEqual(payload["routing_summary"]["workflow_plan"]["video_workflow_name"], "minimax_h3_i2va")
         self.assertEqual(payload["routing_summary"]["count_plan"]["review_selection_limit"], 5)
 
     def test_publish_prompt_inherits_rendered_native_h3_story(self) -> None:
@@ -843,7 +832,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_build_goal_payload_raises_on_invalid_routed_workflow(self) -> None:
         with patch(
-            "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             side_effect=ValueError("invalid route"),
         ):
             with self.assertRaises(ValueError):
@@ -855,12 +844,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_build_goal_payload_generates_prompt_from_news_when_prompt_missing(self) -> None:
         with patch(
-            "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             return_value={
                 "generation_type": "text2video",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                    "video_workflow_name": "wan2gp_h3_t2va",
+                    "video_workflow_name": "minimax_h3_t2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "",
@@ -877,14 +866,14 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "prompt_mode": "llm",
             },
         ), patch(
-            "agentic.app.character_workflow.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.get_random_news",
             return_value=type(
                 "_News",
                 (),
                 {"to_dict": lambda self: {"title": "Taipei panda steals zongzi", "keyword": "panda"}}  # noqa: ARG005
             )(),
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={
                 "prompt": "Kirby turns a panda zongzi headline into a playful rainy-night chase scene",
                 "source": "autonomous_llm",
@@ -919,11 +908,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             (),
             {"to_dict": lambda self: {"title": "Taipei panda steals zongzi", "keyword": "panda"}},  # noqa: ARG005
         )()
-        with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "agentic.app.character_workflow.NewsContextService.get_random_news",
+        with tempfile.TemporaryDirectory(), patch(
+            "agentic.tools.context_services.NewsContextService.get_random_news",
             return_value=news,
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
             side_effect=AssertionError("native H3 must not create an autonomous scene prompt"),
         ):
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -1023,10 +1012,10 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             category="technology",
         )
         with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "agentic.app.character_workflow.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.get_random_news",
             return_value=news,
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={
                 "prompt": "Kirby turns the panda news into a playful rescue scene",
                 "source": "autonomous_llm",
@@ -1056,10 +1045,10 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             category="technology",
         )
         with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "agentic.app.character_workflow.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.get_random_news",
             return_value=news,
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={
                 "prompt": "Kirby turns the panda news into a playful multi-scene story",
                 "source": "autonomous_llm",
@@ -1084,8 +1073,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
 
     def test_build_goal_payload_merges_global_social_config_and_surfaces_summary(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "agentic.app.character_workflow.load_global_social_config",
+        with tempfile.TemporaryDirectory(), patch(
+            "agentic.app.character_payload.load_global_social_config",
             return_value={
                 "social_media": {
                     "default_hashtags": ["global_tag"],
@@ -1102,19 +1091,19 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 }
             },
         ), patch(
-            "agentic.app.character_workflow.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.get_random_news",
             return_value=NewsSelection(
                 title="CI fixture headline",
                 keyword="fixture",
                 category="technology",
             ),
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             return_value={
                 "generation_type": "text2video",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                    "video_workflow_name": "wan2gp_h3_t2va",
+                    "video_workflow_name": "minimax_h3_t2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "",
@@ -1131,7 +1120,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "prompt_mode": "llm",
             },
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={"prompt": "kirby prompt", "source": "autonomous_llm", "prompt_mode": "llm", "news_context": {}},
         ):
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -1147,7 +1136,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_image_only_route_removes_youtube_from_publish_platforms(self) -> None:
         with patch(
-            "agentic.app.character_workflow.load_global_social_config",
+            "agentic.app.character_payload.load_global_social_config",
             return_value={
                 "social_media": {
                     "platforms": {
@@ -1163,7 +1152,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 }
             },
         ), patch(
-            "agentic.app.character_workflow.LLMPromptEngine.generate_autonomous_scene_prompt",
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
             return_value={"prompt": "Kirby portrait", "source": "template", "prompt_mode": "template", "news_context": {}},
         ):
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -1219,12 +1208,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             )
 
             with patch(
-                "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+                "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
                 return_value={
                     "generation_type": "text2video",
                     "workflow_plan": {
                         "image_workflow_name": "nova-anime-xl",
-                        "video_workflow_name": "wan2gp_h3_t2va",
+                        "video_workflow_name": "minimax_h3_t2va",
                         "refine_workflow_name": "",
                         "transition_workflow_name": "",
                         "upscale_workflow_name": "",
@@ -1240,7 +1229,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "reason": "text2video",
                     "prompt_mode": "llm",
                 },
-            ), patch("agentic.app.character_workflow.load_global_social_config", return_value={}):
+            ), patch("agentic.app.character_payload.load_global_social_config", return_value={}):
                 payload = build_goal_payload_from_character_config(make_character_workflow_request(
                     self.repo_root,
                     config_path,
@@ -1260,12 +1249,12 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
     def test_build_goal_payload_enables_stage_review_when_discord_env_is_present(self) -> None:
         with patch(
-            "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             return_value={
                 "generation_type": "text2image2video",
                 "workflow_plan": {
                     "image_workflow_name": "nova-anime-xl",
-                        "video_workflow_name": "wan2gp_h3_i2va",
+                        "video_workflow_name": "minimax_h3_i2va",
                     "refine_workflow_name": "",
                     "transition_workflow_name": "",
                     "upscale_workflow_name": "Tile Upscaler SDXL",

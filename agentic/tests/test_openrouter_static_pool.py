@@ -11,7 +11,6 @@ from agentic.runtime.model_backends import (
     OpenRouterRotatingModel,
     OpenRouterModel,
     static_openrouter_models,
-    static_openrouter_model_modes,
 )
 
 

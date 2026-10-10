@@ -96,7 +96,7 @@ class Krea2WorkflowContractTests(unittest.TestCase):
                 "qwen_image_vae.safetensors",
             ],
         )
-        statuses = registry.ensure_workflow_ready("krea2_turbo", auto_download=False)["asset_status"]
+        statuses = registry.ensure_workflow_ready("krea2_turbo")["asset_status"]
         self.assertEqual([item["status"] for item in statuses], ["missing", "missing", "missing"])
 
 

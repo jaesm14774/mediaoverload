@@ -167,7 +167,6 @@ def main() -> int:
         media_type="long_video",
         duration_seconds=target_duration,
         style="polished 2D anime cinematic, clear silhouette, coherent camera motion",
-        auto_download_assets=False,
         constraints={
             "character": "Kirby",
             "segment_count": max(2, args.segments),

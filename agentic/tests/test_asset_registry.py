@@ -36,7 +36,7 @@ class AssetRegistryTests(unittest.TestCase):
         root = self.make_workspace_tempdir()
         self._write_workflow(root, "wf1", {"1": {"class_type": "SaveImage", "inputs": {}}})
         registry = AssetRegistry(root, asset_root=root)
-        result = registry.ensure_workflow_ready("wf1", auto_download=False)
+        result = registry.ensure_workflow_ready("wf1")
         self.assertEqual(result["asset_status"], [])
 
     def test_recommend_workflows_orders_by_style_token_in_name(self) -> None:

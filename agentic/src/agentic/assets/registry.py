@@ -127,11 +127,8 @@ def _relative_to_project(project_root: Path, absolute_file: Path) -> str:
 
 def _infer_media_types(stem: str) -> list[str]:
     lower = stem.lower()
-    if lower.startswith("wan2gp_h3_"):
-        return ["image_to_video", "image_to_video_audio", "text2video", "long_video", "native_h3_ref2va"]
     shared_image = [
         "image",
-        "storyboard",
         "animated_sticker",
         "carousel",
         "sticker_pack",
@@ -185,10 +182,11 @@ class AssetRegistry:
         for path in sorted(self._workflow_dir.glob("*.json")):
             stem = path.stem
             rel = _relative_to_project(self.project_root, path)
-            values = json.loads(path.read_text("utf-8")) if stem.startswith("wan2gp_h3_") else _metadata_for_workflow(metadata, stem)
-            if values.get("provider") == "wan2gp":
-                from agentic.assets.wan2gp import h3_requirements
-                values["required_assets"] = h3_requirements(values["h3_mode"], values["recommended_defaults"].get("model_profile", "q4"))
+            values = _metadata_for_workflow(metadata, stem)
+            h3_mode = values.get("conditioning", {}).get("h3_mode")
+            if h3_mode:
+                from agentic.assets.minimax_h3 import h3_requirements
+                values["required_assets"] = h3_requirements(h3_mode, values["recommended_defaults"].get("model_profile", "q4"))
             manifests[stem] = _synthetic_manifest(stem, rel, values)
         return manifests
 
@@ -226,7 +224,7 @@ class AssetRegistry:
         for manifest in self._manifests.values():
             if media_type not in manifest.media_types:
                 continue
-            requirement_status = self.ensure_requirements(manifest, auto_download=False)
+            requirement_status = self.ensure_requirements(manifest)
             ready_count = sum(1 for item in requirement_status if item["status"] == "ready")
             missing_count = len(requirement_status) - ready_count
             if require_ready and missing_count:
@@ -279,15 +277,6 @@ class AssetRegistry:
             }
 
         workflow = self.load_workflow_template(manifest)
-        if manifest.conditioning.get("provider") == "wan2gp":
-            from agentic.runtime.h3_modes import resolve_h3_mode
-            try:
-                resolve_h3_mode(workflow["h3_mode"])
-                if workflow.get("provider") != "wan2gp":
-                    issues.append("WanGP workflow must declare provider=wan2gp")
-            except (KeyError, ValueError, TypeError) as exc:
-                issues.append(str(exc))
-            return {"workflow_name": workflow_name, "workflow_path": str(workflow_path), "valid": not issues, "issues": issues, "warnings": [], "aliases": [], "output_nodes": ["wan2gp.render_h3"], "unresolved_inputs": []}
         if not isinstance(workflow, dict) or not workflow:
             issues.append("Workflow JSON is empty or not a node mapping.")
         else:
@@ -332,50 +321,19 @@ class AssetRegistry:
             "unresolved_inputs": unresolved_inputs,
         }
 
-    def ensure_workflow_ready(self, workflow_name: str, auto_download: bool) -> dict[str, Any]:
+    def ensure_workflow_ready(self, workflow_name: str) -> dict[str, Any]:
         manifest = self.get_manifest(workflow_name)
-        asset_status = self.ensure_requirements(manifest, auto_download)
+        asset_status = self.ensure_requirements(manifest)
         workflow_path = self.materialize_workflow(manifest)
         return {
             "workflow_name": manifest.name,
             "workflow_path": str(workflow_path),
             "asset_status": asset_status,
-            "auto_download": auto_download,
         }
 
-    def plan_asset_acquisition(self, workflow_name: str) -> dict[str, Any]:
-        manifest = self.get_manifest(workflow_name)
-        statuses = self.ensure_requirements(manifest, auto_download=False)
-        missing = [item for item in statuses if item["status"] != "ready"]
-        return {
-            "workflow_name": workflow_name,
-            "missing_assets": missing,
-            "missing_count": len(missing),
-        }
 
-    def acquire_missing_assets(self, workflow_name: str) -> dict[str, Any]:
-        manifest = self.get_manifest(workflow_name)
-        acquisition_plan = self.plan_asset_acquisition(workflow_name)
-        prepared_assets: list[dict[str, Any]] = []
-        for item in acquisition_plan["missing_assets"]:
-            target_path = Path(str(item["target_path"]))
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            prepared_assets.append(
-                {
-                    "asset": item["asset"],
-                    "kind": item["kind"],
-                    "target_path": str(target_path),
-                    "action": "prepare_download_slot",
-                    "source": item.get("source"),
-                }
-            )
-        return {
-            "workflow_name": manifest.name,
-            "prepared_assets": prepared_assets,
-            "prepared_count": len(prepared_assets),
-        }
 
-    def ensure_requirements(self, manifest: WorkflowManifest, auto_download: bool) -> list[dict[str, Any]]:
+    def ensure_requirements(self, manifest: WorkflowManifest) -> list[dict[str, Any]]:
         statuses: list[dict[str, Any]] = []
         for requirement in manifest.required_assets:
             candidate_paths = self._candidate_asset_paths(manifest, requirement)
@@ -394,9 +352,6 @@ class AssetRegistry:
             elif exists:
                 status = "ready"
                 action = "reuse"
-            elif auto_download:
-                status = "scheduled"
-                action = "download"
             else:
                 status = "missing"
                 action = "manual_setup"

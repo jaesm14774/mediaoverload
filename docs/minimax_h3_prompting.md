@@ -11,5 +11,6 @@ Runtime checks cover renderer inputs such as supported workflow, duration, dimen
 - General prompt builders: `agentic/src/agentic/runtime/prompting.py`
 - Native H3 prompt composer: `agentic/src/agentic/minimax_prompting.py`
 - Native H3 storyboard normalization: `agentic/src/agentic/storyboard.py`
-- Native H3 story generation: `agentic/src/agentic/runtime/llm_engine.py`
-- ComfyUI execution: `agentic/src/agentic/skills/longvideo.py`
+- Native H3 story generation: `agentic/src/agentic/runtime/prompt_tasks/native_h3.py`
+- H3 execution skill: `agentic/src/agentic/skills/longvideo.py`
+- ComfyUI renderer: `agentic/src/agentic/tools/comfy_h3.py`

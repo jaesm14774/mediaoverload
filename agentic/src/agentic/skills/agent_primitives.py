@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
-from agentic.runtime.prompt_engine import PromptEngine
+from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.story_cards import (
     STORY_CARD_DEFAULT_HEIGHT,
@@ -16,7 +16,6 @@ from agentic.runtime.story_cards import (
     validate_story_card_payload,
 )
 from agentic.runtime.prompting import (
-    build_segment_prompt,
     include_role_description,
     validate_story_segments,
 )
@@ -29,17 +28,16 @@ from agentic.skills.shared import (
     resolve_dependency_negative_prompt,
     resolve_dependency_prompt,
     resolve_dependency_value,
-    safe_path_component,
     slug_path_component,
 )
 
 
 class AgentPlanningSkills:
-    def __init__(self, prompt_engine: PromptEngine | None = None) -> None:
-        self.prompt_engine = prompt_engine or PromptEngine()
+    def __init__(self, prompt_engine: LLMPromptEngine | None = None) -> None:
+        self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
 
     def expand_goal(self, context: SkillContext) -> SkillResult:
-        prompt = str(context.node.inputs["prompt"])
+        str(context.node.inputs["prompt"])
         style = str(context.node.inputs.get("style", context.plan.goal.style))
         idea_variants = list(context.node.inputs.get("idea_variants", []))
         selected_variant = idea_variants[0] if idea_variants else {"style": style}
@@ -294,11 +292,11 @@ class AgentMediaSkills:
         self,
         tools: ToolRegistry,
         output_root: Path,
-        prompt_engine: PromptEngine | None = None,
+        prompt_engine: LLMPromptEngine | None = None,
     ) -> None:
         self.tools = tools
         self.output_root = output_root
-        self.prompt_engine = prompt_engine or PromptEngine()
+        self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
         self.output_root.mkdir(parents=True, exist_ok=True)
 
     def ensure_workflow(self, context: SkillContext) -> SkillResult:
@@ -306,7 +304,6 @@ class AgentMediaSkills:
             "asset.ensure_workflow_ready",
             {
                 "workflow_name": context.node.inputs["workflow_name"],
-                "auto_download": context.node.inputs.get("auto_download", False),
             },
         )
         return asset_check_result(result, "Checked workflow assets for an agent step.")
@@ -534,12 +531,12 @@ class AgentMediaSkills:
         }
         # Text-to-video may have a generated cover upstream. Its cover is not
         # an H3 starting frame; only the image-conditioned workflow consumes it.
-        if workflow_name != "wan2gp_h3_t2va":
+        if workflow_name != "minimax_h3_t2va":
             payload["image_path"] = self._resolve_image_path(context)
         seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
         if seed is not None:
             payload["seed"] = int(seed)
-        if context.plan.goal.media_type == "long_video" and workflow_name.startswith("wan2gp_h3_"):
+        if context.plan.goal.media_type == "long_video" and workflow_name.startswith("minimax_h3_"):
             constraints = context.plan.goal.constraints
             payload.update(
                 {
@@ -550,11 +547,11 @@ class AgentMediaSkills:
                     "model_profile": str(constraints.get("longvideo_h3_model_profile", "q4")),
                 }
             )
-        elif workflow_name.startswith("wan2gp_h3_") and context.node.inputs.get("length") is not None:
+        elif workflow_name.startswith("minimax_h3_") and context.node.inputs.get("length") is not None:
             payload["length"] = int(context.node.inputs["length"])
-        if workflow_name.startswith("wan2gp_h3_") and context.node.inputs.get("steps") is not None:
+        if workflow_name.startswith("minimax_h3_") and context.node.inputs.get("steps") is not None:
             payload["steps"] = int(context.node.inputs["steps"])
-        result = self.tools.call("wan2gp.render_h3", payload)
+        result = self.tools.call("comfy.render_h3", payload)
         return SkillResult(
             status="success",
             outputs=result,
@@ -1287,7 +1284,7 @@ def register_agent_primitive_skills(
     skill_registry: SkillRegistry,
     tool_registry: ToolRegistry,
     output_root: Path,
-    prompt_engine: PromptEngine | None = None,
+    prompt_engine: LLMPromptEngine | None = None,
 ) -> None:
     planning = AgentPlanningSkills(prompt_engine=prompt_engine)
     media = AgentMediaSkills(tool_registry, output_root, prompt_engine=prompt_engine)

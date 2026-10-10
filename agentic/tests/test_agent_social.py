@@ -447,10 +447,10 @@ class AgentSocialSkillTests(unittest.TestCase):
                 constraints={
                     "require_human_review": True,
                     "source_generation_type": "native_h3_story",
-                    "workflow_name": "wan2gp_h3_fl2va",
+                    "workflow_name": "minimax_h3_fl2va",
                 },
             ),
-            workflow_name="wan2gp_h3_fl2va",
+            workflow_name="minimax_h3_fl2va",
             nodes=[],
         )
         node = ExecutionNode(
@@ -529,7 +529,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 style="anime",
                 constraints={"character": "Kirby", "enable_stage_review": True},
             ),
-            workflow_name="wan2gp_h3_fl2va",
+            workflow_name="minimax_h3_fl2va",
             nodes=[],
         )
         node = ExecutionNode(
@@ -552,7 +552,6 @@ class AgentSocialSkillTests(unittest.TestCase):
                 "native-opening-keyframe": {"saved_files": candidate_paths},
             },
         )
-        captured: dict[str, object] = {}
 
         class FakePromptEngine:
             calls = 0
@@ -584,7 +583,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 style="anime",
                 constraints={"enable_stage_review": True, "review_notes": None},
             ),
-            workflow_name="wan2gp_h3_fl2va",
+            workflow_name="minimax_h3_fl2va",
             nodes=[],
         )
         node = ExecutionNode(
@@ -719,7 +718,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 style="anime",
                 constraints={"require_human_review": True},
             ),
-            workflow_name="wan2gp_h3_fl2va",
+            workflow_name="minimax_h3_fl2va",
             nodes=[],
         )
         node = ExecutionNode(
@@ -780,7 +779,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 style="anime",
                 constraints={"require_human_review": True},
             ),
-            workflow_name="wan2gp_h3_fl2va",
+            workflow_name="minimax_h3_fl2va",
             nodes=[],
         )
         node = ExecutionNode(
@@ -820,7 +819,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                 style="anime",
                 constraints={"require_human_review": True},
             ),
-            workflow_name="wan2gp_h3_fl2va",
+            workflow_name="minimax_h3_fl2va",
             nodes=[],
         )
         node = ExecutionNode(

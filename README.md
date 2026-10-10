@@ -1,736 +1,82 @@
 # MediaOverload
 
-H3 影片生成已改為 **Powered by WanGP**：文生影、首幀、首尾幀、尾幀、參考圖／影片共五種策略。Krea 生圖維持 ComfyUI。設定與實測見 [WanGP H3 workflows](docs/wan2gp_h3.md)。
+依角色設定、使用者目標與約束，完成媒體生成、編輯、技術 QA、人工審查與社群發布。圖片與 H3 影片共用 ComfyUI 生成服務；應用程式透過 HTTP 提交工作流。
 
+## 安裝
 
-## CI 與本機 E2E 的分工
-
-CI（Continuous Integration，持續整合）是每次 push 或 pull request 自動執行的基本品質防線。Hosted CI 執行可重現的 unit/contract tests 與 Python compile；需要真實 DB、LLM、ComfyUI 或 GPU 的測試會標記為 `integration`，不會在 hosted PR runner 上假裝通過。Hosted CI 會驗證 integration suite 可被發現，正式整合則由受保護的 Formal Integration workflow 執行。
-
-需要真實 DB、LLM、GPU 或 ComfyUI 的流程，會在 Windows self-hosted runner 上透過同一個 `python run_media_interface.py` 做 Formal Integration smoke test；該 workflow 只在 `main`、schedule 或手動觸發，並使用 `mediaoverload-integration` Environment 的 `MEDIAOVERLOAD_ENV` secret。這樣 Hosted CI 仍能快速回饋，Formal Integration 則負責驗證 production-like runtime；兩者都不能被另一者取代。
-
-Formal Integration runner 必須具備 `self-hosted`, `windows`, `x64`, `mediaoverload-integration` labels、可用的 ComfyUI/GPU、FFmpeg 與資料庫連線。它會使用 `--stage-probe` 與 `--dry-run-publish`，產生並上傳 JSON/log evidence，但不執行 live publish。
-
-以 **Agentic 媒體執行階層**（`agentic/`）為核心的專案：依「目標＋約束」組出計畫，透過技能／工具鏈呼叫 ComfyUI、媒體處理與發佈。角色向的一鍵流程由 **`run_media_interface.py`** 讀取角色 YAML，並依 **`configs/routing.yaml`** 做 **生成策略（generation strategy）** 路由。
-
----
-
-## 環境與安裝
-
-- **Python**：建議 3.11+（`agentic/pyproject.toml` 要求 `>=3.11`）。
-- **根目錄依賴**：`pip install -r requirements.txt`
-- **Agentic 套件**（含 `agentic` 指令）：
-
-```bash
-cd agentic
-pip install -e .
-```
-
-- **ComfyUI**：實際出圖／影片時需可連線的 ComfyUI；預設連線由環境變數控制（見下表）。
-
-### 常用環境變數
-
-| 變數 | 說明 | 預設 |
-|------|------|------|
-| `COMFYUI_HOST` | ComfyUI 主機位址 | `host.docker.internal`（程式內預設） |
-| `COMFYUI_PORT` | ComfyUI 埠號 | `8188` |
-| `AGENTIC_LLM_MODE` | LLM 後端模式（角色流程的路由與自動 prompt 會用到） | `llm` |
-| `AGENTIC_RUN_LOGGER_NAME` | 由 `run_character_workflow` 設定，供執行期記錄用 | （執行時注入） |
-
-### 產物與執行資料夾規則
-
-- `output/`：所有生成的圖片、影片、編輯結果、報告與 review 產物；角色名稱與 benchmark 名稱只作為其下的分類。
-- `logs/`：所有 run manifest、lifecycle/events、LLM 紀錄、portfolio 記憶與反思報告。
-- `.tmp-tests/`：測試暫存資料；不屬於正式產物，也不應被流程當成輸入。
-- ComfyUI 安裝目錄只負責模型與服務本身；MediaOverload 會把取回的媒體保存到 repo 的 `output/`，不再另建 `output_media` 或 `agentic/output`。
-
----
-
-## 專案結構（精簡）
-
-| 路徑 | 用途 |
-|------|------|
-| `run_media_interface.py` | 角色媒體介面 CLI：載入角色設定並呼叫 `run_character_workflow` |
-| `agentic/` | Agentic runtime：planner、runner、skills、tools |
-| `configs/routing.yaml` | 全域 **策略候選**、**各階 workflow 候選**、**數量政策**、路由提示 |
-| `configs/characters/*.yaml` | 角色設定（社群、輸出目錄、可選 `additional_params.strategies`） |
-| `configs/workflow/*.json` | ComfyUI workflow 定義（檔名 stem 作為 workflow 名稱） |
-
----
-
-### 影片播放倍率
-
-角色 YAML 的 `generation.video_speed` 控制最終影片是否使用 FFmpeg 後製倍率。倍率節點會在最終合成後執行，並同步調整影片音訊；後續 technical QA、Discord review 與 social publishing 都使用調整後的 MP4。
-
-```yaml
-generation:
-  video_speed:
-    enabled: true
-    factor: 2.0
-```
-
-`enabled: false` 會保留原始速度；`factor: 1.5`、`2.0` 等值分別代表 1.5 倍、2 倍速。影片輸出時長會變成原始時長除以倍率，FPS 與畫布尺寸不變。
-
-Native H3 FL2VA 由原生 workflow 固定產生 15 秒故事影片，不套用角色層級的 speed transform。
-
-### Kirby 短片程式動態圖層（選用）
-
-`text2image2video` 可透過 `--motion-graphics` 在 H3 成片及速度調整後，加入 Pillow 逐幀繪製的字幕、爆發線、閃光或速度線。LLM 只能提供結構化圖層計畫，不能輸出或執行任意程式碼；視覺模型檢視抽樣畫格後，最多修訂兩輪。每輪都從相同的速度調整後原片重新合成，並保留原片音軌。技術 QA、預覽及 Discord 審片接收合成版；Discord 仍是最後的創作決定。此功能不改變預設路徑，也不會重畫 Kirby 本體。
-
-試作時加上 `--dry-run-publish`，仍會走 Discord 最終審查，但不會派送社群平台。
+從此 repo 的 checkout 執行，使用 Python 3.11 以上：
 
 ```powershell
-python run_media_interface.py `
-  --character kirby `
-  --prompt "Kirby用一擊把失控玩具車打回安全路線" `
-  --generation-type text2image2video `
-  --duration-seconds 10 `
-  --motion-graphics `
-  --dry-run-publish
+python -m pip install -r requirements.txt
+# 開發與測試工具
+python -m pip install -e "./agentic[dev]"
 ```
 
-Kirby 角色設定預設使用 2 倍速，因此 10 秒生成片經速度處理後約為 5 秒，程式圖層會依最終時間軸安排。尚未啟用 ComfyUI、GPU 或 LLM 供應商時，可先用本機 FFmpeg 小片段驗證合成器；視覺偏好是否達到 5 組配對中至少 3 組勝出，仍須用實際 Krea→H3 成片盲測確認。
+Python 依賴只在 [agentic/pyproject.toml](agentic/pyproject.toml) 宣告；根目錄 requirements 安裝同一套件。FFmpeg / ffprobe 必須可從 PATH 執行。設定與工作流仍由 repo 的 `configs/` 提供，因此此套件從 checkout 使用。
 
----
+生成前需設定模型服務、LLM 與必要憑證。角色群組與新聞選取使用 MySQL；Discord 審片與各社群平台需要各自憑證。機敏設定不納入版本控制。
 
-## 生成策略總覽
+| 設定 | 用途 |
+|---|---|
+| `COMFYUI_HOST`, `COMFYUI_PORT`, `COMFYUI_ROOT` | ComfyUI 連線與本機資產 |
+| `AGENTIC_LLM_MODE` | 角色流程預設 `llm`；`template` 不提供新聞故事或字卡寫作 |
+| `AGENTIC_TEXT_MODEL_PROVIDER`, `AGENTIC_TEXT_MODEL` | 文字模型供應商與型號 |
+| `AGENTIC_VISION_MODEL_PROVIDER`, `AGENTIC_VISION_MODEL` | 視覺模型供應商與型號 |
+| `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` | 單次 LLM 請求逾時 |
 
-策略名稱對應 **`character_workflow.CONFIG_MEDIA_TYPE_MAP`**，決定送進 planner 的 `media_type`：
-
-| 策略 `generation_type` | `media_type`（內部） | 說明 |
-|------------------------|----------------------|------|
-| `text2img` | `image` | 靜態圖（可多张候選） |
-| `text2video` | `text2video` | 短影片／單鏡頭動態（預設路由檔中可註解關閉） |
-| `text2image2video` | `text2img2video` | 先圖後短片（可含 upscale 階） |
-| `text2longvideo` | `long_video` | 文字→關鍵圖／reference→多段 I2V→轉場→合成；不是純 T2V，也非固定 15 秒 |
-| `native_h3_story` | `native_h3_story` | Native H3 I2VA：單一 approved opening image 進連續故事 |
-| `native_h3_t2v_story` | `native_h3_t2v_story` | Native H3 T2VA：純文字直接生影片 |
-| `native_h3_fl2va_story` | `native_h3_fl2va_story` | Native H3 FL2VA：opening + landing 兩端 conditioning；兩端各產生候選圖供人工選擇 |
-| `native_h3_l2va_story` | `native_h3_l2va_story` | Native H3 L2VA：只使用 landing frame conditioning |
-| `native_h3_ref2va` | `native_h3_ref2va` | Native H3 Ref2VA：有效 manifest 直接使用；空 manifest 自動六張候選圖→Discord 選擇 |
-| `story_card` | `story_card` | 寫作優先的繁中故事字卡：每頁用共同視覺契約獨立生圖，最後由 Pillow 疊上精確文字 |
-| `text2image2image` | `text2img2img` | 先圖後 img2img refine |
-| `sticker_pack` | `sticker_pack` | 多表情貼圖批次 |
-| `image2image` | `image` | 單純 img2img 路線（路由需納入候選時才會被選到） |
-
-**LLM 路由**（未指定 `--generation-type` 時）會讀取 `configs/routing.yaml` 的 `routing.strategy_candidates`、`workflow_stage_candidates`、`count_policies`、`routing_hints`，並回傳結構化結果（鍵：`generation_type`、`workflow_plan`、`count_plan`、`reason`）。  
-**手動指定策略**時：CLI 傳 `--generation-type <策略名>` 或程式傳 `preferred_generation_type=...`，會略過 LLM，並對各階 workflow 取該策略在設定檔中的**第一個候選**，數量則取各 `count_key` 的 **policy 最小值**。
-
-`story_card` 已加入全域策略候選與角色設定的加權策略池。它從新聞的具體事實提出人性看點，依處境選擇反思、感性、深思或其他文風。選題會帶入資料庫已有的正文節錄與網址；只有標題時，限制在標題範圍作反思，不虛構新聞細節。中文文章與英文背景 prompt 使用完全分離的契約。圖像模型會使用當輪解析出的 selected character 作為唯一主角，依每頁的動作、位置與表情節拍維持身份連續性；角色包可選擇加入一名從屬配角。每頁使用同一套 style-locked `krea2_turbo` text-to-image 視覺契約，避免 img2img 把錨點角色複製到畫面中；最終文字由 Pillow 使用可驗證的繁中 font 疊字，因此不能把圖片模型產生的假字當成成品。
-
-### `story_card` — 新聞觀點與感性字卡
-
-這個模式的核心順序是：`agent.story_card.write` → 每頁 style-locked text-to-image 背景 → `media.story_card.compose`。預設自動決定最少頁數：40 字以內才輸出 1 張，超過 40 字就按意思拆成 2–6 張；明確指定時仍可固定頁數，但每張都必須推進同一個事件，不能用感受與形容詞湊頁數。背景會以暖色繪本小劇場呈現，讓 selected character 在不同頁面產生可見的移動、姿勢與表情變化；配角只在角色包設定時出現，最多一名，且不得搶走文字與主角。文章先依事件、本質、情緒與文風選定看點，核對來源依據，再把來源內化成對讀者有新價值的知識、感受或提醒；`evidence_anchor` 只保存內部定位，不要求逐字引用，也不應把原文轉述成正文。保留原新聞的看點，允許有根據的評論；不強迫父愛故事、誤會反轉或勵志結尾。模型失敗不回落固定故事，template 模式不支援此路徑；背景 prompt 必須是英文，字卡 `text` 必須是繁體中文。仍只輸出靜態 PNG；若要單張卡內真正動畫，另立影片路由。
+## 使用入口
 
 ```powershell
-python run_media_interface.py `
-  --character kirby `
-  --prompt "從今天的新聞提出一個具體的人性看點，寫成有感情的繁中字卡" `
-  --generation-type story_card `
-  --news-driven `
-  --no-review `
-  --no-publish
+# 查看角色介面所有選項
+python run_media_interface.py --help
+
+# 角色生成；仍會走 Discord 審片，禁止社群實際發布
+python run_media_interface.py --character kirby --prompt "Kirby接住滑落的星星" --generation-type text2image2video --dry-run-publish
+
+# 只產生執行計畫
+agentic --goal "A hero catches a falling seed" --media-type image
+
+# 不需 GPU 或 LLM 的本機圖片編輯
+agentic --goal "Pan across the source image" --media-type image_sequence_edit --edit-input "D:/media/source.png" --edit-input-root "D:/media" --duration-seconds 2 --width 320 --height 320 --execute
 ```
 
-不指定 `--generation-type` 時，bare CLI 會依 `configs/characters/kirby.yaml` 的 `generation_type_weights` 加權隨機選策略；指定 `--generation-type story_card` 則是直接固定使用這個策略。
+`--dry-run-publish` 只禁止社群派送，生成與 Discord 審查仍會使用外部服務。未加 `--execute` 的 `agentic` 指令只輸出計畫。排程器入口為 `scheduler/scheduler.py`；不要為了測試重啟正在執行的生成工作。
 
-分類、鋪陳、Prompt 與驗收見 [`docs/story_card_editorial_guide.md`](docs/story_card_editorial_guide.md)。原本的本地來源閱讀與 11 篇故事寫作拆解見 [`docs/story_card_research_11_03215.md`](docs/story_card_research_11_03215.md)。
+## 設定與產物
 
-### 各階 workflow 鍵（`workflow_plan`）
+| 路徑 | 責任 |
+|---|---|
+| `configs/characters/*.yaml` | 角色、群組、生成、發布設定 |
+| `configs/routing.yaml` | 策略候選、權重、各階工作流與數量政策 |
+| `configs/workflow/` | 模型工作流與資產 metadata；名稱以檔案 stem 為準 |
+| `configs/storyboards/` | 目前故事與時間線契約 |
+| `agentic/src/agentic/` | 應用協調、計畫、技能、模型與服務轉接 |
+| `output/` | 圖片、影片、編輯、QA 與 review 產物 |
+| `logs/` | run manifest、事件、LLM 請求、portfolio 記錄 |
+| `.tmp-tests/` | 測試與建置暫存，不作為正式流程輸入 |
 
-與 `LLMPromptEngine` 的 `WORKFLOW_STAGE_KEYS` 一致，所有策略的計畫物件都包含這五個鍵（未使用則空字串）：
+策略語意以 [strategies.py](agentic/src/agentic/runtime/strategies.py) 為準；已啟用候選以 routing YAML 為準。影片的模型型號與 conditioning 由工作流描述，新增同類模型通常只需新工作流與候選設定。
 
-| 鍵 | 用途 |
-|----|------|
-| `image_workflow_name` | 文生圖或首幀／靜態階 |
-| `video_workflow_name` | 圖生影片、片段動態 |
-| `refine_workflow_name` | img2img 精修 |
-| `transition_workflow_name` | 長片轉場／過幀 |
-| `upscale_workflow_name` | 放大收尾 |
+## 架構與維護
 
-各 **策略** 實際會用到的階，請對照下方「策略與 YAML／程式範例」。
+[架構與擴充指南](docs/architecture.md) 說明共用與策略專用責任、如何新增策略／模型／LLM，以及驗證邊界。
 
-### 數量計畫（`count_plan`）
+- [ComfyUI H3 工作流與輸入契約](docs/comfyui_h3.md)
+- [H3 提示契約](docs/minimax_h3_prompting.md)
+- [Krea2 工作流操作](docs/krea2_comfyui_best_practice.md)
+- [圖片提示指南](docs/image_prompt_guide.md)
+- [Story Card 編輯指南](docs/story_card_editorial_guide.md)
+- [Game Sprite 輸出契約](docs/game_sprite.md)
+- [影片參考分析](docs/reference_video_remix.md)
 
-路由結果與約束裡會帶入以下整數（範圍由 `configs/routing.yaml` 的 `count_policies.<策略>` 定義）：
-
-| 鍵 | 意義 |
-|----|------|
-| `image_count` | 圖像候選或首幀相關數量 |
-| `video_count` | 影片支數 |
-| `segment_count` | 長片分段數（**僅長片策略語意最重**） |
-| `review_selection_limit` | 審核／挑圖上限 |
-| `sticker_expression_count` | 貼圖表情數量 |
-| `images_per_prompt` | 每個 prompt／表情批次出圖數 |
-
-**長片總時長**（`text2longvideo`）：未指定時預設 30 秒，按渲染器適用的片段長度拆分；故事內容直接依使用者 prompt 生成，不套用固定劇情拍點或長片故事模板。I2V 可沿用上一段實際尾幀，並在每段及最終成片執行技術 QA。
-
----
-
-## 策略一覽：使用方式與範例
-
-以下 **CLI** 假設在專案根目錄執行，並使用內建 `configs/characters/kirby.yaml`（可依需求複製改名）。
-
-### Group 角色選擇
-
-`configs/characters/kirby.yaml` 的 `character.group_name: Kirby` 已啟用群組選角。使用目前的角色入口即可觸發：
+## 驗證
 
 ```powershell
-python run_media_interface.py --character kirby --generation-type text2img --no-review --no-publish
+python -m ruff check agentic/src agentic/tests scripts scheduler run_media_interface.py --config agentic/pyproject.toml
+python -m pytest agentic/tests scripts/tests -m "not integration" -q
+python -m pytest agentic/tests/integration --collect-only -q
 ```
 
-每次 `run_character_workflow` 執行時，runtime 會從 `anime.anime_roles` 讀取同一 `group_name` 下 `status=1` 且 `weight>0` 的角色，依 `weight` 做一次加權隨機選擇。角色描述與 keywords 會一併注入 prompt/storyboard；`run_manifest.json` 和 `events.jsonl` 會記錄 `character_selection`、候選數、權重與選中角色。
+本機測試包含真實 Pillow、FFmpeg、ffprobe 與本機 HTTP provider 契約，以及模型邊界的明確替身。計畫測試驗證真實 manifests、技能與工具可連接，但不代表 GPU 已生成。需要真實 DB、LLM、GPU、ComfyUI 或社群憑證的測試標為 `integration`，必須另行安排受控驗收。
 
-排程不需要新增參數，維持：
-
-```dotenv
-SCHEDULER_CHARACTER=kirby
-```
-
-若 MySQL 未設定、查不到可用角色，該 run 會在選角階段直接失敗並記錄 `character.group.selection_failed`，不會自動改用 Kirby。直接呼叫 `build_goal_payload_from_character_config` 只負責建立已選角色的 payload；要執行 group 選角請使用 CLI、scheduler 或 `run_character_workflow`。
-
-### Two-character interaction
-
-在同一份角色 YAML 啟用兩個 subject slot：
-
-```yaml
-generation:
-  subject_mode: two_character_interaction
-  two_character_interaction:
-    is_same_group: true
-```
-
-`is_same_group: true` 讓兩個 slot 都從 `character.group_name`（或 interaction block 內明確指定的 `group_name`）依 weight 抽樣；`false` 則由該主 group 抽 primary，再從所有 `status=1` 且 `weight>0` 的角色中隨機抽 secondary。global pool 仍可能包含主 group，因此兩個 slot 允許抽到相同角色，不要求角色名稱不同。選角結果會以 `subject_context` 傳入 image prompt、storyboard/store prompt、video prompt 與硬性媒體檢查；沒有 fallback，無法取得主 group 或 global active pool 時 run 直接失敗。
-
-### Random subject mode
-
-若要讓每次 run 依模式權重選擇 single 或互動模式：
-
-```yaml
-generation:
-  subject_mode: random
-  subject_mode_weights:
-    single: 3
-    two_character_interaction: 1
-  two_character_interaction:
-    is_same_group: true
-```
-
-權重按比例抽樣，並且只在選角階段抽一次；後續 image prompt、storyboard/store prompt、video prompt 與硬性媒體檢查 都使用同一個已解析的 concrete mode。`constraints.subject_mode` 與 `character_selection.subject_mode` 會記錄實際選到的 mode，`configured_subject_mode` 會保留原本的 `random`。`subject_mode_weights` 缺少、含未知 mode、負數或全部為零時會直接失敗，不會 fallback。
-
-### 1. `text2img` — 靜態圖
-
-**會用到的 `workflow_plan` 鍵**：主要是 `image_workflow_name`。
-
-**CLI 範例**：
-
-```bash
-python run_media_interface.py --character kirby --prompt "霓虹夜市中的角色立繪，正視，高完成度" --generation-type text2img --comfy-host 127.0.0.1 --comfy-port 8188
-```
-
-**Python 範例**（僅建構目標 payload、不執行 runner）：
-
-```python
-from pathlib import Path
-from agentic.app.character_requests import CharacterGenerationOptions, CharacterWorkflowRequest
-from agentic.app.character_workflow import build_goal_payload_from_character_config
-
-repo_root = Path(__file__).resolve().parent
-payload = build_goal_payload_from_character_config(
-    CharacterWorkflowRequest(
-        repo_root=repo_root,
-        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
-        generation=CharacterGenerationOptions(
-            prompt="賽博龍與拉麵攤，海報構圖",
-            preferred_generation_type="text2img",
-        ),
-    )
-)
-# payload["media_type"] == "image"
-# payload["constraints"]["image_workflow_name"] 等為路由結果
-```
-
-**角色 YAML 可選覆寫**（`additional_params.strategies.text2img`）：
-
-```yaml
-additional_params:
-  strategies:
-    text2img:
-      workflow_name: krea2_turbo
-      workflow_path: configs/workflow/krea2_turbo.json
-```
-
----
-
-### 2. `text2video` — 短影片／單鏡頭
-
-**會用到的鍵**：`video_workflow_name` 為必要的 T2V stage；`image_workflow_name` 若被選出，只是 ideation／cover review artifact，不會接成影片的首幀 conditioning。若要真正的首幀 I2V，請用 `text2image2video`。
-
-預設 `configs/routing.yaml` 中 `text2video` 可能在 `strategy_candidates` 被註解；若要啟用，請取消註解並確認 workflow 候選存在。
-
-**CLI 範例**：
-
-```bash
-python run_media_interface.py --character kirby --prompt "角色在雨中緩步，單鏡頭 loop 感" --generation-type text2video --comfy-host 127.0.0.1 --comfy-port 8188
-```
-
-**Python 範例**：
-
-```python
-from pathlib import Path
-from agentic.app.character_requests import CharacterGenerationOptions, CharacterRuntimeOptions, CharacterReviewOptions, CharacterWorkflowRequest
-from agentic.app.character_workflow import run_character_workflow
-
-repo = Path(__file__).resolve().parent
-result = run_character_workflow(
-    CharacterWorkflowRequest(
-        repo_root=repo,
-        config_path=repo / "configs" / "characters" / "kirby.yaml",
-        generation=CharacterGenerationOptions(
-            prompt="短動態展示，鏡頭固定",
-            preferred_generation_type="text2video",
-        ),
-        review=CharacterReviewOptions(publish_after_generate=False),
-        runtime=CharacterRuntimeOptions(comfy_host="127.0.0.1", comfy_port=8188),
-    )
-)
-print(result["status"], result.get("routing_summary", {}))
-```
-
-**`generation.workflows` 可選**（合併進候選）：
-
-```yaml
-generation:
-  workflows:
-    text2img: krea2_turbo
-    text2video: minimax_h3_lowvram_t2v
-```
-
----
-
-### 3. `text2image2video` — 先圖後短片（可 upscale）
-
-**會用到的鍵**：`image_workflow_name`、`video_workflow_name`、`upscale_workflow_name`。
-
-**CLI 範例**：
-
-```bash
-python run_media_interface.py --character kirby --prompt "先鎖定角色再做成短片，電影感光線" --generation-type text2image2video --comfy-host 127.0.0.1 --comfy-port 8188
-```
-
-**Python 範例**：
-
-```python
-from pathlib import Path
-from agentic.app.character_requests import CharacterGenerationOptions, CharacterWorkflowRequest
-from agentic.app.character_workflow import build_goal_payload_from_character_config
-
-repo_root = Path(__file__).resolve().parent
-payload = build_goal_payload_from_character_config(
-    CharacterWorkflowRequest(
-        repo_root=repo_root,
-        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
-        generation=CharacterGenerationOptions(
-            prompt="key visual 轉五秒動態",
-            preferred_generation_type="text2image2video",
-        ),
-    )
-)
-```
-
-**YAML 階層式覆寫**：
-
-```yaml
-additional_params:
-  strategies:
-    text2image2video:
-      first_stage:
-        workflow_name: krea2_turbo
-        t2i_workflow_path: configs/workflow/krea2_turbo.json
-        upscale_workflow_name: Tile Upscaler SDXL
-      video:
-        workflow_name: minimax_h3_lowvram_i2v
-        i2v_workflow_path: configs/workflow/minimax_h3_lowvram_i2v.json
-```
-
----
-
----
-
-### 4. `text2longvideo` — 長片／多段
-
-所有影片策略共用同一套 Visual Action Contract：開場 hook、主導機制、可見後果、角色反應與 settled payoff。短片會壓縮成一條清楚的因果動作，長片則在每個 segment 套用並透過尾幀延續；Native H3 映射到 storyboard shots，game sprite 映射成可循環的 action graph。這是共用製作品質層，不是新的 generation type。
-
-**會用到的鍵**：開場的 `image_workflow_name`、多段 I2V 的 `video_workflow_name`，以及只在明確狀態轉換時使用的 `transition_workflow_name`。
-
-planner 會把 story 拆成約 5 秒的 segment。第一段使用審核過的開場圖或 reference；後續每段以上一段實際渲染出的尾幀進行 H3 I2V 接續，只有劇情需要抵達新狀態時才使用 FL2V landing transition，最後 concat 並執行逐段與全片 QA。總時長依使用者要求計算，不固定為 Native H3 的 15 秒。
-
-**CLI 範例**：
-
-```bash
-python run_media_interface.py --character kirby --prompt "三段式小故事：相遇、追逐、收尾" --generation-type text2longvideo --comfy-host 127.0.0.1 --comfy-port 8188
-```
-
-**Python 範例**（含長片設定與 TTS）：
-
-```python
-from pathlib import Path
-from agentic.app.character_requests import CharacterGenerationOptions, CharacterRuntimeOptions, CharacterWorkflowRequest
-from agentic.app.character_workflow import run_character_workflow
-
-repo = Path(__file__).resolve().parent
-result = run_character_workflow(
-    CharacterWorkflowRequest(
-        repo_root=repo,
-        config_path=repo / "configs" / "characters" / "kirby.yaml",
-        generation=CharacterGenerationOptions(
-            prompt="旁白式多場景故事",
-            preferred_generation_type="text2longvideo",
-        ),
-        runtime=CharacterRuntimeOptions(comfy_host="127.0.0.1", comfy_port=8188),
-    )
-)
-```
-
-**YAML**（現行 production profile 與實際尾幀接續）：
-
-```yaml
-additional_params:
-  longvideo_config:
-    production_profile: text2longvideo
-    default_duration_seconds: 30
-    segment_duration: 5
-    review_policy: opening_only
-    continuity_mode: rendered_tail
-    workflow_names:
-      - minimax_h3_lowvram_i2v
-      - minimax_h3_lowvram_15s_fl2va_i2v
-    width: 608
-    height: 352
-    length: 120
-    steps: 16
-    model_profile: q2
-```
-
----
-
-### 5. `text2image2image` — 先圖後 refine
-
-**會用到的鍵**：`image_workflow_name`、`refine_workflow_name`。
-
-**CLI 範例**：
-
-```bash
-python run_media_interface.py --character kirby --prompt "保留構圖，加強細節與線稿乾淨度" --generation-type text2image2image --comfy-host 127.0.0.1 --comfy-port 8188
-```
-
-**YAML**：
-
-```yaml
-additional_params:
-  strategies:
-    text2image2image:
-      first_stage:
-        workflow_name: krea2_turbo
-      second_stage:
-        workflow_name: krea2_turbo_img2img
-        workflow_path: configs/workflow/krea2_turbo_img2img.json
-```
-
----
-
-### 6. `sticker_pack` — 貼圖包
-
-**會用到的鍵**：`image_workflow_name`、`video_workflow_name`（動態貼圖時）。
-
-**CLI 範例**：
-
-```bash
-python run_media_interface.py --character kirby --prompt "8 種聊天室表情：開心、翻白眼、大哭..." --generation-type sticker_pack --comfy-host 127.0.0.1 --comfy-port 8188
-```
-
-**YAML**：
-
-```yaml
-additional_params:
-  strategies:
-    sticker_pack:
-      static_config:
-        workflow_name: krea2_turbo
-      animated_config:
-        workflow_name: minimax_h3_lowvram_i2v
-        i2v_workflow_path: configs/workflow/minimax_h3_lowvram_i2v.json
-```
-
----
-
-### 7. `image2image` — 純 refine 路線
-
-需在 **`configs/routing.yaml`** 的 `routing.strategy_candidates` 加入 `image2image` 才會進入 LLM 候選；程式手動指定 `preferred_generation_type="image2image"` 則可直接走覆寫路由邏輯。
-
-**Python 範例**：
-
-```python
-from pathlib import Path
-from agentic.app.character_requests import CharacterGenerationOptions, CharacterWorkflowRequest
-from agentic.app.character_workflow import build_goal_payload_from_character_config
-
-repo_root = Path(__file__).resolve().parent
-payload = build_goal_payload_from_character_config(
-    CharacterWorkflowRequest(
-        repo_root=repo_root,
-        config_path=repo_root / "configs" / "characters" / "kirby.yaml",
-        generation=CharacterGenerationOptions(
-            prompt="在既有構圖上重做光影",
-            preferred_generation_type="image2image",
-        ),
-    )
-)
-```
-
-**YAML**：
-
-```yaml
-additional_params:
-  strategies:
-    image2image:
-      workflow_name: krea2_turbo_img2img
-      workflow_path: configs/workflow/krea2_turbo_img2img.json
-```
-
----
-
-## 完整 CLI 執行清單（含 Discord review / publish gate）
-
-以下是目前 repo 可由 `run_media_interface.py` 呼叫的完整策略清單。每一列都會走同一條角色流程：載入 YAML → 路由 → 建立 workflow plan → 執行 ComfyUI → 進入 publish/review stage。`--dry-run-publish` 會保留 publish stage 與 Discord 審核，但不把結果送到社群平台；因此適合逐條 E2E 驗證。不要把 `--no-publish` 加到這組測試，否則不會驗證 Discord publish gate。
-
-逐一呼叫各策略（每個命令都要在 Discord 完成審核；若成果不合格，請在 Discord 選 reject/block）：
-
-```powershell
-# 1. 靜態圖：krea2_turbo
-python run_media_interface.py --character kirby --prompt '高完成度角色主視覺，霓虹夜市，清楚輪廓' --generation-type text2img
-
-# 2. 短影片／單鏡頭：minimax_h3_lowvram_t2v
-python run_media_interface.py --character kirby --prompt '單鏡頭短動畫，角色在雨中奔跑，鏡頭跟拍' --generation-type text2video
-
-# 3. 先圖後短片：krea2_turbo -> minimax_h3_lowvram_i2v -> Tile Upscaler SDXL
-python run_media_interface.py --character kirby --prompt '先鎖定角色外觀，再把 key visual 做成電影感短片' --generation-type text2image2video
-
-# 4. 長片／多段故事：審核開場 -> I2V 實際尾幀接續 -> 明確轉場時才 FL2V -> concat
-python run_media_interface.py --character kirby --prompt '三段式故事：相遇、追逐、收尾；每段要有狀態轉移' --generation-type text2longvideo
-
-# 5. Native H3 I2VA：generated opening image -> minimax_h3_lowvram_15s_fl2va_i2v
-python run_media_interface.py --character kirby --prompt 'Native H3 單一連續故事，開場動作要立即發生' --generation-type native_h3_story
-
-# 6. Native H3 T2VA：prompt only -> minimax_h3_lowvram_t2v
-python run_media_interface.py --character kirby --prompt 'Native H3 純文字生影片，角色從第一幀就開始行動' --generation-type native_h3_t2v_story
-
-# 7. Native H3 FL2VA：generated opening + generated landing -> minimax_h3_lowvram_15s_fl2va_i2v
-python run_media_interface.py --character kirby --prompt 'Native H3 首尾幀故事，起點與結局都要由人工審核' --generation-type native_h3_fl2va_story
-
-# 8. Native H3 L2VA：generated landing only -> minimax_h3_lowvram_15s_fl2va_i2v
-python run_media_interface.py --character kirby --prompt 'Native H3 以最後一幀作為故事落點，前段保持因果動作' --generation-type native_h3_l2va_story
-
-# 9. Native H3 Ref2VA：valid manifest 直用；空 manifest -> 六張候選圖 -> Discord 選擇 -> minimax_h3_ref2va
-python run_media_interface.py --character kirby --prompt 'Native H3 參考圖與參考影片共同控制身份和運鏡' --generation-type native_h3_ref2va
-
-# 10. 先圖後 img2img refine：krea2_turbo -> krea2_turbo_img2img
-python run_media_interface.py --character kirby --prompt '保留構圖與角色身份，只修正光影和細節' --generation-type text2image2image
-
-# 11. 貼圖包：krea2_turbo -> minimax_h3_lowvram_i2v（動態貼圖階段）
-python run_media_interface.py --character kirby --prompt '聊天貼圖表情包：開心、生氣、驚訝、無奈' --generation-type sticker_pack
-
-# 12. 心靈故事字卡：安靜角落背景 -> 依 40 字規則自動分頁
-python run_media_interface.py --character kirby --generation-type story_card --news-driven --no-review --no-publish
-```
-
-### 自動路由與加權隨機
-
-角色流程先選角色，再選策略，最後才生成內容：scheduler/runtime 先依 YAML 的 `character.group_name` 從 DB 做 group weighted selection，再讀取 `generation.generation_type_weights` 按權重隨機抽策略，並把新聞或指定 prompt 交給已選策略的 LLM story/brief stage；LLM 不決定角色或 scheduler 要走哪一種 strategy。每次抽選彼此獨立，因此短時間內可能重複同一策略；長期比例由 YAML 權重決定。Kirby 目前的 strategy 權重包含 `text2img: 1`、`text2image2video: 1`、`text2longvideo: 2`、`native_h3_story: 1`、`native_h3_t2v_story: 1`、`native_h3_fl2va_story: 1`、`native_h3_l2va_story: 1`、`native_h3_ref2va: 1`、`text2image2native_h3_ref2va: 1`、`sticker_pack: 2`、`story_card: 1`。
-
-固定 route 的 image/refine/transition workflow 會先經過 `AssetRegistry` 的 required-asset readiness，再依 `configs/routing.yaml` 的 `workflow_selection_weights` 選擇；空的 required-asset manifest 只代表未驗證，不會被當成 ready。當前這台 ComfyUI 只有 Krea 的 image assets 被明確驗證，因此 Krea 集中是資產可用性結果，不是機率失效；先補齊並登錄其他 workflow assets，權重才會在它們之間生效。explicit generation-type override 只固定策略家族，若 scheduler 有 RNG，stage workflow 仍會依權重抽樣。
-
-`text2image2video` 的正常 review path 仍保留 6 張 raw keyframe 候選，但不再先跑未被 review 消費的 upscale。Discord 明確 Reject 仍會停止；若 review 發生 timeout、連線錯誤或沒有決策，`pre_video_review.failure_policy: fallback_to_top` 會選 deterministic top-ranked frame 繼續 I2V，並在 run manifest 留下 fallback evidence。
-
-直接呼叫 `run_character_workflow` 時也會執行 group 選角；傳入 `rng` 可讓測試或受控實測重現同一組權重抽樣。`build_goal_payload_from_character_config` 是 payload builder，不是 group 選角入口。
-
-```powershell
-# LLM 自動路由（不指定 --generation-type）
-python run_media_interface.py --character kirby --prompt '幫我做一個有明確衝突與結局的 Kirby 媒體作品'
-
-# 加權隨機：每次重新抽樣；抽樣後仍會完整走同一個 E2E + Discord gate
-$randomType = python -c "import random,sys; from pathlib import Path; sys.path.insert(0,'agentic/src'); from agentic.app.character_workflow import choose_media_type,load_character_config; print(choose_media_type(load_character_config(Path('configs/characters/kirby.yaml')), rng=random.Random())[0])"
-Write-Host "weighted random generation_type=$randomType"
-# news-driven 每次會隨機抓取一則可用新聞；不要用舊 prompt 或舊 media path 代替
-python run_media_interface.py --character kirby --generation-type $randomType --news-driven
-```
-
-`image2image` 目前不是 `configs/routing.yaml` 的預設候選，只有在角色 YAML 的 `additional_params.strategies.image2image` 提供 workflow override 後才適合執行；不要把它和可直接 E2E 的 `text2image2image` 混用。它的 CLI 形式如下：
-
-```powershell
-python run_media_interface.py --character kirby --prompt '在既有構圖上重做光影' --generation-type image2image
-```
-
-### MiniMax H3 五種 canonical mode 的獨立 ComfyUI E2E
-
-這支 runner 直接測試 H3 模式與 strict technical QA，不取代上面的角色流程或 Discord review。可一次跑全部，也可以明確一條一條跑：
-
-```powershell
-# 全部五種：t2va / i2va / fl2va / l2va / ref2va
-python scripts/run_h3_modes_e2e.py `
-  --comfy-root 'D:\ComfyUI_windows_portable' `
-  --output-root '.\output\h3_modes_e2e'
-
-# 逐條重跑指定 mode（可重複 --mode）
-python scripts/run_h3_modes_e2e.py --mode t2va
-python scripts/run_h3_modes_e2e.py --mode i2va
-python scripts/run_h3_modes_e2e.py --mode fl2va
-python scripts/run_h3_modes_e2e.py --mode l2va
-python scripts/run_h3_modes_e2e.py --mode ref2va
-
-# 只對已產生的影片重跑 strict QA
-python scripts/verify_h3_e2e_outputs.py `
-  --output-root '.\output\h3_modes_e2e'
-```
-
-H3 runner 的 canonical workflow 對應：`t2va → minimax_h3_lowvram_t2v`、`i2va → minimax_h3_lowvram_i2v`、`fl2va/l2va → minimax_h3_lowvram_15s_fl2va_i2v`、`ref2va → minimax_h3_ref2va`。完整 conditioning、解析度、音訊與 QA contract 請見 [`docs/minimax_h3_p2_e2e.md`](docs/minimax_h3_p2_e2e.md)。
-
-### 測試順序與 publish 邊界
-
-建議順序是先跑 `text2img` 確認基礎 ComfyUI 與 Discord，再跑五種 native H3，接著跑一般影片／長片／貼圖，最後跑 Ref2VA 與隨機。每條命令都應保留 `run_id`、`log_path`、`review_session_path`、輸出媒體與 `publish_review_summary.json`。
-
-本機測試不會自動公開發佈：`--dry-run-publish` 只驗證 publish/review graph；即使 Discord 通過，也不會送出社群平台。若要做不公開的平台 adapter smoke test，使用 `--publish-mode safe_poc`（YouTube private、Facebook draft、Instagram container-only）；不要在未經人工確認前使用 `--publish-mode live`。
-
-#### Facebook 個人 Profile：手機 handoff
-
-Facebook 個人 Profile 不走 Graph API。若要合法、穩定地發到個人帳號，指定 `facebook_profile_handoff`：流程會先經 Discord 人工審核，接著把媒體附件、caption、hashtags 與操作說明推播到手機；你在 Facebook App 的個人 Profile 建立貼文後按一次發布。系統會留下 `facebook_profile_handoff.json`，狀態固定是 `awaiting_user_action`，不會把 handoff 當成已公開。
-
-```powershell
-python run_media_interface.py `
-  --character kirby `
-  --generation-type text2video `
-  --prompt '單鏡頭短動畫，角色在雨中奔跑' `
-  --publish-platform facebook_profile_handoff
-
-# 若已有可由手機開啟的公開媒體 URL，可額外產生 Facebook link-share 對話框連結；它分享的是 URL，不會代替 Profile 發文
-python run_media_interface.py `
-  --character kirby `
-  --generation-type text2video `
-  --prompt '單鏡頭短動畫，角色在雨中奔跑' `
-  --publish-platform facebook_profile_handoff `
-  --facebook-profile-share-url 'https://example.com/media/clip.mp4'
-```
-
-Discord 推播附檔是手機操作的主要交付物，完整 caption 也會附在 handoff JSON；分享對話框連結是可選項，且只分享你提供的公開 HTTPS URL。完成 Facebook App 的人工發布後，用實際貼文網址回填：
-
-```powershell
-python run_media_interface.py `
-  --complete-facebook-profile-handoff 'D:\path\to\facebook_profile_handoff.json' `
-  --facebook-profile-post-url 'https://www.facebook.com/share/p/your-post-id'
-```
-
-只有回填成功後，handoff artifact 才會轉成 `published` 並帶有可稽核的 Facebook receipt；Discord 推播失敗或未配置時，artifact 會保留未送達狀態。
-
-`--news-driven` 每次從可用新聞中隨機選一則，允許不同執行再次抽到同一新聞；若沒有可用新聞會直接 fail，不會用 generic prompt 或過去媒體充數。OpenRouter publish caption 預設會輪替已驗證 vision pool、每個模型最多 retry 2 次；可用 `AGENTIC_PUBLISH_CAPTION_MAX_RETRIES`、`AGENTIC_PUBLISH_CAPTION_MAX_MODELS_PER_CALL`（`0`/未設定代表整個 pool）、`AGENTIC_PUBLISH_CAPTION_TIMEOUT_SECONDS` 調整。所有 prompt/story LLM request 也可用 `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` 設定單次 request timeout（預設 30 秒）。
-
----
-
-## `run_character_workflow` 參數說明
-
-| 參數 | 型別 | 說明 |
-|------|------|------|
-| `repo_root` | `Path` | 專案根目錄（需能解析到 `configs/routing.yaml`） |
-| `config_path` | `str \| Path` | 角色 YAML 路徑 |
-| `prompt` | `str` | 使用者提示；空字串時可能觸發新聞／LLM 自動場景（視設定） |
-| `temperature` | `float` | 來源溫度，會寫入 `constraints.source_temperature` |
-| `preferred_generation_type` | `str \| None` | **強制策略**；對應 CLI `--generation-type` |
-| `dry_run_publish` | `bool` | 發佈階段不實際送出 |
-| `publish_after_generate` | `bool` | 生成成功後是否再跑 `publish_review` |
-| `output_dir` | `str \| None` | 覆寫輸出目錄 |
-| `enable_review_loop` | `bool` | 是否啟用支援的複查／重試分支 |
-| `review_notes` | `str` | 複查備註 |
-| `comfy_host` | `str \| None` | 覆寫 ComfyUI host |
-| `comfy_port` | `int \| None` | 覆寫 ComfyUI port |
-| `comfy_root` | `str \| None` | ComfyUI 安裝根目錄（資產檢查用） |
-| `auto_download_assets` | `bool` | 是否允許自動準備 workflow 資產 |
-| `rng` | `random.Random \| None` | 僅影響未強制策略時的加權抽樣（若未來啟用） |
-
-**回傳 dict** 主要鍵：`status`、`run_id`、`plan`、`generation`、`routing`、`routing_summary`、`publish`、`stage_status`、`artifacts`、`memory` 等。即使 review、caption 或 publish 失敗，`artifacts.media_paths` 仍會保留已產生的影片／圖片；image-only route 也不會把 YouTube 當成可用影片平台。
-
----
-
-## 直接操作 Comfy workflow：`AgenticNodeManager` 內建策略
-
-`agentic.tools.comfy_backend.AgenticNodeManager` 內建兩類自動對節點套參數的 **builtin strategies**（不需手寫 `node_id` 時）：
-
-| 名稱 | 行為 |
-|------|------|
-| `text` | 依序嘗試 `PrimitiveString` / `CLIPTextEncode`，並依 `is_negative` 區分正負向提示 |
-| `sampler` | 依序對 `RandomNoise`、`KSamplerAdvanced`、`KSampler`、`MMAudioSampler` 寫入種子 |
-
-**範例**（載入 workflow JSON，產生 updates 再交給 `AgenticMediaGenerator`）：
-
-```python
-import json
-from pathlib import Path
-from agentic.tools.comfy_backend import AgenticNodeManager, AgenticMediaGenerator
-
-workflow_path = Path("configs/workflow/krea2_turbo.json")
-workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-
-updates = AgenticNodeManager.generate_updates(
-    workflow,
-    updates_config=None,
-    description="1girl, anime, upper body, soft light",
-    seed=123456789,
-    use_noise_seed=False,
-    is_negative=False,
-)
-
-extra = AgenticNodeManager.generate_updates(
-    workflow,
-    updates_config=[
-        {
-            "node_type": "CLIPTextEncode",
-            "node_index": 0,
-            "inputs": {"text": "low quality"},
-            "filter": {"is_negative": True},
-        }
-    ],
-    description=None,
-    seed=987654321,
-)
-
-generator = AgenticMediaGenerator(host="127.0.0.1", port=8188)
-saved = generator.generate(
-    str(workflow_path),
-    updates + extra,
-    output_dir="./output",
-    file_prefix="demo",
-)
-print(saved)
-```
-
-`generate_updates` 相關參數：
-
-| 參數 | 說明 |
-|------|------|
-| `workflow` | ComfyUI API 格式的 workflow `dict` |
-| `updates_config` | 自訂節點更新列表；可含 `node_id` + `direct_update`，或 `node_type` + `node_index` + `inputs` + `filter` |
-| `description` | 若未在 `updates_config` 手動指定文字節點，則套用內建 **text** 策略寫入正向提示 |
-| `seed` | 若設定，套用 **sampler** 策略 |
-| `use_noise_seed` | `True` 時優先寫 `noise_seed` 類節點 |
-| `exclude_sampler_indices` | 略過指定 sampler 索引 |
-| `is_negative` | 傳入 `additional_params` 供內建文字策略篩選負向節點 |
-
----
-
-## 另見
-
-- 底層 runtime 設計與 **`agentic` CLI**（`--goal`、`--media-type` 等）：請讀 [`agentic/README.md`](agentic/README.md)。
-
-### 媒體輸出審核
-
-媒體檔案與預覽只作為 Discord 審核的附件與證據，不再由 LLM、主體數量、尺寸／長寬比、影片 QA 或 sprite 邊界檢查自動篩選或阻擋。真正的檔案不存在、無法產生或工具本身失敗仍會回報為系統錯誤；內容品質與是否採用由 Discord 人工審核決定。
-
-構圖、美感、角色造型、故事、節奏、可愛度、文風與提示詞符合度由 Discord 人工審核，不設 LLM 分數門檻或自動重剪。字卡的字數密度與句尾標點是寫作建議，不是通行條件；可排版的字數上限、頁數和語言仍依契約檢查。
+目前 repo 未包含 CI workflow；上述命令是可重現的本機檢查，不宣稱有 hosted CI 或已完成正式環境驗收。

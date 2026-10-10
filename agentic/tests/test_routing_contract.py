@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,10 +7,9 @@ from unittest.mock import patch
 
 import yaml
 
-from agentic.app.character_workflow import (
-    _build_h3_reference_runtime_context,
-    build_goal_payload_from_character_config,
-)
+from agentic.app.generation_routing import _build_h3_reference_runtime_context
+from agentic.app.character_payload import build_goal_payload_from_character_config
+from agentic.assets.registry import AssetRegistry
 from character_workflow_helpers import make_character_workflow_request
 
 
@@ -53,11 +51,11 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("video conditioning", " ".join(descriptions["text2video"]["hard_rules"]).lower())
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2image2video"]["video_workflow_name"][0],
-            "wan2gp_h3_i2va",
+            "minimax_h3_i2va",
         )
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2longvideo"]["video_workflow_name"][0],
-            "wan2gp_h3_i2va",
+            "minimax_h3_i2va",
         )
 
         stage_contracts = self.hints["workflow_stage_contracts"]
@@ -117,15 +115,17 @@ class RoutingContractTests(unittest.TestCase):
             },
         )
 
-    def test_user_given_h3_strategy_when_workflow_selected_then_wangp_declares_the_required_inputs(self) -> None:
-        """User Given each H3 strategy When its workflow is selected Then WanGP declares its conditioning roles."""
+    def test_user_given_h3_strategy_when_workflow_selected_then_comfyui_declares_the_required_inputs(self) -> None:
+        """User Given each H3 strategy When its workflow is selected Then ComfyUI declares its conditioning roles."""
         expected = {"t2va": ("t2v", []), "i2va": ("anchor_first", ["first"]), "fl2va": ("anchor_first_last", ["first", "last"]), "l2va": ("anchor_last", ["last"]), "ref2va": ("reference_bundle", [])}
         for mode, (recipe, anchors) in expected.items():
-            workflow = json.loads((self.repo_root / "configs/workflow" / f"wan2gp_h3_{mode}.json").read_text("utf-8"))
-            self.assertEqual(workflow["conditioning"]["provider"], "wan2gp")
-            contract = workflow["conditioning"]["recipes"][recipe]
+            registry = AssetRegistry(self.repo_root)
+            manifest = registry.get_manifest(f"minimax_h3_{mode}")
+            self.assertTrue(registry.validate_workflow(manifest.name)["valid"])
+            self.assertEqual(manifest.conditioning["provider"], "comfyui")
+            contract = manifest.conditioning["recipes"][recipe]
             self.assertEqual(contract.get("anchors", []), anchors)
-            self.assertEqual(contract["render_tool"], "wan2gp.render_h3")
+            self.assertEqual(contract["render_tool"], "comfy.render_h3")
             if mode == "ref2va":
                 self.assertEqual(contract["references"], ["image", "video"])
 
@@ -134,7 +134,7 @@ class RoutingContractTests(unittest.TestCase):
             "generation_type": "text2video",
             "workflow_plan": {
                 "image_workflow_name": "",
-                "video_workflow_name": "wan2gp_h3_t2va",
+                "video_workflow_name": "minimax_h3_t2va",
                 "refine_workflow_name": "",
                 "transition_workflow_name": "",
                 "upscale_workflow_name": "",
@@ -151,7 +151,7 @@ class RoutingContractTests(unittest.TestCase):
             "prompt_mode": "llm",
         }
         with patch(
-            "agentic.app.character_workflow.LLMPromptEngine.route_generation_strategy",
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             return_value=route_result,
         ) as route:
             payload = build_goal_payload_from_character_config(make_character_workflow_request(

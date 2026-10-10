@@ -10,8 +10,6 @@ from pathlib import Path
 from agentic.app.main import build_runtime
 from agentic.runtime.reference_video import ReferenceVideoAnalyzer, ReferenceVideoError
 from agentic.runtime.reference_video import format_reference_video_directive
-from character_workflow_helpers import make_character_workflow_request
-from agentic.app.character_workflow import build_goal_payload_from_character_config
 
 
 class ReferenceVideoTests(unittest.TestCase):
@@ -30,7 +28,7 @@ class ReferenceVideoTests(unittest.TestCase):
         base_constraints = {
             "character": "Kirby",
             "native_h3_storyboard_path": str(self.repo_root / "configs" / "storyboards" / "native_h3_15s.yaml"),
-            "native_h3_workflow_name": "wan2gp_h3_fl2va",
+            "native_h3_workflow_name": "minimax_h3_fl2va",
             "native_h3_keyframe_workflow_name": "krea2_turbo",
             "native_h3_refine_workflow_name": "krea2_turbo_img2img",
             "pre_video_review_enabled": False,
@@ -43,7 +41,6 @@ class ReferenceVideoTests(unittest.TestCase):
                 media_type="native_h3_story",
                 duration_seconds=15,
                 style="tactile pastel 2D anime",
-                auto_download_assets=False,
                 constraints=base_constraints,
             )
         )
@@ -63,7 +60,6 @@ class ReferenceVideoTests(unittest.TestCase):
                 media_type="native_h3_story",
                 duration_seconds=15,
                 style="tactile pastel 2D anime",
-                auto_download_assets=False,
                 constraints=with_reference,
             )
         )
@@ -86,12 +82,10 @@ class ReferenceVideoTests(unittest.TestCase):
                 media_type="text2img2video",
                 duration_seconds=6,
                 style="polished 2D anime",
-                auto_download_assets=False,
                 constraints={
                     "reference_video_source": "C:/references/clip.mp4",
                     "reference_video_depth": "deep",
                     "reference_video_max_keyframes": 12,
-                    "reference_video_source": "C:/references/clip.mp4",
                     "seed": 1234,
                     "duration_override_seconds": 6,
                     "video_frame_rate": 24,

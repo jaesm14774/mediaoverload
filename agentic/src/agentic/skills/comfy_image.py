@@ -36,7 +36,6 @@ class ComfyImageSkills:
             "asset.ensure_workflow_ready",
             {
                 "workflow_name": context.node.inputs["workflow_name"],
-                "auto_download": context.node.inputs.get("auto_download", False),
             },
         )
         return asset_check_result(result, "Checked ComfyUI workflow.")

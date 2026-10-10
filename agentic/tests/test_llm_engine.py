@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from agentic.runtime.prompt_tasks.publishing import normalize_hashtag_text
+
 import os
 import json
 import tempfile
@@ -8,10 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
+from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.llm_client import PromptGenerationError
 from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
+from agentic.runtime.structured_chat import chat_json, parse_json
+from agentic.runtime.prompting import ENGLISH_GENERATION_RESPONSE_CONTRACT
 from agentic.runtime.observability import RunRecorder
-from agentic.runtime.prompting import build_goal_brief
 
 
 class _FakeTextModel:
@@ -28,6 +32,10 @@ class _FakeManager:
     def __init__(self, responses: list[str], vision_responses: list[str] | None = None) -> None:
         self.text_model = _FakeTextModel(responses)
         self.vision_model = _FakeTextModel(list(vision_responses or []))
+
+
+def _unavailable_manager(backend):
+    raise ValueError("OpenRouter API key missing; KeyError: gemini_api_token")
 
 
 class LLMEngineTests(unittest.TestCase):
@@ -328,7 +336,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2gp_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
                 ]
             ),
         )
@@ -342,7 +350,7 @@ class LLMEngineTests(unittest.TestCase):
                 "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
                 "sticker_pack": {
                     "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
-                    "video_workflow_name": ["wan2gp_h3_i2va"],
+                    "video_workflow_name": ["minimax_h3_i2va"],
                 },
             },
             count_policies={
@@ -368,7 +376,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_route_generation_strategy_schema_locks_unavailable_sticker_stages(self) -> None:
         manager = _FakeManager(
             [
-                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2gp_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
             ]
         )
         engine = LLMPromptEngine(mode="llm", manager=manager)
@@ -382,7 +390,7 @@ class LLMEngineTests(unittest.TestCase):
                 "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
                 "sticker_pack": {
                     "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
-                    "video_workflow_name": ["wan2gp_h3_i2va"],
+                    "video_workflow_name": ["minimax_h3_i2va"],
                 },
             },
             count_policies={
@@ -421,7 +429,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"wan2gp_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
+                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
                 ]
             ),
         )
@@ -434,7 +442,7 @@ class LLMEngineTests(unittest.TestCase):
             workflow_stage_candidates={
                 "text2image2video": {
                     "image_workflow_name": ["anima_anime"],
-                    "video_workflow_name": ["wan2gp_h3_i2va"],
+                    "video_workflow_name": ["minimax_h3_i2va"],
                 }
             },
             count_policies={
@@ -480,28 +488,27 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["count_plan"], {"image_count": 1, "review_selection_limit": 1})
 
     def test_route_generation_strategy_raises_when_manager_unavailable(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=None)
+        """User Given an unavailable LLM provider When generating content Then its declared failure policy and diagnostic are preserved."""
+        engine = LLMPromptEngine(mode="llm", manager_factory=_unavailable_manager)
 
-        with patch.object(engine, "_manager_or_none", return_value=None):
-            engine._manager_error = "ValueError: OpenRouter API key missing"
-            with self.assertRaises(Exception):
-                engine.route_generation_strategy(GenerationRoutingRequest(
-                    prompt="Kirby sticker emotions",
-                    character="Kirby",
-                    style="LINE sticker",
-                    generation_type_candidates=["sticker_pack", "text2img"],
-                    workflow_stage_candidates={"sticker_pack": {"image_workflow_name": ["nova-anime-xl"]}},
-                    count_policies={
-                        "sticker_pack": {
-                            "image_count": {"min": 1, "max": 1},
-                            "video_count": {"min": 1, "max": 1},
-                            "segment_count": {"min": 1, "max": 1},
-                            "review_selection_limit": {"min": 1, "max": 2},
-                            "sticker_expression_count": {"min": 4, "max": 12},
-                            "images_per_prompt": {"min": 1, "max": 4},
-                        }
-                    },
-                ))
+        with self.assertRaises(PromptGenerationError):
+            engine.route_generation_strategy(GenerationRoutingRequest(
+                prompt="Kirby sticker emotions",
+                character="Kirby",
+                style="LINE sticker",
+                generation_type_candidates=["sticker_pack", "text2img"],
+                workflow_stage_candidates={"sticker_pack": {"image_workflow_name": ["nova-anime-xl"]}},
+                count_policies={
+                    "sticker_pack": {
+                        "image_count": {"min": 1, "max": 1},
+                        "video_count": {"min": 1, "max": 1},
+                        "segment_count": {"min": 1, "max": 1},
+                        "review_selection_limit": {"min": 1, "max": 2},
+                        "sticker_expression_count": {"min": 4, "max": 12},
+                        "images_per_prompt": {"min": 1, "max": 4},
+                    }
+                },
+            ))
 
     def test_generate_autonomous_scene_prompt_uses_llm_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -593,7 +600,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '["joyful leap","sleepy yawn","angry steam","big surprise","heart eyes","confused tilt","celebration pose","dramatic sob"]',
+                    '{"expressions": ["joyful leap", "sleepy yawn", "angry steam", "big surprise", "heart eyes", "confused tilt", "celebration pose", "dramatic sob"]}',
                 ]
             ),
         )
@@ -609,7 +616,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '[{"label":"sticker_01","expression":"joyful leap","prompt":"kirby joyful prompt"},{"label":"sticker_02","expression":"sleepy yawn","prompt":"kirby sleepy prompt"}]',
+                    '{"prompt_sets": [{"label": "sticker_01", "expression": "joyful leap", "prompt": "kirby joyful prompt"}, {"label": "sticker_02", "expression": "sleepy yawn", "prompt": "kirby sleepy prompt"}]}',
                 ]
             ),
         )
@@ -711,7 +718,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '[{"label":"slide_01","prompt":"shot one","narration":"line one"},{"label":"slide_02","prompt":"shot two","narration":"line two"}]',
+                    '{"prompt_sets": [{"label": "slide_01", "prompt": "shot one", "narration": "line one"}, {"label": "slide_02", "prompt": "shot two", "narration": "line two"}]}',
                 ]
             ),
         )
@@ -766,10 +773,10 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["hashtags"], "#one #two")
         self.assertEqual(result["platform_captions"]["instagram"], "ig caption")
         self.assertEqual(result["prompt_mode"], "llm")
-        self.assertNotIn("Mention only Kirby and the meadow.", engine._manager.text_model.calls[0]["messages"][1]["content"])
-        self.assertEqual(engine._manager.text_model.calls[0]["kwargs"]["max_retries"], 2)
-        self.assertIsNone(engine._manager.text_model.calls[0]["kwargs"].get("max_models_per_call"))
-        self.assertEqual(engine._manager.text_model.calls[0]["kwargs"]["request_timeout"], 60.0)
+        self.assertNotIn("Mention only Kirby and the meadow.", engine.client._manager.text_model.calls[0]["messages"][1]["content"])
+        self.assertEqual(engine.client._manager.text_model.calls[0]["kwargs"]["max_retries"], 2)
+        self.assertIsNone(engine.client._manager.text_model.calls[0]["kwargs"].get("max_models_per_call"))
+        self.assertEqual(engine.client._manager.text_model.calls[0]["kwargs"]["request_timeout"], 60.0)
 
     def test_prepare_publish_caption_removes_internal_labels_and_keeps_long_form_post(self) -> None:
         engine = LLMPromptEngine(
@@ -815,7 +822,7 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertEqual(result["caption"], "A short sentence.")
         self.assertEqual(result["platform_captions"]["facebook"], "A short sentence.")
-        self.assertEqual(len(engine._manager.text_model.calls), 1)
+        self.assertEqual(len(engine.client._manager.text_model.calls), 1)
         self.assertNotIn("Caption:", result["caption"])
         self.assertNotIn("Hashtags:", result["caption"])
 
@@ -899,8 +906,8 @@ class LLMEngineTests(unittest.TestCase):
         )
 
         self.assertEqual(result["caption"], "Kirby stands beside a glowing blue crystal.")
-        self.assertEqual(engine._manager.vision_model.calls[0]["kwargs"]["images"], ["D:\\kirby.png"])
-        self.assertEqual(engine._manager.text_model.calls, [])
+        self.assertEqual(engine.client._manager.vision_model.calls[0]["kwargs"]["images"], ["D:\\kirby.png"])
+        self.assertEqual(engine.client._manager.text_model.calls, [])
 
     def test_prepare_publish_caption_does_not_inject_unrelated_news_example(self) -> None:
         manager = _FakeManager([
@@ -949,12 +956,12 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(set(result["platform_captions"]), {"instagram", "youtube"})
         self.assertNotIn("youtube_title", result)
         self.assertNotIn("youtube_tags", result)
-        user_prompt = engine._manager.text_model.calls[0]["messages"][1]["content"]
+        user_prompt = engine.client._manager.text_model.calls[0]["messages"][1]["content"]
         self.assertNotIn("youtube_title", user_prompt)
         self.assertNotIn("youtube_tags", user_prompt)
 
     def test_normalize_hashtags_blocks_internal_project_tag(self) -> None:
-        result = LLMPromptEngine._normalize_hashtag_text(
+        result = normalize_hashtag_text(
             "#mediaoverload #RainyNeon #kirby",
             required_hashtags=["mediaoverload", "kirby"],
         )
@@ -964,7 +971,7 @@ class LLMEngineTests(unittest.TestCase):
 
     def test_normalize_hashtags_rejects_python_list_notation(self) -> None:
         with self.assertRaises(ValueError):
-            LLMPromptEngine._normalize_hashtag_text(
+            normalize_hashtag_text(
                 "['#one' '#two']",
                 required_hashtags=[],
             )
@@ -1020,12 +1027,11 @@ class LLMEngineTests(unittest.TestCase):
 
 
     def test_expand_goal_falls_back_when_manager_unavailable(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=None)
+        """User Given an unavailable LLM provider When generating content Then its declared failure policy and diagnostic are preserved."""
+        engine = LLMPromptEngine(mode="llm", manager_factory=_unavailable_manager)
         goal = GoalRequest(prompt="kirby runs", media_type="long_video", style="anime")
 
-        with patch.object(engine, "_manager_or_none", return_value=None):
-            engine._manager_error = "ValueError: OpenRouter API key missing"
-            result = engine.expand_goal(goal, "anime", [])
+        result = engine.expand_goal(goal, "anime", [])
 
         self.assertEqual(result["prompt_mode"], "template")
         self.assertEqual(result["fallback_reason"], "manager_unavailable")
@@ -1033,12 +1039,11 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["llm_backend"]["mode"], "llm")
 
     def test_expand_goal_surfaces_manager_initialization_error(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=None)
+        """User Given an unavailable LLM provider When generating content Then its declared failure policy and diagnostic are preserved."""
+        engine = LLMPromptEngine(mode="llm", manager_factory=_unavailable_manager)
         goal = GoalRequest(prompt="kirby runs", media_type="long_video", style="anime")
 
-        with patch.object(engine, "_manager_or_none", return_value=None):
-            engine._manager_error = "KeyError: gemini_api_token"
-            result = engine.expand_goal(goal, "anime", [])
+        result = engine.expand_goal(goal, "anime", [])
 
         self.assertEqual(result["prompt_mode"], "template")
         self.assertEqual(result["fallback_reason"], "manager_unavailable")
@@ -1056,7 +1061,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("old prompt", result["prompt"])
 
     def test_parse_json_extracts_array_from_surrounding_text(self) -> None:
-        payload = LLMPromptEngine._parse_json(
+        payload = parse_json(
             'Here is the result:\n["happy","angry","sleepy"]\nUse it well.'
         )
 
@@ -1065,7 +1070,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_chat_json_repairs_invalid_json_with_stricter_prompt(self) -> None:
         fake_manager = _FakeManager(["not json", '```json\n{"ok":true}\n```'])
 
-        result = LLMPromptEngine._chat_json(JsonChatRequest(
+        result = chat_json(JsonChatRequest(
             fake_manager,
             "You are a story planner.",
             "Return the plan.",
@@ -1081,12 +1086,13 @@ class LLMEngineTests(unittest.TestCase):
     def test_chat_json_requires_english_for_generation_requests(self) -> None:
         fake_manager = _FakeManager(['{"ok":true}'])
 
-        result = LLMPromptEngine._chat_json(JsonChatRequest(
+        result = chat_json(JsonChatRequest(
             fake_manager,
             "You are a storyboard planner.",
             "Return the storyboard.",
             "storyboard",
             {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            language_contract=ENGLISH_GENERATION_RESPONSE_CONTRACT,
         ))
 
         self.assertEqual(result, {"ok": True})
@@ -1098,7 +1104,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_chat_json_can_skip_provider_response_schema_for_free_models(self) -> None:
         fake_manager = _FakeManager(['{"native_shots":[{"time":"0-4s","action":"Kirby runs."}]}'])
 
-        result = LLMPromptEngine._chat_json(JsonChatRequest(
+        result = chat_json(JsonChatRequest(
             fake_manager,
             "You are a storyboard planner.",
             "Return the storyboard.",
@@ -1116,7 +1122,7 @@ class LLMEngineTests(unittest.TestCase):
         for schema_name in ("publish_caption",):
             fake_manager = _FakeManager(['{"ok":true}'])
 
-            result = LLMPromptEngine._chat_json(JsonChatRequest(
+            result = chat_json(JsonChatRequest(
                 fake_manager,
                 "You are a social post writer.",
                 "Return the final post.",
@@ -1133,7 +1139,7 @@ class LLMEngineTests(unittest.TestCase):
         fake_manager = _FakeManager(['{"ok":true}'])
 
         with patch.dict(os.environ, {"AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS": "7.5"}):
-            result = LLMPromptEngine._chat_json(JsonChatRequest(
+            result = chat_json(JsonChatRequest(
                 fake_manager,
                 "You are a story planner.",
                 "Return the plan.",
@@ -1149,9 +1155,9 @@ class LLMEngineTests(unittest.TestCase):
             recorder = RunRecorder(Path(temp_dir), "run-debug")
             manager = _FakeManager(["not json", '{"ok":true}'])
             engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
-            engine._require_manager()
+            engine.client.require_manager()
 
-            result = LLMPromptEngine._chat_json(JsonChatRequest(
+            result = chat_json(JsonChatRequest(
                 manager,
                 "You are a story planner.",
                 "Return the plan.",
@@ -1175,7 +1181,7 @@ class LLMEngineTests(unittest.TestCase):
             manager = _FakeManager(['{"ok":true}'])
             engine = LLMPromptEngine(mode="llm", manager=manager, recorder=recorder)
 
-            result = engine._chat_json_with_recorder(
+            result = engine.client.generate_json(
                 manager,
                 "You are a caption planner.",
                 "Return the plan.",
@@ -1191,7 +1197,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_chat_json_uses_array_contract_for_array_schema(self) -> None:
         fake_manager = _FakeManager(['[{"ok":true}]'])
 
-        result = LLMPromptEngine._chat_json(JsonChatRequest(
+        result = chat_json(JsonChatRequest(
             fake_manager,
             "You are a story planner.",
             "Return the list.",
@@ -1294,15 +1300,6 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(backend["vision_provider"], "ollama")
         self.assertEqual(backend["vision_model"], "qwen3.8-27b-ud-q2xl-local")
 
-    def test_manager_creation_goes_through_agentic_adapter(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=None)
-        fake_manager = _FakeManager(['{"creative_brief":"ok","prompt":"ok","negative_prompt":"ok"}'])
-
-        with patch("agentic.runtime.llm_engine.build_llm_manager", return_value=fake_manager) as build_mock:
-            manager = engine._manager_or_none()
-
-        self.assertIs(manager, fake_manager)
-        build_mock.assert_called_once()
 
 
 

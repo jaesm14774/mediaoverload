@@ -1,7 +1,7 @@
-"""Run the canonical MiniMax H3 modes through real WanGP workflows.
+"""Run the canonical MiniMax H3 modes through real ComfyUI workflows.
 
 This runner intentionally creates every conditioning asset through ComfyUI
-before the WanGP H3 render. It does not use mock media, reference audio, or a
+before the ComfyUI H3 render. It does not use mock media, reference audio, or a
 prompt-only shortcut. All generated artifacts and the report are written to
 the caller-selected output root, defaulting to the repository's ``output/``
 directory.
@@ -24,8 +24,8 @@ if str(AGENTIC_SRC) not in sys.path:
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.h3_modes import H3Mode, mode_contract
 from agentic.runtime.registry import ToolRegistry
+from agentic.tools.comfy_h3 import register_comfy_h3_tools
 from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
-from agentic.tools.wan2gp import register_wan2gp_tools
 from agentic.tools.media_services import register_media_service_tools
 
 
@@ -72,7 +72,7 @@ def _check_assets(registry: AssetRegistry, workflow_names: list[str]) -> dict[st
     missing: list[str] = []
     for name in workflow_names:
         manifest = registry.get_manifest(name)
-        entries = registry.ensure_requirements(manifest, auto_download=False)
+        entries = registry.ensure_requirements(manifest)
         status[name] = entries
         missing.extend(f"{name}: {entry['asset']} -> {entry['target_path']}" for entry in entries if entry["status"] != "ready")
     if missing:
@@ -98,7 +98,7 @@ def _render_image(tools: ToolRegistry, *, workflow_name: str, run_dir: Path, pro
 
 def _render_video(tools: ToolRegistry, *, mode: H3Mode, run_dir: Path, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
     contract = mode_contract(mode.value)
-    tool_name = "wan2gp.render_h3"
+    tool_name = "comfy.render_h3"
     request = {
         "workflow_name": contract.workflow_name,
         "run_dir": str(run_dir),
@@ -301,8 +301,8 @@ def _write_report(report_path: Path, report: dict[str, object]) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run all canonical MiniMax H3 modes through real WanGP (Krea images use ComfyUI)")
-    parser.add_argument("--comfy-root", default=r"D:\ComfyUI_windows_portable", help="Portable ComfyUI root on D/E drive")
+    parser = argparse.ArgumentParser(description="Run all canonical MiniMax H3 modes through real ComfyUI (Krea images use ComfyUI)")
+    parser.add_argument("--comfy-root", required=True, help="ComfyUI installation root")
     parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "h3_modes_e2e"))
     parser.add_argument("--comfy-host", default="127.0.0.1")
     parser.add_argument("--comfy-port", type=int, default=8188)
@@ -325,7 +325,7 @@ def main() -> int:
     asset_status = _check_assets(registry, list(dict.fromkeys(workflow_names)))
     tools = ToolRegistry()
     register_comfy_workflow_tools(tools, registry, output_root, comfy_host=args.comfy_host, comfy_port=args.comfy_port)
-    register_wan2gp_tools(tools, registry, output_root, args.comfy_host, args.comfy_port)
+    register_comfy_h3_tools(tools, registry, output_root, args.comfy_host, args.comfy_port)
     register_media_service_tools(tools, output_root)
     report_path = output_root / "h3_modes_e2e_report.json"
     existing_report: dict[str, object] = {}
