@@ -1,129 +1,17 @@
-# MiniMax H3 進階玩法：L2VA 與 Ref2VA
+# H3 進階策略：WanGP
 
-這個 repo 現在把 Native H3 拆成五條可追溯策略路徑，另有一條明確的自動 reference 組合路徑：
+MediaOverload H3 影片生成 **Powered by WanGP**。完整設定與安裝見 [WanGP H3 workflows](wan2gp_h3.md)。
 
-| mode | 條件影像 | 適合用途 |
-|---|---|---|
-| `native_h3_story` | opening frame，可選 approved last frame | 角色一致性的標準 causal I2V |
-| `native_h3_fl2va_story` | approved opening + approved landing frame | 明確的起點到結局狀態轉換 |
-| `native_h3_l2va_story` | 只有 approved last frame | 從結尾姿態／構圖反推一段新片，避免 opening frame 污染 |
-| `native_h3_t2v_story` | 無影像 | 純 prompt 探索 |
-| `native_h3_ref2va` | 有效 manifest 直接使用；空 manifest 產生六張候選圖後 Discord 選擇 | identity、style、motion、camera、environment 的組合控制 |
-| `text2image2native_h3_ref2va` | 明確的六張 T2I candidates + Discord 選擇 | 沒有既有 references 時的可見自動組合流程 |
+- T2VA：只有 prompt，沒有首幀或尾幀。
+- I2VA：Krea / 既有圖片經選擇後送入 `image_start`，flag `S`。
+- FL2VA：經選擇的首尾圖送入 `image_start` / `image_end`，flag `SE`。既有 opening-conditioned img2img 尾幀策略仍由 Krea 執行。
+- L2VA：只有 `image_end`，flag `E`。模型自由生成開頭，再收束到尾圖；不會自動補首圖。
+- Ref2VA：使用專屬 Ref2VA checkpoint。圖片送入 `image_refs`，flag `I`；影片送入 `video_guide` / `video_guide2` / `video_guide3`，使用 reference-video flags。
 
-Ref2VA 本地實作只允許 image/video reference。`audio`、`reference_audio`、音訊檔案作為 reference 都會在 manifest、skill 和 Comfy binding 邊界被拒絕；影片內的聲音仍由 H3 原生 audio VAE 依 prompt 生成。
+原有 `native_h3_*` generation type、storyboard、候選圖選擇與人工審核契約仍是使用入口。正式影片工具統一為 `wan2gp.render_h3`，五個 template 位於 `configs/workflow/wan2gp_h3_*.json`。
 
-## P0：L2VA
+Ref2VA 的參考圖描述外觀、角色、場景等特徵，不保證第一幀等於參考圖。若第一幀必須固定，使用 I2VA / FL2VA。圖片上限九張，影片上限三個；專案目前不接 reference audio，H3 自行生成音訊。
 
-L2VA 是 FL2VA workflow 的明確變形，不是把一張「ending image」誤塞進一般 I2V：
+WanGP 上游還提供續接影片、指定位置插幀、控制影片與 V2V edit、音訊參考等能力。這些尚未成為本專案的正式策略。圖片／影片參考與首尾幀是已實作的五種策略。
 
-1. 生成 ending keyframe。
-2. 人工 review（預設開啟）。
-3. `media.image.confirm_last_frame_source` 確認來源檔案存在並直接沿用 selected asset；此步驟不判斷角色身分，Discord 保留人工創意審查。
-4. Comfy binding 清掉 `MiniMaxH3ImageToVideo.first_frame`，只保留 `last_frame`。
-5. 產生供 Discord 檢視的媒體證據、GIF preview 與 package；不設額外 DQ gate。
-
-執行：
-
-```powershell
-python run_media_interface.py `
-  --character kirby `
-  --generation-type native_h3_l2va_story `
-  --comfy-host 127.0.0.1 `
-  --comfy-port 8188 `
-  --comfy-root D:\ComfyUI_windows_portable `
-  --no-publish
-```
-
-若暫時不要 Discord review，可以加 `--no-review`；這會只產生一個 ending candidate，且不自動重生 continuity frame。
-
-## P1：Ref2VA reference manifest 或自動候選
-
-`native_h3_ref2va` 不會因為 `reference_manifest: []` 就直接失敗。有效
-manifest 會直接送入 Ref2VA；空 manifest 會自動產生六張 T2I candidate，
-交給 Discord 使用者選擇 1-4 張，再建立最終 reference manifest。若希望在
-策略名稱上明確表達這個前置 stage，可選 `text2image2native_h3_ref2va`，
-兩者使用相同的六張候選圖與人工選擇契約。已配置但缺檔、不可讀或格式錯誤
-的 references 仍然是錯誤，不會被當成空 manifest。
-
-在 `configs/characters/kirby.yaml` 的 `generation.native_h3_ref2va` 填入 reference。每筆 record 至少需要 `path`；建議明確指定 `type`、`role`、`retention`：
-
-```yaml
-  native_h3_ref2va:
-    storyboard_path: configs/storyboards/native_h3_15s.yaml
-    duration_seconds: 15
-    workflow_name: minimax_h3_ref2va
-    reference_image_size: match
-    reference_max_images: 3
-    reference_max_videos: 1
-    reference_manifest:
-      - path: D:/MediaOverload/references/kirby_identity.png
-        type: image
-        role: identity
-        retention: identity_and_appearance
-        notes: preserve the approved subject silhouette and face proportions for Discord review
-      - path: D:/MediaOverload/references/storm_camera.mp4
-        type: video
-        role: camera
-        retention: camera_motion_and_timing
-        notes: use as motion/camera reference only
-    width: 608
-    height: 352
-    length: 362
-    steps: 20
-```
-
-可用 `role`：`identity`、`subject`、`style`、`environment`、`motion`、`camera`、`continuation`。預設低 VRAM policy 是最多 3 張 reference image、1 支 reference video；要試官方較高上限，可以把 recipe 的 `reference_max_images` 提到 9、`reference_max_videos` 提到 3，但 RTX 4060 8 GB 應先從 1 image + 1 video 開始。
-
-執行：
-
-```powershell
-python run_media_interface.py `
-  --character kirby `
-  --generation-type native_h3_ref2va `
-  --comfy-host 127.0.0.1 `
-  --comfy-port 8188 `
-  --comfy-root D:\ComfyUI_windows_portable `
-  --no-publish
-```
-
-Ref2VA 執行時會建立：
-
-- `reference_manifest`：送入 H3 的 deterministic slot order。
-- `reference_lineage`：每個來源的 path、type、role、tag、retention、檔案大小、mtime。
-- `reference_audio_enabled: false`：防止後續 workflow 變更時誤接 audio reference。
-- `native_h3_prompt`：六段 Ref2VA prompt contract，包括 Subject Definitions、Summary、Reference Retention、Detailed Description、Overall Soundscape、Non-Diegetic Music。
-
-## ComfyUI 與模型
-
-`minimax_h3_ref2va.json` 是唯一的 Ref2VA graph；loader 由 API 的
-`model_profile` 在 queue 前決定：
-
-- `q4`（RTX 4060 default）：`MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf` + Q4_K_M text encoder
-- `q2`（OOM fallback）：沿用 Q4 Ref2VA diffusion，只把 text encoder 切成 Q2_K
-- `native`（quality A/B）：`minimax_h3_ref2va_pruned_int8_convrot.safetensors` + native text encoder
-- H3 video/audio VAE → `models/vae`
-- `VHS_LoadVideoPath` → `ComfyUI-VideoHelperSuite`
-
-Ref2VA render 前會 preflight `MiniMaxH3ReferenceToVideo`；若 manifest 中有 video，還會 preflight `VHS_LoadVideoPath`。缺 node 時會在 queue 前失敗，不會產生一個看似成功但缺 reference 的結果。
-Reference video 先以 24 fps 讀入，讓 H3 VAE 保留時間訊息；H3 的 Qwen reference presentation 會在 node 內另外以 2 fps 取樣，不要在 loader 層先降成 2 fps。
-
-## Workflow tuning order
-
-建議每次只改一個軸，並保留 run summary：
-
-1. 先固定 608×352、362 frames、20 steps（Kirby production profile 為 15 秒）。
-2. 先用 1 identity image；確認角色後再加 1 motion/camera video。
-3. identity 漂移時，先提高 identity reference 的明確 retention，不要先增加 reference 數量。
-4. 動作不對時，加入 `role: motion` 或 `role: camera` video；不要把 style image 當 motion reference。
-5. VRAM 壓力高時，先減少 reference 數量、length、steps，再考慮升高解析度。
-6. 只在 approved last frame 穩定後才用 L2VA；只在 reference manifest 已驗證或候選圖完成 Discord 選擇、lineage 完整後才用 Ref2VA。
-
-## 相關程式位置
-
-- manifest／lineage／prompt：`agentic/src/agentic/h3_reference.py`
-- H3 asset profile：`agentic/src/agentic/assets/minimax_h3.py`
-- Comfy slot binding：`agentic/src/agentic/tools/comfy_workflow_tool.py`
-- planner：`agentic/src/agentic/runtime/planner.py`
-- L2VA／Ref2VA skills：`agentic/src/agentic/skills/longvideo.py`
-- approved last-frame gate：`agentic/src/agentic/skills/agent_primitives.py`
+實跑驗證：`python scripts/validate_wan2gp_h3.py`。Krea-to-H3 完整模式 runner：`python scripts/run_h3_modes_e2e.py --help`。日常介面仍為 `run_media_interface.py`；不需要另外啟動 WanGP WebUI。

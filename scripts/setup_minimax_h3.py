@@ -15,7 +15,7 @@ from agentic.assets.minimax_h3 import PROFILES, download_profile, inspect_profil
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Prepare a MiniMax H3 ComfyUI profile")
+    parser = argparse.ArgumentParser(description="Download shared MiniMax H3 model files; use setup_wan2gp_h3.py for WanGP registration")
     parser.add_argument(
         "--comfy-root",
         default="D:/ComfyUI_windows_portable",

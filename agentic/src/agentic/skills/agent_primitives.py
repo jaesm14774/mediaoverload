@@ -20,6 +20,7 @@ from agentic.runtime.prompting import (
     include_role_description,
     validate_story_segments,
 )
+from agentic.video_directing import apply_video_opening_frame_direction
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import (
     asset_check_result,
@@ -126,6 +127,25 @@ class AgentPlanningSkills:
             previous_segment=previous_segment,
             prior_frame=prior_frame,
         )
+        if segment_index == 0:
+            opening_frame_prompt = str(
+                context.state["idea-brief"].get("opening_keyframe_prompt") or ""
+            ).strip()
+            if opening_frame_prompt:
+                opening_action = str(segment.get("action") or "").strip()
+                if opening_action:
+                    opening_frame_prompt = "\n\n".join(
+                        part
+                        for part in (
+                            opening_frame_prompt,
+                            f"Frozen anticipation before the first segment's action: {opening_action}. Show the poised moment before it begins.",
+                        )
+                        if part
+                    )
+                outputs["opening_keyframe_prompt"] = apply_video_opening_frame_direction(
+                    opening_frame_prompt,
+                    context.plan.goal.media_type,
+                )
         if review_direction and review_direction not in outputs["prompt"]:
             outputs["original_prompt"] = outputs["prompt"]
             outputs["prompt"] = ", ".join(part for part in (outputs["prompt"], f"revision direction: {review_direction}") if part)
@@ -498,7 +518,6 @@ class AgentMediaSkills:
         payload: dict[str, object] = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
-            "image_path": self._resolve_image_path(context),
             "prompt": self._resolve_prompt(context),
             "model_profile": str(
                 context.node.inputs.get("model_profile")
@@ -513,25 +532,29 @@ class AgentMediaSkills:
             "width": context.node.inputs.get("width"),
             "height": context.node.inputs.get("height"),
         }
+        # Text-to-video may have a generated cover upstream. Its cover is not
+        # an H3 starting frame; only the image-conditioned workflow consumes it.
+        if workflow_name != "wan2gp_h3_t2va":
+            payload["image_path"] = self._resolve_image_path(context)
         seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
         if seed is not None:
             payload["seed"] = int(seed)
-        if context.plan.goal.media_type == "long_video" and workflow_name.startswith("minimax_h3_"):
+        if context.plan.goal.media_type == "long_video" and workflow_name.startswith("wan2gp_h3_"):
             constraints = context.plan.goal.constraints
             payload.update(
                 {
                     "width": int(constraints.get("longvideo_h3_width", 512)),
                     "height": int(constraints.get("longvideo_h3_height", 288)),
-                    "length": int(constraints.get("longvideo_h3_length", 81)),
+                    "length": int(constraints.get("longvideo_h3_length", 124)),
                     "steps": int(constraints.get("longvideo_h3_steps", 16)),
-                    "model_profile": str(constraints.get("longvideo_h3_model_profile", "q2")),
+                    "model_profile": str(constraints.get("longvideo_h3_model_profile", "q4")),
                 }
             )
-        elif workflow_name.startswith("minimax_h3_") and context.node.inputs.get("length") is not None:
+        elif workflow_name.startswith("wan2gp_h3_") and context.node.inputs.get("length") is not None:
             payload["length"] = int(context.node.inputs["length"])
-        if workflow_name.startswith("minimax_h3_") and context.node.inputs.get("steps") is not None:
+        if workflow_name.startswith("wan2gp_h3_") and context.node.inputs.get("steps") is not None:
             payload["steps"] = int(context.node.inputs["steps"])
-        result = self.tools.call("comfy.workflow.image_to_video", payload)
+        result = self.tools.call("wan2gp.render_h3", payload)
         return SkillResult(
             status="success",
             outputs=result,

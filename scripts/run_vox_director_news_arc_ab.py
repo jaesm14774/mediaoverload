@@ -265,7 +265,7 @@ def _start_vram_release_watcher(host: str, port: int) -> tuple[threading.Event, 
     stop_event = threading.Event()
 
     def watch() -> None:
-        deadline = time.monotonic() + 3600
+        deadline = time.monotonic() + 4500
         while not stop_event.wait(0.5) and time.monotonic() < deadline:
             try:
                 running, pending = _queue_state(host, port)

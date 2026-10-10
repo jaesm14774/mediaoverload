@@ -32,20 +32,20 @@ MODE_CONTRACTS: dict[H3Mode, H3ModeContract] = {
         mode=H3Mode.T2VA,
         generation_type="native_h3_t2v_story",
         render_mode="text_to_video",
-        workflow_name="minimax_h3_lowvram_t2v",
+        workflow_name="wan2gp_h3_t2va",
     ),
     H3Mode.I2VA: H3ModeContract(
         mode=H3Mode.I2VA,
         generation_type="native_h3_story",
         render_mode="image_to_video",
-        workflow_name="minimax_h3_lowvram_i2v",
+        workflow_name="wan2gp_h3_i2va",
         requires_first_frame=True,
     ),
     H3Mode.FL2VA: H3ModeContract(
         mode=H3Mode.FL2VA,
         generation_type="native_h3_fl2va_story",
         render_mode="first_last_to_video",
-        workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+        workflow_name="wan2gp_h3_fl2va",
         requires_first_frame=True,
         requires_last_frame=True,
     ),
@@ -53,14 +53,14 @@ MODE_CONTRACTS: dict[H3Mode, H3ModeContract] = {
         mode=H3Mode.L2VA,
         generation_type="native_h3_l2va_story",
         render_mode="last_frame_to_video",
-        workflow_name="minimax_h3_lowvram_15s_fl2va_i2v",
+        workflow_name="wan2gp_h3_l2va",
         requires_last_frame=True,
     ),
     H3Mode.REF2VA: H3ModeContract(
         mode=H3Mode.REF2VA,
         generation_type="native_h3_ref2va",
         render_mode="reference_to_video",
-        workflow_name="minimax_h3_ref2va",
+        workflow_name="wan2gp_h3_ref2va",
         allows_reference_images=True,
         allows_reference_videos=True,
     ),
@@ -139,6 +139,8 @@ def validate_h3_payload(
         errors.append(f"{contract.mode.value} requires a landing/last-frame image")
     if contract.mode is H3Mode.I2VA and last_frame:
         errors.append("i2va must not receive a last-frame conditioning input")
+    if contract.mode is H3Mode.T2VA and last_frame:
+        errors.append("t2va must not receive a last-frame conditioning input")
     if contract.mode is H3Mode.L2VA and first_frame:
         errors.append("l2va must not receive an opening-frame conditioning input")
     if contract.mode is not H3Mode.REF2VA and has_references:

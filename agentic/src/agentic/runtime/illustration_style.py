@@ -2,8 +2,9 @@ from __future__ import annotations
 
 
 PAPER_STORYBOOK_ART_DIRECTION = (
-    "Default illustration art direction: hand-painted watercolor and gouache with tactile pigment, confident "
-    "ink contours, dimensional shadows, and a specific scene environment that grounds the characters' action. "
+    "Default illustration art direction: use a coherent handcrafted treatment whose surface and marks match the "
+    "selected medium, with confident contours when appropriate, dimensional shadows, and a specific scene "
+    "environment that grounds the characters' action. "
     "Keep the characters and their physical interaction dominant; use a readable foreground, middle distance, "
     "and background instead of blank paper. Match composition, color, face, and body posture to the emotion. "
     "For comedy, use vivid contrast, a strong diagonal silhouette, exaggerated body acting, clear physical "
@@ -12,10 +13,10 @@ PAPER_STORYBOOK_ART_DIRECTION = (
     "and honor an explicitly requested medium, palette, or isolated background."
 )
 PAPER_STORYBOOK_SUBJECT_DIRECTION = (
-    "Default subject art direction: render the subject itself as a refined hand-painted storybook "
-    "illustration with watercolor and gouache pigment, delicate ink or pencil edges, subtle paper-like "
-    "surface detail within the forms, nuanced light and soft dimensional shadows, and a restrained yet "
-    "clearly chromatic palette. Preserve the requested silhouette and any transparent, solid, or chroma-key "
+    "Default subject art direction: render the subject itself as a refined handcrafted illustration in the "
+    "selected medium, with surface detail and mark quality suited to that medium, nuanced light and soft "
+    "dimensional shadows, and a restrained yet clearly chromatic palette. Preserve the requested silhouette "
+    "and any transparent, solid, or chroma-key "
     "background exactly; do not add a floor or environment when the asset requires isolation. Honor an "
     "explicitly requested different medium or palette."
 )

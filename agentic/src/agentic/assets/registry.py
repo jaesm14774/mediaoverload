@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentic.assets.minimax_h3 import profile_manifest
 
 
 def _load_workflow_metadata(workflow_dir: Path) -> dict[str, dict[str, Any]]:
@@ -102,18 +101,7 @@ _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "krea2_turbo": {"width": 1024, "height": 576, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple"},
     "krea2_turbo_img2img": {"steps": 8, "cfg": 1.0, "denoise": 0.25, "sampler_name": "euler", "scheduler": "simple"},
     "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
-    "minimax_h3_lowvram_i2v": {"width": 608, "height": 352, "length": 240, "frame_rate": 24, "steps": 20},
-    "minimax_h3_lowvram_15s_fl2va_i2v": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16},
-    "minimax_h3_lowvram_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
-    "minimax_h3_native_t2v": {"width": 608, "height": 352, "length": 124, "frame_rate": 24, "steps": 20},
-    "minimax_h3_ref2va": {
-        "width": 608,
-        "height": 352,
-        "length": 124,
-        "frame_rate": 24,
-        "steps": 20,
-        "ref_image_size": "match",
-    },
+
 }
 
 
@@ -139,8 +127,8 @@ def _relative_to_project(project_root: Path, absolute_file: Path) -> str:
 
 def _infer_media_types(stem: str) -> list[str]:
     lower = stem.lower()
-    if lower == "minimax_h3_ref2va":
-        return ["native_h3_ref2va", "long_video"]
+    if lower.startswith("wan2gp_h3_"):
+        return ["image_to_video", "image_to_video_audio", "text2video", "long_video", "native_h3_ref2va"]
     shared_image = [
         "image",
         "storyboard",
@@ -172,41 +160,11 @@ def _synthetic_manifest(
     ]
     return WorkflowManifest(
         name=name,
-        media_types=_infer_media_types(name),
+        media_types=list(values.get("media_types") or _infer_media_types(name)),
         workflow_path=workflow_rel_path,
         summary=str(values.get("summary") or ""),
         required_assets=required_assets,
-        recommended_defaults=dict(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
-        asset_extra_roots=[],
-        conditioning=dict(values.get("conditioning") or {}),
-    )
-
-
-def _minimax_h3_manifest(
-    name: str,
-    workflow_rel_path: str,
-    metadata: dict[str, Any] | None = None,
-) -> WorkflowManifest:
-    values = dict(metadata or {})
-    profile_name = {
-        "minimax_h3_lowvram_i2v": "balanced-lowvram",
-        "minimax_h3_lowvram_t2v": "balanced-lowvram",
-        "minimax_h3_lowvram_15s_fl2va_i2v": "balanced-lowvram",
-        "minimax_h3_native_t2v": "native-quality",
-        "minimax_h3_ref2va": "ref2va-lowvram",
-    }.get(name)
-    if not profile_name:
-        return _synthetic_manifest(name, workflow_rel_path, values)
-    payload = profile_manifest(profile_name)
-    recommended_defaults = dict(payload["recommended_defaults"])
-    recommended_defaults.update(_WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {}))
-    return WorkflowManifest(
-        name=name,
-        media_types=list(payload["media_types"]),
-        workflow_path=workflow_rel_path,
-        summary=str(payload["summary"]),
-        required_assets=[AssetRequirement.from_dict(item) for item in payload["required_assets"]],
-        recommended_defaults=recommended_defaults,
+        recommended_defaults=dict(values.get("recommended_defaults") or _WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
         asset_extra_roots=[],
         conditioning=dict(values.get("conditioning") or {}),
     )
@@ -227,7 +185,11 @@ class AssetRegistry:
         for path in sorted(self._workflow_dir.glob("*.json")):
             stem = path.stem
             rel = _relative_to_project(self.project_root, path)
-            manifests[stem] = _minimax_h3_manifest(stem, rel, _metadata_for_workflow(metadata, stem))
+            values = json.loads(path.read_text("utf-8")) if stem.startswith("wan2gp_h3_") else _metadata_for_workflow(metadata, stem)
+            if values.get("provider") == "wan2gp":
+                from agentic.assets.wan2gp import h3_requirements
+                values["required_assets"] = h3_requirements(values["h3_mode"], values["recommended_defaults"].get("model_profile", "q4"))
+            manifests[stem] = _synthetic_manifest(stem, rel, values)
         return manifests
 
     def all_manifests(self) -> list[WorkflowManifest]:
@@ -317,6 +279,15 @@ class AssetRegistry:
             }
 
         workflow = self.load_workflow_template(manifest)
+        if manifest.conditioning.get("provider") == "wan2gp":
+            from agentic.runtime.h3_modes import resolve_h3_mode
+            try:
+                resolve_h3_mode(workflow["h3_mode"])
+                if workflow.get("provider") != "wan2gp":
+                    issues.append("WanGP workflow must declare provider=wan2gp")
+            except (KeyError, ValueError, TypeError) as exc:
+                issues.append(str(exc))
+            return {"workflow_name": workflow_name, "workflow_path": str(workflow_path), "valid": not issues, "issues": issues, "warnings": [], "aliases": [], "output_nodes": ["wan2gp.render_h3"], "unresolved_inputs": []}
         if not isinstance(workflow, dict) or not workflow:
             issues.append("Workflow JSON is empty or not a node mapping.")
         else:

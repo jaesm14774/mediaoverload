@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import json
 import re
 from pathlib import Path
 from typing import Any
 
-from agentic.h3_reference import build_reference_lineage, format_ref2va_prompt, normalize_reference_manifest
+from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
+from agentic.minimax_prompting import require_h3_prompt
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
 from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.prompting import (
-    build_minimax_h3_prompt,
     build_story_segments,
     include_role_description,
     validate_story_segments,
@@ -381,53 +381,24 @@ class LongVideoSkills:
         constraints = context.plan.goal.constraints
         prompt_node_id = str(context.node.depends_on[0]) if context.node.depends_on else ""
         prepared_prompt_output = context.state.node_outputs.get(prompt_node_id)
-        prepared_prompt = (
-            str(prepared_prompt_output.get("prompt") or "").strip()
-            if isinstance(prepared_prompt_output, dict)
-            else ""
-        )
         prompt = ", ".join(
             part
             for part in (str(segment.get("visual") or "").strip(), context.plan.goal.style.strip())
             if part
         )
-        prompt_anchor = first_frame or last_frame
-        segment_frame_rate = float(
-            context.node.inputs.get("frame_rate")
-            or constraints.get("longvideo_frame_rate")
-            or constraints.get("video_frame_rate")
-            or 24
-        )
-        segment_length = float(
-            context.node.inputs.get("length")
-            or constraints.get("longvideo_length")
-            or constraints.get("longvideo_h3_length")
-            or 120
-        )
-        segment_duration_seconds = max(1, int(round(segment_length / max(segment_frame_rate, 1))))
-        if workflow_name.startswith("minimax_h3_"):
-            prompt_goal = replace(
-                context.plan.goal,
-                duration_seconds=segment_duration_seconds,
+        if workflow_name.startswith("wan2gp_h3_"):
+            prompt = require_h3_prompt(
+                prepared_prompt_output.get("prompt") if isinstance(prepared_prompt_output, dict) else None
             )
-            prompt = build_minimax_h3_prompt(
-                prompt_goal,
-                segment,
-                prior_frame=prompt_anchor,
-            )["prompt"]
-            if prepared_prompt:
-                prompt = "\n".join(
-                    (prompt, prepared_prompt)
-                )
 
         width = context.node.inputs.get("width") or constraints.get("canvas_width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
         height = context.node.inputs.get("height") or constraints.get("canvas_height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
         length = context.node.inputs.get("length") or constraints.get("longvideo_length") or constraints.get("longvideo_h3_length")
         steps = context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps")
-        if workflow_name.startswith("minimax_h3_"):
+        if workflow_name.startswith("wan2gp_h3_"):
             width = width or 512
             height = height or 288
-            length = length or 81
+            length = length or 124
             steps = steps or 16
 
         h3_mode = {
@@ -462,14 +433,7 @@ class LongVideoSkills:
         if reference_manifest:
             payload["reference_manifest"] = reference_manifest
 
-        render_tool = str(context.node.inputs.get("render_tool") or "").strip()
-        tool_name = (
-            "comfy.render_reference_to_video"
-            if render_tool == "comfy.workflow.reference_to_video" or recipe == "reference_bundle"
-            else "comfy.render_text_to_video"
-            if render_tool == "comfy.workflow.text_to_video" or recipe == "t2v"
-            else "comfy.render_image_to_video"
-        )
+        tool_name = "wan2gp.render_h3"
         result = self.tools.call(tool_name, payload)
         outputs: dict[str, object] = {
             **result,
@@ -509,14 +473,14 @@ class LongVideoSkills:
             raise RuntimeError("Native H3 render requires workflow_name and first_frame_path")
         if use_last_frame and not last_frame:
             raise RuntimeError("Native H3 render with use_last_frame=true requires last_frame_path")
-        default_model_profile = "q2" if workflow_name.startswith("minimax_h3_lowvram_15s") else "q4"
+        default_model_profile = "q4"
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3")),
             "image_path": first_frame,
             "use_last_frame": use_last_frame,
             "h3_mode": "fl2va" if use_last_frame else "i2va",
-            "prompt": str(story["prompt"]),
+            "prompt": require_h3_prompt(story["prompt"]),
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
@@ -556,11 +520,12 @@ class LongVideoSkills:
                 or default_model_profile
             ),
         }
-        if context.node.inputs.get("seed") is not None:
-            payload["seed"] = int(context.node.inputs["seed"])
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
         if use_last_frame:
             payload["last_image_path"] = last_frame
-        result = self.tools.call("comfy.workflow.image_to_video", payload)
+        result = self.tools.call("wan2gp.render_h3", payload)
         outputs: dict[str, object] = {
             **result,
             "first_frame_path": first_frame,
@@ -708,7 +673,7 @@ class LongVideoSkills:
             "use_first_frame": False,
             "use_last_frame": True,
             "h3_mode": "l2va",
-            "prompt": str(story["prompt"]),
+            "prompt": require_h3_prompt(story["prompt"]),
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
@@ -743,9 +708,12 @@ class LongVideoSkills:
                 or "q4"
             ),
         }
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
         return self._run_native_h3_render(
             _NativeH3Render(
-                tool_name="comfy.workflow.image_to_video",
+                tool_name="wan2gp.render_h3",
                 payload=payload,
                 outputs={
                 "first_frame_path": "",
@@ -755,7 +723,7 @@ class LongVideoSkills:
                 "render_mode": "last_frame_to_video",
                 **self._native_h3_story_outputs(
                     story,
-                    prompt=str(story["prompt"]),
+                    prompt=require_h3_prompt(story["prompt"]),
                     render_mode="last_frame_to_video",
                 ),
                 },
@@ -779,11 +747,7 @@ class LongVideoSkills:
         )
         if not workflow_name:
             raise RuntimeError("Native H3 Ref2VA render requires workflow_name")
-        prompt = format_ref2va_prompt(
-            str(story["prompt"]),
-            references,
-            soundscape=str(story.get("native_audio") or ""),
-        )
+        prompt = require_h3_prompt(story["prompt"])
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3_ref2va")),
@@ -828,9 +792,12 @@ class LongVideoSkills:
             ),
             "video_count": _bounded_int(context.node.inputs.get("video_count") or 1, name="video_count", minimum=1, maximum=4),
         }
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
         return self._run_native_h3_render(
             _NativeH3Render(
-                tool_name="comfy.workflow.reference_to_video",
+                tool_name="wan2gp.render_h3",
                 payload=payload,
                 outputs={
                 "reference_manifest": references,
@@ -860,19 +827,18 @@ class LongVideoSkills:
         )
         if not workflow_name:
             raise RuntimeError("Native H3 T2V render requires workflow_name")
-        lowvram_t2v = workflow_name.startswith("minimax_h3_lowvram_")
         constraints = context.plan.goal.constraints
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3_t2v")),
-            "prompt": str(story["prompt"]),
+            "prompt": require_h3_prompt(story["prompt"]),
             "h3_mode": "t2va",
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
             "width": _bounded_int(
                 context.node.inputs.get("width")
                 or constraints.get("canvas_width")
-                or (512 if lowvram_t2v else 608),
+                or 608,
                 name="width",
                 minimum=256,
                 maximum=1024,
@@ -880,7 +846,7 @@ class LongVideoSkills:
             "height": _bounded_int(
                 context.node.inputs.get("height")
                 or constraints.get("canvas_height")
-                or (288 if lowvram_t2v else 352),
+                or 352,
                 name="height",
                 minimum=256,
                 maximum=1024,
@@ -907,14 +873,17 @@ class LongVideoSkills:
                 context.node.inputs.get("model_profile")
                 or constraints.get("native_h3_t2v_model_profile")
                 or constraints.get("native_h3_model_profile")
-                or ("q2" if lowvram_t2v else "q4")
+                or "q4"
             ),
         }
+        seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        if seed is not None:
+            payload["seed"] = int(seed)
         return self._run_native_h3_render(
             _NativeH3Render(
-                tool_name="comfy.workflow.text_to_video",
+                tool_name="wan2gp.render_h3",
                 payload=payload,
-                outputs=self._native_h3_story_outputs(story, prompt=str(story["prompt"]), render_mode="text_to_video"),
+                outputs=self._native_h3_story_outputs(story, prompt=require_h3_prompt(story["prompt"]), render_mode="text_to_video"),
                 log=f"Rendered one continuous native H3 text-to-video story with '{workflow_name}'.",
             )
         )

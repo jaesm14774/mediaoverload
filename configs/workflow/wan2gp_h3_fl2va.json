@@ -1,0 +1,7 @@
+{
+  "provider": "wan2gp", "h3_mode": "fl2va", "allowed_modes": ["fl2va", "l2va", "i2va"],
+  "summary": "H3 opening and ending images to video and native audio. Powered by WanGP.",
+  "media_types": ["image_to_video", "image_to_video_audio", "long_video"],
+  "recommended_defaults": {"width": 608, "height": 352, "length": 362, "frame_rate": 24, "steps": 16, "model_profile": "q4"},
+  "conditioning": {"provider": "wan2gp", "recipes": {"anchor_first_last": {"anchors": ["first", "last"], "continuation": "rendered_tail", "render_tool": "wan2gp.render_h3"}, "anchor_last": {"anchors": ["last"], "continuation": "none", "render_tool": "wan2gp.render_h3"}}}
+}

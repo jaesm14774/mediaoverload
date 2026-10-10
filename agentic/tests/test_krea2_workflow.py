@@ -63,9 +63,10 @@ class Krea2WorkflowContractTests(unittest.TestCase):
             self.assertFalse((self.workflow_dir / f"{workflow_name}.json").exists(), workflow_name)
 
     def test_krea2_turbo_is_official_low_vram_sampler_shape(self) -> None:
+        """User Given local Krea Turbo When rendering Then the native checkpoint keeps its distilled sampler contract."""
         graph = json.loads((self.workflow_dir / "krea2_turbo.json").read_text(encoding="utf-8"))
         classes = {node["class_type"] for node in graph.values()}
-        self.assertIn("UnetLoaderGGUF", classes)
+        self.assertIn("UNETLoader", classes)
         self.assertIn("CLIPLoaderGGUF", classes)
         self.assertIn("ConditioningZeroOut", classes)
         sampler = next(node for node in graph.values() if node["class_type"] == "KSampler")["inputs"]
@@ -76,10 +77,11 @@ class Krea2WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("TextGenerate", classes)
 
     def test_krea2_img2img_keeps_the_same_model_family(self) -> None:
+        """User Given a Krea frame When repairing continuity Then the same native model family refines it."""
         graph = json.loads((self.workflow_dir / "krea2_turbo_img2img.json").read_text(encoding="utf-8"))
         sampler = next(node for node in graph.values() if node["class_type"] == "KSampler")["inputs"]
         self.assertEqual(sampler["denoise"], 0.25)
-        self.assertEqual(graph["2"]["inputs"]["unet_name"], "krea2_turbo_bf16-Q4_0.gguf")
+        self.assertEqual(graph["2"]["inputs"]["unet_name"], "Krea2-Turbo-W4A4-noLowRank.safetensors")
         self.assertEqual(graph["3"]["inputs"]["type"], "krea2")
         self.assertEqual(graph["4"]["inputs"]["vae_name"], "qwen_image_vae.safetensors")
 
@@ -89,7 +91,7 @@ class Krea2WorkflowContractTests(unittest.TestCase):
         self.assertEqual(
             [asset.name for asset in manifest.required_assets],
             [
-                "krea2_turbo_bf16-Q4_0.gguf",
+                "Krea2-Turbo-W4A4-noLowRank.safetensors",
                 "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
                 "qwen_image_vae.safetensors",
             ],

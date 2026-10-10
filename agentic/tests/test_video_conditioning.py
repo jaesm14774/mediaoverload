@@ -30,7 +30,7 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertIn("anchor_first_last", candidates)
         self.assertIn("anchor_last", candidates)
         self.assertIn("reference_bundle", candidates)
-        self.assertEqual(candidates["anchor_first"][0].workflow_name, "minimax_h3_lowvram_i2v")
+        self.assertEqual(candidates["anchor_first"][0].workflow_name, "wan2gp_h3_i2va")
         self.assertEqual(candidates["reference_bundle"][0].recipes["reference_bundle"].reference_maximum, 4)
 
     def test_t2v_recipe_has_no_frame_conditioning(self) -> None:
@@ -40,15 +40,15 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertFalse(recipe.requires_first)
         self.assertFalse(recipe.requires_last)
         self.assertFalse(recipe.requires_references)
-        self.assertEqual(recipe.render_tool, "comfy.workflow.text_to_video")
+        self.assertEqual(recipe.render_tool, "wan2gp.render_h3")
 
     def test_production_sequence_is_deterministic_and_reserves_fl2va_for_state_changes(self) -> None:
         capabilities = capabilities_from_manifests(self.registry.all_manifests())
         eligible = recipe_candidates(
             capabilities,
             preferred_workflows=[
-                "minimax_h3_lowvram_i2v",
-                "minimax_h3_lowvram_15s_fl2va_i2v",
+                "wan2gp_h3_i2va",
+                "wan2gp_h3_fl2va",
             ],
         )
 
@@ -84,7 +84,7 @@ class VideoConditioningTests(unittest.TestCase):
             captured.update(payload)
             return {"saved_files": ["C:/tmp/segment.mp4"]}
 
-        tools.register("comfy.render_image_to_video", fake_render, "test renderer")
+        tools.register("wan2gp.render_h3", fake_render, "test renderer")
         with tempfile.TemporaryDirectory() as temp_dir:
             skills = LongVideoSkills(tools, Path(temp_dir))
             plan = ExecutionPlan(
@@ -102,8 +102,8 @@ class VideoConditioningTests(unittest.TestCase):
                 inputs={
                     "segment_index": 0,
                     "recipe": "anchor_last",
-                    "workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
-                    "render_tool": "comfy.workflow.image_to_video",
+                    "workflow_name": "wan2gp_h3_fl2va",
+                    "render_tool": "wan2gp.render_h3",
                     "anchor_nodes": {"last": "ending-frame"},
                     "conditioning_plan": {"recipe": "anchor_last", "anchors": {"last": "ending-frame"}},
                     "width": 512,
@@ -111,6 +111,7 @@ class VideoConditioningTests(unittest.TestCase):
                     "length": 81,
                     "steps": 16,
                 },
+                depends_on=["segment-prompt-01"],
             )
             state = RunState(
                 goal={"prompt": plan.goal.prompt},
@@ -127,6 +128,7 @@ class VideoConditioningTests(unittest.TestCase):
                         ]
                     },
                     "idea-brief": {"negative_prompt": "blurry"},
+                    "segment-prompt-01": {"prompt": "Kirby takes one determined step through the rain. The camera tracks alongside him."},
                     "ending-frame": {"selected_assets": ["C:/tmp/ending.png"]},
                 },
             )
@@ -139,8 +141,8 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertTrue(captured["use_last_frame"])
         self.assertNotIn("image_path", captured)
         self.assertEqual(captured["last_image_path"], "C:/tmp/ending.png")
-        self.assertIn("Duration: 3 seconds", str(captured["prompt"]))
-        self.assertNotIn("Duration: 20 seconds", str(captured["prompt"]))
+        self.assertEqual(captured["prompt"], "Kirby takes one determined step through the rain. The camera tracks alongside him.")
+        self.assertEqual(captured["length"], 81)
         self.assertIn("segment-01-opening_video", str(captured["run_dir"]))
 
     def test_render_segment_video_consumes_prepared_segment_direction(self) -> None:
@@ -151,7 +153,7 @@ class VideoConditioningTests(unittest.TestCase):
             captured.update(payload)
             return {"saved_files": ["C:/tmp/segment.mp4"]}
 
-        tools.register("comfy.render_image_to_video", fake_render, "test renderer")
+        tools.register("wan2gp.render_h3", fake_render, "test renderer")
         with tempfile.TemporaryDirectory() as temp_dir:
             skills = LongVideoSkills(tools, Path(temp_dir))
             plan = ExecutionPlan(
@@ -175,8 +177,8 @@ class VideoConditioningTests(unittest.TestCase):
                 inputs={
                     "segment_index": 0,
                     "recipe": "anchor_first",
-                    "workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
-                    "render_tool": "comfy.workflow.image_to_video",
+                    "workflow_name": "wan2gp_h3_fl2va",
+                    "render_tool": "wan2gp.render_h3",
                     "anchor_nodes": {"first": "opening-frame"},
                     "width": 512,
                     "height": 288,

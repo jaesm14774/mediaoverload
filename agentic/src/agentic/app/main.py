@@ -32,6 +32,7 @@ from agentic.skills.storyboard import register_storyboard_skills
 from agentic.tools.comfy import register_builtin_tools
 from agentic.tools.authoring import register_authoring_tools
 from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
+from agentic.tools.wan2gp import register_wan2gp_tools
 from agentic.tools.context_services import NewsContextService
 from agentic.tools.local import register_local_tools
 from agentic.tools.media_services import register_media_service_tools
@@ -79,6 +80,7 @@ def build_runtime(
         comfy_host=comfy_host,
         comfy_port=comfy_port,
     )
+    register_wan2gp_tools(tool_registry, asset_registry, resolved_output_root, comfy_host, comfy_port)
     register_media_service_tools(tool_registry, resolved_output_root, input_roots=input_roots)
     register_social_service_tools(tool_registry, resolved_output_root)
     register_motion_graphics_skills(

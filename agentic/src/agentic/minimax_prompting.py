@@ -4,8 +4,29 @@ from collections.abc import Mapping, Sequence
 import re
 from typing import Any
 
+
+def require_h3_prompt(value: Any) -> str:
+    """Accept scene descriptions, never serialized responses or writing advice."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("H3 prompt must be a non-empty scene description string.")
+    prompt = value.strip()
+    if prompt.startswith(("{", "```")) or re.match(r"\[\s*[\"'{]", prompt):
+        raise ValueError("H3 prompt must describe the scene, not contain a serialized object or code fence.")
+    if re.search(
+        r"(?:^|\n)\s*(?:explanation|reasoning|analysis|retention_analysis)\s*:|"
+        r"(?:video action and camera direction|opening-frame action staging|"
+        r"news grounding context|additional source context)\s*:",
+        prompt,
+        re.IGNORECASE,
+    ):
+        raise ValueError("H3 prompt must contain scene description only, without explanation or writing instructions.")
+    return prompt
+
+
 def clean_prompt_text(value: Any) -> str:
-    return " ".join(str(value or "").split()).strip().rstrip(".")
+    if value is None or value == "":
+        return ""
+    return " ".join(require_h3_prompt(value).split()).rstrip(".")
 
 
 def subject_reference(
@@ -70,24 +91,9 @@ def compose_minimax_h3_prompt(
     spine = dict(story_spine or {})
     context = dict(subject_context or {})
     identity = subject_reference(character, context)
-    mode = clean_prompt_text(render_mode).lower()
-    if prior_frame or mode in {"image_to_video", "i2v", "first_last_frame_to_video", "fl2va"}:
-        input_relation = "Input relation: begin from the supplied first frame and follow the requested motion"
-        if mode in {"first_last_frame_to_video", "fl2va"}:
-            input_relation = (
-                "Input relation: begin from the supplied first frame and make the requested action visibly cause "
-                "the supplied last-frame state. Preserve character identity and count, screen direction, setting, "
-                "props, drawing style, palette, framing, and camera axis unless the shot progression calls for a "
-                "clear change. Make the physical cause, surprise/payoff, and character reaction legible; land on "
-                "the supplied last frame and hold the final reveal for about half a second"
-            )
-    else:
-        input_relation = "Input relation: generate from the supplied text brief."
     prompt_parts = [
-        "integrated_multimodal_description:",
         f"Duration: {int(duration_seconds)} seconds.",
         identity,
-        input_relation + ".",
     ]
     for label, key in (
         ("Creative intent", "premise"),
@@ -148,11 +154,7 @@ def compose_minimax_h3_prompt(
     soundscape = clean_prompt_text(audio)
     if soundscape:
         prompt_parts.append(f"Audio direction: {soundscape}.")
-    prompt_parts.append("Follow the supplied creative brief and requested style.")
-    rules = [clean_prompt_text(item) for item in continuity_rules if clean_prompt_text(item)]
-    if rules:
-        prompt_parts.append("Additional continuity rules: " + "; ".join(rules) + ".")
-    return "\n".join(prompt_parts)
+    return require_h3_prompt("\n".join(part for part in prompt_parts if part))
 
 
 def _format_h3_cut_time(value: str) -> str:

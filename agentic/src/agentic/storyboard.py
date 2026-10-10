@@ -343,19 +343,10 @@ def format_native_h3_prompt(
     shots = storyboard.get("native_shots")
     if not isinstance(shots, list):
         shots = []
-    spine = dict(storyboard.get("story_spine") or {})
-    base_prompt = str(storyboard.get("base_prompt") or "").strip()
     world = dict(storyboard.get("world") or {})
-    continuity = world.get("continuity_rules") or []
-    if not isinstance(continuity, list):
-        continuity = [str(continuity)]
     character = str(storyboard.get("character") or "the protagonist").strip()
     duration = int(duration_seconds or storyboard.get("native_duration_seconds") or 15)
     render_mode = str(storyboard.get("render_mode") or "").strip()
-    prompt_base = base_prompt
-    surface_variation = native_surface_variation(creative_brief)
-    if surface_variation:
-        prompt_base = f"{prompt_base} Creative variation for this run: {surface_variation}.".strip()
     shot_payloads: list[dict[str, Any]] = []
     for index, shot in enumerate(shots, start=1):
         shot_payloads.append(dict(shot) if isinstance(shot, dict) else {"action": str(shot or "")})
@@ -364,88 +355,14 @@ def format_native_h3_prompt(
         duration_seconds=duration,
         character=character,
         style=style,
-        base_prompt=prompt_base,
-        story_spine=spine,
         setting=str(world.get("setting") or ""),
         visual_language=str(world.get("visual_language") or ""),
         shots=shot_payloads,
         audio=audio,
         render_mode=render_mode,
-        continuity_rules=continuity,
         subject_context=dict(storyboard.get("subject_context") or {}),
         media_type=render_mode or "native_h3_story",
     )
-    news_trace = storyboard.get("news_trace")
-    gag_card = storyboard.get("gag_card")
-    if isinstance(gag_card, dict):
-        gag_labels = (
-            ("character_signature", "Character signature"),
-            ("character_desire", "Character desire"),
-            ("source_prop", "Source prop"),
-            ("prop_rule", "Prop rule"),
-            ("expectation", "Expectation"),
-            ("physical_escalation", "Physical escalation"),
-            ("surprising_harmless_reversal", "Surprising reversal"),
-            ("held_expressive_reaction", "Held reaction"),
-        )
-        ideas = [
-            f"{label}: {str(gag_card.get(key) or '').strip()}"
-            for key, label in gag_labels
-            if str(gag_card.get(key) or "").strip()
-        ]
-        if ideas:
-            prompt += "\nComic staging card: " + "; ".join(ideas) + "."
-    if isinstance(news_trace, dict):
-        story_arc_intent = str(news_trace.get("story_arc_intent") or "").strip()
-        source_fact = str(news_trace.get("source_fact") or "").strip()
-        visual_translation = str(news_trace.get("visual_translation") or "").strip()
-        news_mechanism = str(news_trace.get("news_mechanism") or "").strip()
-        news_consequence = str(news_trace.get("news_consequence") or "").strip()
-        source_limit = str(news_trace.get("source_limit") or "").strip()
-        source_roles = news_trace.get("source_roles")
-        character_mapping = news_trace.get("character_mapping")
-        source_roles_text = (
-            json.dumps(source_roles, ensure_ascii=False)
-            if isinstance(source_roles, (dict, list))
-            else str(source_roles or "").strip()
-        )
-        character_mapping_text = (
-            json.dumps(character_mapping, ensure_ascii=False)
-            if isinstance(character_mapping, (dict, list))
-            else str(character_mapping or "").strip()
-        )
-        raw_anchor_roles = news_trace.get("anchor_roles", [])
-        if isinstance(raw_anchor_roles, dict):
-            anchor_roles = [
-                f"{str(role).strip()}: {str(anchor).strip()}"
-                for role, anchor in raw_anchor_roles.items()
-                if str(role).strip() and str(anchor).strip()
-            ]
-        elif isinstance(raw_anchor_roles, list):
-            anchor_roles = [str(item).strip() for item in raw_anchor_roles if str(item).strip()]
-        else:
-            anchor_roles = []
-        visual_anchors = [
-            str(item).strip()
-            for item in news_trace.get("visual_anchors", [])
-            if str(item).strip()
-        ]
-        if story_arc_intent or source_fact or visual_translation or visual_anchors or source_roles_text or character_mapping_text:
-            prompt += (
-                "\nNews grounding context: "
-                f"source fact={source_fact}; arc intent={story_arc_intent}; "
-                f"visual translation={visual_translation}; visual anchors={', '.join(visual_anchors)}; "
-                f"reported roles={source_roles_text}; character role mapping={character_mapping_text}. "
-                "Preserve who did what to whom; the visual adaptation must not change the source relationship."
-            )
-        if news_mechanism or news_consequence or source_limit or anchor_roles:
-            prompt += (
-                "\nAdditional source context: "
-                f"active mechanism={news_mechanism}; visible consequence={news_consequence}; "
-                f"source limit={source_limit}; anchor roles={', '.join(anchor_roles)}."
-            )
-    if str(spine.get("resolution") or "").strip():
-        prompt += f"\nEnding frame idea: {str(spine.get('resolution') or '').strip()}."
     return prompt.strip()
 
 

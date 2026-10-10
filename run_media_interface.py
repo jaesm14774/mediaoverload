@@ -126,6 +126,7 @@ def main() -> None:
         return
 
     config_path = _resolve_config_path(args)
+    print("H3 影片生成：Powered by WanGP", file=sys.stderr, flush=True)
     # Keep strategy/character routing randomness independent from --seed,
     # which is reserved for reproducible media rendering.
     request = CharacterWorkflowRequest(

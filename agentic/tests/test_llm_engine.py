@@ -53,6 +53,7 @@ class LLMEngineTests(unittest.TestCase):
         result = engine.expand_goal(goal, "anime", [])
 
         self.assertEqual(result["creative_brief"], "llm brief")
+        self.assertIn("llm prompt", result["prompt"])
         self.assertEqual(result["prompt"], "llm prompt")
         self.assertEqual(result["negative_prompt"], "")
         self.assertEqual(result["prompt_mode"], "llm")
@@ -163,6 +164,30 @@ class LLMEngineTests(unittest.TestCase):
 
         self.assertEqual(segments[0]["visual"], "shot one")
         self.assertEqual(segments[1]["narration"], "line two")
+
+    def test_user_given_video_segment_has_camera_and_action_when_story_is_normalized_then_direction_survives(self) -> None:
+        """User: Given a video segment has an action and camera decision, When the story is normalized, Then both decisions remain available to rendering."""
+        manager = _FakeManager(
+            [
+                '{"segments":[{"segment_id":"segment-1","visual":"the hero hops over a puddle","narration":"a little leap","action":"leans, hops, and lands beyond the puddle","cause":"the umbrella catches a gust","effect":"the hero lands safely and blinks with delight","camera":"start wide, track alongside the hop, end with the puddle behind"}]}'
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(prompt="a character hops over a puddle", media_type="long_video")
+
+        segments = engine.segment_story(goal, "brief", 1, "playful")
+
+        self.assertEqual(segments[0]["action"], "leans, hops, and lands beyond the puddle")
+        self.assertEqual(segments[0]["camera"], "start wide, track alongside the hop, end with the puddle behind")
+        self.assertEqual(segments[0]["effect"], "the hero lands safely and blinks with delight")
+        story_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("each segment must include action, cause, effect, camera", story_prompt.casefold())
+        self.assertIn("use one continuous move or a locked shot", story_prompt.casefold())
+        self.assertIn("pan and tilt change camera direction, not subject distance or scale", story_prompt.casefold())
+        self.assertIn("show the result before any close-up reaction", story_prompt.casefold())
+        self.assertIn("keep the face and every story-critical object within frame with clear edge margins", story_prompt.casefold())
+        self.assertIn("one visible goal, one obstacle, and one turn that changes the outcome", story_prompt.casefold())
+        self.assertIn("stable visible rules for medium and surface, palette and light, and motion or transitions", story_prompt.casefold())
 
     def test_user_given_long_video_segment_when_llm_returns_shots_then_shot_count_is_not_forced(self) -> None:
         """User: Given an LLM returns extra shot details, When segments are prepared, Then the renderer uses the segment without a fixed internal shot contract."""
@@ -303,7 +328,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_lowvram_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2gp_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
                 ]
             ),
         )
@@ -317,7 +342,7 @@ class LLMEngineTests(unittest.TestCase):
                 "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
                 "sticker_pack": {
                     "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
-                    "video_workflow_name": ["minimax_h3_lowvram_i2v"],
+                    "video_workflow_name": ["wan2gp_h3_i2va"],
                 },
             },
             count_policies={
@@ -343,7 +368,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_route_generation_strategy_schema_locks_unavailable_sticker_stages(self) -> None:
         manager = _FakeManager(
             [
-                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_lowvram_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"wan2gp_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
             ]
         )
         engine = LLMPromptEngine(mode="llm", manager=manager)
@@ -357,7 +382,7 @@ class LLMEngineTests(unittest.TestCase):
                 "text2img": {"image_workflow_name": ["nova_model_plus_z_image_anime"]},
                 "sticker_pack": {
                     "image_workflow_name": ["nova-anime-xl", "nova_model_plus_z_image_anime"],
-                    "video_workflow_name": ["minimax_h3_lowvram_i2v"],
+                    "video_workflow_name": ["wan2gp_h3_i2va"],
                 },
             },
             count_policies={
@@ -396,7 +421,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"minimax_h3_lowvram_i2v","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
+                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"wan2gp_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
                 ]
             ),
         )
@@ -409,7 +434,7 @@ class LLMEngineTests(unittest.TestCase):
             workflow_stage_candidates={
                 "text2image2video": {
                     "image_workflow_name": ["anima_anime"],
-                    "video_workflow_name": ["minimax_h3_lowvram_i2v"],
+                    "video_workflow_name": ["wan2gp_h3_i2va"],
                 }
             },
             count_policies={
@@ -504,8 +529,8 @@ class LLMEngineTests(unittest.TestCase):
             self.assertEqual(result["source"], "autonomous_llm")
             self.assertEqual(result["prompt_mode"], "llm")
             user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-            self.assertIn("main documented event or impact as the story anchor", user_prompt)
-            self.assertIn("a loose pun or shared keyword is not a substitute", user_prompt)
+            self.assertIn("Anchor the story in the article's main documented event or impact", user_prompt)
+            self.assertIn("Carry that anchor through the scenario", user_prompt)
             call_files = list((Path(temp_dir) / "autonomous-scene" / "llm").glob("*.json"))
             self.assertEqual(len(call_files), 1)
             call = json.loads(call_files[0].read_text(encoding="utf-8"))
@@ -619,9 +644,34 @@ class LLMEngineTests(unittest.TestCase):
             negative_prompt="bad anatomy",
         )
 
+        self.assertIn("segment llm prompt", result["prompt"])
         self.assertEqual(result["prompt"], "segment llm prompt")
         self.assertEqual(result["narration"], "segment llm narration")
         self.assertEqual(result["prompt_mode"], "llm")
+
+    def test_user_given_video_segment_has_directing_fields_when_prepared_then_camera_and_result_reach_render_prompt(self) -> None:
+        """User: Given a video segment has a camera move and visible result, When its render prompt is prepared, Then the prompt retains those shot-specific directions."""
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager(
+                ['{"prompt":"The hero leans, hops, and lands beyond the puddle, then blinks with delight. The camera tracks alongside the hop.","narration":"over the puddle"}']
+            ),
+        )
+        goal = GoalRequest(prompt="a character hops over a puddle", media_type="long_video", style="storybook")
+        segment = {
+            "segment_id": "segment-1",
+            "visual": "the hero hops over a puddle",
+            "action": "leans, hops, and lands beyond the puddle",
+            "cause": "the umbrella catches a gust",
+            "effect": "the hero lands safely and blinks with delight",
+            "camera": "start wide, track alongside the hop, end with the puddle behind",
+        }
+
+        result = engine.prepare_segment(goal, segment, negative_prompt="")
+
+        self.assertIn("leans, hops, and lands beyond the puddle", result["prompt"])
+        self.assertIn("tracks alongside the hop", result["prompt"])
+        self.assertIn("blinks with delight", result["prompt"])
 
     def test_refine_prompt_from_review_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(

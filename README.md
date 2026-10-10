@@ -1,5 +1,8 @@
 # MediaOverload
 
+H3 影片生成已改為 **Powered by WanGP**：文生影、首幀、首尾幀、尾幀、參考圖／影片共五種策略。Krea 生圖維持 ComfyUI。設定與實測見 [WanGP H3 workflows](docs/wan2gp_h3.md)。
+
+
 ## CI 與本機 E2E 的分工
 
 CI（Continuous Integration，持續整合）是每次 push 或 pull request 自動執行的基本品質防線。Hosted CI 執行可重現的 unit/contract tests 與 Python compile；需要真實 DB、LLM、ComfyUI 或 GPU 的測試會標記為 `integration`，不會在 hosted PR runner 上假裝通過。Hosted CI 會驗證 integration suite 可被發現，正式整合則由受保護的 Formal Integration workflow 執行。

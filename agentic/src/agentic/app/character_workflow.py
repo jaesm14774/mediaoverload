@@ -962,7 +962,6 @@ def build_goal_payload_from_character_config(
         "canvas_height": int(canvas_profile["height"]),
         "visual_style_profile": style_profile,
         "seed": int(requested_seed) if requested_seed is not None else None,
-        "h3_profile": str(generation.get("h3_profile") or "balanced-lowvram"),
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
         "video_speed": video_speed,
         "story_card_page_count": str(
@@ -993,22 +992,7 @@ def build_goal_payload_from_character_config(
             native_reference_candidate_count
         ),
         "auto_reference_generation": auto_reference_generation,
-        "native_h3_model_profile": str(
-            native_recipe.get("model_profile")
-            or generation.get("model_profile")
-            or (
-                "q2"
-                if (
-                    config_generation_type.startswith("native_h3_")
-                    or config_generation_type == "text2image2native_h3_ref2va"
-                )
-                and str(generation.get("h3_profile") or "balanced-lowvram").strip().lower() == "balanced-lowvram"
-                else {"ultra-lowvram": "q2", "native-quality": "native"}.get(
-                    str(generation.get("h3_profile") or "balanced-lowvram").strip().lower(),
-                    "q4",
-                )
-            )
-        ),
+        "native_h3_model_profile": str(native_recipe.get("model_profile") or generation.get("model_profile") or "q4"),
         "hashtags": hashtags,
         "platforms": list(platform_configs.keys()),
         "platform_configs": platform_configs,
@@ -2606,44 +2590,7 @@ def _collect_workflow_stage_candidates(
             if resolved:
                 workflow_stage_candidates.setdefault(generation_type, {})[stage_key] = resolved
         workflow_stage_candidates.setdefault(generation_type, {})
-    _prioritize_h3_profile(repo_root, generation, workflow_stage_candidates, generation_type_candidates)
     return workflow_stage_candidates
-
-
-def _prioritize_h3_profile(
-    repo_root: Path,
-    generation: dict[str, Any],
-    workflow_stage_candidates: dict[str, dict[str, list[str]]],
-    generation_type_candidates: list[str],
-) -> None:
-    profile_to_slug = {
-        "balanced-lowvram": "lowvram",
-        "ultra-lowvram": "lowvram",
-        "native-quality": "native",
-    }
-    profile = str(generation.get("h3_profile") or "balanced-lowvram").strip().lower()
-    slug = profile_to_slug.get(profile, profile_to_slug["balanced-lowvram"])
-    for generation_type in generation_type_candidates:
-        if generation_type not in {"text2video", "text2image2video", "text2longvideo", "native_h3_story", "native_h3_t2v_story", "native_h3_fl2va_story", "native_h3_l2va_story", "native_h3_ref2va", "text2image2native_h3_ref2va", "sticker_pack", "game_sprite"}:
-            continue
-        if generation_type in {"text2video", "native_h3_t2v_story"}:
-            suffix = "t2v"
-        elif generation_type in {"native_h3_story", "native_h3_fl2va_story", "native_h3_l2va_story"}:
-            suffix = "15s_fl2va_i2v"
-        elif generation_type in {"native_h3_ref2va", "text2image2native_h3_ref2va"}:
-            continue
-        elif generation_type == "text2longvideo":
-            suffix = "i2v"
-        else:
-            suffix = "i2v"
-        preferred = f"minimax_h3_{slug}_{suffix}"
-        workflow_path = repo_root / "configs" / "workflow" / f"{preferred}.json"
-        if not workflow_path.exists():
-            continue
-        stage_candidates = workflow_stage_candidates.setdefault(generation_type, {})
-        candidates = list(stage_candidates.get("video_workflow_name", []))
-        candidates = [candidate for candidate in candidates if candidate != preferred]
-        stage_candidates["video_workflow_name"] = [preferred, *candidates]
 
 
 def _collect_count_policies(

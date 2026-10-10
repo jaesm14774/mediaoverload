@@ -98,17 +98,12 @@ class AgenticComfyCommunicator:
             return json.loads(response.read())
 
     def free_memory(self) -> None:
-        """Ask ComfyUI to unload cached models between sequential jobs.
+        """Release cached models explicitly during image OOM recovery.
 
-        A long-video run queues several H3 generations in one process. On an
-        8GB GPU, the previous H3 graph can remain cached after its output is
-        saved, leaving too little VRAM for the next segment. ComfyUI exposes
-        ``/free`` for this exact lifecycle boundary. Failure to free is
-        intentionally non-fatal because older ComfyUI builds may not expose
-        the endpoint.
+        Successful images retain their model cache. WanGP owns the release
+        at the image-to-video boundary. Cleanup failure must not hide the
+        original generation error.
         """
-        if os.environ.get("COMFYUI_FREE_MEMORY_AFTER_GENERATION", "true").strip().lower() in {"0", "false", "no", "off"}:
-            return
         payload = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
         req = request.Request(
             f"http://{self.server_address}/free",
@@ -337,16 +332,9 @@ class AgenticComfyCommunicator:
                         str(matching_nodes[node_index]["id"]),
                         dict(update.get("inputs", {})),
                     )
-            # Image and H3 video jobs use different large model graphs. Clear
-            # ComfyUI's cached models before each queue boundary so a prior
-            # keyframe cannot consume the VRAM required by the next video
-            # segment on an 8GB GPU.
-            self.free_memory()
             prompt_id = str(self.queue_prompt(workflow_copy)["prompt_id"])
             self.wait_for_completion(prompt_id)
-            result = self.save_results(prompt_id, output_path, file_name)
-            self.free_memory()
-            return result
+            return self.save_results(prompt_id, output_path, file_name)
         except Exception as exc:
             if prompt_id:
                 self.cancel_prompt(prompt_id)

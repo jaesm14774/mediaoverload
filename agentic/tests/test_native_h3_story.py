@@ -12,7 +12,6 @@ from agentic.app.main import build_runtime
 from agentic.runtime.llm_engine import LLMPromptEngine, PromptGenerationError
 from agentic.runtime.model_backends import OpenRouterModelCatalog
 from agentic.runtime.contracts import RunState
-from agentic.runtime.prompting import LONG_VIDEO_SYSTEM_PROMPT
 from agentic.skills.agent_primitives import AgentMediaSkills
 from agentic.skills.longvideo import LongVideoSkills
 from agentic.storyboard import (
@@ -56,7 +55,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(goal.media_type, "native_h3_story")
         self.assertEqual(goal.duration_seconds, 15)
-        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_15s_fl2va_i2v")
+        self.assertEqual(plan.workflow_name, "wan2gp_h3_i2va")
         node_ids = [node.node_id for node in plan.nodes]
         expected_node_ids = [
             "native-story-prompt",
@@ -102,7 +101,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
         self.assertEqual(qa.inputs["mode"], "discord_review_evidence_only")
         self.assertEqual(qa.inputs["video_node"], "native-h3-canvas" if "native-h3-canvas" in node_ids else "native-h3-speed")
-        self.assertEqual(qa.inputs["target_duration"], 7.5)
+        self.assertAlmostEqual(qa.inputs["target_duration"], render.inputs["length"] / 24 / 2)
         self.assertEqual(qa.inputs["expected_fps"], 24.0)
         self.assertIsNone(qa.tool_name)
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
@@ -122,7 +121,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native_h3_use_last_frame": True,
             "native_h3_keyframe_candidate_count": 1,
             "native_h3_keyframe_workflow_name": "krea2_turbo",
-            "workflow_name": "minimax_h3_lowvram_15s_fl2va_i2v",
+            "workflow_name": "wan2gp_h3_fl2va",
             "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
             "require_human_review": False,
             "enable_review_loop": False,
@@ -364,7 +363,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("warm star meadow", opening_prompt)
         self.assertIn("one plain blank instruction card", opening_prompt)
         self.assertNotIn("gemstone", opening_prompt.casefold())
-        self.assertIn("Google says existing Gems", str(result.outputs["prompt"]))
+        self.assertNotIn("Google says existing Gems", str(result.outputs["prompt"]))
+        self.assertIn("Google automatically migrates the saved instructions", str(result.outputs["prompt"]))
         self.assertNotIn("Google says existing Gems", opening_prompt)
         self.assertIn("one storybook still", opening_prompt.lower())
         self.assertNotIn("changes into callable form", opening_prompt)
@@ -376,13 +376,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(ending_prompt.count("News visual cue:"), 1)
         self.assertNotIn("gold Skill star", ending_prompt)
 
-    def test_native_h3_workflow_manifest_has_runtime_prompt_placeholder(self) -> None:
-        workflow_path = self.repo_root / "configs" / "workflow" / "minimax_h3_lowvram_15s_fl2va_i2v.json"
+    def test_user_given_h3_template_when_loaded_then_prompt_comes_from_the_current_story(self) -> None:
+        """User Given a WanGP H3 template When loaded Then it contains no stale example scene prompt."""
+        workflow_path = self.repo_root / "configs" / "workflow" / "wan2gp_h3_fl2va.json"
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        prompt = str(workflow["5"]["inputs"]["prompt"])
-
-        self.assertIn("runtime prompt placeholder", prompt.lower())
-        self.assertNotIn("golden star seed", prompt.lower())
+        self.assertEqual(workflow["provider"], "wan2gp")
+        self.assertNotIn("prompt", workflow)
 
     def test_human_selected_opening_frame_is_immutable(self) -> None:
         class FakeTools:
@@ -427,19 +426,23 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(result.outputs["identity_check"], "not_applied")
 
     def test_user_given_creative_direction_when_native_prompt_is_formatted_then_current_h3_brief_and_duration_are_preserved(self) -> None:
-        """User Given a creative direction When the current Native H3 prompt is formatted Then its variation, duration, and render instructions are preserved."""
+        """User Given a scene based on creative direction, When the Native H3 prompt is formatted, Then scene and duration remain without writing instructions."""
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
+        storyboard["native_shots"] = [{"action": "Kirby runs through a blue-hour summer storm.", "camera": "The camera tracks beside Kirby."}]
         prompt = format_native_h3_prompt(
             storyboard,
             creative_brief="a blue-hour summer storm",
             duration_seconds=15,
         )
-        self.assertIn("Creative variation for this run", prompt)
+        self.assertIn("Kirby runs through a blue-hour summer storm", prompt)
+        self.assertIn("camera tracks beside Kirby", prompt)
         self.assertIn("Duration: 15 seconds.", prompt)
         self.assertNotIn("contract", prompt.lower())
-        self.assertIn("Follow the supplied creative brief and requested style.", prompt)
+        self.assertNotIn("Creative variation for this run", prompt)
+        self.assertNotIn("Follow the supplied creative brief", prompt)
 
     def test_user_given_comedy_card_when_native_prompt_is_formatted_then_character_specific_beats_reach_video_prompt(self) -> None:
+        """User Given a comedy card and its final shot description, When formatted, Then H3 receives the visible gag while the editorial card stays in the story record."""
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["gag_card"] = {
             "character_signature": "Kirby inhales and copies the cushion's bounce.",
@@ -451,17 +454,23 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "surprising_harmless_reversal": "The cushion reverses its bounce and hugs Kirby.",
             "held_expressive_reaction": "Kirby freezes wide-eyed, then puffs his cheeks.",
         }
+        storyboard["native_shots"] = [{
+            "action": "The cushion reverses its bounce and hugs Kirby. Kirby freezes wide-eyed, then puffs his cheeks.",
+            "camera": "A close view holds on Kirby's face.",
+        }]
 
         prompt = format_native_h3_prompt(storyboard, duration_seconds=15)
 
-        self.assertIn("Comic staging card", prompt)
-        self.assertIn("Character signature: Kirby inhales and copies the cushion's bounce", prompt)
-        self.assertIn("Prop rule: The cushion springs away whenever Kirby lands on it", prompt)
-        self.assertIn("Surprising reversal: The cushion reverses its bounce and hugs Kirby", prompt)
+        self.assertIn("The cushion reverses its bounce and hugs Kirby", prompt)
+        self.assertIn("Kirby freezes wide-eyed, then puffs his cheeks", prompt)
+        self.assertIn("close view holds on Kirby's face", prompt)
+        self.assertNotIn("Comic staging card", prompt)
+        self.assertNotIn("Prop rule:", prompt)
+        self.assertEqual(storyboard["gag_card"]["prop_rule"], "The cushion springs away whenever Kirby lands on it")
         self.assertNotIn("contract", prompt.lower())
 
     def test_user_given_generated_world_without_continuity_when_story_is_merged_then_base_rules_are_preserved(self) -> None:
-        """User: Given the generated world omits continuity rules, When its story is merged, Then the base rules remain available to rendering."""
+        """User Given a generated world without continuity rules, When merged, Then the rules remain in the story record while H3 receives the actual scene."""
         base_storyboard = {
             "native_duration_seconds": 15,
             "base_prompt": "Kirby follows a firefly.",
@@ -483,7 +492,9 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             ["Keep the same garden path throughout."],
         )
         prompt = format_native_h3_prompt(merged)
-        self.assertIn("same garden path throughout", prompt.lower())
+        self.assertNotIn("same garden path throughout", prompt.lower())
+        self.assertIn("Kirby follows a firefly along the path", prompt)
+        self.assertIn("moonlit garden", prompt)
         self.assertEqual(
             base_storyboard["world"]["continuity_rules"],
             ["Keep the same garden path throughout."],
@@ -582,18 +593,23 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(goal.media_type, "native_h3_t2v_story")
         self.assertEqual(goal.duration_seconds, 15)
-        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_t2v")
+        self.assertEqual(plan.workflow_name, "wan2gp_h3_t2va")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-        self.assertEqual(render.tool_name, "comfy.workflow.text_to_video")
+        self.assertEqual(render.tool_name, "wan2gp.render_h3")
         self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
         self.assertEqual(plan.metadata["native_h3"]["length"], 362)
-        self.assertTrue(plan.metadata["native_h3"]["lowvram_preview"])
+        self.assertEqual(plan.metadata["native_h3"]["backend"], "wan2gp")
         self.assertEqual(plan.metadata["native_h3"]["steps"], 16)
         self.assertNotIn("native-opening-keyframe", [node.node_id for node in plan.nodes])
         self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
 
-    def test_native_prompt_preserves_the_complete_creative_brief(self) -> None:
+    def test_user_given_described_scene_when_native_prompt_is_formatted_then_action_and_camera_are_preserved(self) -> None:
+        """User Given a final scene description, When the native prompt is formatted, Then its action and camera remain without appending a separate creative brief."""
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
+        storyboard["native_shots"] = [{
+            "action": "Kirby floats through a digital archive, inhales red shards, and transforms them into stars.",
+            "camera": "The camera performs an orbital rotation in a 3D void.",
+        }]
         prompt = format_native_h3_prompt(
             storyboard,
             creative_brief=(
@@ -671,7 +687,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("golden star seed", prompt.lower())
         self.assertNotIn("dark sky rift", prompt.lower())
 
-    def test_native_h3_render_prompt_keeps_source_context_without_a_mechanism_contract(self) -> None:
+    def test_user_given_source_context_when_native_prompt_is_formatted_then_only_described_scene_reaches_h3(self) -> None:
+        """User Given source context and a final scene, When formatted, Then H3 receives the described action rather than source explanations or role mappings."""
         storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         storyboard["news_trace"] = {
             "visual_translation": "A city blackout closes a canal path.",
@@ -682,15 +699,15 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "source_roles": ["Kirby: redirects the beam to reopen the path"],
             "character_mapping": {"Kirby": "the person who clears the path"},
         }
+        storyboard["native_shots"] = [{"action": "Kirby redirects the lantern beam and reopens the canal path.", "camera": "The camera follows the beam toward the path."}]
         prompt = format_native_h3_prompt(storyboard, duration_seconds=15)
-        self.assertIn("News grounding context", prompt)
-        self.assertIn("Kirby: redirects the beam", prompt)
-        self.assertIn("character role mapping={\"Kirby\": \"the person who clears the path\"}", prompt)
-        self.assertIn("Preserve who did what to whom", prompt)
-        self.assertIn("Additional source context", prompt)
-        self.assertIn("synchronized lights shut down", prompt)
-        self.assertNotIn("Optional source context", prompt)
-        self.assertNotIn("News mechanism contract", prompt)
+        self.assertIn("Kirby redirects the lantern beam and reopens the canal path", prompt)
+        self.assertIn("camera follows the beam", prompt)
+        self.assertNotIn("News grounding context", prompt)
+        self.assertNotIn("character role mapping", prompt)
+        self.assertNotIn("Preserve who did what to whom", prompt)
+        self.assertNotIn("Additional source context", prompt)
+        self.assertEqual(storyboard["news_trace"]["news_mechanism"], "synchronized lights shut down and block the route")
 
     def test_user_given_readable_text_visual_when_native_h3_story_is_generated_then_story_is_not_rejected(self) -> None:
         """User: Given a story mentions a readable document, When Native H3 prepares its render data, Then that creative detail does not block generation."""
@@ -1288,14 +1305,13 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "Kirby reacts with relieved surprise when the same saved instructions appear in the Skills format.",
         )
         render_prompt = format_native_h3_prompt(merged, duration_seconds=15)
-        self.assertIn("Users can keep calling the converted task instructions.", render_prompt)
-        self.assertIn("\nNews grounding context:", render_prompt)
-        self.assertIn("\nAdditional source context:", render_prompt)
-        self.assertIn("mechanism: the same instruction card remains as the instructions migrate", render_prompt)
+        self.assertIn(merged["native_shots"][0]["action"], render_prompt)
+        self.assertNotIn("\nNews grounding context:", render_prompt)
+        self.assertNotIn("\nAdditional source context:", render_prompt)
         self.assertIn("Cause: The scheduled system migration updates the instructions without being triggered by Kirby.", render_prompt)
 
     def test_user_given_news_gag_when_story_is_formatted_then_physical_cause_and_full_payoff_reach_video_prompt(self) -> None:
-        """User Given a character-led news gag When its story is formatted Then the renderer receives the physical cause, desire, setback, and reversal needed to stage it."""
+        """User Given a character-led news gag, When formatted, Then H3 receives the final shots' cause, setback and payoff without the editorial staging card."""
         base_storyboard = load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml")
         merged = merge_native_h3_storyboard(
             base_storyboard,
@@ -1368,11 +1384,11 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         prompt = format_native_h3_prompt(merged, duration_seconds=15)
 
         self.assertIn("Cause: The article's correction reveals that the saved instructions continue under the Skills name.", prompt)
-        self.assertIn("Kirby wants to give the saved instructions a proper goodbye", prompt)
-        self.assertIn("same card remains available as Google migrates the saved instructions automatically", prompt)
-        self.assertIn("Physical escalation: Kirby begins a solemn little farewell wave", prompt)
+        self.assertIn("Kirby starts a solemn farewell wave", prompt)
         self.assertIn("stops the farewell mid-wave", prompt)
-        self.assertIn("Surprising reversal: The same card is still present in the new format", prompt)
+        self.assertIn("hold a clear shared relief pose", prompt)
+        self.assertNotIn("Physical escalation:", prompt)
+        self.assertNotIn("Surprising reversal:", prompt)
 
     def test_native_h3_negative_visual_constraints_do_not_erase_creative_brief(self) -> None:
         brief = (
@@ -1384,13 +1400,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertIn("compact causal story", sanitized)
         self.assertIn("Do not show readable interfaces", sanitized)
-
-    def test_shared_video_system_prompt_does_not_downgrade_news_grounding(self) -> None:
-        self.assertIn("news-grounded", LONG_VIDEO_SYSTEM_PROMPT)
-        self.assertIn("causal story", LONG_VIDEO_SYSTEM_PROMPT)
-        self.assertIn("factual boundaries", LONG_VIDEO_SYSTEM_PROMPT)
-        self.assertIn("do not merge events from separate places", LONG_VIDEO_SYSTEM_PROMPT)
-        self.assertNotIn("use it only as inspiration for visual motifs", LONG_VIDEO_SYSTEM_PROMPT)
 
     def test_native_h3_story_does_not_fallback_when_llm_is_unavailable(self) -> None:
         engine = LLMPromptEngine(mode="llm", manager=None)

@@ -7,12 +7,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile, minimax_h3_model_overrides
+from agentic.assets.minimax_h3 import download_profile, get_profile, inspect_profile
 from agentic.assets.registry import AssetRegistry
-from agentic.app.character_workflow import _prioritize_h3_profile
 from agentic.minimax_prompting import compose_minimax_h3_prompt, subject_reference
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.prompting import build_minimax_h3_prompt
 
 
 class MiniMaxH3ProfileTests(unittest.TestCase):
@@ -47,17 +45,6 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
             self.assertEqual(len(result["assets"]), 4)
             self.assertFalse(any(root.rglob("*.gguf")))
 
-    def test_ref2va_model_profile_switches_loaders_without_second_workflow(self) -> None:
-        q4 = minimax_h3_model_overrides("q4", reference_to_video=True)
-        self.assertEqual(q4["1"]["class_type"], "UnetLoaderGGUF")
-        self.assertEqual(q4["1"]["inputs"]["unet_name"], "MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf")
-        q2 = minimax_h3_model_overrides("q2")
-        self.assertEqual(q2["2"]["class_type"], "CLIPLoaderGGUF")
-        self.assertEqual(q2["2"]["inputs"]["clip_name"], "qwen3vl-32B-MiniMax-H3-Q2_K.gguf")
-        native = minimax_h3_model_overrides("native", reference_to_video=True)
-        self.assertEqual(native["1"]["class_type"], "UNETLoader")
-        self.assertEqual(native["1"]["inputs"]["unet_name"], "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
-        self.assertEqual(native["2"]["class_type"], "CLIPLoader")
 
     def test_partial_file_is_reported_as_corrupt_or_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -70,66 +57,23 @@ class MiniMaxH3ProfileTests(unittest.TestCase):
             self.assertFalse(result["ready"])
             self.assertEqual(result["assets"][0]["status"], "corrupt")
 
-    def test_registry_materializes_h3_manifest_and_validates_graph(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
-        registry = AssetRegistry(repo_root / "agentic", asset_root=repo_root)
-        manifest = registry.get_manifest("minimax_h3_lowvram_i2v")
-        self.assertEqual(len(manifest.required_assets), 4)
-        self.assertEqual(manifest.recommended_defaults["width"], 608)
-        validation = registry.validate_workflow("minimax_h3_lowvram_i2v")
-        self.assertTrue(validation["valid"], validation)
-        workflow = json.loads(Path(validation["workflow_path"]).read_text(encoding="utf-8"))
-        self.assertEqual(workflow["5"]["class_type"], "MiniMaxH3ImageToVideo")
-        self.assertEqual(workflow["15"]["class_type"], "SaveVideo")
 
-        fl2va_manifest = registry.get_manifest("minimax_h3_lowvram_15s_fl2va_i2v")
-        self.assertEqual(fl2va_manifest.recommended_defaults["length"], 362)
-        self.assertEqual(fl2va_manifest.recommended_defaults["steps"], 16)
 
-    def test_ref2va_uses_one_canonical_workflow_file(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
-        registry = AssetRegistry(repo_root / "agentic", asset_root=repo_root)
-        self.assertEqual(
-            [manifest.name for manifest in registry.all_manifests() if "ref2va" in manifest.name],
-            ["minimax_h3_ref2va"],
-        )
-        self.assertFalse(any(manifest.name.startswith("minimax_h3_ultra_lowvram") for manifest in registry.all_manifests()))
-        self.assertFalse((repo_root / "configs" / "workflow" / "minimax_h3_ref2va_native.json").exists())
-        self.assertFalse((repo_root / "configs" / "workflow" / "comfyui").exists() and any((repo_root / "configs" / "workflow" / "comfyui").iterdir()))
 
-    def test_lowvram_graph_routes_spectrum_between_sigma_shift_and_sampler(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
-        for workflow_name in ("minimax_h3_lowvram_i2v", "minimax_h3_lowvram_t2v"):
-            workflow_path = repo_root / "configs" / "workflow" / f"{workflow_name}.json"
-            workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-            self.assertEqual(workflow["17"]["class_type"], "SpectrumApplyMiniMaxH3")
-            self.assertEqual(workflow["17"]["inputs"]["model"], ["6", 0])
-            self.assertEqual(workflow["7"]["inputs"]["model"], ["17", 0])
-            self.assertEqual(workflow["10"]["inputs"]["model"], ["17", 0])
-
-    def test_kirby_h3_profile_changes_video_candidate_priority(self) -> None:
-        repo_root = Path(__file__).resolve().parents[2]
-        candidates = {
-            "text2video": {"video_workflow_name": ["minimax_h3_lowvram_t2v", "minimax_h3_native_t2v"]},
-            "text2longvideo": {"video_workflow_name": ["minimax_h3_lowvram_t2v", "minimax_h3_lowvram_i2v"]},
-        }
-        _prioritize_h3_profile(repo_root, {"h3_profile": "ultra-lowvram"}, candidates, list(candidates))
-        self.assertEqual(candidates["text2video"]["video_workflow_name"][0], "minimax_h3_lowvram_t2v")
-        self.assertEqual(candidates["text2longvideo"]["video_workflow_name"][0], "minimax_h3_lowvram_i2v")
 
     def test_krea2_keyframe_and_identity_workflows_are_registered(self) -> None:
+        """User Given image-assisted H3 When workflows are resolved Then opening
+        and continuity recipes validate and continuity preserves source content.
+        """
         repo_root = Path(__file__).resolve().parents[2]
         registry = AssetRegistry(repo_root / "agentic", asset_root=repo_root)
         for workflow_name in ("krea2_turbo", "krea2_turbo_img2img"):
             validation = registry.validate_workflow(workflow_name)
             self.assertTrue(validation["valid"], validation)
-        krea2 = json.loads((repo_root / "configs" / "workflow" / "krea2_turbo.json").read_text(encoding="utf-8"))
-        self.assertEqual(krea2["1"]["inputs"]["unet_name"], "krea2_turbo_bf16-Q4_0.gguf")
         continuity = json.loads((repo_root / "configs" / "workflow" / "krea2_turbo_img2img.json").read_text(encoding="utf-8"))
-        self.assertEqual(continuity["9"]["inputs"]["denoise"], 0.25)
-        h3_i2v = json.loads((repo_root / "configs" / "workflow" / "minimax_h3_lowvram_i2v.json").read_text(encoding="utf-8"))
-        self.assertEqual(h3_i2v["5"]["inputs"]["first_frame"], ["16", 0])
-        self.assertEqual(h3_i2v["5"]["inputs"]["length"], 240)
+        self.assertGreater(continuity["9"]["inputs"]["denoise"], 0)
+        self.assertLess(continuity["9"]["inputs"]["denoise"], 1)
+
 
 
 
@@ -171,11 +115,11 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             prior_frame=True,
         )
         self.assertLess(len(prompt), 7000)
-        self.assertIn("integrated_multimodal_description:", prompt)
+        self.assertNotIn("Video action and camera direction:", prompt)
         self.assertIn("[Shot 1 | 0-6s]", prompt)
         self.assertLess(prompt.index("Protagonist objective:"), prompt.index("Shot progression:"))
         self.assertLess(prompt.index("Kirby runs and catches the seed"), prompt.index("tracking shot follows the run"))
-        self.assertIn("begin from the supplied first frame", prompt)
+        self.assertNotIn("Input relation:", prompt)
 
     def test_first_last_frame_prompt_carries_ending_condition(self) -> None:
         prompt = compose_minimax_h3_prompt(
@@ -185,8 +129,9 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             shots=[{"time": "0-15s", "action": "Kirby reaches the closing gate", "state_change": "the gate opens"}],
             render_mode="first_last_frame_to_video",
         )
-        self.assertIn("begin from the supplied first frame", prompt)
-        self.assertIn("supplied last-frame state", prompt)
+        self.assertIn("Kirby reaches the closing gate", prompt)
+        self.assertIn("the gate opens", prompt)
+        self.assertNotIn("Input relation:", prompt)
 
     def test_pair_prompt_lists_configured_subjects_without_interaction_rules(self) -> None:
         prompt = compose_minimax_h3_prompt(
@@ -240,12 +185,12 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             prompt.index("Kirby runs toward the falling seed"),
             prompt.index("tracking shot"),
         )
-        self.assertIn("supplied first frame", prompt)
-        self.assertIn("supplied last-frame state", prompt)
-        self.assertIn("physical cause", prompt)
-        self.assertIn("half a second", prompt)
+        self.assertIn("a flower releases a seed", prompt)
+        self.assertIn("the glowing seed surprises Kirby", prompt)
+        self.assertNotIn("Input relation:", prompt)
 
-    def test_kirby_prompt_uses_subject_reference_without_default_audio_direction(self) -> None:
+    def test_user_given_subject_scene_when_composed_then_h3_keeps_description_without_default_audio_direction(self) -> None:
+        """User Given a subject and scene, When composed for H3, Then the description remains without generic writing guidance or an invented soundtrack."""
         goal = GoalRequest(
             prompt="Kirby races through a neon night market and catches a falling star",
             media_type="long_video",
@@ -253,16 +198,16 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             style="cinematic anime",
             constraints={"character": "Kirby"},
         )
-        result = build_minimax_h3_prompt(
-            goal,
-            {"segment_id": "segment-1", "visual": "Kirby runs through a glowing market"},
-            prior_frame="frame.png",
+        prompt = compose_minimax_h3_prompt(
+            duration_seconds=goal.duration_seconds,
+            character=goal.constraints["character"],
+            style=goal.style,
+            shots=[{"action": "Kirby runs through a glowing market."}],
         )
-        self.assertIn("Character: Kirby", result["prompt"])
-        self.assertIn("Kirby", result["prompt"])
-        self.assertIn("supplied first frame", result["prompt"])
-        self.assertNotIn("Audio direction", result["prompt"])
-        self.assertEqual(result["audio_direction"], "")
+        self.assertIn("Character: Kirby", prompt)
+        self.assertIn("Kirby runs through a glowing market", prompt)
+        self.assertNotIn("Audio direction:", prompt)
+        self.assertNotIn("Video action and camera direction:", prompt)
 
 
 if __name__ == "__main__":

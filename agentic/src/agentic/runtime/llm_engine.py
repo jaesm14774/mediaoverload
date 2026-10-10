@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agentic.minimax_prompting import require_h3_prompt
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_manager_adapter import build_llm_manager
 from agentic.runtime.model_backends import _load_project_env, provider_default_model, scoped_model_sequence
@@ -34,6 +35,12 @@ from agentic.runtime.story_cards import (
     validate_story_card_evidence,
     validate_story_card_payload,
 )
+from agentic.video_directing import (
+    VIDEO_MOTION_DIRECTION,
+    VIDEO_SEGMENT_DIRECTION_FIELDS,
+    apply_video_opening_frame_direction,
+    requires_video_motion_direction,
+)
 from agentic.runtime.prompting import (
     ENGLISH_GENERATION_RESPONSE_CONTRACT,
     DYNAMIC_SPRITE_SYSTEM_PROMPT,
@@ -48,7 +55,6 @@ from agentic.runtime.prompting import (
     dynamic_sprite_source_contract,
     normalize_dynamic_sprite_beats,
     resolve_dynamic_sprite_background,
-    build_segment_prompt,
     build_goal_brief,
     include_role_description,
     news_grounding_anchor_clause,
@@ -531,11 +537,16 @@ class LLMPromptEngine:
                     f"News context JSON: {json.dumps(news_context or {}, ensure_ascii=False)}",
                     "Create a generation prompt that follows the supplied creative brief.",
                     (
-                        "This workflow is news-grounded. State the article's main documented event or impact as the story anchor, then translate one source-supported fact into a visible unmarked object or action. Carry that same anchor through the scenario; a loose pun or shared keyword is not a substitute for the reported event. Preserve location and actor boundaries, and do not invent source-specific people or events. Any added cartoon comedy must read as allegory, not a reported fact."
-                        if news_grounding_required
-                        else "If news is optional inspiration, borrow a few visual motifs without presenting invented details as facts from the article."
+                        f"Video action direction: {VIDEO_MOTION_DIRECTION}"
+                        if requires_video_motion_direction(media_type)
+                        else ""
                     ),
-                    "Do not ask follow-up questions.",
+                    (
+                        "This workflow is news-grounded. Anchor the story in the article's main documented event or impact, then turn one source-supported fact into a visible object or action. Carry that anchor through the scenario and keep each actor, location, cause, and result attached to the source. Frame added cartoon comedy as visual allegory."
+                        if news_grounding_required
+                        else "Use a few optional news motifs as visual inspiration while keeping reported facts distinct from the imagined scene."
+                    ),
+                    "Return the requested JSON directly using the supplied information.",
                     "Return JSON with keys: prompt, creative_seed, source.",
                 ]
             )
@@ -858,7 +869,7 @@ class LLMPromptEngine:
                     "Keep every shot on the selected primary news mechanism and omit later-mentioned secondary features from the visual analogy. Each shot must advance a distinct visible state or character action; do not repeat a row of characters watching the same object with only stronger adjectives. Avoid decorative glow, particles, and sparkles unless the source reports them.",
                     "Translate recommended_scene's hook, escalation, payoff, emotional_shift, and held_reaction into ordered shots without changing the article's trigger into a different kind of action or cause. Give each selected character a distinct, drawable response suited to the source stakes; active intervention is appropriate only when the fictional role and source support it. For serious public news, let posture, attention, distance, and the environment carry the response. Keep the visual thesis specific enough that it could not illustrate unrelated news; show the reported trigger, its consequence, and the planned reveal through visible cause and effect. For platform- or default-driven adoption, carry the source-owned change across a connected field of endpoints, show the reported coverage contrast in the environment, and let the character witness it rather than operate a switch. The last shot's action and state_change must describe the same held pose. Its final state_change must be directly drawable: name each character's relative position, body orientation, important limb placement, exact body-part contact, eyes and mouth expression, gaze target, and source_prop location. Replace vague endings such as 'sit in a heap' with that specific pose, and keep the final action's physical consequence consistent with it. Follow the three-quarter front camera rule so neither face disappears behind the task; keep their gaze on the partner or event instead of posing together for the viewer.",
                     "Honor recommended_scene.payoff_kind. For comedy, make one specific character habit lead to an understandable setup, a surprising but physically earned reversal, and a held reaction that completes the joke; a smile or wide eyes alone is not a punchline. For curiosity, tenderness, sadness, awe, concern, tension, solemnity, or relief, make the chosen feeling visible in a source-appropriate posture, gaze, and environment. Serious real-world stakes rule out comedy even when the selected style is cozy or playful. Never make victims, injury, death, or grief funny.",
-                    "Return world.setting as one specific drawable place and world.visual_language as a clear medium, palette, composition, and light that carry this article's chosen emotion; use the selected profile for texture, not for a preset subject, palette, or mood. The news source sets the emotional tone and visual structure. Keep the source mechanism and selected character in one integrated focal relationship, not a character portrait beside a separate news icon; use camera, depth, scale, environment, and one coherent medium to make the article-specific trigger and consequence readable without text. Do not replace a reported language or policy condition with a numeric or manual control. For high-stakes news, stage the characters as witnesses unless the source supports another role, and do not turn public danger into a harmless gag. Keep character reactions visible and avoid a sales-style product mockup. Do not omit either world field. Preserve source dates, account audience, and consequences, and label a rumor as a rumor rather than a confirmed event. If the source says the new feature is similar, do not call it identical or say all functionality is preserved. Do not infer complete feature parity from a saved-item migration or invent shutdowns, lost work, outages, guarantees, or real-world harm. Do not show a readable headline, interface, label, or logo.",
+                    "Return world.setting as one specific drawable place and world.visual_language as a clear medium and surface, palette and light, composition, and compatible motion or transition rule that carry this article's chosen emotion across every shot; use the selected profile for texture, not for a preset subject, palette, or mood. The news source sets the emotional tone and visual structure. Keep the source mechanism and selected character in one integrated focal relationship, not a character portrait beside a separate news icon; use camera, depth, scale, environment, and one coherent medium to make the article-specific trigger and consequence readable without text. Keep the character's body and expression lively when the scene's honest tone allows, while preserving the article's cause and consequence. Do not replace a reported language or policy condition with a numeric or manual control. For high-stakes news, stage the characters as witnesses unless the source supports another role, and do not turn public danger into a harmless gag. Keep character reactions visible and avoid a sales-style product mockup. Do not omit either world field. Preserve source dates, account audience, and consequences, and label a rumor as a rumor rather than a confirmed event. If the source says the new feature is similar, do not call it identical or say all functionality is preserved. Do not infer complete feature parity from a saved-item migration or invent shutdowns, lost work, outages, guarantees, or real-world harm. Do not show a readable headline, interface, label, or logo.",
                     "Return one story object with a specific visual title, required world {setting, visual_language}, story_spine, and native_shots. Each shot uses time, title, action, physical_cause, state_change, and camera. Only include gag_card for payoff_kind=comedy, with character_signature, character_desire, source_prop, prop_rule, expectation, physical_escalation, surprising_harmless_reversal, and held_expressive_reaction; omit gag_card for every other payoff_kind.",
                 ]
             )
@@ -896,11 +907,17 @@ class LLMPromptEngine:
                 [
                     "Follow the user's creative brief and selected style.",
                     "Return one story object with 3 to 5 time-ordered native_shots. Give each a concise title, visible action, physical cause, visible effect or state change, and camera direction.",
-                    "Shape the clip as a readable hook, a complication, a physical reversal or reveal, and a held payoff reaction. Keep each beat simple enough to read on a phone.",
+                    "Shape the clip as a readable hook, a complication, a physical reversal or reveal, and a brief payoff reaction. Keep each beat simple enough to read on a phone; vary the movement around the reaction so each beat is legible, and hold the resolved pose only in the final tenth of the clip.",
                     "Keep the cast, camera axis, setting, palette, linework, and props consistent across opening and ending frame anchors.",
                     "Do not add extra characters, props, or locations unless a beat needs them. Keep the selected protagonist recognizable and causally active.",
                 ]
             )
+        prompt_sections.extend(
+            [
+                f"Video action and camera direction: {VIDEO_MOTION_DIRECTION}",
+                "In every native_shots entry, action describes visible movement through a changed result and camera describes the opening framing, one decisive motivated move or intentional lock, its relation to the action, what it reveals, and the ending composition. The final shot reaches its result before a brief resolved pose in the final tenth.",
+            ]
+        )
         prompt_sections.extend(
             [
                 "Use character details as references while following the requested scene and action.",
@@ -970,7 +987,13 @@ class LLMPromptEngine:
             elif planned_news_category == "product_or_service" and planned_reuse:
                 revision_guidance.append(reuse_visual_guidance)
             revision_guidance.append(
-                "Return the revised story object only, preserving its title and world, with story_spine, news_trace, native_shots, and gag_card only when the chosen payoff_kind is comedy. Each shot uses time, title, action, physical_cause, state_change, and camera; state_change in the final shot is a simultaneous held pose, not a sequence."
+                "Return the revised story object, preserving its title and world, with story_spine, news_trace, native_shots, and gag_card when the chosen payoff_kind is comedy. Each shot uses time, title, action, physical_cause, state_change, and camera; the final state_change describes the cast's simultaneous resolved pose."
+            )
+            revision_guidance.extend(
+                [
+                    f"Video action and camera direction: {VIDEO_MOTION_DIRECTION}",
+                    "Keep the final payoff in motion until its resolution; state_change names the ending pose, which may hold only in the final tenth of the video. This timing rule overrides any instruction to hold the pose for the entire last shot.",
+                ]
             )
             revision_prompt = "\n".join(revision_guidance)
             try:
@@ -1018,9 +1041,10 @@ class LLMPromptEngine:
             if not str(world.get("visual_language") or "").strip():
                 style_language = str(style or "Expressive storybook illustration").strip()
                 world["visual_language"] = (
-                    f"{style_language} with one coherent tactile medium, an emotion-matched palette, and layered "
-                    "foreground, action space, and background; make the source mechanism part of the character's "
-                    "main visual relationship, with readable faces and physical cause-and-effect"
+                    f"{style_language} with a coherent surface and mark quality, an emotion-matched palette and "
+                    "light, layered foreground, action space, and background, plus a motion or transition rule "
+                    "that fits the medium; make the source mechanism part of the character's main visual "
+                    "relationship, with readable faces and physical cause-and-effect"
                 )
             story["world"] = world
         recommended_scene = news_plan.get("recommended_scene")
@@ -1285,6 +1309,13 @@ class LLMPromptEngine:
                     ),
                     "Return JSON with keys: creative_brief, prompt, opening_keyframe_prompt.",
                     "Follow the user's requested subject, scene, action, style, composition, and text where specified.",
+                    (
+                        "The prompt field describes the full moving action with a concrete cause, protagonist movement, visible result, and motivated camera move. "
+                        "The opening_keyframe_prompt describes one frozen instant before action: a loaded pose, a visible goal or obstacle, and a clear travel lane. "
+                        f"Video direction: {VIDEO_MOTION_DIRECTION}"
+                        if requires_video_motion_direction(goal.media_type)
+                        else ""
+                    ),
                     news_grounding_contract,
                 ]
             )
@@ -1308,11 +1339,14 @@ class LLMPromptEngine:
             fallback.update(
                 {
                     "creative_brief": str(payload.get("creative_brief") or fallback["creative_brief"]),
-                    "prompt": str(payload.get("prompt") or fallback["prompt"]),
-                    "opening_keyframe_prompt": str(
-                        payload.get("opening_keyframe_prompt")
-                        or fallback.get("opening_keyframe_prompt")
-                        or fallback["prompt"]
+                    "prompt": require_h3_prompt(payload.get("prompt")),
+                    "opening_keyframe_prompt": apply_video_opening_frame_direction(
+                        str(
+                            payload.get("opening_keyframe_prompt")
+                            or fallback.get("opening_keyframe_prompt")
+                            or fallback["prompt"]
+                        ),
+                        goal.media_type,
                     ),
                 }
             )
@@ -1368,7 +1402,7 @@ class LLMPromptEngine:
             )
             return self._mark_llm_payload(
                 {
-                    "prompt": str(payload.get("prompt") or fallback["prompt"]),
+                    "prompt": require_h3_prompt(payload.get("prompt")),
                     "negative_prompt": fallback["negative_prompt"],
                 }
             )
@@ -1408,6 +1442,34 @@ class LLMPromptEngine:
         reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
         reference_images = reference_keyframe_paths(reference_analysis)[:6]
 
+        video_story_contract = requires_video_motion_direction(goal.media_type)
+        if video_story_contract:
+            direction_field_names = ", ".join(key for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS)
+            camera_contract = (
+                "Give every segment a distinct consecutive beat and a readable start and result. "
+                "For a causal story, keep one visible goal, one obstacle, and one turn that changes the outcome; "
+                "each beat changes a visible state and causes the next, and the ending resolves or reframes the opening. "
+                "If the brief requests one action, do not invent a second problem or subplot. "
+                "The first segment begins its action within its first tenth; the final segment reaches "
+                "a clear payoff before a brief ending hold. Keep the subject's body, face, and goal readable. "
+                "When the tone supports it, include a compact anticipation, action, follow-through, and charming "
+                "reaction such as a blink, delighted glance, or proud bounce. Do not add cute business to solemn scenes. "
+                f"Each segment must include {direction_field_names}. The camera field names starting framing, one "
+                "motivated move or intentional lock, how it relates to the subject's path, what it reveals, and ending "
+                "framing. Keep camera terms distinct: pan/tilt rotates from a fixed point; dolly/truck/arc travels "
+                "through space and creates parallax; tracking/follow moves with the subject; zoom changes focal length. "
+                "Use one continuous move or a locked shot; name a separate shot if a second camera operation is needed. "
+                "Pan and tilt change camera direction, not subject distance or scale. A scale change requires a matching "
+                "camera translation, zoom, or physical subject travel, and the ending frame must follow from that move. "
+                "Keep the protagonist's expression and the visible result together at the payoff when both matter; "
+                "show the result before any close-up reaction. Keep the face and every story-critical object within "
+                "frame with clear edge margins during and after the move. If a close-up would crop the reaction or "
+                "result, stop wider or cut to a separate shot. Describe the selected style with stable visible rules "
+                "for medium and surface, palette and light, and motion or transitions; keep them consistent across shots."
+            )
+        else:
+            camera_contract = ""
+
         user_prompt = "\n".join(
             [
                 f"Goal: {goal.prompt}",
@@ -1420,6 +1482,7 @@ class LLMPromptEngine:
                 f"Segment count: {segment_count}",
                 f"News context JSON: {json.dumps(news_context, ensure_ascii=False)}",
                 reference_directive,
+                camera_contract,
                 (
                     "Keep news details consistent with the supplied source; do not present the character as a real participant in the event."
                     if has_news_source
@@ -1430,7 +1493,7 @@ class LLMPromptEngine:
                     if reference_images
                     else "No reference-video keyframes were supplied."
                 ),
-                "Return one JSON object with a segments array in the requested order. Each segment needs segment_id, visual, and narration; other descriptive fields are optional.",
+                "Return one JSON object with a segments array in the requested order. Each segment needs segment_id, visual, and narration; video segments also require action, cause, effect, and camera.",
                 "Write creative fields in natural English.",
             ]
         )
@@ -1439,6 +1502,10 @@ class LLMPromptEngine:
             "visual": {"type": "string"},
             "narration": {"type": "string"},
         }
+        segment_required = ["segment_id", "visual", "narration"]
+        if video_story_contract:
+            segment_properties.update({key: {"type": "string"} for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS})
+            segment_required.extend(key for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS)
         try:
             payload = self._chat_json_with_recorder(
                 manager,
@@ -1454,7 +1521,7 @@ class LLMPromptEngine:
                             "items": {
                                 "type": "object",
                                 "properties": segment_properties,
-                                "required": [],
+                                "required": segment_required,
                                 "additionalProperties": True,
                             },
                         }
@@ -1474,6 +1541,11 @@ class LLMPromptEngine:
                         "visual": str(item.get("visual") or fallback[index]["visual"]),
                         "narration": str(item.get("narration") or fallback[index]["narration"]),
                     }
+                    if video_story_contract:
+                        for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS:
+                            value = str(item.get(key) or "").strip()
+                            if value:
+                                normalized_item[key] = value
                     normalized.append(normalized_item)
                 while len(normalized) < segment_count:
                     fallback_item = dict(fallback[len(normalized)])
@@ -1635,17 +1707,7 @@ class LLMPromptEngine:
         previous_segment: dict[str, Any] | None = None,
         prior_frame: str | None = None,
     ) -> dict[str, Any]:
-        fallback = build_segment_prompt(goal, segment, prior_frame)
-        fallback["negative_prompt"] = negative_prompt
-        production_mode = str(
-            goal.constraints.get("longvideo_production_profile") or ""
-        ).strip().lower() == "text2longvideo"
-        try:
-            manager = self._require_manager()
-        except Exception:
-            if production_mode:
-                return fallback
-            raise
+        manager = self._require_manager()
 
         continuity_lines = [
             f"Current segment id: {segment.get('segment_id', '')}",
@@ -1656,11 +1718,16 @@ class LLMPromptEngine:
                 else ""
             ),
             f"Current segment narration: {segment.get('narration', '')}",
+            *(
+                f"Current segment {key}: {segment.get(key, '')}"
+                for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS
+                if str(segment.get(key) or "").strip()
+            ),
             f"Style: {goal.style}",
             f"Character: {goal.constraints.get('character', '')}",
             _goal_subject_instruction(goal),
             f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
-                    f"Has prior frame path: {'yes' if prior_frame else 'no'}",
+            f"Has prior frame path: {'yes' if prior_frame else 'no'}",
         ]
         if previous_segment:
             continuity_lines.extend(
@@ -1670,13 +1737,19 @@ class LLMPromptEngine:
                 ]
             )
         continuity_lines.extend(
-                [
-                    "Return JSON with keys: prompt, narration.",
-                    "Follow the user's requested scene, action, framing, style, and pacing.",
-                    "Use any supplied prior frame as visual context while following the requested scene and motion.",
-                    "Keep claims about supplied news context within the source; use its visual treatment as requested.",
-                ]
-            )
+            [
+                "Return JSON with keys: prompt, narration.",
+                "prompt must be one non-empty string containing only the final scene description for H3: "
+                "subjects and appearance, setting and visual style, visible action and result, camera movement, "
+                "and sound if needed. Incorporate the supplied shot details into that description. "
+                "Do not include nested objects, alternative prompts, explanations, analysis, markdown, "
+                "source records, or instructions about how to write a prompt. narration must be a string.",
+                f"Writing guidance (apply it to the scene; do not copy it into prompt): {VIDEO_MOTION_DIRECTION}",
+                "Follow the user's requested scene, action, framing, style, and pacing.",
+                "Use any supplied prior frame as visual context while following the requested scene and motion.",
+                "Keep claims about supplied news context within the source; use its visual treatment as requested.",
+            ]
+        )
         try:
             payload = self._chat_json_with_recorder(
                 manager,
@@ -1693,9 +1766,17 @@ class LLMPromptEngine:
                     "additionalProperties": False,
                 },
             )
-            fallback["prompt"] = str(payload.get("prompt") or fallback["prompt"])
-            fallback["narration"] = str(payload.get("narration") or fallback["narration"])
-            return self._mark_llm_payload(fallback)
+            subject_context = goal.constraints.get("subject_context")
+            result = {
+                "segment_id": segment["segment_id"],
+                "prompt": require_h3_prompt(payload.get("prompt")),
+                "narration": payload["narration"],
+                "negative_prompt": negative_prompt,
+                "subject_context": dict(subject_context) if isinstance(subject_context, dict) else {},
+            }
+            if prior_frame:
+                result["prior_frame_path"] = prior_frame
+            return self._mark_llm_payload(result)
         except Exception as exc:
             raise self._generation_error("prepare_segment", exc) from exc
 
@@ -2846,6 +2927,13 @@ class LLMPromptEngine:
             else ENGLISH_GENERATION_RESPONSE_CONTRACT
         )
         system_contract = f"{language_contract}\n\n" if language_contract else ""
+        if schema_name in {"segment_prompt", "goal_brief", "compose_prompt"}:
+            system_contract += (
+                "The prompt field must contain only the final scene description as one non-empty string. "
+                "Describe the subjects, appearance, setting, style, action, visible result, camera and optional sound. "
+                "Include no nested JSON, alternatives, markdown, analysis, explanations, source records, "
+                "or advice about writing prompts. Apply all writing guidance without copying it into prompt.\n\n"
+            )
         user_contract = f"\n\n{language_contract}" if language_contract else ""
         messages = [
             {
@@ -2887,6 +2975,17 @@ class LLMPromptEngine:
             },
         }
         first_error: Exception | None = None
+
+        def parse_response(response: str) -> Any:
+            parsed = LLMPromptEngine._parse_json(response)
+            if schema_name in {"segment_prompt", "goal_brief", "compose_prompt"}:
+                if not isinstance(parsed, dict):
+                    raise ValueError("prompt response must be an object with a scene description string.")
+                parsed["prompt"] = require_h3_prompt(parsed.get("prompt"))
+                if schema_name == "segment_prompt" and not isinstance(parsed.get("narration"), str):
+                    raise ValueError("narration must be a string, not a nested object.")
+            return parsed
+
         response: Any = None
         chat_options: dict[str, Any] = {}
         if max_retries is not None:
@@ -2924,13 +3023,13 @@ class LLMPromptEngine:
         )
         try:
             completion_options = {
-                "_response_validator": LLMPromptEngine._parse_json,
+                "_response_validator": parse_response,
                 **chat_options,
             }
             if use_response_format:
                 completion_options["response_format"] = response_format
             response = chat_model.chat_completion(messages=messages, images=images, **completion_options)
-            parsed = LLMPromptEngine._parse_json(response)
+            parsed = parse_response(response)
             if isinstance(recorder, RunRecorder) and call_path is not None:
                 recorder.complete_llm_call(
                     call_path,
@@ -2957,7 +3056,8 @@ class LLMPromptEngine:
                     "content": (
                         f"{system_prompt}\n\n"
                         f"{system_contract}"
-                        "JSON REPAIR MODE: Your previous answer did not satisfy the JSON parser. "
+                        "JSON REPAIR MODE: Your previous answer did not satisfy the response contract. "
+                        f"Validation error: {first_error}. "
                         f"Return only one complete {expected_json}"
                         + (" matching the schema" if use_response_format else " using the requested fields as a guide")
                         + ". No markdown, no code fences, "
@@ -2995,10 +3095,10 @@ class LLMPromptEngine:
                 repaired_response = chat_model.chat_completion(
                     messages=repair_messages,
                     images=images,
-                    _response_validator=LLMPromptEngine._parse_json,
+                    _response_validator=parse_response,
                     **chat_options,
                 )
-                parsed = LLMPromptEngine._parse_json(repaired_response)
+                parsed = parse_response(repaired_response)
                 if isinstance(recorder, RunRecorder) and repair_call_path is not None:
                     recorder.complete_llm_call(
                         repair_call_path,

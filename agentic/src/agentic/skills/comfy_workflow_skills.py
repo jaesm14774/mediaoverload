@@ -85,8 +85,8 @@ class ComfyWorkflowSkills:
             value = context.node.inputs.get(key)
             if value is not None:
                 payload[key] = int(value)
-        result = self.tools.call("comfy.workflow.image_to_video", payload)
-        return SkillResult(status="success", outputs=result, logs=["Rendered video from still image with ComfyUI."])
+        result = self.tools.call("wan2gp.render_h3", payload)
+        return SkillResult(status="success", outputs=result, logs=["Rendered H3 video from still image. Powered by WanGP."])
 
     def _build_run_dir(self, prompt: str, suffix: str) -> Path:
         return build_run_dir(self.output_root, prompt, suffix, default_slug="workflow", suffix_first=True)
@@ -114,4 +114,4 @@ def register_comfy_workflow_skills(skill_registry: SkillRegistry, tool_registry:
     skills = ComfyWorkflowSkills(tool_registry, output_root)
     skill_registry.register("image.refine", skills.refine_image, "Refine an image with a ComfyUI img2img workflow")
     skill_registry.register("image.upscale", skills.upscale_image, "Upscale an image with a ComfyUI workflow")
-    skill_registry.register("image.animate", skills.image_to_video, "Animate an image into a video with a ComfyUI workflow")
+    skill_registry.register("image.animate", skills.image_to_video, "Animate an image into a video. Powered by WanGP.")

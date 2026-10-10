@@ -53,11 +53,11 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("video conditioning", " ".join(descriptions["text2video"]["hard_rules"]).lower())
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2image2video"]["video_workflow_name"][0],
-            "minimax_h3_lowvram_i2v",
+            "wan2gp_h3_i2va",
         )
         self.assertEqual(
             self.routing["workflow_stage_candidates"]["text2longvideo"]["video_workflow_name"][0],
-            "minimax_h3_lowvram_i2v",
+            "wan2gp_h3_i2va",
         )
 
         stage_contracts = self.hints["workflow_stage_contracts"]
@@ -117,47 +117,24 @@ class RoutingContractTests(unittest.TestCase):
             },
         )
 
-    def test_workflow_graph_inputs_match_h3_stage_contracts(self) -> None:
-        def graph_inputs(name: str) -> dict[str, object]:
-            graph = json.loads(
-                (self.repo_root / "configs" / "workflow" / f"{name}.json").read_text(encoding="utf-8")
-            )
-            node = next(
-                node
-                for node in graph.values()
-                if node.get("class_type") in {"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"}
-            )
-            return node["inputs"]
-
-        fl2va = graph_inputs("minimax_h3_lowvram_15s_fl2va_i2v")
-        self.assertIn("first_frame", fl2va)
-        self.assertIn("last_frame", fl2va)
-
-        t2v = graph_inputs("minimax_h3_native_t2v")
-        self.assertNotIn("first_frame", t2v)
-        self.assertNotIn("last_frame", t2v)
-
-        i2v = graph_inputs("minimax_h3_lowvram_i2v")
-        self.assertIn("first_frame", i2v)
-        self.assertNotIn("last_frame", i2v)
-
-        ref2va = graph_inputs("minimax_h3_ref2va")
-        ref_node = next(
-            node
-            for node in json.loads(
-                (self.repo_root / "configs" / "workflow" / "minimax_h3_ref2va.json").read_text(encoding="utf-8")
-            ).values()
-            if node.get("class_type") == "MiniMaxH3ReferenceToVideo"
-        )
-        self.assertEqual(ref_node["class_type"], "MiniMaxH3ReferenceToVideo")
-        self.assertNotIn("ref_audios", ref2va)
+    def test_user_given_h3_strategy_when_workflow_selected_then_wangp_declares_the_required_inputs(self) -> None:
+        """User Given each H3 strategy When its workflow is selected Then WanGP declares its conditioning roles."""
+        expected = {"t2va": ("t2v", []), "i2va": ("anchor_first", ["first"]), "fl2va": ("anchor_first_last", ["first", "last"]), "l2va": ("anchor_last", ["last"]), "ref2va": ("reference_bundle", [])}
+        for mode, (recipe, anchors) in expected.items():
+            workflow = json.loads((self.repo_root / "configs/workflow" / f"wan2gp_h3_{mode}.json").read_text("utf-8"))
+            self.assertEqual(workflow["conditioning"]["provider"], "wan2gp")
+            contract = workflow["conditioning"]["recipes"][recipe]
+            self.assertEqual(contract.get("anchors", []), anchors)
+            self.assertEqual(contract["render_tool"], "wan2gp.render_h3")
+            if mode == "ref2va":
+                self.assertEqual(contract["references"], ["image", "video"])
 
     def test_automatic_routing_keeps_ref2va_available_for_candidate_generation(self) -> None:
         route_result = {
             "generation_type": "text2video",
             "workflow_plan": {
                 "image_workflow_name": "",
-                "video_workflow_name": "minimax_h3_lowvram_t2v",
+                "video_workflow_name": "wan2gp_h3_t2va",
                 "refine_workflow_name": "",
                 "transition_workflow_name": "",
                 "upscale_workflow_name": "",

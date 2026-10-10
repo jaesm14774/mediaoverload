@@ -1,0 +1,4 @@
+# Local isolated WanGP installation; WAN2GP_ROOT overrides this path.
+root: D:/Wan2GP_benchmark
+profile: 4
+attention: sage2

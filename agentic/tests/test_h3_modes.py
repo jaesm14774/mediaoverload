@@ -13,7 +13,6 @@ from agentic.app.main import build_runtime
 from agentic.runtime.contracts import RunState
 from agentic.skills.agent_primitives import AgentMediaSkills
 from agentic.skills.longvideo import LongVideoSkills
-from agentic.tools.comfy_workflow_tool import ComfyWorkflowToolset
 
 
 class H3ModePlanTests(unittest.TestCase):
@@ -61,8 +60,8 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(render.inputs["width"], plan.goal.constraints["canvas_width"])
         self.assertEqual(render.inputs["height"], plan.goal.constraints["canvas_height"])
         self.assertEqual(render.inputs["length"], 362)
-        self.assertEqual(render.inputs["model_profile"], "q2")
-        self.assertTrue(plan.metadata["native_h3"]["lowvram_preview"])
+        self.assertEqual(render.inputs["model_profile"], "q4")
+        self.assertEqual(plan.metadata["native_h3"]["backend"], "wan2gp")
         speed = next(node for node in plan.nodes if node.node_id == "native-h3-speed")
         self.assertEqual(speed.inputs["speed"], 2.0)
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
@@ -86,7 +85,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertTrue(ending.inputs["use_prior_frame"])
         self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
         self.assertTrue(render.inputs["use_last_frame"])
-        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_15s_fl2va_i2v")
+        self.assertEqual(plan.workflow_name, "wan2gp_h3_fl2va")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
 
     def test_fl2va_review_builds_six_opening_conditioned_ending_candidates(self) -> None:
@@ -122,7 +121,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(review.inputs["limit"], 4)
         reference = next(node for node in plan.nodes if node.node_id == "native-ref2va-reference-check")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-        self.assertEqual(plan.workflow_name, "minimax_h3_ref2va")
+        self.assertEqual(plan.workflow_name, "wan2gp_h3_ref2va")
         self.assertEqual(reference.skill_name, "longvideo.validate_native_h3_references")
         self.assertEqual(render.skill_name, "longvideo.render_native_h3_ref2va")
         self.assertFalse(plan.metadata["reference_audio_enabled"])
@@ -148,7 +147,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(plan.metadata["recipe"], "text2image2native_h3_ref2va")
         self.assertEqual(
             plan.metadata["selected_workflows"],
-            {"image": "krea2_turbo", "video": "minimax_h3_ref2va"},
+            {"image": "krea2_turbo", "video": "wan2gp_h3_ref2va"},
         )
 
     def test_native_t2v_stays_prompt_only_even_with_shared_review_enabled(self) -> None:
@@ -159,8 +158,8 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertNotIn("native-opening-keyframe", node_ids)
         self.assertNotIn("native-opening-review", node_ids)
         self.assertEqual(render.skill_name, "longvideo.render_native_h3_t2v")
-        self.assertEqual(render.tool_name, "comfy.workflow.text_to_video")
-        self.assertEqual(plan.workflow_name, "minimax_h3_lowvram_t2v")
+        self.assertEqual(render.tool_name, "wan2gp.render_h3")
+        self.assertEqual(plan.workflow_name, "wan2gp_h3_t2va")
         self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
 
     def test_pre_video_l2va_uses_six_candidates_and_one_approved_last_frame(self) -> None:
@@ -566,61 +565,6 @@ class H3ModePlanTests(unittest.TestCase):
             self.assertEqual(result.outputs["identity_check"], "not_applied")
             self.assertEqual(result.outputs["regenerated_count"], 0)
 
-    def test_ref2va_graph_is_empty_until_runtime_references_are_bound(self) -> None:
-        workflow_path = self.repo_root / "configs" / "workflow" / "minimax_h3_ref2va.json"
-        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-
-        self.assertEqual(workflow["31"]["class_type"], "SamplerCustomAdvanced")
-        self.assertEqual(workflow["32"]["inputs"]["samples"], ["31", 0])
-        self.assertEqual(workflow["33"]["inputs"]["samples"], ["31", 0])
-        self.assertEqual(workflow["34"]["inputs"]["images"], ["32", 0])
-        self.assertEqual(workflow["34"]["inputs"]["audio"], ["33", 0])
-        self.assertEqual(workflow["35"]["inputs"]["video"], ["34", 0])
-        self.assertFalse(any(node.get("class_type") == "LoadImage" for node in workflow.values()))
-        self.assertFalse(any(node.get("class_type") == "VHS_LoadVideoPath" for node in workflow.values()))
-        self.assertFalse(
-            any(
-                key.startswith(("ref_images.", "ref_videos.", "ref_audios.", "ref_video_audios."))
-                for key in workflow["5"]["inputs"]
-            )
-        )
-
-        toolset = ComfyWorkflowToolset.__new__(ComfyWorkflowToolset)
-        image_only = toolset._build_runtime_reference_workflow(
-            workflow,
-            [{"path": "identity.png", "type": "image"}],
-            {"width": 608, "height": 352},
-        )
-        video_only = toolset._build_runtime_reference_workflow(
-            workflow,
-            [{"path": "motion.mp4", "type": "video"}],
-            {"width": 608, "height": 352},
-        )
-        mixed = toolset._build_runtime_reference_workflow(
-            workflow,
-            [
-                {"path": "identity.png", "type": "image"},
-                {"path": "motion.mp4", "type": "video"},
-            ],
-            {"width": 608, "height": 352},
-        )
-
-        self.assertEqual(sum(node.get("class_type") == "LoadImage" for node in image_only.values()), 1)
-        self.assertEqual(sum(node.get("class_type") == "VHS_LoadVideoPath" for node in image_only.values()), 0)
-        self.assertEqual(list(image_only["5"]["inputs"]), ["clip", "vae", "audio_vae", "prompt", "width", "height", "length", "ref_image_size", "ref_images.ref_image_0"])
-        self.assertEqual(sum(node.get("class_type") == "LoadImage" for node in video_only.values()), 0)
-        self.assertEqual(sum(node.get("class_type") == "VHS_LoadVideoPath" for node in video_only.values()), 1)
-        self.assertNotIn("ref_images.ref_image_0", video_only["5"]["inputs"])
-        self.assertEqual(sum(node.get("class_type") == "LoadImage" for node in mixed.values()), 1)
-        self.assertEqual(sum(node.get("class_type") == "VHS_LoadVideoPath" for node in mixed.values()), 1)
-        self.assertEqual(mixed["5"]["inputs"]["ref_images.ref_image_0"][1], 0)
-        self.assertEqual(mixed["5"]["inputs"]["ref_videos.ref_video_0"][1], 0)
-
-        for node in workflow.values():
-            if node.get("class_type") == "LoadImage":
-                self.assertNotIn("__unused_", str(node["inputs"].get("image")))
-            if node.get("class_type") == "VHS_LoadVideoPath":
-                self.assertNotIn("__unused_", str(node["inputs"].get("video")))
 
 
 if __name__ == "__main__":
