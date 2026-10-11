@@ -124,6 +124,14 @@ generation:
           avoid: decorative food props, crumbs, utensils, generic product renders, and unreadable clutter
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: krea2_turbo_img2img
+  motion_comic:
+    duration_seconds: 9
+    width: 576
+    height: 1024
+    fps: 24
+    image_width: 1024
+    image_height: 768
+    steps: 8
   # Writing-first Traditional-Chinese story cards. Every page is generated
   # independently from one shared visual contract before Pillow places text.
   story_card:
@@ -261,7 +269,7 @@ generation:
   generation_type_weights:
     text2img: 1
     text2image2video: 1
-    text2longvideo: 2
+    text2longvideo: 1
     native_h3_story: 1
     native_h3_t2v_story: 1
     native_h3_fl2va_story: 1
@@ -270,6 +278,7 @@ generation:
     text2image2native_h3_ref2va: 1
     sticker_pack: 2
     story_card: 1
+    motion_comic: 2
     game_sprite: 3
 
 social_media:

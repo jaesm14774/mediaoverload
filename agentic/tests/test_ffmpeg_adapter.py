@@ -6,6 +6,7 @@ acceptance; each must inspect the adapter's actual output.
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -21,8 +22,14 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def source_factory(tmp_path):
-    def create(*, audio=True):
+    def create(*, audio=True, changing=False, variable_timing=False):
         target = tmp_path / ("with_audio.mp4" if audio else "silent.mp4")
+        source_filter = (
+            "testsrc2=size=160x96:rate=24:duration=2" if changing else
+            "color=c=green:size=160x96:rate=24:duration=2,drawbox=x=10:y=10:w=20:h=20:color=red:t=fill:enable='lt(t,1)'"
+        )
+        if variable_timing:
+            source_filter += ",setpts='if(lt(N,12),N/(24*TB),(0.5+(N-12)/12)/TB)'"
         command = [
             "ffmpeg",
             "-v",
@@ -31,7 +38,7 @@ def source_factory(tmp_path):
             "-f",
             "lavfi",
             "-i",
-            "color=c=green:size=160x96:rate=24:duration=2,drawbox=x=10:y=10:w=20:h=20:color=red:t=fill:enable='lt(t,1)'",
+            source_filter,
         ]
         if audio:
             command.extend(
@@ -42,11 +49,89 @@ def source_factory(tmp_path):
         )
         if audio:
             command.extend(["-c:a", "aac", "-ac", "2"])
+        if variable_timing:
+            command.extend(["-vsync", "vfr"])
         command.append(str(target))
         subprocess.run(command, check=True, capture_output=True)
         return target
 
     return create
+
+
+@pytest.mark.parametrize("variable_timing", [False, True])
+def test_user_given_fixed_sample_times_when_extracting_a_batch_then_pixels_match_individual_samples(
+    source_factory, tmp_path, variable_timing,
+):
+    """User Given fixed video and timestamps When extracting a batch Then each frame matches the individual sample pixels."""
+    source = source_factory(audio=False, changing=True, variable_timing=variable_timing)
+    adapter = FFmpegAdapter()
+    timestamps = [0.0, 0.137, 0.137, 0.75, 1.001, 1.875]
+    outputs = [str(tmp_path / f"batch-{index}.png") for index in range(len(timestamps))]
+    result = adapter.extract_frames_at(str(source), outputs, timestamps)
+    assert result == outputs
+    for index, timestamp in enumerate(timestamps):
+        individual = tmp_path / f"individual-{index}.png"
+        adapter.extract_frame_at(str(source), str(individual), timestamp)
+        with Image.open(individual) as expected, Image.open(outputs[index]) as actual:
+            assert actual.size == expected.size
+            assert actual.convert("RGBA").tobytes() == expected.convert("RGBA").tobytes()
+
+
+@pytest.mark.parametrize("timestamps", [[-1], [float("nan")], [float("inf")]])
+def test_user_given_invalid_sample_times_when_extracting_then_no_output_is_created(tmp_path, timestamps):
+    """User Given an invalid timestamp When extracting Then the request fails without creating output."""
+    output = tmp_path / "invalid.png"
+    with pytest.raises(ValueError, match="finite.*non-negative"):
+        FFmpegAdapter().extract_frames_at("unused.mp4", [str(output)], timestamps)
+    assert not output.exists()
+
+
+def test_user_given_a_sample_beyond_the_clip_when_extracting_then_missing_frames_are_reported(
+    source_factory, tmp_path,
+):
+    """User Given a timestamp beyond the clip When extracting Then missing media fails explicitly instead of returning a stale frame."""
+    output = tmp_path / "existing.png"
+    Image.new("RGB", (4, 4), "red").save(output)
+    previous = output.read_bytes()
+    with pytest.raises(RuntimeError, match="frame"):
+        FFmpegAdapter().extract_frames_at(str(source_factory(audio=False)), [str(output)], [3.0])
+    assert output.read_bytes() == previous
+
+
+@pytest.mark.parametrize("outputs,timestamps", [([], []), (["a.png"], [0, 1]), (["a.png", "a.png"], [0, 1]), (["unused.mp4"], [0])])
+def test_user_given_an_ambiguous_batch_when_extracting_then_the_request_is_rejected(outputs, timestamps):
+    """User Given missing, duplicate or source-overwriting destinations When extracting Then the ambiguous batch is rejected."""
+    with pytest.raises(ValueError):
+        FFmpegAdapter().extract_frames_at("unused.mp4", outputs, timestamps)
+
+
+def test_user_given_a_fixed_motion_clip_when_packaging_then_the_atlas_and_animation_keep_the_sample_pixels(
+    source_factory, tmp_path,
+):
+    """User Given fixed motion media When the sprite tool packages it Then all sixteen frames and exported atlas retain the individual-sample pixels."""
+    import json
+    from agentic.runtime.registry import ToolRegistry
+    from agentic.tools.media_services import register_media_service_tools
+    from agentic.tools.sprite_adapter import SpriteAdapter
+
+    source = source_factory(audio=False, changing=True)
+    tools = ToolRegistry()
+    register_media_service_tools(tools, tmp_path)
+    result = tools.call("media.video_to_sprite", {
+        "video_path": str(source), "output_dir": str(tmp_path / "batch_sprite"),
+        "cell_width": 64, "cell_height": 64, "fps": 12,
+    })
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    samples = []
+    for index, timestamp in enumerate(manifest["sampling"]["timestamps_seconds"]):
+        path = tmp_path / f"reference-{index}.png"
+        FFmpegAdapter().extract_frame_at(str(source), str(path), timestamp)
+        samples.append(str(path))
+    reference = SpriteAdapter().build_from_frames(samples, output_dir=str(tmp_path / "reference_sprite"))
+    assert len(result["frame_paths"]) == 16
+    assert all(result["qa"]["checks"].values())
+    for key in ("atlas_path", "gif_path", "webp_path"):
+        assert Path(result[key]).read_bytes() == Path(reference[key]).read_bytes()
 
 
 @pytest.mark.parametrize("copies", [1, 2])

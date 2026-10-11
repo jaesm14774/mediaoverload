@@ -83,6 +83,7 @@ GENERATION_STRATEGIES = {
     "story_card": GenerationStrategy(
         "story_card", _IMAGE, image_only=True, news_grounded=True
     ),
+    "motion_comic": GenerationStrategy("motion_comic", _IMAGE),
 }
 CONFIG_MEDIA_TYPE_MAP = {
     name: strategy.media_type for name, strategy in GENERATION_STRATEGIES.items()

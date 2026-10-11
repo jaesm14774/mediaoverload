@@ -218,6 +218,16 @@ def _resolve_publish_prompt(
     state = generation_result.get("state") or {}
     node_outputs = state.get("node_outputs") if isinstance(state, dict) else {}
     if isinstance(node_outputs, dict):
+        comic = node_outputs.get("motion-comic-write")
+        if isinstance(comic, dict):
+            lines = [f"Comic title: {comic['title']}"]
+            for panel in comic["panels"]:
+                lines.append(
+                    f"{panel['role']}: {panel['caption']}\n"
+                    f"Visible state: {panel['visible_state']}\nCause: {panel['cause']}"
+                )
+            lines.append("Write publish copy about this rendered comic, using the contact sheet to verify visible claims.")
+            return "\n".join(lines), "motion_comic"
         native_story = node_outputs.get("native-story-prompt")
         if isinstance(native_story, dict):
             generated_storyboard = native_story.get("generated_storyboard")
@@ -243,7 +253,12 @@ def _extract_publish_visual_grounding(run_result: dict[str, Any]) -> dict[str, A
     """Expose only compact, visible-content QA evidence to caption generation."""
     state = run_result.get("state") or {}
     node_outputs = state.get("node_outputs") if isinstance(state, dict) else {}
-    qa = node_outputs.get("native-h3-qa") if isinstance(node_outputs, dict) else None
+    qa = None
+    if isinstance(node_outputs, dict):
+        for node_id in ("motion-comic-qa", "native-h3-qa"):
+            if isinstance(node_outputs.get(node_id), dict):
+                qa = node_outputs[node_id]
+                break
     contact_sheet_path = (
         str(qa.get("contact_sheet_path") or "").strip() if isinstance(qa, dict) else ""
     )
