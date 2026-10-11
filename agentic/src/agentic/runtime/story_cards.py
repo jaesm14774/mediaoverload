@@ -480,15 +480,16 @@ def resolve_story_card_font(font_path: str | None = None) -> Path:
     )
 
 
-def _font(font_path: Path, size: int) -> ImageFont.FreeTypeFont:
+def load_story_card_font(font_path: Path, size: int, *, weight: str = "Regular") -> ImageFont.FreeTypeFont:
+    """Load readable CJK text, selecting a named weight for variable fonts."""
     font = ImageFont.truetype(str(font_path), size=size)
     try:
         names = font.get_variation_names()
     except OSError:
         return font  # Static fonts have no variation instances.
-    if b"Regular" in names:
+    if weight.encode() in names:
         # NotoSansTC-VF defaults to Thin (100), which is too faint for body copy.
-        font.set_variation_by_name(b"Regular")
+        font.set_variation_by_name(weight.encode())
     return font
 
 
@@ -543,7 +544,7 @@ def _fit_body(
     min_size = max(1, min(base_size, int(min_size)))
     size_step = max(1, int(size_step))
     for size in range(base_size, min_size - 1, -size_step):
-        font = _font(font_path, size)
+        font = load_story_card_font(font_path, size)
         lines = _wrap_text(draw, text, font, max_width)
         spacing = max(6, round(size * 0.46))
         line_height = size + spacing
@@ -569,11 +570,11 @@ def _fit_title(
     min_size = max(1, min(base_size, int(min_size)))
     size_step = max(1, int(size_step))
     for size in range(base_size, min_size - 1, -size_step):
-        font = _font(font_path, size)
+        font = load_story_card_font(font_path, size)
         lines = _wrap_text(draw, text, font, max_width)
         if len(lines) <= 2 and max(_text_width(draw, line, font) for line in lines) <= max_width:
             return font, lines
-    font = _font(font_path, min_size)
+    font = load_story_card_font(font_path, min_size)
     return font, _wrap_text(draw, text, font, max_width)
 
 
@@ -642,7 +643,7 @@ def render_story_card_images(
             veil_draw.line((0, y, width, y), fill=(249, 244, 236, alpha))
         canvas = Image.alpha_composite(background, veil)
         draw = ImageDraw.Draw(canvas)
-        small_font = _font(resolved_font, max(10, round(22 * scale)))
+        small_font = load_story_card_font(resolved_font, max(10, round(22 * scale)))
         title_font, title_lines = _fit_title(
             draw,
             normalized["title"],

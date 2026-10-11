@@ -18,6 +18,7 @@ routing:
     # - text2image2image
     - sticker_pack
     - story_card
+    - motion_comic
     - game_sprite
 
   # Image-conditioned routes use a human-reviewed image gate before video
@@ -260,6 +261,9 @@ routing:
             landing settle the action.
 
   workflow_stage_candidates:
+    motion_comic:
+      image_workflow_name:
+        - krea2_turbo
     # Writing-first route. Kirby's character YAML gives it an explicit
     # generation_type_weights entry so bare CLI runs can select it.
     story_card:
@@ -390,6 +394,13 @@ routing:
         - minimax_h3_i2va
 
   count_policies:
+    motion_comic:
+      image_count:
+        min: 3
+        max: 3
+      review_selection_limit:
+        min: 1
+        max: 1
     story_card:
       image_count:
         min: 1
@@ -624,6 +635,8 @@ routing:
       reference_manifest_error_code: "Runtime status: auto_generation_available, missing_file, invalid, or empty string when validated."
       routing_policy: "native_h3_ref2va uses existing references when available; with an empty manifest it expands into the same six-candidate Discord review contract as text2image2native_h3_ref2va."
     workflow_stage_contracts:
+      motion_comic:
+        image_workflow_name: "Required text-to-image stage: one illustration for each of three LLM-authored causal beats. Exact captions and progressive-panel timing are composed by Pillow/FFmpeg; no neural video workflow or prewritten story file is required."
       story_card:
         image_workflow_name: "Required style-locked text-to-image stage for each static story page; prompts must preserve the resolved selected character while changing visual beat, expression, pose, and optional supporting cast without blocking typography."
       text2img:
@@ -717,6 +730,17 @@ routing:
         - looping motion
         - dynamic shot
     strategy_descriptions:
+      motion_comic:
+        summary: "LLM 自動規劃三格因果故事，以同一角色和場景生成三張插畫，逐格揭示並保留前格，精確繁中配字後合成直式短片；預設九秒。"
+        best_for:
+          - "角色日常、可見狀態變化、承諾落空或其他有明確收尾的社群漫畫。"
+        avoid_when:
+          - "需要連續肢體動作、原生聲音或真實事件的連續影片重現。"
+        hard_rules:
+          - "故事由本輪主題與 resolved subject 交給 LLM 規劃，不使用固定故事或角色 fallback。"
+          - "三格必須有 setup、escalation、payoff，每句文字對應可見事件，結尾回應標題。"
+          - "每格圖片不生成文字；字幕由合成器精確加入。維持角色、道具設計、場景和鏡頭一致。"
+          - "最終圖文一致性仍由既有審查確認；技術 QA 不等於故事通過。"
       story_card:
         summary: "寫作優先的 1–6 頁繁中故事字卡；多頁每頁約 36–70 字、以 42–65 字為目標，超過 70 字按意思分頁，使用當輪解析出的角色做連續動作與表情節拍，可選一名可愛配角，文字由 Pillow 精確疊字，不產生影片。"
         best_for:

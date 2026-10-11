@@ -816,6 +816,8 @@ def _native_recipe_for_generation(
 ) -> dict[str, Any]:
     if generation_type == "story_card":
         return dict(generation.get("story_card", {}) or {})
+    if generation_type == "motion_comic":
+        return dict(generation.get("motion_comic", {}) or {})
     if generation_type in NATIVE_STORY_GENERATION_TYPES:
         selected = dict(generation.get(generation_type, {}) or {})
         if selected:
@@ -868,6 +870,9 @@ def _resolve_duration_seconds(
         sprite_config = dict((generation or {}).get("game_sprite", {}) or {})
         configured_duration = int(sprite_config.get("duration_seconds", 8))
         return max(4, min(8, requested or configured_duration))
+    if config_generation_type == "motion_comic":
+        comic_config = dict((generation or {}).get("motion_comic", {}) or {})
+        return requested or int(comic_config.get("duration_seconds", 9))
     if config_generation_type != "text2longvideo":
         return requested or 30
     configured_longvideo = dict(longvideo_config or {})

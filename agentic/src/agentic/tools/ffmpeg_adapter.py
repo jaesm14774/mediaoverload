@@ -40,6 +40,50 @@ class FFmpegAdapter:
         )
         return output_path
 
+    def extract_frames_at(
+        self, video_path: str, output_paths: list[str], timestamps_seconds: list[float],
+    ) -> list[str]:
+        """Decode once and sample the same frames as independent output seeks.
+
+        Each split branch trims at its requested timestamp. Separate outputs
+        also preserve repeated samples when a short clip has few source frames.
+        Materialize only after every requested frame exists, so an EOF cannot
+        make a stale destination look like a successful extraction.
+        """
+        timestamps = [float(value) for value in timestamps_seconds]
+        if not timestamps or len(timestamps) != len(output_paths):
+            raise ValueError("Provide one output path for each requested timestamp")
+        if any(not math.isfinite(value) or value < 0 for value in timestamps):
+            raise ValueError("timestamps_seconds must be finite and non-negative")
+        destinations = [Path(path).resolve() for path in output_paths]
+        if len(set(destinations)) != len(destinations):
+            raise ValueError("Frame output paths must be distinct")
+        if Path(video_path).resolve() in destinations:
+            raise ValueError("Frame output must be different from source video")
+        self._ensure_binaries()
+        for path in destinations:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="frame_batch_", dir=destinations[0].parent) as temporary:
+            count = len(timestamps)
+            labels = "".join(f"[branch{index}]" for index in range(count))
+            filters = [f"[0:v:0]format=yuvj420p,split={count}{labels}"]
+            for index, timestamp in enumerate(timestamps):
+                filters.append(
+                    f"[branch{index}]trim=start={timestamp:.6f},setpts=PTS-STARTPTS[frame{index}]"
+                )
+            command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", video_path,
+                       "-filter_complex", ";".join(filters)]
+            staged = [Path(temporary) / f"frame-{index}.png" for index in range(count)]
+            for index, path in enumerate(staged):
+                command.extend(["-map", f"[frame{index}]", "-frames:v", "1", "-threads", "1",
+                                "-q:v", "2", "-y", str(path)])
+            self._run(command)
+            if any(not path.is_file() or path.stat().st_size == 0 for path in staged):
+                raise RuntimeError("Video did not produce every requested frame; check timestamps against its duration")
+            for source, destination in zip(staged, destinations):
+                shutil.copyfile(source, destination)
+        return output_paths
+
     def extract_frame_at(self, video_path: str, output_path: str, timestamp_seconds: float) -> str:
         """Extract one deterministic review frame at a bounded timestamp."""
 

@@ -55,6 +55,7 @@ class SpriteAdapter:
         raw_dir = root / "source_frames"
         raw_dir.mkdir(parents=True, exist_ok=True)
         frame_paths: list[str] = []
+        timestamps: list[float] = []
         frame_count = SPRITE_FRAME_COUNT
         # Sample the interior of each interval so the first and final frames
         # do not become duplicate codec boundary frames.
@@ -65,8 +66,9 @@ class SpriteAdapter:
                 duration * ((index + 0.5) / frame_count),
             )
             frame_path = raw_dir / f"source-{index + 1:02d}.png"
-            self.ffmpeg.extract_frame_at(str(source), str(frame_path), timestamp)
+            timestamps.append(timestamp)
             frame_paths.append(str(frame_path))
+        self.ffmpeg.extract_frames_at(str(source), frame_paths, timestamps)
 
         result = self.build_from_frames(
             frame_paths,
@@ -85,6 +87,7 @@ class SpriteAdapter:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["source_video"] = str(source)
         manifest["source_probe"] = probe
+        manifest["sampling"] = {"method": "interval_midpoints", "timestamps_seconds": timestamps}
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         return result
 

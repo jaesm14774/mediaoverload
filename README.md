@@ -19,7 +19,7 @@ Python 依賴只在 [agentic/pyproject.toml](agentic/pyproject.toml) 宣告；�
 | 設定 | 用途 |
 |---|---|
 | `COMFYUI_HOST`, `COMFYUI_PORT`, `COMFYUI_ROOT` | ComfyUI 連線與本機資產 |
-| `AGENTIC_LLM_MODE` | 角色流程預設 `llm`；`template` 不提供新聞故事或字卡寫作 |
+| `AGENTIC_LLM_MODE` | 角色流程預設 `llm`；`template` 不提供新聞故事、字卡或漫畫寫作 |
 | `AGENTIC_TEXT_MODEL_PROVIDER`, `AGENTIC_TEXT_MODEL` | 文字模型供應商與型號 |
 | `AGENTIC_VISION_MODEL_PROVIDER`, `AGENTIC_VISION_MODEL` | 視覺模型供應商與型號 |
 | `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` | 單次 LLM 請求逾時 |
@@ -38,6 +38,9 @@ agentic --goal "A hero catches a falling seed" --media-type image
 
 # 不需 GPU 或 LLM 的本機圖片編輯
 agentic --goal "Pan across the source image" --media-type image_sequence_edit --edit-input "D:/media/source.png" --edit-input-root "D:/media" --duration-seconds 2 --width 320 --height 320 --execute
+
+# LLM 自動寫三格故事、生成插畫並合成漫畫短片；只生成、不發布
+python run_media_interface.py --character kirby --generation-type motion_comic --prompt "只想吃一小口蛋糕，卻忍不住一直吃" --no-publish
 ```
 
 `--dry-run-publish` 只禁止社群派送，生成與 Discord 審查仍會使用外部服務。未加 `--execute` 的 `agentic` 指令只輸出計畫。排程器入口為 `scheduler/scheduler.py`；不要為了測試重啟正在執行的生成工作。
@@ -67,6 +70,8 @@ agentic --goal "Pan across the source image" --media-type image_sequence_edit --
 - [圖片提示指南](docs/image_prompt_guide.md)
 - [Story Card 編輯指南](docs/story_card_editorial_guide.md)
 - [Game Sprite 輸出契約](docs/game_sprite.md)
+- [生成策略候選與受控實驗](docs/strategy_experiments.md)
+- [自動分格漫畫與隨機策略](docs/motion_comic.md)
 - [影片參考分析](docs/reference_video_remix.md)
 
 ## 驗證

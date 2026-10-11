@@ -29,6 +29,7 @@ from agentic.runtime.planning.editing import (
     build_image_sequence_edit,
 )
 from agentic.runtime.planning.publishing import build_publish_review
+from agentic.runtime.planning.motion_comic import build_motion_comic
 
 
 PLAN_BUILDERS = {
@@ -37,6 +38,7 @@ PLAN_BUILDERS = {
     "animated_sticker": build_animated_sticker,
     "carousel": build_carousel,
     "story_card": build_story_card,
+    "motion_comic": build_motion_comic,
     "sticker_pack": build_sticker_pack,
     "text2img2img": build_text2img2img,
     "text2video": build_text2video,

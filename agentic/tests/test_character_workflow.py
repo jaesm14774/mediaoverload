@@ -1039,6 +1039,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
 
     def test_weighted_news_run_selects_strategy_before_news_content_generation(self) -> None:
+        """User Given a news request with only long-video weight When routing runs Then the selected strategy receives the news context before content generation."""
         news = NewsSelection(
             title="Taipei panda steals zongzi",
             keyword="panda",
@@ -1057,9 +1058,15 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "news_context": news.to_dict(),
             },
         ) as generate_prompt:
+            # Candidate additions must not change what this news-boundary
+            # scenario exercises through an incidental seeded random pick.
+            config = yaml.safe_load(self.kirby_config.read_text(encoding="utf-8"))
+            config["generation"]["generation_type_weights"] = {"text2longvideo": 1}
+            weighted_config = Path(temp_dir) / "kirby.yaml"
+            weighted_config.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
-                self.kirby_config,
+                weighted_config,
                 prompt="",
                 news_driven=True,
                 rng=random.Random(3),
