@@ -17,9 +17,10 @@ from agentic.runtime.prompting import (
     dynamic_sprite_source_contract,
     normalize_dynamic_sprite_beats,
     resolve_dynamic_sprite_background,
-    include_role_description,
     build_sticker_prompt,
+    include_role_description,
     selected_role_description,
+    style_profile_direction,
 )
 from agentic.runtime.llm_client import PromptClient
 
@@ -90,7 +91,14 @@ def build_sticker_prompt_set(
             "label": f"sticker_{index + 1:02d}",
             "expression": expression,
             "prompt": include_role_description(
-                build_sticker_prompt(character, expression, prompt_prefix, style),
+                ", ".join(
+                    part
+                    for part in (
+                        build_sticker_prompt(character, expression, prompt_prefix, style),
+                        style_profile_direction(goal),
+                    )
+                    if part
+                ),
                 goal,
             ),
         }
@@ -109,6 +117,7 @@ def build_sticker_prompt_set(
             ),
             f"Prompt prefix: {prompt_prefix}",
             f"Style: {style}",
+            f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Expressions JSON: {json.dumps(expressions, ensure_ascii=False)}",
             "Return a JSON object with key prompt_sets.",
             "prompt_sets must be an array where each item has keys: label, expression, prompt.",
@@ -215,6 +224,7 @@ def build_sticker_motion_prompt(
             f"Base sticker prompt: {base_prompt}",
             f"Primary expression: {selected_expression}",
             f"Style: {goal.style}",
+            f"Resolved visual style rules: {style_profile_direction(goal)}",
             "Return JSON with key: prompt.",
             "Create an animated sticker motion prompt from the user's brief.",
         ]
@@ -381,9 +391,11 @@ def build_dynamic_sprite_motion_plan(
             f"Creative request: {goal.prompt}",
             f"Subject reference: {goal.constraints.get('character') or ''}",
             f"Style: {goal.style}",
+            f"Character-only style rules: {style_profile_direction(goal)}",
             f"Reference notes (optional): {reference_context['prompt_text'] if reference_context['references'] else ''}",
             f"The render uses a {target_duration_seconds:g}-second clip sampled into a 4x4 frame atlas.",
             f"Use a flat, uniform chroma-key background {background_color} for sprite extraction.",
+            "Apply the style to the character and its materials only; keep the required chroma background flat and uniform.",
             "Return JSON with image_prompt and video_prompt. Other descriptive fields are optional.",
         )
         if part
@@ -490,6 +502,7 @@ def build_carousel_prompt_set(
                 for part in (
                     str(segment.get("visual", "")),
                     style,
+                    style_profile_direction(goal),
                 )
                 if part
             ),
@@ -513,6 +526,7 @@ def build_carousel_prompt_set(
         [
             f"Goal: {goal.prompt}",
             f"Style: {style}",
+            f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Segment count: {len(compact_segments)}",
             f"Segments JSON: {json.dumps(compact_segments, ensure_ascii=False)}",
             "Return a JSON object with key prompt_sets.",

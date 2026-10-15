@@ -57,7 +57,7 @@ def _qa(
     return tools.call("media.video_qa", inputs)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production long-video conditioning route through ComfyUI")
     parser.add_argument("--comfy-root", default=r"D:\ComfyUI_windows_portable")
     parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "longvideo_production_e2e"))
@@ -94,7 +94,7 @@ def parse_args() -> argparse.Namespace:
         help="Existing JSON news context to render deterministically instead of selecting a new item",
     )
     parser.add_argument("--news-lookback-days", type=int, default=7)
-    parser.add_argument("--news-limit", type=int, default=200)
+    parser.add_argument("--news-limit", type=int, default=5000)
     parser.add_argument(
         "--goal-prompt",
         default=(
@@ -104,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--smoke", action="store_true", help="Use a short 17-frame, 8-step render")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _load_news_context(args: argparse.Namespace, output_root: Path) -> tuple[dict[str, Any], str]:

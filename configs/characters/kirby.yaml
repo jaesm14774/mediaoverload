@@ -17,8 +17,8 @@ generation:
   subject_mode: random
   # Change subject_mode to random to use these proportional weights.
   subject_mode_weights:
-    single: 2
-    two_character_interaction: 5
+    single: 3
+    two_character_interaction: 1
   two_character_interaction:
     is_same_group: false
   # One creative profile is selected per run. The canvas selection is shared
@@ -26,7 +26,7 @@ generation:
   # editorial 4:5 layout contract below.
   creative_profile:
     canvas:
-      mode: random
+      mode: fixed
       fixed: landscape_16_9
       random_weights:
         landscape_16_9: 3
@@ -47,81 +47,7 @@ generation:
           height: 512
     style:
       mode: random
-      fixed: painterly_atmosphere
-      random_weights:
-        clean_cel_action: 2
-        painterly_atmosphere: 2
-        storybook_watercolor: 2
-        dynamic_ensemble: 2
-        graphic_color_pop: 1
-        tactile_tabletop: 1
-      profiles:
-        clean_cel_action:
-          label: clean cel-shaded action
-          prompt: >-
-            polished cel-shaded animation with confident line weight, expressive squash-and-stretch,
-            crisp shapes, and a designed background rather than an empty studio field
-          composition: >-
-            use foreground, midground, and background layers with a clear diagonal or depth cue;
-            keep the selected subject readable while the setting participates in the action
-          palette: saturated primary accents against two or three supporting colors with controlled contrast
-          motion: readable anticipation, contact, recoil, and a settled graphic pose
-          avoid: sterile white voids, sticker-only isolation, and flat icon composition
-        painterly_atmosphere:
-          label: painterly atmospheric adventure
-          prompt: >-
-            hand-painted anime background with luminous sky or water, visible brush texture,
-            atmospheric perspective, soft edge variation, and a small subject embedded in a believable world
-          composition: >-
-            build a deep landscape with a foreground framing element, a middle action plane, and a distant horizon;
-            use scale contrast without losing the character silhouette
-          palette: layered blue, teal, and warm light with reflected color and natural tonal transitions
-          motion: wind, water, drifting light, or weather should visibly respond to the main action
-          avoid: blank backgrounds, isolated cutouts, and generic gradient-only scenery
-        storybook_watercolor:
-          label: tactile storybook watercolor
-          prompt: >-
-            charming hand-painted storybook illustration with watercolor bloom, colored-pencil accents,
-            paper grain, imperfect organic edges, and warm narrative detail
-          composition: >-
-            use a full-page scene with small environmental discoveries, a readable central gesture,
-            and layered framing details that feel drawn rather than tiled
-          palette: warm cream, coral, leaf green, and sky blue with gentle pigment variation
-          motion: paper texture, cloth, leaves, crumbs, or tiny environmental reactions echo the action
-          avoid: empty cream backdrops, printed captions, copied lettering, and rigid vector geometry
-        dynamic_ensemble:
-          label: dynamic ensemble adventure
-          prompt: >-
-            energetic animated ensemble staging with the selected characters interacting inside a rich environment,
-            strong gesture drawing, overlapping silhouettes, and a sense of coordinated motion
-          composition: >-
-            stage a foreground-to-background action chain with varied scale, a diagonal camera angle,
-            and secondary configured forms that support the same physical cause and effect
-          palette: bold complementary color groups with clear subject separation and a lively horizon
-          motion: bodies, props, particles, and background layers travel along different readable paths
-          avoid: unrequested characters, clone duplicates, lineup portraits, and evenly spaced sticker rows
-        graphic_color_pop:
-          label: graphic color-pop fantasy
-          prompt: >-
-            high-energy graphic anime fantasy with saturated neon color blocks, luminous accents,
-            playful geometric shapes, controlled bloom, and a bold poster-like silhouette
-          composition: >-
-            use a strong off-center focal point, large-to-small shape rhythm, and layered glow trails
-            that lead through the frame instead of leaving unused empty space
-          palette: electric cyan, magenta, violet, and warm yellow with deliberate dark anchors
-          motion: sparks, ribbons, glow, and geometric bursts amplify the visible action and resolve cleanly
-          avoid: monochrome minimalism, random symbols, interface elements, and fake text
-        tactile_tabletop:
-          label: warm tactile miniature-world illustration
-          prompt: >-
-            richly textured miniature-world illustration with tactile handmade surfaces, warm directional light,
-            expressive small characters, and deliberate physical scale contrast
-          composition: >-
-            frame one dominant relationship across foreground, action space, and environment;
-            keep the focal action clear and leave room for the scene's emotional tone
-          palette: layered warm and cool colors with natural tonal transitions and deliberate contrast
-          motion: use restrained environmental motion that clarifies the source-linked cause and emotional tone
-          avoid: decorative food props, crumbs, utensils, generic product renders, and unreadable clutter
+      catalog: krea2
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: krea2_turbo_img2img
   motion_comic:
@@ -144,13 +70,6 @@ generation:
     height: 675
     overlay_opacity: 176
     brand_label: CHARACTER NOTE
-    # This is a group-level visual language. The resolved selected character
-    # and companions are optional visual cues for the generator.
-    visual:
-      scene_style: "warm watercolor illustration with layered scenery, visible pigment, atmospheric light, a restrained but chromatic palette, and a softly detailed environment"
-      supporting_cast:
-        - "tiny blue paper bird, triangular beak, round goggles, crooked cap, distinct from protagonist"
-        - "tiny tangerine square creature, floppy ears, tiny messenger bag, distinct from protagonist"
   # Longvideo stories are generated from the current brief/news context. A
   # static meadow preset here silently replaced unrelated news prompts.
   # Additive game asset route. It remains separate from the story, sticker,

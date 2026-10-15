@@ -89,6 +89,40 @@ class LLMEngineTests(unittest.TestCase):
         self.assertNotIn("9:16", user_prompt)
         self.assertNotIn("vertical", user_prompt.lower())
 
+    def test_user_given_selected_style_when_goal_is_expanded_then_llm_receives_its_visual_rules(
+        self,
+    ) -> None:
+        """User: Given a selected reference style,
+        When an image or video goal is expanded,
+        Then the LLM receives its medium, composition, palette, motion, and exclusions.
+        """
+        manager = _FakeManager(
+            [
+                '{"creative_brief":"brief","prompt":"finished scene","opening_keyframe_prompt":"opening"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        profile = {
+            "label": "textured-paper watercolor storybook",
+            "prompt": "watercolor pigment blooms with colored-pencil accents",
+            "composition": "one readable central gesture with breathing room",
+            "palette": "luminous blue, leaf green, cream, and coral",
+            "motion": "stable paper grain with gentle movement in water and leaves",
+            "avoid": "unrequested text, logos, and interface overlays",
+        }
+        goal = GoalRequest(
+            prompt="A paper boat reaches a safe harbor",
+            media_type="text2img2video",
+            style=profile["label"],
+            constraints={"visual_style_profile": profile},
+        )
+
+        engine.expand_goal(goal, profile["label"], [])
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        for key in ("prompt", "composition", "palette", "motion", "avoid"):
+            self.assertIn(profile[key], user_prompt)
+
     def test_expand_goal_keeps_news_events_attached_to_reported_places(self) -> None:
         manager = _FakeManager(
             [

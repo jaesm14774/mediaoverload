@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import math
+import random
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +12,7 @@ import yaml
 from agentic.app.generation_routing import _build_h3_reference_runtime_context
 from agentic.app.character_payload import build_goal_payload_from_character_config
 from agentic.assets.registry import AssetRegistry
+from agentic.runtime.route_selection import select_weighted_route
 from character_workflow_helpers import make_character_workflow_request
 
 
@@ -95,26 +98,19 @@ class RoutingContractTests(unittest.TestCase):
         ):
             self.assertEqual(self.routing["count_policies"][strategy]["image_count"], {"min": 6, "max": 6})
 
-    def test_kirby_weighted_pool_covers_all_routes_with_requested_weights(self) -> None:
+    def test_user_given_current_strategy_weights_when_routes_are_selected_then_every_enabled_strategy_is_eligible(self) -> None:
+        """User Given current character weights When a configured positive strategy is selected Then it belongs to the available pool and can be selected without requiring historical weight values."""
         config = yaml.safe_load(self.character_path.read_text(encoding="utf-8"))
-        self.assertEqual(
-            config["generation"]["generation_type_weights"],
-            {
-                "text2img": 1,
-                "text2image2video": 1,
-                "text2longvideo": 2,
-                "native_h3_story": 1,
-                "native_h3_t2v_story": 1,
-                "native_h3_fl2va_story": 1,
-                "native_h3_l2va_story": 1,
-                "native_h3_ref2va": 1,
-                "text2image2native_h3_ref2va": 1,
-                "sticker_pack": 2,
-                "story_card": 1,
-            "motion_comic": 1,
-                "game_sprite": 3,
-            },
-        )
+        weights = config["generation"]["generation_type_weights"]
+        candidates = self.routing["strategy_candidates"]
+        self.assertLessEqual(set(weights), set(candidates))
+        self.assertTrue(all(math.isfinite(float(weight)) and float(weight) >= 0 for weight in weights.values()))
+        enabled = [candidate for candidate, weight in weights.items() if float(weight) > 0]
+        self.assertTrue(enabled)
+        for candidate in enabled:
+            self.assertEqual(select_weighted_route(
+                {candidate: weights[candidate]}, candidates, rng=random.Random(7),
+            ), candidate)
 
     def test_user_given_h3_strategy_when_workflow_selected_then_comfyui_declares_the_required_inputs(self) -> None:
         """User Given each H3 strategy When its workflow is selected Then ComfyUI declares its conditioning roles."""

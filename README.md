@@ -16,6 +16,8 @@ Python 依賴只在 [agentic/pyproject.toml](agentic/pyproject.toml) 宣告；�
 
 生成前需設定模型服務、LLM 與必要憑證。角色群組與新聞選取使用 MySQL；Discord 審片與各社群平台需要各自憑證。機敏設定不納入版本控制。
 
+新聞模式預設從最近 7 天符合條件的最新 5,000 筆中，過濾不可用或不適合的標題，再獨立隨機抽取。視覺風格只定義媒材、筆觸、色彩、光線與構圖；場景、物件與動作由本次需求和新聞決定，角色外觀由選中的角色資料決定。
+
 | 設定 | 用途 |
 |---|---|
 | `COMFYUI_HOST`, `COMFYUI_PORT`, `COMFYUI_ROOT` | ComfyUI 連線與本機資產 |
@@ -25,6 +27,8 @@ Python 依賴只在 [agentic/pyproject.toml](agentic/pyproject.toml) 宣告；�
 | `AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS` | 單次 LLM 請求逾時 |
 
 ## 使用入口
+
+風格勾選頁：執行 `python scripts/style_picker.py`，開啟 <http://127.0.0.1:8766>。提供 288 種匯入風格與 6 種原有角色風格；取消不要的項目後按「儲存並套用」，下一次 random 生成只會使用保留的風格。詳見 [風格選擇操作](docs/style_picker.md)。
 
 ```powershell
 # 查看角色介面所有選項
@@ -44,6 +48,8 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 ```
 
 `--dry-run-publish` 只禁止社群派送，生成與 Discord 審查仍會使用外部服務。未加 `--execute` 的 `agentic` 指令只輸出計畫。排程器入口為 `scheduler/scheduler.py`；不要為了測試重啟正在執行的生成工作。
+
+手動角色生成與排程的每個 Discord 審核階段都有「重新生成」按鈕，包含首圖、尾圖、參考圖、錨點組與最終成品。按下後會停止本輪的後續生成與發布，立即建立新 run，從頭重跑完整流程並重新送審；舊素材與審核紀錄仍保留。Accept 繼續、Reject 停止，成品階段的 Edit 仍可修改文案。若初次執行指定了 `--seed`，重新生成時會取消固定 seed，讓新一輪重新取樣。已送出的舊審核訊息不會更新按鈕；長時間執行的排程服務須在目前工作完成後重新載入程式。
 
 ## 設定與產物
 

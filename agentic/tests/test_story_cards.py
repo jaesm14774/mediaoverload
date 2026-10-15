@@ -227,20 +227,26 @@ class StoryCardContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "resolved selected character"):
             story_card_anchor_prompt("the selected character")
 
-    def test_user_given_page_background_and_role_when_backgrounds_are_rendered_then_both_reach_the_image_provider(self) -> None:
-        """User Given a page prompt and selected character role When story-card backgrounds are rendered Then the provider receives both in its visual prompt."""
-        config = {
-            "supporting_cast": ["one tiny unnamed orange side character with a shy smile"],
+    def test_user_given_selected_style_and_page_when_backgrounds_are_rendered_then_style_scene_and_role_reach_the_image_provider(self) -> None:
+        """User Given a selected shared style and page scene When story-card backgrounds are rendered Then the image provider receives the style, character, scene, and exclusions without video motion directions."""
+        style = {
+            "label": "ink illustration", "prompt": "confident ink contours with clean cel shading",
+            "composition": "one clear physical action with layered depth",
+            "palette": "coordinated coral and cyan accents",
+            "motion": "video-only guidance: anticipation and follow-through",
+            "avoid": "photorealistic surfaces and glossy 3D rendering",
         }
         goal = self.make_goal(
             character="Meta Knight",
             character_profile={"keywords": "masked, caped"},
-            story_card_visual=config,
+            visual_style_profile=style,
         )
         story = sample_payload(goal, 2)
+        story["negative_prompt"] = "lettering and interface overlays"
         for index, page in enumerate(story["pages"], start=1):
             page["background_prompt"] = story_card_page_prompt(
-                "Meta Knight", goal.constraints["character_profile"], config,
+                "Meta Knight", goal.constraints["character_profile"],
+                visual_anchor="A network gateway beside a cracked padlock",
             )
 
         calls: list[tuple[str, dict[str, object]]] = []
@@ -280,6 +286,13 @@ class StoryCardContractTests(unittest.TestCase):
         )
         self.assertEqual([name for name, _ in calls], ["comfy.workflow.text_to_image", "comfy.workflow.text_to_image"])
         self.assertTrue(all("image_path" not in payload for _, payload in calls))
+        for _, payload in calls:
+            for field in ("prompt", "composition", "palette"):
+                self.assertIn(style[field], payload["prompt"])
+            self.assertNotIn(style["motion"], payload["prompt"])
+            self.assertIn(style["avoid"], payload["negative_prompt"])
+            self.assertIn(story["negative_prompt"], payload["negative_prompt"])
+            self.assertIn("network gateway", payload["prompt"])
         self.assertIn("Meta Knight, masked, caped", result.outputs["page_runs"][0]["prompt"])
         self.assertNotIn("the selected", result.outputs["page_runs"][0]["prompt"])
         self.assertEqual(len(result.outputs["page_runs"]), 2)

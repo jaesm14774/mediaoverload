@@ -13,6 +13,7 @@ from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.prompting import (
     build_story_segments,
     include_role_description,
+    include_visual_style_profile,
     validate_story_segments,
 )
 from agentic.runtime.llm_engine import LLMPromptEngine
@@ -266,14 +267,6 @@ class LongVideoSkills:
         )
         opening_prompt = format_native_h3_keyframe_prompt(storyboard, style=style, frame="opening")
         ending_prompt = format_native_h3_keyframe_prompt(storyboard, style=style, frame="ending")
-        if render_mode == "first_last_frame_to_video":
-            ending_prompt = (
-                f"{ending_prompt}\n"
-                "This is the terminal image of the exact same shot as the supplied opening image. "
-                "Preserve the same character identity and count, silhouette, costume, prop count, setting, "
-                "camera axis, framing, perspective, paper texture, ink line weight, and color palette. "
-                "Show only the described final action state and its readable reaction; do not redesign the scene."
-            )
         negative_prompt = str(storyboard.get("negative_prompt") or "").strip()
         return SkillResult(
             status="success",
@@ -320,7 +313,9 @@ class LongVideoSkills:
             {
                 "workflow_name": workflow_name,
                 "run_dir": str(run_dir),
-                "prompt": apply_paper_storybook_art_direction(prompt),
+                "prompt": include_visual_style_profile(
+                    apply_paper_storybook_art_direction(prompt), context.plan.goal
+                ),
                 "negative_prompt": str(context.state["idea-brief"].get("negative_prompt") or ""),
                 "width": context.node.inputs.get("width", 1024),
                 "height": context.node.inputs.get("height", 1024),
@@ -388,6 +383,7 @@ class LongVideoSkills:
             prompt = require_h3_prompt(
                 prepared_prompt_output.get("prompt") if isinstance(prepared_prompt_output, dict) else None
             )
+        prompt = include_visual_style_profile(prompt, context.plan.goal)
 
         width = context.node.inputs.get("width") or constraints.get("canvas_width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
         height = context.node.inputs.get("height") or constraints.get("canvas_height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
@@ -472,13 +468,16 @@ class LongVideoSkills:
         if use_last_frame and not last_frame:
             raise RuntimeError("Native H3 render with use_last_frame=true requires last_frame_path")
         default_model_profile = "q4"
+        prompt = include_visual_style_profile(
+            require_h3_prompt(story["prompt"]), context.plan.goal
+        )
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3")),
             "image_path": first_frame,
             "use_last_frame": use_last_frame,
             "h3_mode": "fl2va" if use_last_frame else "i2va",
-            "prompt": require_h3_prompt(story["prompt"]),
+            "prompt": prompt,
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
@@ -529,7 +528,7 @@ class LongVideoSkills:
             "first_frame_path": first_frame,
             "last_frame_path": last_frame,
             "use_last_frame": use_last_frame,
-            "native_h3_prompt": story["prompt"],
+            "native_h3_prompt": prompt,
             "creative_brief": story.get("creative_brief", ""),
             "story_source": story.get("story_source", "news_llm"),
             "creative_seed": story.get("creative_seed", ""),
@@ -664,6 +663,9 @@ class LongVideoSkills:
         last_frame = str(source_check.get("last_frame_path") or "")
         if not workflow_name or not last_frame:
             raise RuntimeError("Native H3 L2VA render requires workflow_name and last_frame_path")
+        prompt = include_visual_style_profile(
+            require_h3_prompt(story["prompt"]), context.plan.goal
+        )
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3_l2va")),
@@ -671,7 +673,7 @@ class LongVideoSkills:
             "use_first_frame": False,
             "use_last_frame": True,
             "h3_mode": "l2va",
-            "prompt": require_h3_prompt(story["prompt"]),
+            "prompt": prompt,
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
@@ -721,7 +723,7 @@ class LongVideoSkills:
                 "render_mode": "last_frame_to_video",
                 **self._native_h3_story_outputs(
                     story,
-                    prompt=require_h3_prompt(story["prompt"]),
+                    prompt=prompt,
                     render_mode="last_frame_to_video",
                 ),
                 },
@@ -745,7 +747,9 @@ class LongVideoSkills:
         )
         if not workflow_name:
             raise RuntimeError("Native H3 Ref2VA render requires workflow_name")
-        prompt = require_h3_prompt(story["prompt"])
+        prompt = include_visual_style_profile(
+            require_h3_prompt(story["prompt"]), context.plan.goal
+        )
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3_ref2va")),
@@ -826,10 +830,13 @@ class LongVideoSkills:
         if not workflow_name:
             raise RuntimeError("Native H3 T2V render requires workflow_name")
         constraints = context.plan.goal.constraints
+        prompt = include_visual_style_profile(
+            require_h3_prompt(story["prompt"]), context.plan.goal
+        )
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3_t2v")),
-            "prompt": require_h3_prompt(story["prompt"]),
+            "prompt": prompt,
             "h3_mode": "t2va",
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "subject_context": dict(context.plan.goal.constraints.get("subject_context") or {}),
@@ -881,7 +888,7 @@ class LongVideoSkills:
             _NativeH3Render(
                 tool_name="comfy.render_h3",
                 payload=payload,
-                outputs=self._native_h3_story_outputs(story, prompt=require_h3_prompt(story["prompt"]), render_mode="text_to_video"),
+                outputs=self._native_h3_story_outputs(story, prompt=prompt, render_mode="text_to_video"),
                 log=f"Rendered one continuous native H3 text-to-video story with '{workflow_name}'.",
             )
         )

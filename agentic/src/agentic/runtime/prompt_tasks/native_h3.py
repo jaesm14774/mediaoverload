@@ -20,10 +20,10 @@ _NATIVE_H3_CHAINING_VISUAL_GUIDANCE = (
     "When the selected primary news mechanism is combining or chaining actions, show two different, voluntary actions in order; the second "
     "must use or complete a visible result of the first. For a selected pair and a manipulable analogy, let both "
     "characters contribute distinct physical roles to the same shared task, such as one steadying the partial result "
-    "while the other joins its next link. Give both characters an active, readable pose. Choose visibly interlocking "
-    "links or loops for the analogy, and avoid generic cubes or blocks that sit side by side. Keep the combined result "
+    "while the other completes the source-defined next step. Give both characters an active, readable pose. Choose "
+    "any analogy from the article's mechanism rather than a prescribed object. Keep the combined result "
     "readable. "
-    "Keep the linked structure still as an object; never turn it into a conveyor, circular machine, or self-running loop. "
+    "Preserve the source's distinction between a voluntary sequence and an automatic process. "
     "Do not confuse chaining with repeating one action. Choose comedy only when that source-linked sequence itself "
     "causes a clear, harmless surprise; a coincidental bump, fall, or reaction after the task is finished is not a "
     "source-linked joke. If the mechanism has no honest visual punchline, use curiosity or shared satisfaction. Keep "
@@ -35,10 +35,10 @@ _NATIVE_H3_READABLE_ENDING_RULE = (
     "For every final held frame, use a three-quarter front view with every selected face visible. Preserve the exact "
     "contact, task result, and chosen emotion. Name what each character's eyes and mouth are doing and where their "
     "gaze lands; keep their pupils on the partner or story event instead of posing together for the viewer. For "
-    "curiosity, give Kirby bright wide eyes and a clearly open O-mouth in the held state, while Bandana Waddle Dee "
-    "answers with one distinct, source-consistent head tilt or forward lean and wide attentive eyes; name that exact action "
-    "in the held pose. Do not add a hand gesture or body contact unless the story beat names it. Keep Waddle Dee's canonical simple face. "
-    "Do not flatten curiosity into passive watching, a soft neutral expression, or a closed mouth on Kirby. Do not "
+    "curiosity, give each selected character a distinct, source-consistent facial or body reaction that respects "
+    "their canonical anatomy; do not invent facial features a character does not have. Name the exact reaction "
+    "in the held pose. Do not add a hand gesture or body contact unless the story beat names it. "
+    "Do not flatten the chosen emotion into a generic neutral pose. Do not "
     "trade away the facial reaction to show characters' backs looking at a prop. Refer to each selected character by "
     "their exact name; do not infer gender or use gendered pronouns."
 )
@@ -46,8 +46,8 @@ _NATIVE_H3_READABLE_ENDING_RULE = (
 
 _NATIVE_H3_CHARACTER_ABILITY_RULE = (
     "Keep each action within an ability established for that selected character in the profile or well-known canon. "
-    "A costume or accessory is not a power: do not make a bandana, clothing, or decorative prop generate wind, force, "
-    "or another new ability unless the character profile explicitly says it can. When no established ability fits, "
+    "A costume or accessory is not a power: do not give it an unestablished ability unless the character profile "
+    "explicitly says it has that ability. When no established ability fits, "
     "use a simple ordinary body movement or the character's named tool."
 )
 
@@ -92,12 +92,12 @@ _NATIVE_H3_PRODUCT_NEWS_VISUAL_RULE = (
     "For an automatic product migration, do not turn a rename or scheduled conversion into a shutdown, data-loss scare, "
     "tearful grief, or high-stakes crisis. If the article supports a clear visual joke, make the joke readable without its "
     "headline, captions, or readable text: a character's visible action must cause or interrupt the punchline, and the held "
-    "frame must show the funny reversal rather than a sad setup. A card merely changing shape, a surprised face, or a relieved "
+    "frame must show the funny reversal rather than a sad setup. A prop merely changing shape, a surprised face, or a relieved "
     "smile is not a joke. If no honest silent visual punchline exists, choose curiosity or shared relief and say so plainly. "
     "Never imply that every saved feature or detail has exact parity after migration. Never show actual deletion, lost settings, "
     "or a real shutdown unless the source reports it. "
-    "When a product name has a misleading literal meaning, depict the reported function rather than the name; for example, "
-    "Google Gems are saved software instructions, not gemstones. Derive one simple, clearly fictional analogy from the "
+    "When a product name has a misleading literal meaning, depict the reported function rather than the name. "
+    "Derive one simple, clearly fictional analogy from the "
     "reported function, and let the selected characters act on or react to that analogy in a source-consistent way. Do not "
     "present an invented visual detail as an official product design."
 )
@@ -112,17 +112,15 @@ _NATIVE_H3_HUMAN_INTEREST_DIGNITY_RULE = (
     "recipient's visible response, leave that person out of the image and let the helper's documented action carry the emotion. "
     "When progress depends on repeated visits or long-term trust, do not compress it into one knock or a short wait that "
     "appears to cause acceptance. Let recurring presence or elapsed effort read before any outcome, without inventing a "
-    "count, date, weather change, or recipient response. Never map one visible footprint, light, marker, or shot to one "
-    "visit; do not call marks first, second, or third, or add them one by one to imply a count the source omits. If using "
-    "a path motif, show it as an already accumulated, uncounted route, but hide most of its length behind a wall or bend in "
-    "the opening frame so the midpoint camera move can visibly reveal the route; do not show the full path before that move. "
-    "Keep a selected helper visible or actively present in every shot; do not replace them with a prop-only trail. If the "
+    "count, date, weather change, or recipient response. Show accumulated effort only through evidence or a clearly "
+    "identified analogy grounded in this source; do not invent numbered steps or prescribe a particular spatial motif. "
+    "When a later reveal is warranted, keep that result unresolved in the opening rather than showing it early. "
+    "Keep a selected helper visible or actively present in every shot; do not replace them with props alone. If the "
     "source reports a later outcome, reserve that one bounded instance as the climax after effort is established. When the "
-    "reported outcome is a door opening, make the state change unmistakable: move the same door from closed to visibly ajar "
-    "and hold it; character eye movement alone is not the payoff. When the source identifies a person who opens the door, "
-    "preserve that person's agency instead of making the door move by itself; if needed, show only a non-identifying hand "
-    "performing the reported action, with no invented face or reaction. For other outcomes, name an equally drawable source-supported "
-    "state change. Do not imply every household reaches the same result or invent a recipient response. The opening may "
+    "reported outcome changes the scene, show that same source-supported change unmistakably and hold it; character "
+    "eye movement alone is not the payoff. Preserve the reported actor's agency rather than making an object act by "
+    "itself. Use only the minimum non-identifying detail needed to show that reported action, with no invented reaction. "
+    "Do not generalize one reported outcome to every affected person or invent a recipient response. The opening may "
     "suggest recurring presence, but must not show the later payoff early."
 )
 
@@ -309,7 +307,7 @@ def generate_native_h3_storyboard(
                 "Read the article as factual source material. Extract its named subject, actors, affected people, place, causal mechanism, and stated consequence in order. news_consequence must not be null when the article states a user-visible result; preserve its exact qualifiers without adding benefits or harms. Keep source actions with their real actors: when a company automatically changes a saved product, start with an existing saved item and show the change happening on its own; the character may react or use the result, but must not create or trigger the reported change. For a how-to article, preserve every essential material, action, and result; do not upgrade a limited result into a guarantee or treat an unmentioned outcome as fact.",
                 "Assess story fit candidly: strong when the reported people or event already gives the characters a distinct action and emotional stake; conditional when one faithful, visible fictional analogy can carry the event; weak when viewers cannot recognize the news or understand what the characters do because of it. Abstract product news is usually conditional, not automatically a story. State when the article has no natural joke, sadness, or human drama; never manufacture one.",
                 _NATIVE_H3_READABLE_ENDING_RULE,
-                "Keep source_roles factual. Map reported people or affected users to the selected cast when appropriate; do not turn a company or institution into Kirby or attribute its real-world action to him. For product news, the cast are fictional users or witnesses reacting to the source mechanism. Keep their roles distinct and preserve who did what to whom.",
+                "Keep source_roles factual. Map reported people or affected users to the selected cast when appropriate; do not turn a company or institution into a selected character or attribute its real-world action to that character. For product news, the cast are fictional users or witnesses reacting to the source mechanism. Keep their roles distinct and preserve who did what to whom.",
                 _NATIVE_H3_HUMAN_INTEREST_DIGNITY_RULE,
                 _NATIVE_H3_SOURCE_PROP_RULE,
                 "Plan one silent 15-second scene. Keep the source-specific action recognizable but let the characters' response carry the scene.",
@@ -321,7 +319,7 @@ def generate_native_h3_storyboard(
                 "The first shot is also the Krea cold open: show the selected lead character clearly performing the reported role or responding to the article-specific mechanism in the same thumbnail-readable composition. Do not make the character wait until a later shot or let the environment-only cue carry the frame. Avoid a generic arrival or posing beside a topic cue, and freeze before the later payoff so the opening creates a question the clip can answer.",
                 "Choose the visual thesis like a creative director: silently consider several distinct translations, then reject any scene where a prop merely labels the topic. The final visual_translation must encode this article's exact trigger or action, the physical consequence it causes, and one surprising but source-faithful reveal in a single readable relationship. If the same image could illustrate many unrelated articles, rethink it. Keep the reveal legible without a headline, caption, logo, or decorative symbol.",
                 "For news where one platform, service, or default drives adoption across many endpoints, show that source-owned change spreading through one connected field of distinct endpoints, with the reported coverage contrast visible in the environment. The character watches the system-wide effect; do not have the character turn on or configure it. Render percentages as relative visual coverage, never as invented counts, labels, or a chart.",
-                "Keep the reported trigger in its true form: a language, prompt, policy, or framing condition must not become an invented keypad, numeric code, password, or button press. Do not invent specific inputs, commands, credentials, exploit steps, people harmed, or outcomes absent from the source. For cybersecurity news, show risk at a high level without executable detail; let the fictional characters witness the system's autonomous action rather than cause it.",
+                "Keep the reported trigger in its true form: a language, prompt, policy, or framing condition must not become an invented manual physical trigger. Do not invent specific inputs, commands, credentials, exploit steps, people harmed, or outcomes absent from the source. For cybersecurity news, show risk at a high level without executable detail; let the fictional characters witness the system's autonomous action rather than cause it.",
                 "Choose one primary article mechanism for the 15-second scene; do not combine separate product features or add a second metaphor just to fill the timeline.",
                 _NATIVE_H3_HELD_PAYOFF_RULE,
                 _NATIVE_H3_SOURCE_PROP_RULE,
@@ -565,7 +563,7 @@ def generate_native_h3_storyboard(
             f"Draft story: {json.dumps(draft_story, ensure_ascii=False)}",
             "Keep exactly the selected cast and their distinct roles. Preserve the article's defining event, factual actors, dates, and causal order; label rumors as rumors and never promote them to confirmed dates or events. If the source says similar functionality, keep that qualifier and never call the replacement identical or fully preserved. Keep fictional actions clearly separate from reported facts in news_trace.source_limit; do not invent outages, lost work, guarantees, or real-world harm.",
             "Keep story_spine chronology explicit: premise and stakes describe unresolved opening conditions; climax contains the source-supported causal change; resolution contains only the bounded reported or clearly fictional-analogy outcome. Never put a later state in premise, stakes, or the first shot. Each shot starts from the previous shot's state and advances one visible change.",
-            "Keep one source-connected cause-and-effect chain across 3 to 5 ordered shots. Keep every shot on the selected primary news mechanism and omit secondary features from its visual analogy. Each shot must advance a distinct visible state or character action; do not repeat characters watching the same object with only stronger adjectives. Use a specific setting from world.setting and retain world.visual_language. Make the last shot one held pose, with action and state_change describing the same body positions and expressions for every selected character. The final state_change must be directly drawable: name each character's relative position, body orientation, important limb placement, exact body-part contact, eyes and mouth expression, gaze target, and source_prop location. Match the expression to payoff_kind; only for payoff_kind=curiosity give Kirby the visibly open curious mouth. Keep faces readable from the three-quarter front and have gaze follow the partner or story event, not a shared audience-facing presentation.",
+            "Keep one source-connected cause-and-effect chain across 3 to 5 ordered shots. Keep every shot on the selected primary news mechanism and omit secondary features from its visual analogy. Each shot must advance a distinct visible state or character action; do not repeat characters watching the same object with only stronger adjectives. Use a source-specific setting from world.setting and retain world.visual_language. Make the last shot one held pose, with action and state_change describing the same body positions and expressions for every selected character. The final state_change must be directly drawable: name each character's relative position, body orientation, important limb placement, exact body-part contact, canonical facial or body expression, gaze target, and source_prop location. Match the reaction to payoff_kind and each selected character's anatomy. Keep faces readable from the three-quarter front and have gaze follow the partner or story event, not a shared audience-facing presentation.",
             "Follow the plan's honest emotion. A comic ending needs an identifiable character habit, setup, physically earned surprise, active interaction, and a held reaction frozen on the funny reversal; a prop change, smile, pair of wide eyes, or two-stage emotional explanation is not a punchline. It must read without a headline, caption, or readable text. For high-stakes public news, comedy is unavailable: keep the character a witness unless the source supports another role, and use source-true scale and environment with concern, tension, solemnity, or awe. For a low-stakes migration, do not stage tearful grief or a dramatic loss scare. If no source-connected physical joke survives that silent-frame test, choose curiosity or shared relief instead of pretending the result is funny. For sadness or tenderness, let the specific feeling read in posture and contact without a forced smile.",
             _NATIVE_H3_CHARACTER_ABILITY_RULE,
             _NATIVE_H3_HELD_PAYOFF_RULE,
@@ -577,7 +575,7 @@ def generate_native_h3_storyboard(
             revision_guidance.extend(
                 [
                     _NATIVE_H3_PRODUCT_NEWS_VISUAL_RULE,
-                    "Keep product behavior and user behavior distinct: an explicitly reported automatic change happens on its own before characters choose how to respond. Keep a small analogy card on a low surface, below both faces, so the characters' eyes, mouths, hands, and interaction carry the frame. Do not let a card cover a face or become larger than a character's face.",
+                    "Keep product behavior and user behavior distinct: an explicitly reported automatic change happens on its own before characters choose how to respond. Use only the source-defined object or selected analogy, keep the relevant action and character reactions readable together, and do not obscure a selected face with a prop.",
                 ]
             )
         elif planned_news_category == "human_interest":
@@ -666,7 +664,7 @@ def generate_native_h3_storyboard(
         world = dict(story.get("world") or {})
         if not str(world.get("setting") or "").strip():
             world["setting"] = (
-                "a simple storybook setting with clear space around the source-linked action"
+                "a source-grounded setting with clear space around the main action"
             )
         if not str(world.get("visual_language") or "").strip():
             style_language = str(style or "Expressive storybook illustration").strip()

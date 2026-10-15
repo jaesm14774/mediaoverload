@@ -14,6 +14,9 @@ from agentic.video_directing import (
 from agentic.minimax_prompting import compose_minimax_h3_prompt
 
 
+_ISOLATED_ASSET_TYPES = frozenset({"sticker_pack", "animated_sticker", "game_sprite"})
+
+
 def selected_role_description(goal: GoalRequest) -> str:
     subject_context = goal.constraints.get("subject_context")
     if isinstance(subject_context, dict):
@@ -70,6 +73,10 @@ def _visual_identity_phrase(identity: str) -> str:
 
 LONG_VIDEO_SYSTEM_PROMPT = """
 You write image and video prompts that follow the user's brief and selected style.
+Derive the setting, objects, actors, and actions from this run's brief and source material.
+Visual style controls medium, surface, color, light, composition, and motion treatment;
+it does not supply a story, setting, prop, task, or character anatomy. Preserve the selected
+characters' canonical identities and essential source context while applying that treatment.
 Use source material as context and keep every reported actor, location, cause, and
 outcome tied to its source. When the user requests a causal story, follow that direction.
 For video, make visible physical action and purposeful camera movement the default.
@@ -98,7 +105,7 @@ Response in English only.
 """.strip()
 
 
-STICKER_SYSTEM_PROMPT = "Follow the user's sticker brief, character, and selected style."
+STICKER_SYSTEM_PROMPT = "Follow the user's sticker brief and selected character identity. Derive scene content from the brief; the selected style controls visual treatment only."
 
 
 DYNAMIC_SPRITE_BACKGROUND_PALETTE = {
@@ -147,7 +154,7 @@ def dynamic_sprite_video_contract(background_color: str) -> str:
     return f"Use a flat, uniform chroma-key background {background_color} for sprite extraction."
 
 
-DYNAMIC_SPRITE_SYSTEM_PROMPT = "Follow the user's game-sprite prompt and selected style. Return concise image and video prompts. Include a flat, uniform chroma-key background description for sprite extraction."
+DYNAMIC_SPRITE_SYSTEM_PROMPT = "Follow the user's game-sprite brief and selected identities. Derive actions and props from the brief and source; the selected style controls visual treatment only. Return concise image and video prompts. Include a flat, uniform chroma-key background description for sprite extraction."
 
 def build_game_sprite_reference_context(
     goal: GoalRequest,
@@ -205,7 +212,7 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
     )
     news_anchor = news_grounding_anchor_clause(news_context) if news_grounding_required else ""
     style_direction = _style_directive(selected_style)
-    profile_direction = _style_profile_prompt(goal)
+    profile_direction = style_profile_direction(goal)
     if profile_direction:
         style_direction = "; ".join(part for part in (style_direction, profile_direction) if part)
     visual_prompt = "\n".join(
@@ -230,7 +237,14 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
         ),
         "prompt": video_prompt,
         "opening_keyframe_prompt": apply_video_opening_frame_direction(visual_prompt, goal.media_type),
-        "negative_prompt": str(goal.constraints.get("negative_prompt") or ""),
+        "negative_prompt": ", ".join(
+            part
+            for part in (
+                str(goal.constraints.get("negative_prompt") or "").strip(),
+                style_profile_avoidance(goal),
+            )
+            if part
+        ),
         "selected_style": selected_style,
         "idea_variants": idea_variants,
         "subject_context": _subject_context(goal),
@@ -282,6 +296,7 @@ def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame
         for part in (
             str(segment.get("visual") or goal.prompt or "").strip(),
             f"Style: {goal.style}" if goal.style else "",
+            style_profile_direction(goal),
         )
         if part
     )
@@ -359,6 +374,7 @@ def build_animated_sticker_motion_prompt(goal: GoalRequest) -> str:
             _core_scene_clause(goal.prompt, goal.media_type, news_context),
             _news_fusion_clause(news_context),
             _style_directive(goal.style),
+            style_profile_direction(goal),
         )
         if part
     )
@@ -437,6 +453,15 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
     character = str(goal.constraints.get("character") or "the featured subject").strip()
     request = str(goal.prompt or "an original playful game-like motion").strip()
     style = str(goal.style or "clean stylized game art").strip()
+    profile = goal.constraints.get("visual_style_profile")
+    character_style_parts = [style]
+    if isinstance(profile, dict):
+        character_style_parts.extend(
+            str(profile.get(key) or "").strip()
+            for key in ("prompt", "palette", "motion")
+            if str(profile.get(key) or "").strip()
+        )
+    character_style = "; ".join(character_style_parts)
     configured_fps = float(goal.constraints.get("sprite_fps") or 12)
     fps = min(24.0, max(4.0, configured_fps))
     configured_duration = float(
@@ -450,14 +475,14 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
     )
     chroma_threshold = int(goal.constraints.get("sprite_chroma_threshold") or 52)
     beats = _dynamic_sprite_fallback_beats(request)
-    creative_prompt = request
+    creative_prompt = f"{request}; Character rendering style: {character_style}"
     return {
         "motion_name": "llm_defined_motion",
         "layout_mode": "single_motion",
         "motion_plan_mode": "direct_prompt",
         "beats": beats,
         "image_prompt": (
-            f"{character}, {request}, {style}, "
+            f"{character}, {request}, Character rendering style: {character_style}, "
             f"{dynamic_sprite_source_contract(chroma_color)}"
         ),
         "creative_video_prompt": creative_prompt,
@@ -580,15 +605,78 @@ def _subject_anchor_clause(goal: GoalRequest) -> str:
     return "; ".join(clauses)
 
 
-def _style_profile_prompt(goal: GoalRequest) -> str:
+def style_profile_direction(goal: GoalRequest) -> str:
+    profile = goal.constraints.get("visual_style_profile")
+    isolated_subject = goal.media_type in _ISOLATED_ASSET_TYPES
+    if isolated_subject and isinstance(profile, dict):
+        # Scene composition and unstructured exclusions can prohibit the very
+        # isolation that sticker and chroma-key renderers require.
+        profile = {key: profile.get(key) for key in ("prompt", "palette", "motion")}
+    direction = visual_style_profile_direction(
+        profile,
+        include_motion=goal.media_type != "image",
+    )
+    if isolated_subject and direction:
+        return (
+            "Apply the selected visual style to the subject only. "
+            "Required transparent, solid, or uniform chroma-key background requirements take priority. "
+            "Ignore scene and background instructions in the style descriptor; do not add scenery or a floor. "
+            + direction
+        )
+    return direction
+
+
+def include_visual_style_profile(prompt: object, goal: GoalRequest) -> str:
+    """Keep the selected reference-derived rules on the final renderer prompt."""
+
+    prompt_text = str(prompt or "").strip()
+    direction = style_profile_direction(goal)
+    if not direction:
+        return prompt_text
+    priority_label = (
+        "Selected subject rendering rules:"
+        if goal.media_type in _ISOLATED_ASSET_TYPES
+        else "Selected visual style rules take priority over conflicting scene details:"
+    )
+    normalized_prompt = prompt_text.casefold()
+    if normalized_prompt.startswith(priority_label.casefold()) and direction.casefold() in normalized_prompt:
+        return prompt_text
+    if direction.casefold() in normalized_prompt:
+        prompt_text = re.sub(re.escape(direction), "", prompt_text, flags=re.IGNORECASE).strip()
+    return "\n".join(
+        part
+        for part in (
+            f"{priority_label} {direction}",
+            prompt_text,
+        )
+        if part
+    )
+
+
+def visual_style_profile_direction(profile: object, *, include_motion: bool = True) -> str:
+    if not isinstance(profile, dict):
+        return ""
+    profile_fields = ("prompt", "composition", "palette", "motion")
+    if not include_motion:
+        profile_fields = ("prompt", "composition", "palette")
+    parts = [
+        str(profile.get(key) or "").strip()
+        for key in profile_fields
+        if str(profile.get(key) or "").strip()
+    ]
+    avoid = str(profile.get("avoid") or "").strip()
+    if avoid:
+        parts.append(f"Avoid: {avoid}")
+    return "; ".join(parts)
+
+
+def style_profile_avoidance(goal: GoalRequest) -> str:
+    if goal.media_type in _ISOLATED_ASSET_TYPES:
+        return ""
     profile = goal.constraints.get("visual_style_profile")
     if not isinstance(profile, dict):
         return ""
-    return "; ".join(
-        str(profile.get(key) or "").strip()
-        for key in ("prompt", "composition", "palette", "motion")
-        if str(profile.get(key) or "").strip()
-    )
+    return str(profile.get("avoid") or "").strip()
 
 
 def _hero_subject_clause(subject_anchor: str) -> str:

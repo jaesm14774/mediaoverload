@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 from typing import Any
 import yaml
+from agentic.app.style_catalog import StyleLibrary
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.app.character_requests import SUBJECT_MODE_SINGLE
 
@@ -161,7 +162,10 @@ def _summarize_character_config(
         "generation_type_weights": dict(
             generation.get("generation_type_weights", {}) or {}
         ),
-        "style_count": len(
+        "style_count": len(StyleLibrary().profiles()) if (
+            dict(dict(generation.get("creative_profile", {}) or {}).get("style", {}) or {})
+            .get("catalog") == "krea2"
+        ) else len(
             dict(
                 dict(generation.get("creative_profile", {}) or {})
                 .get("style", {})

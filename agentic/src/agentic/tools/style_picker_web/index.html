@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>風格選擇 · MediaOverload</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="masthead">
+      <div class="brand"><p class="eyebrow">MEDIAOVERLOAD / STYLE COLLECTION</p><h1>挑選你的風格<span class="edition">KREA 2</span></h1></div>
+      <div class="save-group"><span id="save-status" role="status" aria-live="polite">讀取已儲存的選擇…</span><button id="save" class="primary" disabled>儲存並套用 <span aria-hidden="true">↗</span></button></div>
+    </div>
+    <div class="intro"><p>取消不想要的，留下的風格會用於隨機生成。</p><p class="selection-summary"><strong id="selected-count">—</strong><span id="total-count">/ 288 已選</span><span class="divider">/</span><span id="excluded-count">已取消 0</span></p></div>
+    <div class="filters">
+      <label class="search"><span>尋找風格</span><input id="search" type="search" placeholder="搜尋名稱、風格或關鍵字…" autocomplete="off"></label>
+      <label><span>風格分類</span><select id="category"><option value="">所有分類</option></select></label>
+      <label><span>比較場景</span><select id="scene"></select></label>
+      <label><span>顯示項目</span><select id="selection-filter"><option value="all">全部風格</option><option value="selected">已勾選</option><option value="excluded">已取消</option></select></label>
+    </div>
+  </header>
+  <main>
+    <div class="collection-tools"><p id="result-count" aria-live="polite">載入風格圖庫…</p><div class="bulk-actions"><button id="select-all" disabled>全選 288 種</button><button id="clear-all" disabled>取消全部</button><span class="tool-divider" aria-hidden="true"></span><button id="select-visible" disabled>勾選目前結果</button><button id="clear-visible" disabled>取消目前結果</button></div></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <section id="catalog" class="catalog" aria-label="可選風格"></section>
+    <p id="empty" class="empty" hidden>沒有符合的風格。調整搜尋或分類，就能繼續挑選。</p>
+    <p id="loading" class="empty">正在準備 288 種風格。</p>
+    <footer><span>每個風格使用相同場景比較，讓畫風差異更容易看見。</span><a href="https://matplinta.github.io/t2i-krea-2-style-library/" target="_blank" rel="noopener noreferrer">原始風格圖庫 ↗</a></footer>
+  </main>
+  <dialog id="viewer" aria-labelledby="viewer-name">
+    <div class="viewer-head"><div><p id="viewer-category" class="eyebrow"></p><h2 id="viewer-name"></h2></div><button id="close-viewer" class="close" aria-label="關閉預覽">×</button></div>
+    <img id="viewer-image" alt="" width="1536" height="1024" referrerpolicy="no-referrer">
+    <div class="viewer-bottom"><label class="viewer-choice"><input id="viewer-selected" type="checkbox"><span>保留這個風格</span></label><p id="viewer-descriptor"></p></div>
+  </dialog>
+</body>
+</html>

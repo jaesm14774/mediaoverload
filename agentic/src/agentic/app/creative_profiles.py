@@ -5,6 +5,8 @@ import random
 from copy import deepcopy
 from typing import Any
 
+from agentic.app.style_catalog import StyleLibrary
+
 
 ALLOWED_ASPECT_RATIOS = frozenset({"16:9", "4:5", "1:1"})
 _REQUIRED_STYLE_FIELDS = ("label", "prompt")
@@ -18,15 +20,15 @@ _DEFAULT_CREATIVE_PROFILE = {
     },
     "style": {
         "mode": "fixed",
-        "fixed": "clean_cel_action",
+        "fixed": "bold_cartoon_comic",
         "profiles": {
-            "clean_cel_action": {
-                "label": "clean cel-shaded action",
-                "prompt": "polished cel-shaded animation with a designed layered setting and expressive physical action",
-                "composition": "readable foreground, middle action plane, and background depth",
-                "palette": "controlled saturated color with clear subject separation",
-                "motion": "anticipation, contact, recoil, and a settled pose",
-                "avoid": "sterile white voids and flat icon composition",
+            "bold_cartoon_comic": {
+                "label": "bold hand-inked cartoon and comic illustration",
+                "prompt": "a fully illustrated 2D scene with confident variable-weight dark ink contours and clean cel-shaded color blocks across the character, props, and background; no photographic or 3D surfaces",
+                "composition": "a full-frame illustrated environment with hand-drawn background details in the same 2D comic language; no blank space, sticker isolation, or cutout halo",
+                "palette": "saturated coral, cyan, and yellow with controlled contrast",
+                "motion": "clear anticipation, contact, and follow-through with stable linework",
+                "avoid": "blank white or cream backgrounds, isolated stickers, photorealistic textures, 3D rendering, fake lettering, random symbols, logos, and interface overlays",
             },
         },
     },
@@ -37,6 +39,7 @@ def resolve_creative_profile(
     config: dict[str, Any],
     *,
     rng: random.Random | None = None,
+    style_library: StyleLibrary | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Resolve one run-level canvas and visual language from config.
 
@@ -49,7 +52,7 @@ def resolve_creative_profile(
     if not isinstance(config, dict) or not config:
         config = deepcopy(_DEFAULT_CREATIVE_PROFILE)
     canvas = _resolve_canvas(dict(config.get("canvas") or {}), rng=rng)
-    style = _resolve_style(dict(config.get("style") or {}), rng=rng)
+    style = _resolve_style(dict(config.get("style") or {}), rng=rng, library=style_library)
     return {"canvas": canvas, "style": style}
 
 
@@ -80,8 +83,18 @@ def _resolve_canvas(config: dict[str, Any], *, rng: random.Random | None) -> dic
     }
 
 
-def _resolve_style(config: dict[str, Any], *, rng: random.Random | None) -> dict[str, Any]:
-    profiles = _mapping(config, "profiles", "generation.creative_profile.style.profiles")
+def _resolve_style(
+    config: dict[str, Any], *, rng: random.Random | None, library: StyleLibrary | None,
+) -> dict[str, Any]:
+    if "catalog" in config:
+        if config["catalog"] != "krea2":
+            raise ValueError("unknown style catalog; expected 'krea2'")
+        if "profiles" in config or "random_weights" in config:
+            raise ValueError("catalog styles use the saved selection instead of inline profiles or weights")
+        profiles = (library or StyleLibrary()).profiles()
+        config = {**config, "random_weights": dict.fromkeys(profiles, 1)}
+    else:
+        profiles = _mapping(config, "profiles", "generation.creative_profile.style.profiles")
     profile_id = _select_profile_id(config, profiles, "style", rng=rng)
     raw = _mapping(profiles, profile_id, f"style profile '{profile_id}'")
     missing = [field for field in _REQUIRED_STYLE_FIELDS if not str(raw.get(field) or "").strip()]

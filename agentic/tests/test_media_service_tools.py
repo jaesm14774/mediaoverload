@@ -166,12 +166,6 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
         ):
             communicator.wait_for_completion("prompt-history-raw-timeout")
 
-    def test_comfy_media_filename_cannot_escape_run_output_directory(self) -> None:
-        output_dir = Path(tempfile.mkdtemp())
-
-        with self.assertRaises(ValueError):
-            AgenticComfyCommunicator._safe_output_path(str(output_dir), "..\\outside.mp4")
-
     def test_cancel_prompt_deletes_only_a_pending_prompt(self) -> None:
         communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
-from agentic.runtime.prompting import include_role_description
+from agentic.runtime.prompting import include_role_description, include_visual_style_profile
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import asset_check_result, build_run_dir
 
@@ -95,6 +95,7 @@ class ComfyImageSkills:
                     prompt,
                     isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
                 )
+                prompt = include_visual_style_profile(prompt, context.plan.goal)
                 return {
                     "prompt": prompt,
                     "negative_prompt": str(dependency_output.get("negative_prompt", "")),
@@ -106,6 +107,7 @@ class ComfyImageSkills:
             prompt,
             isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
         )
+        prompt = include_visual_style_profile(prompt, context.plan.goal)
         return {"prompt": prompt, "negative_prompt": ""}
 
     def _build_run_dir(self, prompt: str) -> Path:

@@ -135,8 +135,13 @@ def deliver_video(source: Path, target: Path, delivery: dict[str, int]) -> dict[
     else:
         width, height, length, fps = (delivery[key] for key in ("width", "height", "length", "fps"))
         # Retain the complete generated timeline and both endpoint anchors.
-        frames = [round(i * (actual["length"] - 1) / (length - 1)) for i in range(length)] if length > 1 else [actual["length"] - 1]
-        select = "+".join(f"eq(n,{index})" for index in frames)
+        # Map each source frame to its nearest delivery slot and back. This
+        # keeps both anchors without an expression that grows with frame count.
+        if length > 1:
+            source_end, delivery_end = actual["length"] - 1, length - 1
+            select = f"eq(n,round(round(n*{delivery_end}/{source_end})*{source_end}/{delivery_end}))"
+        else:
+            select = f"eq(n,{actual['length'] - 1})"
         video_filter = f"select='{select}',setpts=N/({fps}*TB),scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
         ratio = actual["length"] / length
         tempos = []

@@ -38,6 +38,56 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         cls.repo_root = Path(__file__).resolve().parents[2]
         cls.config_path = cls.repo_root / "configs" / "characters" / "kirby.yaml"
 
+    def test_user_given_an_llm_video_prompt_and_selected_style_profile_when_native_h3_l2va_renders_then_all_profile_rules_reach_the_video_model(self) -> None:
+        """User Given an LLM video prompt and a selected visual style profile When Native H3 L2VA renders Then the full profile remains in the final video-model prompt."""
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            def call(self, tool_name: str, payload: dict[str, object]) -> dict[str, object]:
+                calls.append((tool_name, payload))
+                return {"saved_files": ["video.mp4"]}
+
+        profile = {
+            "prompt": "fully illustrated hand-painted scene across all layers",
+            "composition": "clear foreground action and a soft distant garden",
+            "palette": "deep teal, violet, and a controlled cyan highlight",
+            "motion": "stable brush texture and coherent light direction",
+            "avoid": "photographic textures and 3D surfaces",
+        }
+        context = SimpleNamespace(
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Kirby protects a star seed",
+                    media_type="native_h3_l2va_story",
+                    duration_seconds=8,
+                    style="cinematic painterly",
+                    constraints={"character": "Kirby", "visual_style_profile": profile},
+                )
+            ),
+            node=SimpleNamespace(inputs={"workflow_name": "minimax_h3_l2va"}),
+            state=RunState(
+                goal={},
+                metadata={},
+                node_outputs={
+                    "native-story-prompt": {
+                        "prompt": "Kirby kneels beside a star seed in a garden and watches it glow.",
+                        "negative_prompt": "text, watermark",
+                    },
+                    "native-l2va-frame-source-check": {"last_frame_path": "ending.png"},
+                },
+            ),
+        )
+
+        result = LongVideoSkills(
+            FakeTools(), self.repo_root / ".tmp-tests" / "style-profile-h3-l2va"
+        ).render_native_h3_l2va(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0][0], "comfy.render_h3")
+        self.assertEqual(calls[0][1]["h3_mode"], "l2va")
+        for rule in profile.values():
+            self.assertIn(rule, calls[0][1]["prompt"])
+
     def test_character_route_builds_native_h3_graph_without_power_shell_entrypoint(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -116,8 +166,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(plan.metadata["native_h3"]["use_last_frame"])
         self.assertIn("native_h3", plan.metadata)
 
-    def test_user_gets_reproducible_opening_conditioned_ending_for_fl2va(self) -> None:
-        """User Given the same FL2VA story and seed When the planner builds either A/B arm Then only the treatment reuses the opening image for its ending anchor."""
+    def test_user_gets_reproducible_independent_ending_for_fl2va(self) -> None:
+        """User Given a FL2VA story and seed When the planner prepares both anchors Then the ending is drawn independently with reproducible generation seeds."""
         planner, _runner, _memory = build_runtime(
             self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-paired-anchor-plan",
@@ -136,44 +186,26 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native_h3_experiment_seed": 730927,
         }
 
-        def make_plan(strategy: str):
-            goal = planner.create_goal(
-                prompt="Kirby draws one small star that comes alive and surprises him.",
-                media_type="native_h3_fl2va_story",
-                duration_seconds=15,
-                style="hand-drawn paper storybook animation",
-                constraints={**common_constraints, "native_h3_frame_pair_strategy": strategy},
-            )
-            return planner.build_plan(goal)
-
-        treatment = make_plan("opening_conditioned_image_to_image")
-        control = make_plan("independent_text_to_image")
-        treatment_nodes = {node.node_id: node for node in treatment.nodes}
-        control_nodes = {node.node_id: node for node in control.nodes}
-        treatment_ending = treatment_nodes["native-ending-keyframe"]
-        control_ending = control_nodes["native-ending-keyframe"]
-
-        self.assertTrue(treatment_ending.inputs["use_prior_frame"])
-        self.assertEqual(treatment_ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
-        self.assertEqual(treatment_ending.inputs["denoise"], 0.5)
-        self.assertEqual(treatment_ending.inputs["seed"], 730928)
-        self.assertFalse(control_ending.inputs["use_prior_frame"])
-        self.assertEqual(control_ending.inputs["seed"], treatment_ending.inputs["seed"])
-        self.assertTrue(
-            any(node.node_id == "native-ending-image-refine-asset-check" for node in treatment.nodes)
+        goal = planner.create_goal(
+            prompt="Kirby draws one small star that comes alive and surprises him.",
+            media_type="native_h3_fl2va_story",
+            duration_seconds=15,
+            style="hand-drawn paper storybook animation",
+            constraints=common_constraints,
         )
-        self.assertFalse(
-            any(node.node_id == "native-ending-image-refine-asset-check" for node in control.nodes)
-        )
-        for plan in (treatment, control):
-            render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
-            opening = next(node for node in plan.nodes if node.node_id == "native-opening-keyframe")
-            self.assertEqual(opening.inputs["seed"], 730927)
-            self.assertEqual(render.inputs["seed"], 730929)
-            self.assertTrue(render.inputs["use_last_frame"])
+        plan = planner.build_plan(goal)
+        nodes = {node.node_id: node for node in plan.nodes}
+        ending = nodes["native-ending-keyframe"]
+        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(ending.inputs["seed"], 730928)
+        self.assertEqual(nodes["native-opening-keyframe"].inputs["seed"], 730927)
+        self.assertEqual(nodes["native-h3-render"].inputs["seed"], 730929)
+        self.assertTrue(nodes["native-h3-render"].inputs["use_last_frame"])
+        self.assertEqual(plan.metadata["native_h3"]["frame_pair_strategy"], "independent_text_to_image")
 
     def test_native_h3_last_frame_mode_adds_review_and_passes_both_frames(self) -> None:
-        """User Given FL2VA needs editorial review When the planner creates the ending Then it refines the opening into reviewed candidates before rendering both anchors."""
+        """User Given FL2VA needs editorial review When the planner creates the ending Then it draws independent final-state candidates and sends both approved anchors to video generation."""
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
@@ -206,12 +238,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
         self.assertEqual(ending.inputs["image_count"], 6)
-        self.assertTrue(ending.inputs["use_prior_frame"])
-        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
-        self.assertIn(
-            "native-ending-image-refine-asset-check",
-            node_ids,
-        )
+        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
         self.assertEqual(ending_review.depends_on, ["native-ending-keyframe"])
         self.assertTrue(source_check.inputs["use_last_frame"])
         self.assertTrue(source_check.inputs["preserve_ending_frame"])
@@ -370,7 +398,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("Google says existing Gems", str(result.outputs["prompt"]))
         self.assertIn("Google automatically migrates the saved instructions", str(result.outputs["prompt"]))
         self.assertNotIn("Google says existing Gems", opening_prompt)
-        self.assertIn("one storybook still", opening_prompt.lower())
+        self.assertIn("one still", opening_prompt.lower())
         self.assertNotIn("changes into callable form", opening_prompt)
         self.assertIn("Kirby", ending_prompt)
         self.assertIn("Bandana Waddle Dee", ending_prompt)
@@ -1120,8 +1148,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertTrue(result["story"]["world"]["visual_language"].strip())
         self.assertNotIn("pedestal", result["story"]["world"]["setting"].casefold())
         ending_prompt = format_native_h3_keyframe_prompt(result["story"], style="warm storybook", frame="ending")
-        self.assertIn("Setting: a simple storybook setting", ending_prompt)
-        self.assertIn("clear space around the source-linked action", ending_prompt)
+        self.assertIn(f"Setting: {result['story']['world']['setting']}", ending_prompt)
         self.assertIn("Visual style: warm storybook", ending_prompt)
         self.assertNotIn("gag_card", result["story"])
 
@@ -1511,7 +1538,7 @@ class NativeH3KeyframePromptTests(unittest.TestCase):
         self.assertLess(prompt.index("Visual identity"), prompt.index("Main action"))
         self.assertIn("round pink body, blue oval eyes, red feet", prompt)
         self.assertNotIn("can inhale and copy abilities", prompt)
-        self.assertIn("one storybook still", prompt.lower())
+        self.assertIn("one still", prompt.lower())
         self.assertIn("main action", prompt.lower())
         self.assertIn("plain blank instruction card", prompt.lower())
         self.assertNotIn("gemstone", prompt.lower())
@@ -1966,10 +1993,9 @@ class NativeH3KeyframePromptTests(unittest.TestCase):
         prompt = format_native_h3_keyframe_prompt(storyboard, frame="ending")
 
         self.assertIn("three plain wooden rings linked into one chain, a visual analogy for combined Skills is part of the held pose", prompt)
-        self.assertIn("Main visual focus: the complete linked object is large and unmistakable", prompt)
-        self.assertIn("keep every ring separately recognizable and countable, with its own open center and outline", prompt)
-        self.assertIn("never fuse the chain into one oversized ring, donut, or bagel", prompt)
-        self.assertIn("hands frame the result without covering any link", prompt)
+        self.assertIn("Main visual focus: keep the complete source-defined task result readable", prompt)
+        self.assertIn("Preserve its planned objects, distinct components, and exact connection state", prompt)
+        self.assertIn("visible without covering the result", prompt)
         self.assertIn("News visual cue: three plain wooden rings linked into one chain", prompt)
         self.assertIn("preserve its described relationship to the character", prompt.casefold())
         self.assertNotIn("once in the small background", prompt.casefold())

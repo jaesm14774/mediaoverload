@@ -46,7 +46,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             self.repo_root / "output" / "kirby",
         )
 
-    def test_explicit_story_card_route_exposes_writing_first_contract(self) -> None:
+    def test_user_given_kirby_config_when_requesting_story_cards_then_selected_style_replaces_fixed_visual_overrides(self) -> None:
+        """User Given the Kirby config When requesting story cards Then the shared selected style is available without a fixed scene style or invented supporting cast."""
         payload = build_goal_payload_from_character_config(
             make_character_workflow_request(
                 self.repo_root,
@@ -63,7 +64,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["image_workflow_name"], "krea2_turbo")
         self.assertEqual(payload["constraints"]["refine_workflow_name"], "")
         self.assertEqual(payload["constraints"]["story_card_brand_label"], "CHARACTER NOTE")
-        self.assertTrue(payload["constraints"]["story_card_visual"]["supporting_cast"])
+        self.assertNotIn("scene_style", payload["constraints"]["story_card_visual"])
+        self.assertNotIn("supporting_cast", payload["constraints"]["story_card_visual"])
+        self.assertTrue(payload["constraints"]["visual_style_profile"]["prompt"])
         self.assertNotIn("story_card_refine_denoise", payload["constraints"])
 
     def test_duration_policy_selects_single_action_or_native_story(self) -> None:

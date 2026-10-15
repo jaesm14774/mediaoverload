@@ -16,7 +16,7 @@ from agentic.app.character_publishing import (
     collect_media_paths_from_run_result,
 )
 from agentic.assets.registry import AssetRegistry
-from agentic.runtime.contracts import GoalRequest
+from agentic.runtime.contracts import GoalRequest, RunState, SkillContext
 from agentic.runtime.creativity import RetryPolicy
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.motion_comics import validate_motion_comic_story
@@ -170,6 +170,38 @@ def test_user_given_theme_and_character_when_motion_comic_runs_without_a_story_f
     assert outputs["perceptual_review"]["status"] == "awaiting_review"
     assert result.state["motion-comic-write"]["prompt_mode"] == "llm"
     assert Path(outputs["summary_path"]).is_file()
+
+
+def test_user_given_a_reference_derived_style_profile_when_motion_comic_renders_llm_panels_then_each_krea_prompt_retains_the_profile_rules(
+    tmp_path,
+):
+    """User Given a reference-derived style profile and an LLM story with a short style label When motion-comic panels are rendered Then each Krea prompt retains the profile's medium, composition, palette, and avoidance rules."""
+    request = goal()
+    profile = {
+        "label": "hand-inked cartoon", "prompt": "bold ink outlines and crisp cel shading",
+        "composition": "one readable focal action", "palette": "coral and cyan accents",
+        "avoid": "fake lettering and interface overlays",
+    }
+    request.constraints["visual_style_profile"] = profile
+    planner, runner = runtime(tmp_path)
+    plan = planner.build_plan(request)
+    node = next(node for node in plan.nodes if node.skill_name == "media.motion_comic.panels")
+    state = RunState(goal={"prompt": request.prompt}, metadata=plan.metadata)
+    written = story_response()
+    written["run_dir"] = str(tmp_path)
+    state["motion-comic-write"] = written
+
+    result = runner.skill_registry.get(node.skill_name).handler(SkillContext(plan, node, state))
+
+    assert result.status == "success", result.to_dict()
+    panel_records = result.outputs["generation"]
+    assert len(panel_records) == 3
+    for record in panel_records:
+        prompt = record["payload"]["prompt"]
+        assert profile["label"] in prompt
+        assert story_response()["visual_style"] not in prompt
+        for key in ("prompt", "composition", "palette", "avoid"):
+            assert profile[key] in prompt
 
 
 @pytest.mark.parametrize(

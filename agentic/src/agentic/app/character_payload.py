@@ -10,6 +10,7 @@ from typing import Any
 from agentic.app.character_requests import CharacterWorkflowRequest
 from agentic.app.creative_profiles import resolve_creative_profile
 from agentic.runtime.observability import RunRecorder
+from agentic.runtime.prompting import visual_style_profile_direction
 from agentic.runtime.strategies import (
     IMAGE_ONLY_GENERATION_TYPES,
     NEWS_GROUNDED_GENERATION_TYPES,
@@ -172,7 +173,9 @@ def build_goal_payload_from_character_config(
     )
     canvas_profile = dict(creative_profile["canvas"])
     style_profile = dict(creative_profile["style"])
+    creative_profile["style"] = style_profile
     style = str(style_profile["label"])
+    style_guidance = visual_style_profile_direction(style_profile)
     prompt = _replace_character_identity(
         prompt,
         configured_name=configured_prompt_identity,
@@ -288,7 +291,7 @@ def build_goal_payload_from_character_config(
     autonomous_prompt = _resolve_autonomous_prompt(
         prompt=prompt,
         character_name=character_name,
-        style=style,
+        style="; ".join(part for part in (style, style_guidance) if part),
         media_type=agentic_media_type,
         generation=generation,
         generation_type=config_generation_type,
@@ -450,17 +453,6 @@ def build_goal_payload_from_character_config(
             )
             if item
         )
-    style_guidance = "; ".join(
-        part
-        for part in (
-            str(style_profile.get("prompt") or "").strip(),
-            str(style_profile.get("composition") or "").strip(),
-            str(style_profile.get("palette") or "").strip(),
-            str(style_profile.get("motion") or "").strip(),
-            f"Avoid: {style_profile['avoid']}" if style_profile.get("avoid") else "",
-        )
-        if part
-    )
     native_h3_creative_brief = "; ".join(
         part
         for part in (
@@ -590,6 +582,7 @@ def build_goal_payload_from_character_config(
         "facebook_profile_share_url": facebook_profile_share_url,
         "selection_limit": routing.get("count_plan", {}).get("review_selection_limit"),
         "enable_review_loop": bool(enable_review_loop and not no_review),
+        "allow_regenerate_review": bool(review.allow_regenerate),
         "review_notes": review_notes,
         "news_driven": effective_news_driven,
         "native_h3_arc_instruction": requested_native_h3_arc_instruction,

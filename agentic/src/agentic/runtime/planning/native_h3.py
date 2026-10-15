@@ -60,19 +60,9 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
     require_human_review = bool(
         goal.constraints.get("require_human_review", False)
     ) or (pre_video_review and pre_video_requires_human)
-    use_last_frame = bool(goal.constraints.get("native_h3_use_last_frame", False))
-    frame_pair_strategy = str(
-        goal.constraints.get("native_h3_frame_pair_strategy")
-        or "opening_conditioned_image_to_image"
-    ).strip()
-    allowed_frame_pair_strategies = {
-        "independent_text_to_image",
-        "opening_conditioned_image_to_image",
-    }
-    if use_last_frame and frame_pair_strategy not in allowed_frame_pair_strategies:
-        raise ValueError(
-            "native_h3_frame_pair_strategy must be independent_text_to_image or opening_conditioned_image_to_image"
-        )
+    use_last_frame = goal.media_type == "native_h3_fl2va_story" or bool(
+        goal.constraints.get("native_h3_use_last_frame", False)
+    )
     experiment_seed = goal.constraints.get("native_h3_experiment_seed")
     if experiment_seed is not None:
         experiment_seed = int(experiment_seed)
@@ -122,7 +112,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
                 "style": goal.style,
                 "render_mode": (
                     "first_last_frame_to_video"
-                    if goal.media_type == "native_h3_fl2va_story"
+                    if use_last_frame
                     else "image_to_video"
                 ),
             },
@@ -186,45 +176,22 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         opening_source_node = opening_review_node
     ending_source_node = ""
     if use_last_frame:
-        refine_workflow_name = str(
-            goal.constraints.get("identity_refine_workflow_name")
-            or "krea2_turbo_img2img"
-        ).strip()
-        use_opening_reference = (
-            frame_pair_strategy == "opening_conditioned_image_to_image"
-        )
         ending_dependencies = [
             opening_source_node,
             "native-story-prompt",
             "native-image-asset-check",
         ]
-        if use_opening_reference:
-            nodes.append(
-                ExecutionNode(
-                    node_id="native-ending-image-refine-asset-check",
-                    skill_name="media.ensure_workflow",
-                    inputs={
-                        "workflow_name": refine_workflow_name,
-                    },
-                    depends_on=["native-story-prompt"],
-                    tags=["assets", "image", "continuity", "native-h3"],
-                    tool_name="asset.ensure_workflow_ready",
-                    stage="assets",
-                )
-            )
-            ending_dependencies.append("native-ending-image-refine-asset-check")
         ending_inputs = {
             "workflow_name": image_manifest.name,
             "prompt_key": "ending_keyframe_prompt",
-            "use_prior_frame": use_opening_reference,
-            "identity_refine_workflow_name": refine_workflow_name,
+            # The ending is a new story state, not a refinement of the opening.
+            # Keep the opening dependency only to preserve the review order.
+            "use_prior_frame": False,
             "width": width,
             "height": height,
             "image_count": keyframe_candidate_count,
             "suffix": "native_h3_ending",
         }
-        if use_opening_reference:
-            ending_inputs["denoise"] = 0.5
         if experiment_seed is not None:
             ending_inputs["seed"] = experiment_seed + 1
         nodes.append(
@@ -353,7 +320,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             "require_human_review": require_human_review,
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_last_frame": use_last_frame,
-            "frame_pair_strategy": frame_pair_strategy if use_last_frame else "",
+            "frame_pair_strategy": "independent_text_to_image" if use_last_frame else "",
             "experiment_seed": experiment_seed,
             "backend": "comfyui",
         },

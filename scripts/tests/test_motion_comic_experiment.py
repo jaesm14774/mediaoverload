@@ -94,30 +94,32 @@ def test_user_given_three_panels_when_comparing_presentations_then_both_playable
         assert media["has_video"] and (media["width"], media["height"]) == (240, 426)
         assert abs(media["frame_rate"] - 12) < 0.01
         assert abs(media["video_duration"] - 2.25) <= 1 / 12
+        assert abs(media["audio_duration"] - media["video_duration"]) <= 1 / 12
         assert report["median_seconds"][variant] > 0
         assert Path(report["outputs"][variant]["contact_sheet_path"]).is_file()
     assert hashes == {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in tmp_path.glob("panel-*.png")
     }
-    # The final comic preserves the earlier red and green panels alongside the
-    # blue payoff. A full-screen image cut cannot satisfy this visible contract.
-    frame = output / "final-comic.png"
-    FFmpegAdapter().extract_frame_at(
-        report["outputs"]["motion_comic"]["video_path"], str(frame), 2.0
-    )
-    with Image.open(frame) as image:
-        colors = image.convert("RGB").getdata()
+    # Each settled beat must contain its own panel and every earlier panel.
+    for beat, timestamp in enumerate((0.5, 1.25, 2.0)):
+        frame = output / f"comic-beat-{beat}.png"
+        FFmpegAdapter().extract_frame_at(
+            report["outputs"]["motion_comic"]["video_path"], str(frame), timestamp
+        )
+        with Image.open(frame) as image:
+            colors = list(image.convert("RGB").getdata())
         for channel in range(3):
-            assert (
-                sum(
+            visible_fraction = sum(
                     pixel[channel] > 110
                     and pixel[channel]
                     > max(pixel[(channel + 1) % 3], pixel[(channel + 2) % 3]) * 1.4
                     for pixel in colors
-                )
-                > 400
-            )
+                ) / len(colors)
+            if channel <= beat:
+                assert visible_fraction > 0.01, (beat, channel, visible_fraction)
+            else:
+                assert visible_fraction < 0.001, (beat, channel, visible_fraction)
 
 
 @pytest.mark.parametrize(
@@ -132,7 +134,6 @@ def test_user_given_three_panels_when_comparing_presentations_then_both_playable
         "invalid_fps",
         "fractional_frame",
         "empty_title",
-        "caption_layout",
         "unreadable_canvas",
     ],
 )
@@ -162,8 +163,6 @@ def test_user_given_invalid_or_existing_inputs_when_starting_a_trial_then_no_sou
         raw["panels"][1]["duration_seconds"] = 0.73
     elif failure == "empty_title":
         raw["title"] = ""
-    elif failure == "caption_layout":
-        raw["panels"][1]["caption"] = "字" * 24
     elif failure == "unreadable_canvas":
         raw["width"] = 120
     story.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
@@ -174,3 +173,22 @@ def test_user_given_invalid_or_existing_inputs_when_starting_a_trial_then_no_sou
         assert (output / "keep.txt").read_text(encoding="utf-8") == "existing result"
     else:
         assert not output.exists()
+
+
+@pytest.mark.parametrize("canvas", [(240, 426), (576, 1024)])
+def test_user_given_valid_long_captions_when_running_the_trial_then_dynamic_layout_preserves_the_story(tmp_path, canvas):
+    """User Given captions at the valid character limit When a trial runs on a minimum or default portrait canvas Then dynamic layout accepts them and both playable videos preserve every caption."""
+    story = story_file(tmp_path)
+    raw = json.loads(story.read_text(encoding="utf-8"))
+    raw.update(width=canvas[0], height=canvas[1])
+    raw["panels"][1]["caption"] = "字" * 24
+    story.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    output = tmp_path / "result"
+    completed = run_cli(story, output)
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["story"]["panels"] == raw["panels"]
+    for variant in ("slideshow", "motion_comic"):
+        media = FFmpegAdapter().probe_media(report["outputs"][variant]["video_path"])
+        assert media["has_video"] and media["has_audio"]
+        assert (media["width"], media["height"]) == canvas

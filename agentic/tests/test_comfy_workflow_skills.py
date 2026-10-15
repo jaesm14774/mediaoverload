@@ -96,6 +96,48 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
         self.assertIn("blue bandana", bundle["prompt"])
         self.assertNotIn("inhale and copy abilities", bundle["prompt"])
 
+    def test_user_given_an_llm_opening_prompt_and_selected_style_profile_when_krea_keyframe_is_prepared_then_all_profile_rules_reach_the_renderer(self) -> None:
+        """User Given an LLM opening prompt and a reference-derived style profile When a Krea keyframe prompt is prepared Then its medium, composition, palette, motion, and avoidance rules reach the renderer."""
+        profile = {
+            "prompt": "fully hand-drawn 2D comic scene across every visible layer",
+            "composition": "illustrated garden background with one clear action",
+            "palette": "saturated coral, cyan, and yellow",
+            "motion": "stable hand-inked contours through the shot",
+            "avoid": "photographic backgrounds and 3D rendering",
+        }
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby plants a star seed",
+                media_type="native_h3_story",
+                style="bold cartoon comic",
+                constraints={"visual_style_profile": profile},
+            ),
+            workflow_name="native_h3_story",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="render-opening",
+            skill_name="image.render",
+            depends_on=["native-story-prompt"],
+        )
+        state = RunState(
+            goal={},
+            metadata={},
+            node_outputs={
+                "native-story-prompt": {
+                    "opening_keyframe_prompt": "Kirby kneels beside a seedling.",
+                    "negative_prompt": "text",
+                }
+            },
+        )
+
+        bundle = ComfyImageSkills._resolve_prompt_bundle(
+            SkillContext(plan=plan, node=node, state=state)
+        )
+
+        for rule in profile.values():
+            self.assertIn(rule, bundle["prompt"])
+
     def test_user_given_i2v_image_prompt_when_render_bundle_is_built_then_no_action_lock_is_added(self) -> None:
         """User: Given an I2V opening prompt, When the shared art direction is applied, Then its wording stays intact without an action lock."""
         plan = ExecutionPlan(

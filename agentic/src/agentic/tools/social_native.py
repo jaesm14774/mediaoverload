@@ -985,7 +985,8 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         for _ in range(max_wait):
             response = requests.get(
                 url,
-                params={"fields": "status_code,status", "access_token": self.access_token},
+                params={"fields": "status_code,status"},
+                headers={"Authorization": f"Bearer {self.access_token}"},
                 timeout=30,
             )
             response.raise_for_status()
@@ -1012,12 +1013,18 @@ class InstagramGraphPlatform(BaseConfigPlatform):
     def _fetch_ig_user_id_from_me(self) -> str | None:
         response = requests.get(
             f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me",
-            params={"fields": "user_id,username,id", "access_token": self.access_token},
+            params={"fields": "user_id,username"},
+            headers={"Authorization": f"Bearer {self.access_token}"},
             timeout=30,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise RuntimeError(
+                f"Instagram account lookup failed: {_describe_publish_exception(exc)}"
+            ) from exc
         body = response.json()
-        user_id = body.get("user_id") or body.get("id") or ""
+        user_id = body.get("user_id") or ""
         return str(user_id) if user_id else None
 
     def _get_media_url(self, local_path: str) -> str | None:

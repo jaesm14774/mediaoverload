@@ -13,12 +13,13 @@ from agentic.runtime.motion_comics import (
 from agentic.runtime.prompting import selected_role_description
 
 SYSTEM_PROMPT = """Write an original three-panel social comic from the supplied brief and resolved subjects.
+Derive setting, objects and actions from this run's brief and source. Visual style controls rendering treatment, not scene content or character anatomy.
 Use setup -> escalation -> payoff as one causal chain. The title makes a concrete promise or raises a question that the last panel visibly answers.
 Each image depicts one frozen moment, not several sequential actions. Use one simple goal and one dominant changing prop or physical relationship.
 Describe the visible action and prop state first in each image_prompt. Keep the same subjects, prop design, location, camera and scale across panels.
 Each image_prompt is a complete standalone illustration direction including the setting, camera and prop design. continuity is a planning/review note, never appended to image generation; only resolved identity and visual_style are shared at render time.
 continuity and visual_style describe only stable identity, scene and style. Never put a changing prop state in shared directions.
-For quantity changes, shared continuity describes the container itself, never its contents: even 'a plate holding cake' can force food back into an empty-container payoff.
+For quantity changes, shared continuity describes only stable object identity, never changing contents or quantity; keep changing states in the individual panels.
 If a container is only a continuity anchor, keep its exact count, design, position and orientation across panels. Show the changed contents clearly; avoid complex handling poses that create a second container or hide its state.
 Prefer one clearly visible changed state plus the character's reaction in the payoff. Do not add an unrelated physical transformation or extra prop to make the ending more dramatic.
 visible_state names the evidence the viewer must actually see. cause explains how this beat follows from the previous one.

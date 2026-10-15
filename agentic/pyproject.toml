@@ -39,6 +39,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"agentic.tools" = ["style_picker_web/*.html", "style_picker_web/*.css", "style_picker_web/*.js"]
+
 [tool.ruff.lint]
 select = ["E9", "F"]
 

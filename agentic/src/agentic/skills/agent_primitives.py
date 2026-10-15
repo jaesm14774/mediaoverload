@@ -16,7 +16,9 @@ from agentic.runtime.story_cards import (
     validate_story_card_payload,
 )
 from agentic.runtime.prompting import (
+    include_visual_style_profile,
     include_role_description,
+    style_profile_avoidance,
     validate_story_segments,
 )
 from agentic.video_directing import apply_video_opening_frame_direction
@@ -344,13 +346,14 @@ class AgentMediaSkills:
 
         def apply_art_direction(prompt: str) -> str:
             prompt = include_role_description(prompt, context.plan.goal)
-            return apply_paper_storybook_art_direction(
+            prompt = apply_paper_storybook_art_direction(
                 prompt,
                 isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
             )
+            return include_visual_style_profile(prompt, context.plan.goal)
 
         use_prior_frame = bool(context.node.inputs.get("use_prior_frame", True))
-        prior_frame_path = context.node.inputs.get("prior_frame_path")
+        prior_frame_path = context.node.inputs.get("prior_frame_path") if use_prior_frame else None
         if use_prior_frame and not prior_frame_path:
             prior_frame_path = resolve_dependency_value(
                 context,
@@ -515,7 +518,9 @@ class AgentMediaSkills:
         payload: dict[str, object] = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
-            "prompt": self._resolve_prompt(context),
+            "prompt": include_visual_style_profile(
+                self._resolve_prompt(context), context.plan.goal
+            ),
             "model_profile": str(
                 context.node.inputs.get("model_profile")
                 or context.plan.goal.constraints.get("native_h3_model_profile")
@@ -585,6 +590,7 @@ class AgentMediaSkills:
                 prompt,
                 isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
             )
+            prompt = include_visual_style_profile(prompt, context.plan.goal)
             result = self.tools.call(
                 "comfy.workflow.text_to_image",
                 {
@@ -626,6 +632,10 @@ class AgentMediaSkills:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "story_card_backgrounds")
         background_paths: list[str] = []
         page_runs: list[dict[str, object]] = []
+        image_goal = replace(context.plan.goal, media_type="image")
+        negative_prompt = "; ".join(
+            part for part in (str(story["negative_prompt"]), style_profile_avoidance(image_goal)) if part
+        )
         seed_value = context.plan.goal.constraints.get("seed")
         if seed_value is not None:
             seed_base = int(seed_value)
@@ -633,12 +643,12 @@ class AgentMediaSkills:
             seed_base = int(story.get("visual_seed") or new_story_card_visual_seed())
         for index, page in enumerate(story["pages"], start=1):
             page_dir = run_dir / f"page_{index:02d}"
-            background_prompt = str(page["background_prompt"])
+            background_prompt = include_visual_style_profile(page["background_prompt"], image_goal)
             page_seed = seed_base + (index * 1009)
             payload: dict[str, object] = {
                 "workflow_name": workflow_name,
                 "prompt": background_prompt,
-                "negative_prompt": str(story["negative_prompt"]),
+                "negative_prompt": negative_prompt,
                 "width": width,
                 "height": height,
                 "image_count": 1,

@@ -408,10 +408,7 @@ class AgentSocialSkills:
                 selection_required=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
                 selection_limit=(1 if (first_frame_review or last_frame_review) else (limit if (anchor_set_review or reference_review) else None)),
                 review_scope=review_scope,
-                allow_continue=(
-                    bool(context.plan.goal.constraints.get("allow_continue_review", False))
-                    and (final_video_review or final_media_review)
-                ),
+                allow_regenerate=bool(context.plan.goal.constraints.get("allow_regenerate_review", False)),
             )
         if require_human_review and (decision is None or getattr(decision, "review_mode", "") != "discord"):
             fallback_reason = str(getattr(decision, "fallback_reason", "Discord human review did not start."))
@@ -431,7 +428,7 @@ class AgentSocialSkills:
                 logs=["Blocked workflow because required Discord human review was unavailable; automatic selection is disabled."],
             )
         if decision is not None and decision.review_mode == "discord":
-            if decision.status == "continue_requested":
+            if decision.status == "regeneration_requested":
                 return SkillResult(
                     status="blocked",
                     outputs={
@@ -441,15 +438,15 @@ class AgentSocialSkills:
                         "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
                         "rejected_assets": ranked,
                         "selection_rationale": "Human reviewer requested a full end-to-end rerun in Discord.",
-                        "review_decision": "continue",
-                        "continue_requested": True,
+                        "review_decision": "regenerate",
+                        "regeneration_requested": True,
                         "review_mode": decision.review_mode,
                         "review_scope": review_scope,
                         "reviewer": decision.reviewer,
                         "review_session_id": decision.session_id,
                         "review_session_path": decision.session_path,
                     },
-                    logs=["Stopped publish dispatch because Discord requested a fresh end-to-end run."],
+                    logs=["Stopped the current workflow because Discord requested a fresh end-to-end run."],
                 )
             if decision.status == "rejected":
                 return SkillResult(

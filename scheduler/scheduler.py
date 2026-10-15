@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import logging
@@ -30,8 +31,8 @@ from agentic.app.character_requests import (
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
+from agentic.app.character_session import run_character_session
 from agentic.app.character_workflow import run_character_workflow
-
 
 LOGGER = logging.getLogger("mediaoverload.scheduler")
 QUIET_HOURS_END = 6
@@ -177,7 +178,6 @@ def run_scheduled_job(
             enable_review_loop=config.enable_review_loop,
             review_notes=config.review_notes,
             no_review=config.no_review,
-            allow_continue=True,
         ),
         runtime=CharacterRuntimeOptions(
             comfy_host=config.comfy_host,
@@ -185,21 +185,14 @@ def run_scheduled_job(
             comfy_root=config.comfy_root,
         ),
     )
-    while True:
-        result = workflow_runner(request)
-        LOGGER.info(
-            "scheduler.result | status=%s | strategy=%s | publish=%s",
-            result.get("status"),
-            result.get("source_generation_type"),
-            ((result.get("publish") or {}).get("result") or {}).get("status", ""),
-        )
-        if str(result.get("status") or "").strip().lower() != "continue_requested":
-            return result
-        LOGGER.info(
-            "scheduler.continue | previous_run_id=%s | config=%s",
-            result.get("run_id", ""),
-            config.config_path,
-        )
+    result = run_character_session(request, workflow_runner=workflow_runner)
+    LOGGER.info(
+        "scheduler.result | status=%s | strategy=%s | publish=%s",
+        result.get("status"),
+        result.get("source_generation_type"),
+        ((result.get("publish") or {}).get("result") or {}).get("status", ""),
+    )
+    return result
 
 
 def _run_scheduled_job_safe(

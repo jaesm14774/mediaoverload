@@ -22,6 +22,8 @@ from agentic.runtime.prompting import (
     build_goal_brief,
     news_grounding_anchor_clause,
     build_story_segments,
+    style_profile_avoidance,
+    style_profile_direction,
     validate_story_segments,
 )
 from agentic.runtime.llm_client import PromptClient
@@ -215,6 +217,7 @@ def expand_goal(
                 f"Goal: {goal.prompt}",
                 f"Media type: {goal.media_type}",
                 f"Style: {selected_style}",
+                f"Resolved visual style rules: {style_profile_direction(goal)}",
                 f"Character: {goal.constraints.get('character', '')}",
                 _goal_subject_instruction(goal),
                 f"Duration seconds: {goal.duration_seconds}",
@@ -288,8 +291,16 @@ def compose_prompt(
     negative_prompt: str = "",
 ) -> dict[str, Any]:
     fallback = {
-        "prompt": ", ".join(part for part in (prefix, prompt, style, suffix) if part),
-        "negative_prompt": negative_prompt,
+        "prompt": ", ".join(
+            part
+            for part in (prefix, prompt, style, style_profile_direction(goal), suffix)
+            if part
+        ),
+        "negative_prompt": ", ".join(
+            part
+            for part in (str(negative_prompt or "").strip(), style_profile_avoidance(goal))
+            if part
+        ),
     }
     manager = client.require_manager()
     user_prompt = "\n".join(
@@ -298,6 +309,7 @@ def compose_prompt(
             f"Media type: {goal.media_type}",
             f"Base prompt: {prompt}",
             f"Style: {style}",
+            f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Prefix: {prefix}",
             f"Suffix: {suffix}",
             f"Character: {goal.constraints.get('character', '')}",
@@ -408,6 +420,7 @@ def segment_story(
             f"Character: {goal.constraints.get('character', '')}",
             _goal_subject_instruction(goal),
             f"Style: {goal.style}",
+            f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Creative brief: {creative_brief}",
             f"Tone: {tone}",
             f"Segment count: {segment_count}",
@@ -517,6 +530,7 @@ def prepare_segment(
             if str(segment.get(key) or "").strip()
         ),
         f"Style: {goal.style}",
+        f"Resolved visual style rules: {style_profile_direction(goal)}",
         f"Character: {goal.constraints.get('character', '')}",
         _goal_subject_instruction(goal),
         f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",

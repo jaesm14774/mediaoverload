@@ -383,6 +383,14 @@ def format_native_h3_keyframe_prompt(
     if not isinstance(shot, dict):
         shot = {"action": str(shot or "")}
 
+    paired_frames = storyboard.get("render_mode") == "first_last_frame_to_video"
+    if normalized_frame == "ending" and paired_frames:
+        opening_shot = shots[0] if isinstance(shots[0], dict) else {"action": str(shots[0])}
+        opening_state = " ".join(str(opening_shot.get("state_change") or opening_shot.get("action") or "").split())
+        ending_state = " ".join(str(shot.get("state_change") or shot.get("action") or "").split())
+        if not ending_state or opening_state.casefold() == ending_state.casefold():
+            raise StoryboardError("FL2VA requires distinct opening and ending visual states.")
+
     world = dict(storyboard.get("world") or {})
     context = dict(storyboard.get("subject_context") or {})
     raw_news_trace = storyboard.get("news_trace")
@@ -409,7 +417,7 @@ def format_native_h3_keyframe_prompt(
     kirby_name = next((name for name in mood_subjects if "kirby" in name.casefold()), "")
     waddle_name = next((name for name in mood_subjects if "waddle dee" in name.casefold()), "")
 
-    parts = [f"Draw one storybook still at the exact {normalized_frame} instant: one scene, one readable moment."]
+    parts = [f"Draw one still at the exact {normalized_frame} instant: one scene, one readable moment."]
     ending_pose = ""
     if normalized_frame == "ending":
         ending_pose = _format_held_keyframe_reaction(str(shot.get("state_change") or ""))
@@ -448,18 +456,13 @@ def format_native_h3_keyframe_prompt(
     visual_translation = " ".join(str(news_trace.get("visual_translation") or "").split()).strip()
     raw_anchors = news_trace.get("visual_anchors")
     anchors = raw_anchors if isinstance(raw_anchors, list) else [raw_anchors] if isinstance(raw_anchors, str) else []
-    visual_thesis_text = " ".join([visual_translation, *(str(anchor) for anchor in anchors)]).casefold()
-    has_route_thesis = bool(
-        re.search(
-            r"\bfootprints?\b|\bfootpath\b|\bfootsteps?\b|\b(?:path|route|trail|track)\b|腳印|足跡|路徑|小徑",
-            visual_thesis_text,
-            re.IGNORECASE,
-        )
-    )
     has_repeated_presence = any(term in repeated_presence_context for term in repeated_presence_terms)
-    has_recurring_footprint_story = is_human_interest and has_route_thesis and has_repeated_presence
     if character:
         parts.append(f"Selected characters: {character}.")
+    if normalized_frame == "ending" and paired_frames and mood_subjects:
+        parts.append(
+            f"Named cast: {len(mood_subjects)} character(s), each appearing once: {', '.join(mood_subjects)}."
+        )
     def append_labeled_detail(label: str, value: Any) -> None:
         text = str(value or "").strip()
         if not text:
@@ -496,25 +499,34 @@ def format_native_h3_keyframe_prompt(
         ).strip()
         if appearance and character:
             visual_identities.append(f"{character}: {appearance}")
+
+    if normalized_frame == "ending" and paired_frames:
+        # A terminal still needs the result, not the full news/story narration.
+        # Repeating earlier actions and cast descriptions competes with that pose.
+        append_labeled_detail("Held final pose", ending_pose)
+        append_labeled_detail("Visual identity", "; ".join(visual_identities))
+        append_labeled_detail("Setting", world.get("setting"))
+        append_labeled_detail("Visual style", style.strip() or world.get("visual_language"))
+        planned_camera = " ".join(str(shot.get("camera") or "").split()).strip()
+        if planned_camera.casefold().startswith("opening framing:"):
+            planned_camera = planned_camera.partition(".")[2].strip()
+        append_labeled_detail(
+            "Camera",
+            planned_camera or "medium-wide view with the selected cast, final pose, and completed result readable",
+        )
+        parts.append(
+            "Show this completed story state as one new illustration. Each named character appears once. "
+            "Keep the established character design and illustration style; pose, expression, gaze, and prop "
+            "placement follow the final state. Keep faces and the result visible. No readable text, logo, or watermark."
+        )
+        return " ".join(parts)
+
     if visual_identities and normalized_frame == "opening":
         append_labeled_detail("Visual identity", "; ".join(visual_identities))
 
     if normalized_frame == "opening":
-        if has_recurring_footprint_story:
-            lead = character.split(",", 1)[0].strip() or "the selected character"
-            append_labeled_detail(
-                "Main action",
-                f"{lead} stands motionless, full body, immediately beside one fully closed wooden doorway. "
-                "Show the entire door panel, frame, and threshold distinctly in the same composition.",
-            )
-            append_labeled_detail(
-                "Opening reaction",
-                "The door remains firmly shut. The near heel-to-toe prints are visible beside the character's feet, then "
-                "disappear behind the adjacent stone wall; no continuation, destination, interior, recipient, or response is shown.",
-            )
-        else:
-            append_labeled_detail("Main action", shot.get("action"))
-            append_labeled_detail("Opening reaction", shot.get("state_change"))
+        append_labeled_detail("Main action", shot.get("action"))
+        append_labeled_detail("Opening reaction", shot.get("state_change"))
     else:
         append_labeled_detail("Held final pose", ending_pose)
         is_chain_news = any(term in source_context_text for term in ("chain", "combine", "串聯", "組合", "結合"))
@@ -523,18 +535,21 @@ def format_native_h3_keyframe_prompt(
         )
         if is_chain_news and has_linked_visual:
             parts.append(
-                "Main visual focus: the complete linked object is large and unmistakable in the lower-center foreground; "
-                "keep every ring separately recognizable and countable, with its own open center and outline; overlap only "
-                "where the rings are threaded together, never fuse the chain into one oversized ring, donut, or bagel. "
-                "The characters' hands frame the result without covering any link."
+                "Main visual focus: keep the complete source-defined task result readable in the foreground. "
+                "Preserve its planned objects, distinct components, and exact connection state; do not substitute a "
+                "different object or merge separate components into a new shape. Keep any named character contact "
+                "visible without covering the result."
             )
         if visual_identities:
             append_labeled_detail("Visual identity", "; ".join(visual_identities))
     if normalized_frame == "ending":
-        if has_recurring_footprint_story:
+        planned_camera = " ".join(str(shot.get("camera") or "").split()).strip()
+        if planned_camera:
+            camera_detail = f"Camera: {planned_camera}; keep the final pose and completed story result readable."
+        elif len(mood_subjects) < 2:
             camera_detail = (
-                "Camera: same medium-wide side three-quarter axis as the opening; keep the full character, the same now-ajar "
-                "door, and the continuous shoeprint route visible with readable spacing; no close crop."
+                "Camera: medium-wide view of the selected character; keep its full pose, face, hands, "
+                "and the completed story result readable with space around them; no close crop."
             )
         else:
             camera_detail = (
@@ -543,18 +558,11 @@ def format_native_h3_keyframe_prompt(
             )
     else:
         planned_camera = " ".join(str(shot.get("camera") or "").split()).strip()
-        if has_recurring_footprint_story:
-            camera_detail = (
-                "Camera: medium-wide side three-quarter view; show the character's complete body and the entire closed door "
-                "including its frame and threshold. Keep only the near heel-to-toe print section in view; a foreground stone "
-                "wall hides the route's continuation and destination. Do not show the full lane; no close crop."
-            )
-        else:
-            camera_detail = (
-                f"Camera: {planned_camera}; keep the selected characters' faces and the source-linked action readable in this composition."
-                if planned_camera
-                else "Camera: medium-wide two-shot; keep both characters, faces, hands, and the named action inside frame."
-            )
+        camera_detail = (
+            f"Camera: {planned_camera}; keep the selected characters' faces and the source-linked action readable in this composition."
+            if planned_camera
+            else "Camera: medium-wide view; keep the selected cast and named action inside frame."
+        )
     mood_detail = ""
     if emotion == "comedy":
         if kirby_name and waddle_name:
@@ -676,17 +684,6 @@ def format_native_h3_keyframe_prompt(
     elif world_visual_language:
         append_labeled_detail("Visual style", world_visual_language)
     setting = str(world.get("setting") or "").strip()
-    if has_recurring_footprint_story:
-        doors = (
-            "one close, fully visible closed wooden doorway beside a stone wall that turns out of sight"
-            if normalized_frame == "opening"
-            else "the same close wooden doorway visibly ajar beside the stone wall"
-        )
-        setting = f"A miniature Changhua rural lane with a solid, pale stone path and {doors}."
-    if len(setting) > 120:
-        extra_detail = re.search(r"\s+with\s+", setting, re.IGNORECASE)
-        if extra_detail:
-            setting = setting[:extra_detail.start()].rstrip(" ,;:")
     append_labeled_detail("Setting", setting)
     integration = " ".join(str(news_trace.get("integration") or "").split()).strip()
     source_limit = " ".join(str(news_trace.get("source_limit") or "").split()).strip()
@@ -719,28 +716,11 @@ def format_native_h3_keyframe_prompt(
         if has_repeated_presence:
             parts.append(
                 "This source says progress followed recurring presence: do not suggest one visit or a short wait caused "
-                "acceptance. Keep the opening outcome unresolved and suggest sustained effort with an uncounted route motif; "
-                "show the selected character once, with no recipient or inferred reply."
+                "acceptance. Keep the opening outcome unresolved and show only the source-grounded evidence of sustained "
+                "effort selected by this story; do not prescribe a spatial motif or invent a recipient response."
             )
     character_names = [*subjects, *(name.strip() for name in character.split(",") if name.strip())]
     normalized_character_names = [name.casefold() for name in character_names if name]
-    if has_recurring_footprint_story:
-        lead = character.split(",", 1)[0].strip() or "the selected character"
-        route_detail = (
-            "Opening only: show a short visible section of the already accumulated, uncounted route; let it bend behind a "
-            "foreground stone wall and disappear before its full length or destination is visible. Keep the selected door "
-            "clearly closed so the later camera move has a real reveal."
-            if normalized_frame == "opening"
-            else "Final beat only: show the continuous uncounted route and one source-supported doorway visibly ajar with a "
-            "clear gap at its edge; keep every other doorway closed and show no recipient."
-        )
-        parts.append(
-            f"Visible metaphor: show {lead} once, full body, beside a curving route of clearly shaped warm-ochre heel-and-toe "
-            "prints along a simple pale stone lane. Paint the marks on top of the surface as "
-            "flat watercolor pigment, with a distinct sole silhouette and thin dark outline; do not make them holes, pits, "
-            f"indentations, or shadows. Keep the route readable with the character's face and both feet inside frame. {route_detail} "
-            "The marks symbolize sustained work and are not an exact count of visits."
-        )
     source_context_known = bool(source_context_text.strip())
     term_aliases = {
         "conversion": "convert",
@@ -771,7 +751,7 @@ def format_native_h3_keyframe_prompt(
         "expressive", "foreground", "layered", "light", "lighting", "linework", "paper", "palette",
         "pastel", "silhouette", "texture", "visual", "warm", "watercolor", "watercolour",
     }
-    visual_candidates: list[tuple[int, int, int, int, str]] = []
+    visual_candidates: list[tuple[int, int, int, str]] = []
     for index, raw_anchor in enumerate(anchors):
         anchor = " ".join(str(raw_anchor or "").split()).strip()
         if not anchor or len(anchor) > 140:
@@ -791,17 +771,9 @@ def format_native_h3_keyframe_prompt(
         if source_context_known and source_score == 0:
             continue
         frame_score = sum(1 for term in terms if term in frame_text)
-        repeated_motif_score = int(
-            has_recurring_footprint_story
-            and re.search(
-                r"\bfootprints?\b|\bfootpath\b|\bfootsteps?\b|\b(?:path|route|trail|track)\b|腳印|足跡|路徑|小徑",
-                anchor,
-                re.IGNORECASE,
-            ) is not None
-        )
-        visual_candidates.append((repeated_motif_score, source_score, frame_score, -index, anchor))
+        visual_candidates.append((source_score, frame_score, -index, anchor))
     if visual_candidates:
-        _, _, _, _, anchor = max(visual_candidates)
+        _, _, _, anchor = max(visual_candidates)
         is_star_cue = re.search(r"\bstars?\b", anchor, re.IGNORECASE) is not None
         if is_star_cue and not re.search(r"\bstar\s+icon\b", anchor, re.IGNORECASE):
             anchor = re.sub(r"\bstar\b", "star icon", anchor, count=1, flags=re.IGNORECASE)

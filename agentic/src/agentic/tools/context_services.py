@@ -132,7 +132,7 @@ class NewsContextService:
         self,
         *,
         lookback_days: int = 7,
-        limit: int = 200,
+        limit: int = 5000,
         exclude_categories: list[str] | None = None,
     ) -> NewsSelection | None:
         if not self.is_configured():
@@ -611,7 +611,7 @@ class DiscordHumanReviewService:
         selection_required: bool = False,
         selection_limit: int | None = None,
         review_scope: str = "",
-        allow_continue: bool = False,
+        allow_regenerate: bool = False,
     ) -> HumanReviewDecision:
         filtered_media_paths = self._filter_media_paths(media_paths)
         normalized_selection_limit = None
@@ -653,9 +653,7 @@ class DiscordHumanReviewService:
                     selection_mode=selection_mode,
                     selection_required=selection_required,
                     selection_limit=normalized_selection_limit,
-                    allow_continue=(
-                        allow_continue and review_scope in {"final_video", "final_media"}
-                    ),
+                    allow_regenerate=allow_regenerate,
                 )
             )
         except Exception as exc:
@@ -680,8 +678,8 @@ class DiscordHumanReviewService:
         elif status == "reject":
             normalized_status = "rejected"
             selected_paths = []
-        elif status == "continue":
-            normalized_status = "continue_requested"
+        elif status == "regenerate":
+            normalized_status = "regeneration_requested"
             selected_paths = []
         else:
             fallback_reason = {
@@ -702,6 +700,7 @@ class DiscordHumanReviewService:
             "status": status,
             "reviewer": reviewer or "",
             "review_mode": review_mode,
+            "review_scope": review_scope,
             "normalized_status": normalized_status,
             "fallback_reason": fallback_reason,
             "delivery": delivery,
@@ -835,273 +834,12 @@ async def _run_discord_file_feedback_process(
     selection_mode: str = "multi",
     selection_required: bool = False,
     selection_limit: int | None = None,
-    allow_continue: bool = False,
+    allow_regenerate: bool = False,
 ) -> tuple[str | None, str | None, str | None, list[int] | None, dict[str, Any]]:
     import discord
     from discord.ext import commands
-    from discord.ui import Button, Modal, TextInput, View
+    from agentic.tools.discord_review_view import create_discord_review_view
 
-    def split_caption_hashtags(value: str) -> tuple[str, str]:
-        content: list[str] = []
-        hashtags: list[str] = []
-        for line in str(value or "").splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            lowered = stripped.lower()
-            if lowered.startswith(("strategy:", "workflow:", "stage:", "selection:", "assets:")):
-                continue
-            if lowered.startswith("caption:"):
-                stripped = stripped.split(":", 1)[1].strip()
-                if not stripped:
-                    continue
-            elif lowered.startswith("hashtags:"):
-                stripped = stripped.split(":", 1)[1].strip()
-                if not stripped:
-                    continue
-            if stripped.startswith("#"):
-                hashtags.append(stripped)
-            else:
-                content.append(stripped)
-        return "\n".join(content).strip(), "\n".join(hashtags).strip()
-
-    class EditModal(Modal):
-        def __init__(self, original_content: str):
-            super().__init__(title="Edit Caption")
-            caption, hashtags = split_caption_hashtags(original_content)
-            self.caption = TextInput(
-                label="Caption",
-                style=discord.TextStyle.paragraph,
-                default=caption[:1500],
-                max_length=1500,
-                required=True,
-            )
-            self.hashtags = TextInput(
-                label="Hashtags",
-                style=discord.TextStyle.short,
-                default=hashtags[:300],
-                max_length=300,
-                required=False,
-            )
-            self.add_item(self.caption)
-            self.add_item(self.hashtags)
-
-        async def on_submit(self, interaction: discord.Interaction) -> None:
-            await interaction.response.defer()
-
-    class ResponseView(View):
-        def __init__(
-            self,
-            files: list[discord.File],
-            content: str,
-            timeout: float,
-            *,
-            allow_continue: bool,
-        ) -> None:
-            super().__init__(timeout=timeout)
-            self.result: str | None = None
-            self.user_name: str | None = None
-            self.files = files
-            self.content = content
-            self.selected_files: list[int] = []
-            self.message: discord.Message | None = None
-            self.edit_done = asyncio.Event()
-            self.is_editing = False
-            self.edit_requested = False
-            self.decision_finalized = False
-            self.reviewer_id: str | None = None
-            self.state_lock = asyncio.Lock()
-
-            self.allowed_reviewer_ids = {
-                item.strip()
-                for item in str(os.getenv("discord_review_allowed_user_ids") or "").split(",")
-                if item.strip().isdigit()
-            }
-
-            if not allow_text_edit:
-                edit_button = next(
-                    (item for item in self.children if getattr(item, "label", "") == "Edit"),
-                    None,
-                )
-                if edit_button is not None:
-                    self.remove_item(edit_button)
-
-            if not allow_continue:
-                continue_button = next(
-                    (item for item in self.children if getattr(item, "label", "") == "Continue"),
-                    None,
-                )
-                if continue_button is not None:
-                    self.remove_item(continue_button)
-
-            if allow_asset_selection:
-                selectable_files = self.files[:25]
-                options = [
-                    discord.SelectOption(label=f"Asset {index + 1}", value=str(index))
-                    for index in range(len(selectable_files))
-                ]
-                select = discord.ui.Select(
-                    placeholder=(
-                        "Select exactly one opening frame"
-                        if selection_mode == "single"
-                        else "Select final/reference assets"
-                    ),
-                    min_values=1 if selection_required else 0,
-                    max_values=(
-                        1
-                        if selection_mode == "single"
-                        else min(len(selectable_files), selection_limit or len(selectable_files))
-                    ),
-                    options=options,
-                )
-
-                async def select_callback(select_interaction: discord.Interaction) -> None:
-                    if not await self.authorize(select_interaction):
-                        return
-                    async with self.state_lock:
-                        if self.decision_finalized:
-                            await select_interaction.response.send_message(
-                                "This review is already complete.", ephemeral=True
-                            )
-                            return
-                        self.selected_files = [int(value) for value in select.values]
-                    await select_interaction.response.defer()
-
-                select.callback = select_callback
-                self.add_item(select)
-
-        async def authorize(self, interaction: discord.Interaction) -> bool:
-            user = interaction.user
-            user_id = str(getattr(user, "id", "")).strip()
-            allowed = user_id in self.allowed_reviewer_ids
-            if not allowed:
-                await interaction.response.send_message("You are not authorized for this review.", ephemeral=True)
-                return False
-            if self.reviewer_id is not None and self.reviewer_id != user_id:
-                await interaction.response.send_message(
-                    "This review is already being handled by another reviewer.", ephemeral=True
-                )
-                return False
-            self.reviewer_id = user_id
-            return True
-
-        @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
-        async def accept(self, interaction: discord.Interaction, button: Button) -> None:
-            del button
-            if not await self.authorize(interaction):
-                return
-            async with self.state_lock:
-                if self.decision_finalized:
-                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
-                    return
-                if selection_required and not self.selected_files:
-                    await interaction.response.send_message(
-                        "Select the required asset before Accept.",
-                        ephemeral=True,
-                    )
-                    return
-                if selection_mode == "single" and len(self.selected_files) > 1:
-                    await interaction.response.send_message(
-                        "Select exactly one asset before Accept.",
-                        ephemeral=True,
-                    )
-                    return
-                if selection_limit is not None and len(self.selected_files) > selection_limit:
-                    await interaction.response.send_message(
-                        f"Select no more than {selection_limit} assets before Accept.",
-                        ephemeral=True,
-                    )
-                    return
-                self.decision_finalized = True
-                self.result = "accept"
-                self.user_name = str(interaction.user)
-                if not self.selected_files:
-                    self.selected_files = list(range(len(self.files)))
-                self.edit_done.set()
-            await interaction.response.defer()
-            self.stop()
-
-        @discord.ui.button(label="Reject", style=discord.ButtonStyle.red)
-        async def reject(self, interaction: discord.Interaction, button: Button) -> None:
-            del button
-            if not await self.authorize(interaction):
-                return
-            async with self.state_lock:
-                if self.decision_finalized:
-                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
-                    return
-                self.decision_finalized = True
-                self.result = "reject"
-                self.user_name = str(interaction.user)
-                self.content = ""
-                self.selected_files = []
-                self.edit_done.set()
-            await interaction.response.defer()
-            self.stop()
-
-        @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple)
-        async def edit(self, interaction: discord.Interaction, button: Button) -> None:
-            del button
-            if not await self.authorize(interaction):
-                return
-            async with self.state_lock:
-                if self.decision_finalized:
-                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
-                    return
-                self.is_editing = True
-            modal = EditModal(self.content)
-            try:
-                await interaction.response.send_modal(modal)
-                await modal.wait()
-                async with self.state_lock:
-                    if self.decision_finalized:
-                        return
-                    caption = str(modal.caption.value).strip()
-                    hashtags = str(modal.hashtags.value).strip()
-                    self.content = "\n\n".join(part for part in (caption[:1500], hashtags[:300]) if part)[:1900]
-                    self.edit_requested = True
-                if self.message is not None:
-                    await self.message.edit(
-                        content=self.content,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-
-                if not allow_asset_selection:
-                    async with self.state_lock:
-                        if not self.decision_finalized:
-                            self.decision_finalized = True
-                            self.result = "edit"
-                            self.user_name = str(interaction.user)
-                    self.stop()
-                    return
-
-                await self.edit_done.wait()
-            finally:
-                self.is_editing = False
-            self.stop()
-
-        @discord.ui.button(label="Continue", style=discord.ButtonStyle.blurple)
-        async def continue_run(self, interaction: discord.Interaction, button: Button) -> None:
-            del button
-            if not await self.authorize(interaction):
-                return
-            async with self.state_lock:
-                if self.decision_finalized:
-                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
-                    return
-                self.decision_finalized = True
-                self.result = "continue"
-                self.user_name = str(interaction.user)
-                self.selected_files = []
-                self.edit_done.set()
-            await interaction.response.defer()
-            self.stop()
-            if self.message is not None:
-                await self.message.edit(
-                    content=f"{self.content[:1750]}\n\nContinue selected. Starting a new end-to-end run.",
-                    view=None,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -1129,11 +867,16 @@ async def _run_discord_file_feedback_process(
                     completed.set()
                     return
             files = [discord.File(path) for path in filepaths]
-            view = ResponseView(
+            view = create_discord_review_view(
                 files,
                 text or "Review request",
                 timeout=timeout,
-                allow_continue=allow_continue,
+                allow_asset_selection=allow_asset_selection,
+                allow_text_edit=allow_text_edit,
+                selection_mode=selection_mode,
+                selection_required=selection_required,
+                selection_limit=selection_limit,
+                allow_regenerate=allow_regenerate,
             )
             message = await channel.send(
                 content=text or "Review request",

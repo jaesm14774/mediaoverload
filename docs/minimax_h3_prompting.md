@@ -6,6 +6,8 @@ The composer preserves optional details supplied by the user or generated story,
 
 Runtime checks cover renderer inputs such as supported workflow, duration, dimensions, and frame sources. Visual quality and creative choices remain available for human review.
 
+For `native_h3_fl2va_story`, opening and ending candidates are independent text-to-image illustrations of their respective story states. The ending never uses the approved opening as an image-to-image input. Both use the same character and selected illustration style, while the final pose, expression, prop placement, and camera follow the last story beat. Identical opening and final state descriptions are rejected before ending generation. Human review must still verify that the rendered images show the intended change; different text or files alone do not prove a visible story outcome.
+
 ## Code entry points
 
 - General prompt builders: `agentic/src/agentic/runtime/prompting.py`

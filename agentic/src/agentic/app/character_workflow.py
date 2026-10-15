@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -77,7 +78,20 @@ def _extract_failure_details(result: dict[str, Any] | None) -> dict[str, str]:
     return {}
 
 
-def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
+def _regeneration_requested(result: dict[str, Any]) -> bool:
+    return any(
+        record.get("skill_name") == "review.assets.select"
+        and record.get("outputs", {}).get("regeneration_requested") is True
+        for record in result.get("records", [])
+    )
+
+
+def run_character_workflow(
+    request: CharacterWorkflowRequest,
+    *,
+    runtime_builder: Callable[..., Any] | None = None,
+    notification_service: DiscordRunNotificationService | None = None,
+) -> dict[str, Any]:
     repo_root = request.repo_root
     config_path = request.config_path
     runtime = request.runtime
@@ -220,7 +234,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
             "news.context | payload=%s",
             json.dumps(payload["constraints"]["news_context"], ensure_ascii=False),
         )
-    planner, runner, run_memory = build_runtime(
+    planner, runner, run_memory = (runtime_builder or build_runtime)(
         repo_root / "agentic",
         output_root=Path(payload["resolved_output_dir"]),
         comfy_host=runtime.comfy_host,
@@ -248,7 +262,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
 
     publish_dict: dict[str, Any] | None = None
     publish_gate_failure: str = ""
-    continue_requested = False
+    regeneration_requested = _regeneration_requested(generation_dict)
     if effective_publish_after_generate and generation_result.status == "success":
         media_paths = generation_media_paths
         platform_configs = payload["constraints"].get("platform_configs", {})
@@ -316,7 +330,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     "review_scope": _publish_review_scope(media_paths),
                     "review_all_candidates": _publish_review_scope(media_paths)
                     == "final_media",
-                    "allow_continue_review": bool(review.allow_continue),
+                    "allow_regenerate_review": bool(review.allow_regenerate),
                     "publish_prompt_source": publish_prompt_source,
                     # Keep editorial rotation different across successful
                     # workflow runs while preserving a traceable key.
@@ -351,15 +365,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                 if isinstance(publish_node_outputs, dict)
                 else {}
             )
-            final_review_outputs = (
-                publish_node_outputs.get("review-select", {})
-                if isinstance(publish_node_outputs, dict)
-                else {}
-            )
-            continue_requested = bool(
-                isinstance(final_review_outputs, dict)
-                and final_review_outputs.get("continue_requested") is True
-            )
+            regeneration_requested = _regeneration_requested(publish_result_dict)
             publish_state = str(publish_outputs.get("publication_state") or "unknown")
             publicly_visible = bool(publish_outputs.get("publicly_visible", False))
             logger.info(
@@ -375,10 +381,10 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
                     publish_result_dict.get("state", {})
                 ),
             }
-    failure_details = _extract_failure_details(generation_dict)
+    failure_details = {} if regeneration_requested else _extract_failure_details(generation_dict)
     overall_status = (
-        "continue_requested"
-        if continue_requested
+        "regeneration_requested"
+        if regeneration_requested
         else ("success" if generation_result.status == "success" else "failed")
     )
     if publish_gate_failure:
@@ -393,7 +399,7 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         publish_result_status = str(
             (publish_dict.get("result") or {}).get("status") or ""
         ).lower()
-        if publish_result_status not in {"success"} and not continue_requested:
+        if publish_result_status not in {"success"} and not regeneration_requested:
             overall_status = "failed"
             publish_failure_details = _extract_failure_details(
                 publish_dict.get("result")
@@ -482,8 +488,8 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
             else {}
         )
         publish_summary = (
-            "Continue requested; starting a new end-to-end run"
-            if continue_requested
+            "Regeneration requested; starting a new end-to-end run"
+            if regeneration_requested
             else (
                 f"{str(dispatch_outputs.get('status') or publish_result.get('status') or overall_status)} | "
                 f"state={str(dispatch_outputs.get('publication_state') or 'unknown')} | "
@@ -520,14 +526,15 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         ]
         discord_lines.extend(handoff_messages)
         discord_lines.append(f"Log: {log_path}")
+        notifier = notification_service or DiscordRunNotificationService()
         if handoff_attachment_paths:
-            discord_notification = DiscordRunNotificationService().notify(
+            discord_notification = notifier.notify(
                 "\n".join(discord_lines),
                 media_paths=handoff_attachment_paths,
                 channel_env="discord_handoff_channel_id",
             )
         else:
-            discord_notification = DiscordRunNotificationService().notify(
+            discord_notification = notifier.notify(
                 "\n".join(discord_lines)
             )
         handoff_delivery_results: list[dict[str, object]] = []
@@ -581,11 +588,12 @@ def run_character_workflow(request: CharacterWorkflowRequest) -> dict[str, Any]:
         media_paths=generation_media_paths,
         platform_configs=payload["constraints"].get("platform_configs", {}),
     )
-    if continue_requested:
-        publish_status = "continue_requested"
+    if regeneration_requested:
+        review_status = "regeneration_requested"
+        publish_status = "regeneration_requested" if publish_dict else "not_run_regeneration_requested"
     result_payload = {
         "status": overall_status,
-        "continue_requested": continue_requested,
+        "regeneration_requested": regeneration_requested,
         "failure_reason": failure_details.get("failure_reason"),
         "failure_node": failure_details.get("failure_node"),
         "failure_skill": failure_details.get("failure_skill"),

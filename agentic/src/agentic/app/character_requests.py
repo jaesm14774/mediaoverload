@@ -39,7 +39,7 @@ class CharacterReviewOptions:
     review_notes: str = ""
     no_review: bool = False
     stage_probe: bool = False
-    allow_continue: bool = False
+    allow_regenerate: bool = False
 
 @dataclass(frozen=True, slots=True)
 class CharacterRuntimeOptions:

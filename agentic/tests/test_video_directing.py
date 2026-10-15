@@ -34,11 +34,12 @@ class VideoDirectingTests(unittest.TestCase):
         result = apply_video_motion_direction("Kirby reaches for a kite.", "text2img2video")
 
         self.assertIn("anticipation in the eyes and body", result)
-        self.assertIn("brief charming reaction", result)
-        self.assertIn("surprised blink, delighted glance, or proud bounce", result)
+        self.assertIn("reaction consistent with the character and source stakes", result)
+        self.assertIn("When a playful or tender tone fits", result)
         self.assertIn("leave a warm, satisfying afterbeat", result)
         self.assertIn("silhouette change", result)
-        self.assertIn("one or two small secondary motions tied to the action", result)
+        self.assertIn("secondary motions", result)
+        self.assertIn("derived from the existing scene and tied to its action", result)
 
     def test_user_camera_direction_explains_mechanics_and_purpose(self) -> None:
         """User wants intentional camera work. Given a moving character, When directed, Then motion serves a legible path and reveal."""

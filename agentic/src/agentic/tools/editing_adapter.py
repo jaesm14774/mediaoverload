@@ -567,14 +567,14 @@ class OpenCutEditAdapter:
         if any(transition.name == "hard_cut" for transition in transitions):
             if not all(transition.name == "hard_cut" for transition in transitions):
                 raise EditRenderError("hard_cut cannot be mixed with xfade transitions")
-            video_filter = f"{''.join(f'[{i}:v][{i}:a]' for i in range(len(normalized_paths)))}concat=n={len(normalized_paths)}:v=1:a=1[v][a]"
+            video_filter = f"{''.join(f'[{i}:v]' for i in range(len(normalized_paths)))}concat=n={len(normalized_paths)}:v=1:a=0[v]"
+            audio_filter = f"{''.join(f'[{i}:a]' for i in range(len(normalized_paths)))}concat=n={len(normalized_paths)}:v=0:a=1[a]"
         else:
             video_parts: list[str] = []
             audio_parts: list[str] = []
             current_video = "[0:v]"
             current_audio = "[0:a]"
             current_duration = durations[0]
-            overlap = 0.0
             for index, transition in enumerate(transitions, start=1):
                 duration = transition.duration_seconds
                 offset = current_duration - duration
@@ -590,7 +590,6 @@ class OpenCutEditAdapter:
                 current_video = video_label
                 current_audio = audio_label
                 current_duration += durations[index] - duration
-                overlap += duration
             if plan.audio_crossfade:
                 audio_filter = ";".join(audio_parts) + f";{current_audio}anull[a]"
             else:
@@ -598,42 +597,41 @@ class OpenCutEditAdapter:
                     f"{''.join(f'[{i}:a]' for i in range(len(normalized_paths)))}"
                     f"concat=n={len(normalized_paths)}:v=0:a=1[a]"
                 )
-            video_filter = ";".join(video_parts) + f";{current_video}null[v];{audio_filter}"
+            video_filter = ";".join(video_parts) + f";{current_video}null[v]"
 
-        command = [
+        inputs = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel",
             "error",
             *[item for path in normalized_paths for item in ("-i", str(path))],
-            "-filter_complex",
-            video_filter,
-            "-map",
-            "[v]",
-            "-map",
-            "[a]",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            f"{plan.fps:.6g}",
-            "-c:a",
-            "aac",
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
-            "-movflags",
-            "+faststart",
-            "-shortest",
-            "-y",
-            str(output),
         ]
-        self._run(command)
+        # Chained video fades and audio fades must each drain their complete
+        # timeline. Rendering the tracks separately prevents early audio EOF
+        # in a combined graph from freezing the video before the final clip.
+        with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-tracks-", dir=output.parent) as temporary:
+            video = Path(temporary) / "video.mp4"
+            audio = Path(temporary) / "audio.m4a"
+            self._run([
+                *inputs, "-filter_complex", video_filter, "-map", "[v]", "-an",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", f"{plan.fps:.6g}",
+                "-y", str(video),
+            ])
+            self._run([
+                *inputs, "-filter_complex", audio_filter, "-map", "[a]", "-vn",
+                "-c:a", "aac", "-ar", "48000", "-ac", "2", "-y", str(audio),
+            ])
+            video_duration = float(self._ffmpeg.probe_media(str(video))["video_duration"])
+            self._run([
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", str(video), "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
+                # With stream copying, -shortest can drop queued AAC packets
+                # before video EOF. Bound the mux to the completed video instead.
+                "-c", "copy", "-movflags", "+faststart", "-t", f"{video_duration:.6f}", "-y", str(output),
+            ])
 
     def _trim_output(self, output: Path, duration: float) -> None:
-        with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-trim-") as temp_root:
+        with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-trim-", dir=output.parent) as temp_root:
             trimmed = Path(temp_root) / "trimmed.mp4"
             self._ffmpeg.trim_video(str(output), str(trimmed), duration)
             os.replace(trimmed, output)
@@ -642,7 +640,7 @@ class OpenCutEditAdapter:
         current_duration = float(self._ffmpeg.probe_media(str(output)).get("duration") or 0.0)
         if current_duration < target_duration - 0.03:
             pad_duration = target_duration - current_duration + 0.03
-            with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-pad-") as temp_root:
+            with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-pad-", dir=output.parent) as temp_root:
                 padded = Path(temp_root) / "padded.mp4"
                 self._run(
                     [

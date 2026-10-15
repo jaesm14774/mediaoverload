@@ -4,7 +4,7 @@ import json
 import os
 import socket
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib import error, parse, request
 
@@ -397,6 +397,9 @@ class AgenticComfyCommunicator:
     @staticmethod
     def _safe_output_path(output_path: str, file_name: str) -> str:
         root = Path(output_path).resolve()
+        portable_name = PureWindowsPath(file_name)
+        if portable_name.drive or portable_name.root or ".." in portable_name.parts:
+            raise ValueError(f"ComfyUI media filename escapes the run output directory: {file_name}")
         candidate = (root / file_name).resolve()
         try:
             candidate.relative_to(root)

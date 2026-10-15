@@ -79,25 +79,22 @@ class H3ModePlanTests(unittest.TestCase):
         story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
         self.assertEqual(story_prompt.inputs["render_mode"], "first_last_frame_to_video")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
-        self.assertTrue(ending.inputs["use_prior_frame"])
-        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
+        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertEqual(plan.workflow_name, "minimax_h3_fl2va")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
 
-    def test_fl2va_review_builds_six_opening_conditioned_ending_candidates(self) -> None:
-        """User: Given FL2VA needs six reviewed endings, When the plan is built, Then each ending refines the opening before review."""
+    def test_fl2va_review_builds_six_independent_ending_candidates(self) -> None:
+        """User Given FL2VA needs six reviewed endings When the plan is built Then each ending is drawn from the final story state before review."""
         plan = self._plan("native_h3_fl2va_story")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
         ending_review = next(node for node in plan.nodes if node.node_id == "native-ending-review")
         speed_nodes = [node for node in plan.nodes if node.node_id == "native-h3-speed"]
 
         self.assertEqual(ending.inputs["image_count"], 6)
-        self.assertTrue(ending.inputs["use_prior_frame"])
-        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "krea2_turbo_img2img")
-        self.assertTrue(
-            any(node.node_id == "native-ending-image-refine-asset-check" for node in plan.nodes)
-        )
+        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
         self.assertEqual(ending.inputs["prompt_key"], "ending_keyframe_prompt")
         self.assertTrue(ending_review.inputs["review_all_candidates"])
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
@@ -387,6 +384,56 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertIn("Magolor", calls[0][1]["prompt"])
         self.assertIn("no feet", calls[0][1]["prompt"])
         self.assertIn("detached hands with cream mittens", calls[0][1]["prompt"])
+
+    def test_user_given_a_short_native_h3_opening_prompt_when_krea_builds_the_keyframe_then_the_selected_style_profile_reaches_the_renderer(self) -> None:
+        """User Given a short Native H3 opening prompt and a selected style profile When Krea builds the opening keyframe Then the complete profile reaches its text-only renderer payload."""
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeTools:
+            def call(self, name, payload):
+                calls.append((name, payload))
+                return {"saved_files": ["opening.png"]}
+
+        profile = {
+            "label": "bold hand-inked comic",
+            "prompt": "fully illustrated 2D comic scene across every visible layer",
+            "composition": "full garden background with one clear action",
+            "palette": "saturated coral, cyan, and yellow",
+            "motion": "stable ink contours and color across the shot",
+            "avoid": "photographic backgrounds and 3D rendering",
+        }
+        context = SimpleNamespace(
+            node=SimpleNamespace(
+                inputs={
+                    "workflow_name": "krea2_turbo",
+                    "prompt": "Kirby kneels beside the growing star seedling.",
+                    "use_prior_frame": False,
+                },
+                depends_on=[],
+            ),
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    media_type="native_h3_l2va_story",
+                    prompt="Kirby plants a star seed",
+                    style=profile["label"],
+                    constraints={
+                        "character": "Kirby",
+                        "visual_style_profile": profile,
+                    },
+                )
+            ),
+            state=SimpleNamespace(node_outputs={}),
+        )
+
+        result = AgentMediaSkills(
+            FakeTools(), self.repo_root / ".tmp-tests" / "native-h3-style-profile"
+        ).generate_keyframe(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
+        self.assertNotIn("image_path", calls[0][1])
+        for key in ("prompt", "composition", "palette", "motion", "avoid"):
+            self.assertIn(profile[key], calls[0][1]["prompt"])
 
     def test_kirby_batch_keeps_every_candidate_when_identity_dq_would_reject_one(self) -> None:
         class FakeTools:

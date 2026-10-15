@@ -1,8 +1,11 @@
+#!/usr/bin/env python3
 import argparse
 import os
 import random
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent
 AGENTIC_SRC = REPO_ROOT / "agentic" / "src"
@@ -16,6 +19,7 @@ from agentic.app.character_requests import (
     CharacterRuntimeOptions,
     CharacterWorkflowRequest,
 )
+from agentic.app.character_session import run_character_session
 from agentic.app.character_workflow import dumps_result, run_character_workflow
 from agentic.tools.social_services import complete_facebook_profile_handoff
 
@@ -41,7 +45,11 @@ def _resolve_config_path(args: argparse.Namespace) -> Path:
     raise ValueError("Must provide --config or --character argument")
 
 
-def main() -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    workflow_runner: Callable[[CharacterWorkflowRequest], dict[str, Any]] = run_character_workflow,
+) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Character media interface backed by agentic runtime")
@@ -109,7 +117,7 @@ def main() -> None:
         default=_default_comfy_root(),
         help="ComfyUI root for asset checks (default: COMFYUI_ROOT or D:\\ComfyUI_windows_portable)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.complete_facebook_profile_handoff:
         if not args.facebook_profile_post_url:
@@ -161,7 +169,7 @@ def main() -> None:
             comfy_root=args.comfy_root,
         ),
     )
-    result = run_character_workflow(request)
+    result = run_character_session(request, workflow_runner=workflow_runner)
     print(dumps_result(result))
 
 
