@@ -259,6 +259,12 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
             )
         )
         final_video_node = "motion-graphics-review"
+    final_video_node = context.append_nvidia_vfx_postprocess_node(
+        goal,
+        nodes,
+        source_node=final_video_node,
+        node_id="video-nvidia-vfx",
+    )
     video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
     video_qa_node.inputs = context.scaled_video_qa_inputs(goal, video_qa_node.inputs)
     video_qa_node.depends_on = [
@@ -410,6 +416,13 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
                 )
             )
             review_final_video_node = "review-motion-graphics-review"
+        review_final_video_node = context.append_nvidia_vfx_postprocess_node(
+            goal,
+            nodes,
+            source_node=review_final_video_node,
+            node_id="review-video-nvidia-vfx",
+            retry=True,
+        )
         review_gif_preview_node = next(
             node for node in nodes if node.node_id == "review-gif-preview"
         )
@@ -629,6 +642,12 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         source_node="animate-video",
         node_id="video-speed",
     )
+    video_output_node = context.append_nvidia_vfx_postprocess_node(
+        goal,
+        nodes,
+        source_node=video_output_node,
+        node_id="video-nvidia-vfx",
+    )
     video_qa_node = next(node for node in nodes if node.node_id == "video-qa")
     video_qa_node.inputs = context.scaled_video_qa_inputs(goal, video_qa_node.inputs)
     video_qa_node.depends_on = [video_output_node]
@@ -710,6 +729,13 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             nodes,
             source_node="review-animate-video",
             node_id="review-video-speed",
+            retry=True,
+        )
+        review_video_output_node = context.append_nvidia_vfx_postprocess_node(
+            goal,
+            nodes,
+            source_node=review_video_output_node,
+            node_id="review-video-nvidia-vfx",
             retry=True,
         )
         review_gif_preview_node = next(

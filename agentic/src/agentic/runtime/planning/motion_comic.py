@@ -45,21 +45,32 @@ def build_motion_comic(context: PlanningContext, goal: GoalRequest) -> Execution
             depends_on=["motion-comic-write", "motion-comic-panels"],
             stage="package",
         ),
+    ]
+    final_video_node = context.append_nvidia_vfx_postprocess_node(
+        goal,
+        nodes,
+        source_node="motion-comic-compose",
+        node_id="motion-comic-nvidia-vfx",
+    )
+    nodes.append(
         ExecutionNode(
             node_id="motion-comic-qa",
             skill_name="media.video.inspect",
-            inputs={
-                "target_duration": goal.duration_seconds,
-                "expected_width": config["width"],
-                "expected_height": config["height"],
-                "expected_fps": config["fps"],
-                "frame_count": 3,
-                "columns": 3,
-            },
-            depends_on=["motion-comic-compose"],
+            inputs=context.scaled_video_qa_inputs(
+                goal,
+                {
+                    "target_duration": goal.duration_seconds,
+                    "expected_width": config["width"],
+                    "expected_height": config["height"],
+                    "expected_fps": config["fps"],
+                    "frame_count": 3,
+                    "columns": 3,
+                },
+            ),
+            depends_on=[final_video_node],
             stage="qa",
-        ),
-    ]
+        )
+    )
     return ExecutionPlan(
         goal=goal,
         workflow_name="motion_comic_v1",

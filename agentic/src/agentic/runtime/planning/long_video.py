@@ -828,6 +828,12 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             )
         )
         preview_dependency = "video-trim"
+    preview_dependency = context.append_nvidia_vfx_postprocess_node(
+        goal,
+        nodes,
+        source_node=preview_dependency,
+        node_id="video-nvidia-vfx",
+    )
     final_video_node = preview_dependency
 
     longvideo_qa_inputs = context.scaled_video_qa_inputs(
@@ -1051,6 +1057,13 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 )
             )
             retry_preview_dependency = "review-video-trim"
+        retry_preview_dependency = context.append_nvidia_vfx_postprocess_node(
+            goal,
+            nodes,
+            source_node=retry_preview_dependency,
+            node_id="review-video-nvidia-vfx",
+            retry=True,
+        )
         nodes.append(
             ExecutionNode(
                 node_id="review-longvideo-video-qa",

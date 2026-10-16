@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -801,6 +802,85 @@ class AgentMediaSkills:
             logs=[f"Rendered final video at {speed:g}x playback speed."],
         )
 
+    def nvidia_vfx_postprocess(self, context: SkillContext) -> SkillResult:
+        video_paths = context.node.inputs.get("video_paths")
+        if isinstance(video_paths, str):
+            source_paths = [video_paths]
+        elif isinstance(video_paths, list):
+            source_paths = [str(path) for path in video_paths if str(path)]
+        else:
+            source_paths = []
+        if not source_paths:
+            video_path = str(
+                context.node.inputs.get("video_path") or ""
+            )
+            if video_path:
+                source_paths = [video_path]
+            else:
+                video_path = self._resolve_first(
+                    context, ("video_path", "final_video_path")
+                )
+                if video_path:
+                    source_paths = [video_path]
+                else:
+                    source_paths = self._resolve_many(
+                        context, ("saved_files", "media_paths")
+                    )
+
+        video_extensions = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+        source_paths = [
+            path
+            for path in source_paths
+            if Path(path).suffix.lower() in video_extensions
+        ]
+        if not source_paths:
+            raise RuntimeError(
+                f"No video paths available for node '{context.node.node_id}'"
+            )
+
+        run_suffix = f"nvidia_vfx_postprocess_{uuid.uuid4().hex[:12]}"
+        run_dir = self._build_run_dir(context.plan.goal.prompt, run_suffix)
+        video_dir = run_dir / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        results: list[dict[str, object]] = []
+        for index, source_path in enumerate(source_paths, start=1):
+            source = Path(source_path)
+            output_stem = f"{source.stem}_nvidia_vfx"
+            if len(source_paths) > 1:
+                output_stem += f"_{index:02d}"
+            result = self.tools.call(
+                "comfy.nvidia_vfx_postprocess",
+                {
+                    "video_path": str(source),
+                    "output_path": str(video_dir / f"{output_stem}.mp4"),
+                },
+            )
+            results.append(result)
+        output_paths = [str(result["video_path"]) for result in results]
+        summary_paths = [str(result["summary_path"]) for result in results]
+        first = results[0]
+        return SkillResult(
+            status="success",
+            outputs={
+                "video_path": output_paths[0],
+                "final_video_path": output_paths[0],
+                "saved_files": output_paths,
+                "summary_paths": summary_paths,
+                "video_results": results,
+            },
+            metrics={
+                "video_count": len(results),
+                "chunk_count": sum(int(result["chunk_count"]) for result in results),
+                "wall_seconds": sum(float(result["wall_seconds"]) for result in results),
+                "fps": float(first["result"]["fps"]),
+                "width": int(first["result"]["width"]),
+                "height": int(first["result"]["height"]),
+            },
+            logs=[
+                "Upscaled final video 2x with NVIDIA ULTRA and doubled its frame rate with NVIDIA MEDIUM interpolation."
+            ],
+        )
+
     def normalize_video_canvas(self, context: SkillContext) -> SkillResult:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "video_canvas")
         video_dir = run_dir / "video"
@@ -1323,6 +1403,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
     skill_registry.register("media.video.change_speed", media.change_video_speed, "Change final video playback speed")
+    skill_registry.register("media.video.nvidia_vfx_postprocess", media.nvidia_vfx_postprocess, "Upscale and interpolate a final video with NVIDIA VFX")
     skill_registry.register("media.video.normalize_canvas", media.normalize_video_canvas, "Normalize a final video to the requested canvas")
     skill_registry.register("media.video.trim", media.trim_video, "Trim final video to the requested duration")
     skill_registry.register("media.video.merge_audio", media.merge_audio_video, "Mux audio and video as an agent media primitive")

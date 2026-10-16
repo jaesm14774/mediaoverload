@@ -32,6 +32,8 @@ H3 使用 24 FPS、res_multistep、有效 CFG 1、video shift 12／audio shift 3
 
 每次工作保留 `comfy_h3_request_*.json`、`comfy_h3_summary.json`、原生 MP4 及交付影片。summary 包含條件檔 SHA256、模型 profile、實際長寬／幀數／FPS 與音軌 metadata。
 
+產生影片在最終交付前會經 NVIDIA VFX 後製：2x ULTRA 放大、2x MEDIUM 補幀，並保留原始音軌及片長。此階段在 canvas／播放速度調整之後、技術 QA 之前執行；設定與 ComfyUI 安裝方式見 [NVIDIA VFX 後製](comfyui_nvidia_vfx_postprocess.md)。
+
 ## 驗證
 
 ```powershell

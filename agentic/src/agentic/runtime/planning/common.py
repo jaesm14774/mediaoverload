@@ -196,6 +196,13 @@ class PlanningContext:
             )
         return {"enabled": enabled, "factor": factor}
 
+    @staticmethod
+    def nvidia_vfx_postprocess_enabled(goal: GoalRequest) -> bool:
+        enabled = goal.constraints.get("enable_nvidia_vfx_postprocess", True)
+        if not isinstance(enabled, bool):
+            raise ValueError("enable_nvidia_vfx_postprocess must be a boolean")
+        return enabled
+
     @classmethod
     def scaled_video_qa_inputs(
         cls,
@@ -213,6 +220,14 @@ class PlanningContext:
                 result["target_duration"] = float(source_duration) / float(
                     speed["factor"]
                 )
+        if cls.nvidia_vfx_postprocess_enabled(goal):
+            for key in ("expected_width", "expected_height"):
+                value = result.get(key)
+                if value not in {None, ""}:
+                    result[key] = int(value) * 2
+            expected_fps = result.get("expected_fps")
+            if expected_fps not in {None, ""}:
+                result["expected_fps"] = float(expected_fps) * 2
         return result
 
     def append_video_speed_node(
@@ -235,6 +250,31 @@ class PlanningContext:
                 depends_on=[source_node],
                 tags=["package", "video", "speed"] + (["retry"] if retry else []),
                 tool_name="media.change_video_speed",
+                stage="package",
+            )
+        )
+        return node_id
+
+    def append_nvidia_vfx_postprocess_node(
+        self,
+        goal: GoalRequest,
+        nodes: list[ExecutionNode],
+        *,
+        source_node: str,
+        node_id: str,
+        retry: bool = False,
+    ) -> str:
+        if not self.nvidia_vfx_postprocess_enabled(goal):
+            return source_node
+        nodes.append(
+            ExecutionNode(
+                node_id=node_id,
+                skill_name="media.video.nvidia_vfx_postprocess",
+                inputs={},
+                depends_on=[source_node],
+                tags=["package", "video", "postprocess", "nvidia-vfx"]
+                + (["retry"] if retry else []),
+                tool_name="comfy.nvidia_vfx_postprocess",
                 stage="package",
             )
         )
@@ -400,12 +440,21 @@ class PlanningContext:
                 source_node=video_node,
                 node_id="native-h3-canvas",
             )
+        video_node = self.append_nvidia_vfx_postprocess_node(
+            goal,
+            nodes,
+            source_node=video_node,
+            node_id="native-h3-nvidia-vfx",
+        )
         final_qa_inputs = {
             "require_audio": True,
             "require_stereo_audio": True,
             "analyze_audio": True,
             **(qa_inputs or {}),
         }
+        expected_width, expected_height = self.native_h3_canvas_dimensions(goal)
+        final_qa_inputs.setdefault("expected_width", expected_width)
+        final_qa_inputs.setdefault("expected_height", expected_height)
         if final_qa_inputs.get("expected_fps") in {None, ""}:
             final_qa_inputs["expected_fps"] = float(
                 goal.constraints.get("native_h3_frame_rate") or 24
