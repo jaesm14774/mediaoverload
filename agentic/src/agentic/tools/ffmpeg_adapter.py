@@ -342,34 +342,39 @@ class FFmpegAdapter:
         if os.path.abspath(video_path) == os.path.abspath(output_path):
             raise ValueError("output_path must be different from video_path")
 
-        self._run(
-            [
-                "ffmpeg",
-                "-i",
-                video_path,
-                "-vf",
-                (
-                    f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background},"
-                    "setsar=1,format=yuv420p"
-                ),
-                "-map",
-                "0:v:0",
-                "-map",
-                "0:a?",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-movflags",
-                "+faststart",
-                "-shortest",
-                "-y",
-                output_path,
-            ]
-        )
+        probe = self.probe_media(video_path)
+        duration = float(probe.get("video_duration") or probe.get("duration") or 0.0)
+        if not math.isfinite(duration) or duration <= 0:
+            duration = 0.0
+        audio_codec = str(probe.get("audio_codec") or "").lower()
+
+        command = [
+            "ffmpeg",
+            "-i",
+            video_path,
+            "-vf",
+            (
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background},"
+                "setsar=1,format=yuv420p"
+            ),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+        if probe.get("has_audio"):
+            # Preserve AAC packet timing; a second encode can push its endpoint past video.
+            command.extend(["-c:a", "copy" if audio_codec == "aac" else "aac"])
+        command.extend(["-movflags", "+faststart"])
+        if duration:
+            command.extend(["-t", f"{duration:.12g}"])
+        command.extend(["-y", output_path])
+        self._run(command)
         return output_path
 
     def overlay_png_sequence(

@@ -16,6 +16,13 @@ Given a finished video longer than one processing chunk
 When the NVIDIA VFX post-process runs
 Then it processes overlapping chunks of at most 32 source frames, joins each shared endpoint once, and produces one continuous video with no repeated boundary frame.
 
+### AAC packet timing does not block final processing
+
+User
+Given a speed-adjusted video whose AAC audio endpoint differs from its video endpoint by no more than one source frame
+When the video canvas is normalized and NVIDIA VFX starts
+Then canvas normalization preserves the existing AAC stream timing, the VFX preflight accepts the one-frame difference, and audio/video timing errors larger than the supported tolerance are still rejected.
+
 ### Unsupported runtime is reported clearly
 
 User

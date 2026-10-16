@@ -22,11 +22,12 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def source_factory(tmp_path):
-    def create(*, audio=True, changing=False, variable_timing=False):
+    def create(*, audio=True, changing=False, variable_timing=False, duration=2):
         target = tmp_path / ("with_audio.mp4" if audio else "silent.mp4")
+        duration_text = f"{duration:.9g}"
         source_filter = (
-            "testsrc2=size=160x96:rate=24:duration=2" if changing else
-            "color=c=green:size=160x96:rate=24:duration=2,drawbox=x=10:y=10:w=20:h=20:color=red:t=fill:enable='lt(t,1)'"
+            f"testsrc2=size=160x96:rate=24:duration={duration_text}" if changing else
+            f"color=c=green:size=160x96:rate=24:duration={duration_text},drawbox=x=10:y=10:w=20:h=20:color=red:t=fill:enable='lt(t,1)'"
         )
         if variable_timing:
             source_filter += ",setpts='if(lt(N,12),N/(24*TB),(0.5+(N-12)/12)/TB)'"
@@ -42,7 +43,7 @@ def source_factory(tmp_path):
         ]
         if audio:
             command.extend(
-                ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=32000:duration=2"]
+                ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=32000:duration={duration_text}"]
             )
         command.extend(
             ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
@@ -229,6 +230,35 @@ def test_user_given_a_landscape_video_when_fitting_a_canvas_then_the_picture_is_
         bounds = image.convert("RGB").getbbox()
         assert bounds is not None
         assert abs((bounds[2] - bounds[0]) / (bounds[3] - bounds[1]) - 160 / 96) < 0.05
+
+
+def test_user_given_a_speed_adjusted_aac_video_when_normalizing_canvas_then_streams_stay_aligned(
+    source_factory,
+    tmp_path,
+):
+    """User Given a speed-adjusted AAC video with packet-boundary timing When normalizing its canvas Then normalization preserves the video duration and audio stays within one source frame."""
+    source = source_factory(duration=15.083333)
+    speed_path = tmp_path / "speed.mp4"
+    canvas_path = tmp_path / "canvas.mp4"
+    adapter = FFmpegAdapter()
+    adapter.change_video_speed(str(source), str(speed_path), speed=2)
+    speed_media = adapter.probe_media(str(speed_path))
+
+    adapter.normalize_video_canvas(
+        str(speed_path),
+        str(canvas_path),
+        target_width=640,
+        target_height=360,
+    )
+    canvas_media = adapter.probe_media(str(canvas_path))
+
+    assert canvas_media["audio_codec"] == speed_media["audio_codec"] == "aac"
+    assert canvas_media["video_duration"] == pytest.approx(
+        speed_media["video_duration"], abs=0.001
+    )
+    assert abs(canvas_media["audio_duration"] - canvas_media["video_duration"]) <= (
+        1 / canvas_media["frame_rate"]
+    )
 
 
 def test_user_given_a_video_when_preparing_a_platform_canvas_then_the_delivered_streams_match_the_platform_contract(

@@ -24,7 +24,7 @@ The final video path runs:
 1. Read at most 32 source frames through VideoHelperSuite, overlapping adjacent chunks by one frame.
 2. Upscale each chunk 2x with `RTXVideoSuperResolution`, `ULTRA`, strength `1.0`, and 8-bit RGB.
 3. Generate 2x the frame rate with `RTXVideoFrameGeneration`, `MEDIUM`, with automatic shot-change detection.
-4. Join the chunks, remove each repeated boundary frame, hold the final endpoint for one output frame, and mux the original audio back onto the result.
+4. Join the chunks, remove each repeated boundary frame, hold the final endpoint for one output frame, and mux the source audio back onto the result. Canvas normalization copies an existing AAC stream and bounds the output to the video stream duration, avoiding a second AAC encode and its packet-end drift.
 
 For a 640x360, 24 FPS source, the expected output is 1280x720 at 48 FPS with the same duration and audio channels. NVIDIA's node emits `(N - 1) * multiplier + 1` frames for `N` input frames. Holding the final frame once restores the `N * multiplier` frame count needed to keep the original duration at the doubled frame rate.
 
