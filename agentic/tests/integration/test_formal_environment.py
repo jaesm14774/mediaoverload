@@ -19,7 +19,8 @@ from agentic.app.character_selection import resolve_character_selection
 pytestmark = pytest.mark.integration
 
 
-def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
+def test_formal_random_news_payload_is_grounded_with_live_provider(tmp_path: Path) -> None:
+    """User Given a blank prompt and a live random news selection When payload routing completes Then the selected article is marked news-driven and carries validated anchors."""
     if os.environ.get("AGENTIC_FORMAL_INTEGRATION") != "1":
         pytest.skip("Formal integration requires AGENTIC_FORMAL_INTEGRATION=1")
 
@@ -30,7 +31,7 @@ def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
         config_path=repo_root / "configs" / "characters" / "kirby.yaml",
         generation=CharacterGenerationOptions(
             preferred_generation_type="text2video",
-            news_driven=True,
+            news_driven=False,
             output_dir=str(output_dir),
         ),
         review=CharacterReviewOptions(publish_after_generate=False),
@@ -56,5 +57,7 @@ def test_formal_news_driven_payload_uses_live_provider(tmp_path: Path) -> None:
     assert news_context["title"]
     assert news_context["keyword"]
     assert payload["constraints"]["news_driven"] is True
+    assert payload["constraints"]["news_grounding_required"] is True
+    assert payload["constraints"]["news_source_anchors"]
     assert payload["constraints"]["prompt_mode"] == "llm"
     assert payload["prompt"]

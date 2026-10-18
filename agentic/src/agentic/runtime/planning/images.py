@@ -170,6 +170,9 @@ def build_comfy_primitive(context: PlanningContext, goal: GoalRequest) -> Execut
                 inputs={
                     "image_path": input_image_path,
                     "prompt": constraints.get("text", "") or goal.prompt,
+                    "length": context.native_h3_render_config(
+                        goal, workflow_manifest
+                    )["length"],
                     "width": constraints.get("canvas_width")
                     or constraints.get("width"),
                     "height": constraints.get("canvas_height")

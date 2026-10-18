@@ -343,6 +343,7 @@ def run_character_workflow(
                     ),
                     "news_grounding_required": bool(
                         payload["constraints"].get("news_driven")
+                        or payload["constraints"].get("news_grounding_required")
                         or payload["source_generation_type"]
                         in NEWS_GROUNDED_GENERATION_TYPES
                     ),

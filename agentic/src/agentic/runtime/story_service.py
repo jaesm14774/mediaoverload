@@ -6,6 +6,10 @@ from typing import Any
 
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.storyboard import merge_native_h3_storyboard
+from agentic.runtime.news_grounding import (
+    is_brand_safe_news_selection,
+    is_usable_news_selection,
+)
 from agentic.tools.context_services import NewsContextService
 
 
@@ -38,10 +42,10 @@ class NativeH3StoryService:
         resolved_news = dict(news_context or {})
         if resolved_news.get("error"):
             raise RuntimeError(f"Native H3 news context failed: {resolved_news['error']}")
-        if not NewsContextService.is_usable_selection(
+        if not is_usable_news_selection(
             str(resolved_news.get("title") or ""),
             str(resolved_news.get("keyword") or ""),
-        ) or not NewsContextService.is_brand_safe_selection(
+        ) or not is_brand_safe_news_selection(
             str(resolved_news.get("title") or ""),
             str(resolved_news.get("keyword") or ""),
         ):

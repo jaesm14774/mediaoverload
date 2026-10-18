@@ -5,6 +5,7 @@ from typing import Iterable
 
 from agentic.runtime.registry import ToolRegistry
 from agentic.runtime.editing import EditPlan
+from agentic.runtime.contracts import MIN_VIDEO_DURATION_SECONDS
 from agentic.tools.editing_adapter import OpenCutEditAdapter
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.motion_graphics_adapter import MotionGraphicsAdapter
@@ -110,14 +111,23 @@ class MediaServiceTools:
         if not file_exists:
             errors.append("video file does not exist")
         target_duration = payload.get("target_duration")
+        minimum_duration = float(
+            payload.get("minimum_duration", MIN_VIDEO_DURATION_SECONDS)
+        )
         tolerance = float(payload.get("duration_tolerance", 0.5))
         duration = float(probe.get("duration") or 0.0)
+        minimum_duration_ok = duration >= minimum_duration
         checks = {
             "file_exists": file_exists,
             "has_video": bool(probe.get("has_video")),
             "dimensions": int(probe.get("width") or 0) > 0 and int(probe.get("height") or 0) > 0,
+            "minimum_duration": minimum_duration_ok,
             "duration": target_duration in {None, ""} or abs(duration - float(target_duration)) <= tolerance,
         }
+        if not minimum_duration_ok:
+            errors.append(
+                f"duration {duration:.3f}s is below the {minimum_duration:.3f}s minimum"
+            )
         expected_width = payload.get("expected_width")
         expected_height = payload.get("expected_height")
         if expected_width not in {None, ""} or expected_height not in {None, ""}:

@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
+import math
+
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    ExecutionNode,
+    ExecutionPlan,
+    GoalRequest,
+)
 from agentic.runtime.editing import EDIT_PROFILES
 from agentic.runtime.planning.common import PlanningContext
 
 
 def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
-    segment_count = context.constraint_int(
-        goal, "segment_count", max(2, (goal.duration_seconds + 4) // 5)
+    minimum_h3_segment_count = max(
+        1, math.ceil(float(goal.duration_seconds) / (362 / 24))
+    )
+    max_segment_count = max(
+        minimum_h3_segment_count,
+        int(goal.duration_seconds) // MIN_VIDEO_DURATION_SECONDS,
+    )
+    requested_segment_count = context.constraint_int(
+        goal,
+        "segment_count",
+        max_segment_count,
+    )
+    segment_count = max(
+        minimum_h3_segment_count,
+        min(requested_segment_count, max_segment_count),
     )
     use_tts = bool(goal.constraints.get("use_tts", False))
     review_loop_enabled = context.review_loop_enabled(goal)
@@ -197,11 +217,14 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         or goal.constraints.get("video_frame_rate")
         or 24
     )
+    if segment_frame_rate <= 0:
+        raise ValueError("longvideo_frame_rate must be greater than zero")
+    if any(name.startswith("minimax_h3_") for name in selected_workflows) and segment_frame_rate != 24:
+        raise ValueError("longvideo_frame_rate must be 24 when using MiniMax H3 workflows")
+    segment_duration_seconds = float(goal.duration_seconds) / max(1, segment_count)
     segment_default_length = max(
         1,
-        round(
-            (float(goal.duration_seconds) / max(1, segment_count)) * segment_frame_rate
-        ),
+        round(segment_duration_seconds * segment_frame_rate),
     )
 
     idea_variants = context.idea_director.generate_variations(goal)
@@ -559,6 +582,52 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 reference_node = reference_check
             input_dependencies.append(reference_node)
 
+        configured_render_length = context.longvideo_int(
+            goal,
+            "longvideo_length",
+            int(goal.constraints.get("longvideo_h3_length") or segment_default_length),
+            1000,
+        )
+        render_length = max(
+            round(MIN_VIDEO_DURATION_SECONDS * max(segment_frame_rate, 1.0)),
+            round(segment_duration_seconds * segment_frame_rate),
+            configured_render_length,
+        )
+        is_h3_workflow = capability.workflow_name.startswith("minimax_h3_")
+        if is_h3_workflow and render_length > 362:
+            raise ValueError(
+                "MiniMax H3 long-video segments cannot exceed 362 frames; increase the segment count or reduce longvideo_length"
+            )
+        rendered_duration_seconds = render_length / max(segment_frame_rate, 1.0)
+        if is_h3_workflow:
+            rendered_duration_seconds = render_length / 24
+        h3_prompt_node = ""
+        if capability.workflow_name.startswith("minimax_h3_") and (
+            recipe.requires_first or recipe.requires_last or recipe.requires_references
+        ):
+            h3_prompt_node = f"{prefix}-h3-prompt-{suffix}"
+            h3_prompt_dependencies = [prompt_node, *anchor_nodes.values()]
+            if reference_node:
+                h3_prompt_dependencies.append(reference_node)
+            nodes.append(
+                ExecutionNode(
+                    node_id=h3_prompt_node,
+                    skill_name="agent.segment.prepare_h3",
+                    inputs={
+                        "segment_index": index,
+                        "scene_prompt_node": prompt_node,
+                        "anchor_nodes": dict(anchor_nodes),
+                        "reference_node": reference_node,
+                        "recipe": recipe_name,
+                        "duration_seconds": segment_duration_seconds,
+                    },
+                    depends_on=list(dict.fromkeys(h3_prompt_dependencies)),
+                    tags=["story", "segment", "h3", "vision"],
+                    stage="prompting",
+                )
+            )
+            input_dependencies.append(h3_prompt_node)
+
         conditioning_plan = ConditioningPlan(
             recipe=recipe_name,
             workflow_name=capability.workflow_name,
@@ -575,6 +644,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             "conditioning_plan": conditioning_plan.to_dict(),
             "anchor_nodes": dict(anchor_nodes),
             "reference_node": reference_node,
+            "h3_prompt_node": h3_prompt_node,
             "continuation": recipe.continuation,
             "continuity_mode": continuity_mode,
             "production_profile": production_profile,
@@ -596,15 +666,8 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     2048,
                 )
             ),
-            "length": context.longvideo_int(
-                goal,
-                "longvideo_length",
-                int(
-                    goal.constraints.get("longvideo_h3_length")
-                    or segment_default_length
-                ),
-                1000,
-            ),
+            "length": render_length,
+            "target_duration_seconds": segment_duration_seconds,
             "steps": context.longvideo_int(
                 goal,
                 "longvideo_steps",
@@ -630,6 +693,24 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 stage="render",
             )
         )
+        delivered_video_node = video_node
+        if segment_duration_seconds < rendered_duration_seconds - 0.01:
+            trim_node = f"{prefix}-trim-{suffix}"
+            nodes.append(
+                ExecutionNode(
+                    node_id=trim_node,
+                    skill_name="media.video.trim",
+                    inputs={
+                        "duration_seconds": segment_duration_seconds,
+                        "output_name": f"longvideo_{prefix}_{suffix}_trimmed.mp4",
+                    },
+                    depends_on=[video_node],
+                    tags=["package", "video", "segment", "duration"],
+                    tool_name="media.trim_video",
+                    stage="package",
+                )
+            )
+            delivered_video_node = trim_node
         tail_node: str | None = None
         segment_qa_node: str | None = None
         if continuity_mode == "rendered_tail":
@@ -640,9 +721,9 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     skill_name="media.video.extract_last_frame",
                     inputs={
                         "output_name": f"{prefix}_tail_{suffix}.png",
-                        "source_video_node": video_node,
+                        "source_video_node": delivered_video_node,
                     },
-                    depends_on=[video_node],
+                    depends_on=[delivered_video_node],
                     tags=["quality", "continuity", "tail", "segment"]
                     + (["retry"] if retry else []),
                     tool_name="media.extract_last_frame",
@@ -696,7 +777,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     stage="audio",
                 )
             )
-        return video_node, prompt_node, tts_node, tail_node, segment_qa_node
+        return delivered_video_node, prompt_node, tts_node, tail_node, segment_qa_node
 
     previous_rendered_tail_node: str | None = None
     segment_tail_nodes: list[str] = []

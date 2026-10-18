@@ -1,18 +1,42 @@
-# MiniMax H3 prompt behavior
+# MiniMax H3 prompt contract
 
-The local H3 path passes the requested brief, selected style, and optional character reference to the prompt composer. It does not require a fixed number of story beats, actions, camera moves, sound effects, or character counts.
+MiniMax H3 uses different prompt contracts for base video modes and Ref2VA. The runtime formats the prompt for the selected mode immediately before submission to ComfyUI.
 
-The composer preserves optional details supplied by the user or generated story, such as scene notes, shot descriptions, and audio direction. Missing optional details stay missing. For image-to-video, the supplied frame is identified as the starting frame because that is part of the renderer input.
+## Base video modes
 
-Runtime checks cover renderer inputs such as supported workflow, duration, dimensions, and frame sources. Visual quality and creative choices remain available for human review.
+T2VA, I2VA, FL2VA, and L2VA use these three fields in order:
 
-For `native_h3_fl2va_story`, opening and ending candidates are independent text-to-image illustrations of their respective story states. The ending never uses the approved opening as an image-to-image input. Both use the same character and selected illustration style, while the final pose, expression, prop placement, and camera follow the last story beat. Identical opening and final state descriptions are rejected before ending generation. Human review must still verify that the rendered images show the intended change; different text or files alone do not prove a visible story outcome.
+1. `integrated_multimodal_description`
+2. `overall_soundscape`
+3. `non_diegetic_music`
+
+Image alignment is explicit in the scene description. I2VA aligns `<Picture 1>` with the start. FL2VA aligns `<Picture 1>` with the start and `<Picture 2>` with the end. L2VA aligns `<Picture 1>` with the end. The scene itself should describe a visible action and its result; a single H3 segment should read as one continuous shot.
+
+## Ref2VA
+
+Ref2VA uses six sections: `subject_definitions`, `summary`, `retention_analysis`, `detailed_description`, `overall_soundscape`, and `non_diegetic_music`. Each `<Picture N>` or `<Video N>` label follows the ordered reference manifest. A continuation image is named as the starting frame; identity and style references stay in subject definitions.
+
+## Long-video image path
+
+The first segment prompt is a scene draft used to create candidate keyframes. After the first-frame and optional last-frame anchors have been selected, a vision-model call receives those exact files and the draft scene. It writes the final H3 scene plus separate audio directions. The video render depends on that result, then the mode formatter adds the correct image alignment and field labels.
+
+This order lets the prompt writer inspect the actual image while keeping keyframe creation independent from the final H3 wording. Subsequent segments use the rendered tail as their first-frame image, so their vision prompt can preserve the appearance and setting H3 actually produced.
+
+Describe motion positively as an ordered chain: what moves from the first moment, its target and path, the next connected action, and the visible resulting state. Use two or three concrete action verbs. A state description plus negative rules such as “do not hold” did not produce reliable movement in the paired H3 renders; an ordered sword-to-chart action did.
+
+## Review and limits
+
+Local contracts verify which prompt and image paths reach the ComfyUI boundary. They do not prove visual quality. Review the generated video for identity, image adherence, visible action, endpoint continuity, and audible scene response. The official MiniMax prompt skill and ComfyUI H3 documentation are the format sources:
+
+- [MiniMax H3 prompt-writing skill](https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/SKILL.md)
+- [Official base-mode prompt guide](https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/references/base-en.txt)
+- [Official Ref2VA prompt guide](https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/references/ref-en.txt)
+- [ComfyUI native H3 guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3-native)
 
 ## Code entry points
 
-- General prompt builders: `agentic/src/agentic/runtime/prompting.py`
-- Native H3 prompt composer: `agentic/src/agentic/minimax_prompting.py`
-- Native H3 storyboard normalization: `agentic/src/agentic/storyboard.py`
-- Native H3 story generation: `agentic/src/agentic/runtime/prompt_tasks/native_h3.py`
-- H3 execution skill: `agentic/src/agentic/skills/longvideo.py`
+- Prompt formats: `agentic/src/agentic/minimax_prompting.py`, `agentic/src/agentic/h3_reference.py`
+- Image-conditioned H3 prompt writing: `agentic/src/agentic/runtime/prompt_tasks/scenes.py`
+- Long-video prompt dependencies: `agentic/src/agentic/runtime/planning/long_video.py`
+- Render integration: `agentic/src/agentic/skills/longvideo.py`
 - ComfyUI renderer: `agentic/src/agentic/tools/comfy_h3.py`

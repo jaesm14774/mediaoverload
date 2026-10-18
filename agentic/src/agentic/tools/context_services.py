@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from agentic.runtime.news_grounding import (
+    is_brand_safe_news_selection,
+    is_usable_news_selection,
+)
 
 
 REVIEW_MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
@@ -57,25 +61,6 @@ class NewsSelection:
 
 
 class NewsContextService:
-    # The Kirby publishing path is family-safe by default. Keep these terms
-    # out of the random news pool before they reach the story/image/video
-    # models; this is input hygiene, not a hard-coded creative prompt.
-    DEFAULT_EXCLUDE_TITLE_TERMS = (
-        "性愛",
-        "色情",
-        "情色",
-        "裸",
-        "性侵",
-        "強姦",
-        "自殺",
-        "死亡",
-        "猝逝",
-        "身亡",
-        "命案",
-        "凶殺",
-        "血腥",
-        "屍體",
-    )
     DEFAULT_EXCLUDE_CATEGORIES = (
         "政治",
         "兩岸",
@@ -106,21 +91,6 @@ class NewsContextService:
 
     def __init__(self) -> None:
         _load_env_once()
-
-    @staticmethod
-    def is_usable_selection(title: str, keyword: str) -> bool:
-        title_text = str(title or "").strip()
-        keyword_text = str(keyword or "").strip()
-        if not title_text or not keyword_text:
-            return False
-        if title_text.casefold() in {"...", "…", "n/a", "na", "null", "unknown", "untitled"}:
-            return False
-        return any(character.isalnum() for character in title_text)
-
-    @classmethod
-    def is_brand_safe_selection(cls, title: str, keyword: str) -> bool:
-        text = f"{title} {keyword}".casefold()
-        return not any(term.casefold() in text for term in cls.DEFAULT_EXCLUDE_TITLE_TERMS)
 
     def is_configured(self) -> bool:
         return all(
@@ -175,8 +145,8 @@ class NewsContextService:
         rows = [
             row
             for row in rows
-            if self.is_usable_selection(row.get("title", ""), row.get("keyword", ""))
-            and self.is_brand_safe_selection(row.get("title", ""), row.get("keyword", ""))
+            if is_usable_news_selection(row.get("title", ""), row.get("keyword", ""))
+            and is_brand_safe_news_selection(row.get("title", ""), row.get("keyword", ""))
         ]
         if not rows:
             _logger().info("news.fetch.empty | reason=no_usable_news_rows")

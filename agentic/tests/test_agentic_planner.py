@@ -1060,6 +1060,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("segment-tail-01", videos[1].depends_on)
 
     def test_publishable_long_video_uses_rich_beats_rendered_tail_and_segment_qa(self) -> None:
+        """User Given a publishable H3 long video, When the plan is built, Then each conditioned render waits for a vision-written prompt based on its actual anchor images."""
         goal = self.planner.create_goal(
             prompt="Kirby carries a glowing seed through a windy meadow and plants it in a warm clearing",
             media_type="long_video",
@@ -1083,6 +1084,8 @@ class AgenticPlannerTests(unittest.TestCase):
         tails = [node for node in plan.nodes if node.node_id.startswith("segment-tail-")]
         segment_qas = [node for node in plan.nodes if node.node_id.startswith("segment-qa-")]
         second_video = next(node for node in videos if node.node_id == "segment-video-02")
+        first_h3_prompt = next(node for node in plan.nodes if node.node_id == "segment-h3-prompt-01")
+        second_h3_prompt = next(node for node in plan.nodes if node.node_id == "segment-h3-prompt-02")
         publish_package = next(node for node in plan.nodes if node.node_id == "persist-publish-ready-longvideo")
         script_plan = next(node for node in plan.nodes if node.node_id == "script-plan")
 
@@ -1092,6 +1095,10 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(len(segment_qas), 6)
         self.assertEqual(second_video.inputs["anchor_nodes"]["first"], "segment-tail-01")
         self.assertEqual(second_video.inputs["conditioning_plan"]["continuation_node"], "segment-tail-01")
+        self.assertIn("segment-frame-01", first_h3_prompt.depends_on)
+        self.assertIn("segment-tail-01", second_h3_prompt.depends_on)
+        self.assertEqual(second_video.inputs["h3_prompt_node"], second_h3_prompt.node_id)
+        self.assertIn(second_h3_prompt.node_id, second_video.depends_on)
         self.assertIn("segment-qa-01", plan.metadata["segment_qa_nodes"])
         self.assertEqual(plan.metadata["publish_package_node"], "persist-publish-ready-longvideo")
         self.assertEqual(publish_package.inputs["summary_scope"], "publish_ready_longvideo")

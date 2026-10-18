@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    ExecutionNode,
+    ExecutionPlan,
+    GoalRequest,
+)
 from agentic.runtime.planning.common import PlanningContext
 
 
@@ -41,8 +46,9 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
     render_config = context.native_h3_render_config(goal, video_manifest)
     width = render_config["width"]
     height = render_config["height"]
-    length = int(
-        goal.constraints.get("native_h3_fl2va_length") or render_config["length"]
+    length = max(
+        round(MIN_VIDEO_DURATION_SECONDS * 24),
+        int(goal.constraints.get("native_h3_fl2va_length") or render_config["length"]),
     )
     steps = int(goal.constraints.get("native_h3_fl2va_steps") or render_config["steps"])
     video_count = render_config["video_count"]
@@ -361,10 +367,13 @@ def build_native_h3_t2v_story(
     render_config = context.native_h3_render_config(goal, video_manifest)
     width = render_config["width"]
     height = render_config["height"]
-    length = int(
-        goal.constraints.get("native_h3_t2v_length")
-        or goal.constraints.get("native_h3_length")
-        or render_config["length"]
+    length = max(
+        round(MIN_VIDEO_DURATION_SECONDS * 24),
+        int(
+            goal.constraints.get("native_h3_t2v_length")
+            or goal.constraints.get("native_h3_length")
+            or render_config["length"]
+        ),
     )
     steps = int(
         goal.constraints.get("native_h3_t2v_steps")
@@ -507,8 +516,9 @@ def build_native_h3_l2va_story(
     # transform after the full source clip has been rendered.
     width = render_config["width"]
     height = render_config["height"]
-    length = int(
-        goal.constraints.get("native_h3_l2va_length") or render_config["length"]
+    length = max(
+        round(MIN_VIDEO_DURATION_SECONDS * 24),
+        int(goal.constraints.get("native_h3_l2va_length") or render_config["length"]),
     )
     steps = int(goal.constraints.get("native_h3_l2va_steps") or render_config["steps"])
     video_count = render_config["video_count"]

@@ -138,10 +138,31 @@ class LLMPromptEngine:
         segment: dict[str, Any],
         negative_prompt: str,
         previous_segment: dict[str, Any] | None = None,
-        prior_frame: str | None = None,
     ) -> dict[str, Any]:
         return scenes.prepare_segment(
-            self.client, goal, segment, negative_prompt, previous_segment, prior_frame
+            self.client, goal, segment, negative_prompt, previous_segment
+        )
+
+    def prepare_h3_segment(
+        self,
+        goal: GoalRequest,
+        segment: dict[str, Any],
+        *,
+        draft_prompt: str,
+        overall_soundscape: str,
+        non_diegetic_music: str,
+        duration_seconds: float,
+        image_references: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        return scenes.prepare_h3_segment(
+            self.client,
+            goal,
+            segment,
+            draft_prompt=draft_prompt,
+            overall_soundscape=overall_soundscape,
+            non_diegetic_music=non_diegetic_music,
+            duration_seconds=duration_seconds,
+            image_references=image_references,
         )
 
     def refine_prompt_from_review(

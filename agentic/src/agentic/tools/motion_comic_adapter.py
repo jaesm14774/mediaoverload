@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from agentic.runtime.contracts import MIN_VIDEO_DURATION_SECONDS
 from agentic.runtime.editing import EditClip, EditPlan, EditTransition
 from agentic.runtime.registry import ToolRegistry
 from agentic.runtime.story_cards import load_story_card_font, resolve_story_card_font
@@ -107,6 +108,10 @@ def load_recipe(path: Path) -> tuple[dict, list[Path]]:
             image.verify()
         paths.append(source)
     durations = [float(panel["duration_seconds"]) for panel in story["panels"]]
+    if sum(durations) < MIN_VIDEO_DURATION_SECONDS - 1e-5:
+        raise ValueError(
+            f"Motion comic output must be at least {MIN_VIDEO_DURATION_SECONDS} seconds"
+        )
     EditPlan(
         clips=tuple(
             EditClip(str(source), duration_seconds=duration)
@@ -228,12 +233,14 @@ def compose_pages(
         page.save(path)
         page_paths.append(path)
     fade = 2 / story["fps"]
+    panel_motions = ("slow_zoom_in", "drift_up", "slow_zoom_out")
     plan = EditPlan(
         clips=tuple(
             EditClip(
                 str(path),
                 duration_seconds=float(panel["duration_seconds"])
                 + (fade if index < 2 else 0),
+                motion=panel_motions[index % len(panel_motions)],
             )
             for index, (path, panel) in enumerate(zip(page_paths, story["panels"]))
         ),

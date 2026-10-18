@@ -51,7 +51,7 @@ generation:
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: krea2_turbo_img2img
   motion_comic:
-    duration_seconds: 9
+    duration_seconds: 10
     width: 576
     height: 1024
     fps: 24
@@ -79,12 +79,12 @@ generation:
     keyframe_workflow_name: krea2_turbo
     video_workflow_name: minimax_h3_i2va
     h3_model_profile: q4
-    duration_seconds: 8
+    duration_seconds: 10
     source_width: 1024
     source_height: 576
     video_width: 608
     video_height: 352
-    video_length: 192
+    video_length: 240
     video_steps: 16
     fps: 12
     cell_width: 64
@@ -182,8 +182,7 @@ generation:
     length: 240
     frame_rate: 24
     steps: 20
-    # The default I2V source is 10 seconds at 24 fps. The post-render 2x
-    # transform produces a final clip of about 5 seconds.
+    # Keep at least 10 seconds after any configured playback-speed transform.
     max_i2v_frames: 240
   generation_type_weights:
     text2img: 1

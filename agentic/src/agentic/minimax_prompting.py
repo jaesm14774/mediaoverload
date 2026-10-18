@@ -6,27 +6,92 @@ from typing import Any
 
 
 def require_h3_prompt(value: Any) -> str:
-    """Accept scene descriptions, never serialized responses or writing advice."""
+    """Require non-empty text for the H3 prompt field."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("H3 prompt must be a non-empty scene description string.")
-    prompt = value.strip()
-    if prompt.startswith(("{", "```")) or re.match(r"\[\s*[\"'{]", prompt):
-        raise ValueError("H3 prompt must describe the scene, not contain a serialized object or code fence.")
-    if re.search(
-        r"(?:^|\n)\s*(?:explanation|reasoning|analysis|retention_analysis)\s*:|"
-        r"(?:video action and camera direction|opening-frame action staging|"
-        r"news grounding context|additional source context)\s*:",
-        prompt,
-        re.IGNORECASE,
-    ):
-        raise ValueError("H3 prompt must contain scene description only, without explanation or writing instructions.")
-    return prompt
+    return value.strip()
 
 
 def clean_prompt_text(value: Any) -> str:
     if value is None or value == "":
         return ""
     return " ".join(require_h3_prompt(value).split()).rstrip(".")
+
+
+def format_h3_video_prompt(
+    description: str,
+    *,
+    mode: str,
+    duration_seconds: float,
+    overall_soundscape: str,
+    non_diegetic_music: str = "N/A",
+) -> str:
+    """Format one visual story using MiniMax's mode-specific prompt contract."""
+    scene = require_h3_prompt(description)
+    normalized_mode = str(mode or "t2va").strip().casefold().replace("-", "_")
+    aliases = {
+        "t2v": "t2va",
+        "text_to_video": "t2va",
+        "i2v": "i2va",
+        "image_to_video": "i2va",
+        "fl2v": "fl2va",
+        "first_last_frame_to_video": "fl2va",
+        "l2v": "l2va",
+        "last_frame_to_video": "l2va",
+        "reference_to_video": "ref2va",
+    }
+    normalized_mode = aliases.get(normalized_mode, normalized_mode)
+    if normalized_mode not in {"t2va", "i2va", "fl2va", "l2va", "ref2va"}:
+        raise ValueError(f"Unsupported base H3 prompt mode: {mode}")
+
+    seconds = float(duration_seconds)
+    if seconds <= 0:
+        raise ValueError("H3 prompt duration must be positive.")
+    soundscape = clean_prompt_text(overall_soundscape)
+    music = clean_prompt_text(non_diegetic_music) or "N/A"
+    if not soundscape:
+        raise ValueError("H3 prompt requires an overall soundscape or explicit silence.")
+    if not scene.lstrip().startswith("[Shot 1]"):
+        scene = f"[Shot 1] {scene}"
+    shot_numbers = re.findall(r"\[Shot\s+(\d+)\]", scene, re.IGNORECASE)
+    first_shot = shot_numbers[0] if shot_numbers else "1"
+    last_shot = shot_numbers[-1] if shot_numbers else first_shot
+
+    alignment = ""
+    if normalized_mode == "i2va":
+        alignment = (
+            "For the target video, at 0.00 seconds into the target video, "
+            f"<Picture 1> (from [Shot {first_shot}]) is fully referenced."
+        )
+    elif normalized_mode == "fl2va":
+        alignment = (
+            "How the reference pictures align with the target video — "
+            f"<Picture 1> (from [Shot {first_shot}]) aligns with the 0.00-second mark of the target video; "
+            f"<Picture 2> (from [Shot {last_shot}]) aligns with the {seconds:.2f}-second mark of the target video."
+        )
+    elif normalized_mode == "l2va":
+        alignment = (
+            "How the reference pictures align with the target video — "
+            f"<Picture 1> (from [Shot {last_shot}]) aligns with the {seconds:.2f}-second mark of the target video."
+        )
+
+    sections = [
+        f"integrated_multimodal_description: {scene}",
+        f"overall_soundscape: {soundscape}",
+        f"non_diegetic_music: {music}",
+    ]
+    return require_h3_prompt("\n\n".join(([alignment] if alignment else []) + sections))
+
+
+def extract_h3_scene_description(prompt: str) -> str:
+    """Return only the integrated visual/audio-timeline section of a base prompt."""
+    value = require_h3_prompt(prompt)
+    match = re.search(
+        r"(?:^|\n)integrated_multimodal_description:\s*(.*?)(?=\n\s*overall_soundscape:|\Z)",
+        value,
+        re.DOTALL,
+    )
+    return require_h3_prompt(match.group(1).strip()) if match else value
 
 
 def subject_reference(
@@ -44,14 +109,7 @@ def subject_reference(
             profile = dict(item.get("profile") or {})
             role_description = clean_prompt_text(profile.get("role_description"))
             keywords = clean_prompt_text(profile.get("keywords"))
-            details = "; ".join(
-                part
-                for part in (
-                    role_description,
-                    keywords,
-                )
-                if part
-            )
+            details = role_description or keywords
             descriptions.append(f"{name}{f' ({details})' if details else ''}")
         if descriptions:
             return "Character references: " + "; ".join(descriptions) + "."
@@ -79,82 +137,74 @@ def compose_minimax_h3_prompt(
     setting: str = "",
     visual_language: str = "",
     shots: Sequence[Mapping[str, Any]] = (),
-    audio: str = "",
+    overall_soundscape: str = "",
+    non_diegetic_music: str = "N/A",
     render_mode: str = "",
     prior_frame: bool = False,
     continuity_rules: Sequence[Any] = (),
     subject_context: Mapping[str, Any] | None = None,
-    official_shot_syntax: bool = False,
     media_type: str | None = None,
 ) -> str:
-    """Compose the local H3 prompt in MiniMax's documented multimodal shape."""
+    """Compose a compact H3 scene, then apply the official audiovisual fields."""
     spine = dict(story_spine or {})
     context = dict(subject_context or {})
     identity = subject_reference(character, context)
-    prompt_parts = [
-        f"Duration: {int(duration_seconds)} seconds.",
-        identity,
-    ]
-    for label, key in (
-        ("Creative intent", "premise"),
-        ("Protagonist objective", "objective"),
-        ("Obstacle", "obstacle"),
-        ("Stakes", "stakes"),
-        ("Climax", "climax"),
-        ("Resolution", "resolution"),
-    ):
-        value = clean_prompt_text(spine.get(key))
-        if value:
-            prompt_parts.append(f"{label}: {value}.")
-    if clean_prompt_text(base_prompt):
-        prompt_parts.append(f"Creative brief: {clean_prompt_text(base_prompt)}.")
-    if clean_prompt_text(setting):
-        prompt_parts.append(f"World: {clean_prompt_text(setting)}.")
-    if clean_prompt_text(visual_language):
-        prompt_parts.append(f"Visual language: {clean_prompt_text(visual_language)}.")
+    opening = [clean_prompt_text(style), identity]
+    opening.extend(
+        clean_prompt_text(value)
+        for value in (setting, visual_language, base_prompt, spine.get("premise"))
+        if clean_prompt_text(value)
+    )
+    objective = clean_prompt_text(spine.get("objective"))
+    obstacle = clean_prompt_text(spine.get("obstacle"))
+    stakes = clean_prompt_text(spine.get("stakes"))
+    story_goal = "; ".join(
+        part
+        for part in (
+            f"The character aims to {objective}" if objective else "",
+            f"but {obstacle}" if obstacle else "",
+            f"the consequence is {stakes}" if stakes else "",
+        )
+        if part
+    )
+    if story_goal:
+        opening.append(story_goal)
 
-    if shots and not official_shot_syntax:
-        prompt_parts.append("Shot progression:")
+    prompt_parts: list[str] = []
     for index, shot in enumerate(shots, start=1):
         time = clean_prompt_text(shot.get("time"))
-        title = clean_prompt_text(shot.get("title"))
         action = clean_prompt_text(shot.get("action") or shot.get("visual"))
         camera = clean_prompt_text(shot.get("camera"))
         state_change = clean_prompt_text(shot.get("state_change") or shot.get("end_state"))
         cause = clean_prompt_text(shot.get("cause"))
         effect = clean_prompt_text(shot.get("effect"))
-        if official_shot_syntax:
-            shot_parts = [f"[Shot {index}]"]
-            if index > 1 and time:
-                shot_parts.append(f"At {_format_h3_cut_time(time)}, the camera cuts to")
-        else:
-            shot_parts = [f"[Shot {index}{f' | {time}' if time else ''}]"]
-        if title:
-            shot_parts.append(f"{title}.")
+        shot_parts = [f"[Shot {index}]"]
+        if index == 1:
+            shot_parts.extend(part for part in opening if part)
+        elif time:
+            shot_parts.append(f"At {_format_h3_cut_time(time)}, the camera cuts to")
         if cause:
-            shot_parts.append(f"Because {cause}," if official_shot_syntax else f"Cause: {cause}.")
+            shot_parts.append(f"Because {cause},")
         if action:
             shot_parts.append(f"{action}.")
         if camera:
             shot_parts.append(f"{camera}.")
         if state_change:
-            shot_parts.append(
-                f"The visible state changes to {state_change}."
-                if official_shot_syntax
-                else f"State change: {state_change}."
-            )
+            shot_parts.append(f"The visible result is {state_change}.")
         if effect:
-            shot_parts.append(
-                f"This causes the next beat: {effect}."
-                if official_shot_syntax
-                else f"Effect and handoff: {effect}."
-            )
+            shot_parts.append(f"This leads into the next beat: {effect}.")
         prompt_parts.append(" ".join(shot_parts))
-
-    soundscape = clean_prompt_text(audio)
-    if soundscape:
-        prompt_parts.append(f"Audio direction: {soundscape}.")
-    return require_h3_prompt("\n".join(part for part in prompt_parts if part))
+    if not prompt_parts:
+        prompt_parts.append("[Shot 1] " + " ".join(part for part in opening if part))
+    mode = render_mode or ("i2va" if prior_frame else "t2va")
+    soundscape = overall_soundscape or "Sound follows the scene's visible physical actions and setting."
+    return format_h3_video_prompt(
+        " ".join(prompt_parts),
+        mode=mode,
+        duration_seconds=duration_seconds,
+        overall_soundscape=soundscape,
+        non_diegetic_music=non_diegetic_music,
+    )
 
 
 def _format_h3_cut_time(value: str) -> str:

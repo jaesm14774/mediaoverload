@@ -480,6 +480,7 @@ def generate_native_h3_storyboard(
                 "Honor recommended_scene.payoff_kind. For comedy, make one specific character habit lead to an understandable setup, a surprising but physically earned reversal, and a held reaction that completes the joke; a smile or wide eyes alone is not a punchline. For curiosity, tenderness, sadness, awe, concern, tension, solemnity, or relief, make the chosen feeling visible in a source-appropriate posture, gaze, and environment. Serious real-world stakes rule out comedy even when the selected style is cozy or playful. Never make victims, injury, death, or grief funny.",
                 "Return world.setting as one specific drawable place and world.visual_language as a clear medium and surface, palette and light, composition, and compatible motion or transition rule that carry this article's chosen emotion across every shot; use the selected profile for texture, not for a preset subject, palette, or mood. The news source sets the emotional tone and visual structure. Keep the source mechanism and selected character in one integrated focal relationship, not a character portrait beside a separate news icon; use camera, depth, scale, environment, and one coherent medium to make the article-specific trigger and consequence readable without text. Keep the character's body and expression lively when the scene's honest tone allows, while preserving the article's cause and consequence. Do not replace a reported language or policy condition with a numeric or manual control. For high-stakes news, stage the characters as witnesses unless the source supports another role, and do not turn public danger into a harmless gag. Keep character reactions visible and avoid a sales-style product mockup. Do not omit either world field. Preserve source dates, account audience, and consequences, and label a rumor as a rumor rather than a confirmed event. If the source says the new feature is similar, do not call it identical or say all functionality is preserved. Do not infer complete feature parity from a saved-item migration or invent shutdowns, lost work, outages, guarantees, or real-world harm. Do not show a readable headline, interface, label, or logo.",
                 "Return one story object with a specific visual title, required world {setting, visual_language}, story_spine, and native_shots. Each shot uses time, title, action, physical_cause, state_change, and camera. Only include gag_card for payoff_kind=comedy, with character_signature, character_desire, source_prop, prop_rule, expectation, physical_escalation, surprising_harmless_reversal, and held_expressive_reaction; omit gag_card for every other payoff_kind.",
+                "Return native_audio as an object with overall_soundscape (concrete diegetic ambience and physical-action sounds) and non_diegetic_music (an audience-only score, or N/A). Keep the two fields separate.",
             ]
         )
         prompt_sections.append(_NATIVE_H3_CHARACTER_ABILITY_RULE)
@@ -602,7 +603,7 @@ def generate_native_h3_storyboard(
         elif planned_news_category == "product_or_service" and planned_reuse:
             revision_guidance.append(reuse_visual_guidance)
         revision_guidance.append(
-            "Return the revised story object, preserving its title and world, with story_spine, news_trace, native_shots, and gag_card when the chosen payoff_kind is comedy. Each shot uses time, title, action, physical_cause, state_change, and camera; the final state_change describes the cast's simultaneous resolved pose."
+            "Return the revised story object, preserving its title and world, with story_spine, news_trace, native_shots, native_audio as separate overall_soundscape and non_diegetic_music fields, and gag_card when the chosen payoff_kind is comedy. Each shot uses time, title, action, physical_cause, state_change, and camera; the final state_change describes the cast's simultaneous resolved pose."
         )
         revision_guidance.extend(
             [
@@ -833,16 +834,11 @@ def normalize_native_h3_story_payload(
             normalized_story["native_shots"] = normalized_shots
         native_audio = normalized_story.get("native_audio")
         if isinstance(native_audio, dict):
-            audio_parts = []
-            for key, label in (
-                ("overall_soundscape", "Overall soundscape"),
-                ("non_diegetic_music", "Non-diegetic music"),
-            ):
-                value = str(native_audio.get(key) or "").strip()
-                if value:
-                    audio_parts.append(f"{label}: {value}")
-            if audio_parts:
-                normalized_story["native_audio"] = " ".join(audio_parts)
+            normalized_story["native_audio"] = {
+                "overall_soundscape": str(native_audio.get("overall_soundscape") or "").strip(),
+                "non_diegetic_music": str(native_audio.get("non_diegetic_music") or "N/A").strip(),
+            }
+            if normalized_story["native_audio"] != native_audio:
                 changed = True
         if not changed:
             return story

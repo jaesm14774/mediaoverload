@@ -187,7 +187,8 @@ def format_ref2va_prompt(
     base_prompt: str,
     references: Iterable[Mapping[str, Any]],
     *,
-    soundscape: str = "",
+    overall_soundscape: str,
+    non_diegetic_music: str = "N/A",
 ) -> str:
     """Wrap a scene prompt with the reference labels used by the H3 workflow.
 
@@ -222,8 +223,8 @@ def format_ref2va_prompt(
             )
             continue
         subject_lines.append(
-            f"{subject_label} refers to the {role} content in {source_label}, a referenced {source_kind} asset. "
-            f"Use it as visual context for the current prompt; requested retention: {retention}."
+            f"{subject_label} is the {role} reference shown in {source_label}. "
+            f"Preserve its relevant visual features for the target video; requested retention: {retention}."
             + (f" {notes}" if notes else "")
         )
         summary_labels.append(subject_label)
@@ -247,11 +248,14 @@ def format_ref2va_prompt(
         anchor_instruction = (
             "The target video starts from the supplied [Shot 1] image; follow the requested motion from that input.\n"
         )
-    detailed = (
-        "Use the current scene prompt to direct the target video, with the supplied references available as visual context.\n"
-        + anchor_instruction
-        + scene
-    )
+    detailed = scene if scene.lstrip().startswith("[Shot 1]") else f"[Shot 1] {scene}"
+    if summary_labels and not has_frame_anchor:
+        detailed = (
+            "Preserve the visual features assigned in subject_definitions while carrying out this scene. "
+            + detailed
+        )
+    if has_frame_anchor:
+        detailed = anchor_instruction + detailed
     prompt_parts = [
         "subject_definitions:",
         *subject_lines,
@@ -262,7 +266,12 @@ def format_ref2va_prompt(
         "detailed_description:",
         detailed,
     ]
-    audio_direction = str(soundscape or "").strip()
-    if audio_direction:
-        prompt_parts.extend(("overall_soundscape:", audio_direction))
+    soundscape = str(overall_soundscape or "").strip()
+    music = str(non_diegetic_music or "").strip()
+    if not soundscape:
+        raise ValueError("Ref2VA prompt requires an overall soundscape or explicit silence.")
+    if not music:
+        music = "N/A"
+    prompt_parts.extend(("overall_soundscape:", soundscape))
+    prompt_parts.extend(("non_diegetic_music:", music))
     return "\n".join(prompt_parts)

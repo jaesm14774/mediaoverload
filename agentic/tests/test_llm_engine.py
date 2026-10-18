@@ -123,7 +123,85 @@ class LLMEngineTests(unittest.TestCase):
         for key in ("prompt", "composition", "palette", "motion", "avoid"):
             self.assertIn(profile[key], user_prompt)
 
-    def test_expand_goal_keeps_news_events_attached_to_reported_places(self) -> None:
+    def test_user_given_action_video_and_slow_style_notes_when_goal_is_expanded_then_the_first_h3_scene_prioritizes_visible_action(self) -> None:
+        """User Given an action video and a style profile with gentle motion notes When the first scene prompt is written Then the model is told to write the action path from the selected image and not let style pacing replace the requested movement."""
+        manager = _FakeManager(
+            [
+                json.dumps(
+                    {
+                        "creative_brief": "Kirby bursts toward the fuel can and lands on its rim.",
+                        "prompt": "Kirby coils, rockets diagonally to the can, strikes the rim, and lands.",
+                        "opening_keyframe_prompt": "Kirby crouches, facing the can.",
+                    }
+                )
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        profile = {
+            "prompt": "wobbly ballpoint lines and flat color",
+            "composition": "a clear travel lane to the upper right",
+            "palette": "pale beige with one warm accent",
+            "motion": "gentle brush drift and quiet breathing",
+        }
+        goal = GoalRequest(
+            prompt="Kirby springs to the fuel can, hits its rim, and lands balanced.",
+            media_type="text2img2video",
+            duration_seconds=10,
+            style="simple doodle",
+            constraints={"character": "Kirby", "visual_style_profile": profile},
+        )
+
+        engine.expand_goal(goal, "simple doodle", [])
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("motion-only", user_prompt)
+        self.assertIn("the selected image will be the exact opening frame", user_prompt)
+        self.assertIn("Begin the action in the first tenth", user_prompt)
+        self.assertIn("reach the resolved endpoint only in the final tenth", user_prompt)
+        self.assertIn("Do not settle early or leave a long static tail", user_prompt)
+        self.assertIn("Style controls medium, line, surface, and palette", user_prompt)
+        self.assertIn("do not let style-profile motion language slow or replace", user_prompt)
+        self.assertIn("Do not invent anatomy, props, locations", user_prompt)
+
+    def test_user_given_optional_news_context_when_goal_expands_then_article_remains_optional_inspiration(self) -> None:
+        """User Given an optional article context When the H3 brief is expanded Then the article can shape the scene without becoming a required source anchor."""
+        manager = _FakeManager(
+            [
+                '{"creative_brief":"a grounded allegory","prompt":"Kirby reacts to an empty fuel can","negative_prompt":"text"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="Kirby responds to fuel protests reported in multiple countries",
+            media_type="text2img2video",
+            style="cel animation",
+            constraints={
+                "news_driven": False,
+                "news_grounding_required": False,
+                "news_context": {
+                    "title": "Fuel protests and shortages affect several countries",
+                    "keyword": "fuel protests",
+                    "content": "Distinct events occurred in Guatemala and the Philippines.",
+                },
+                "news_source_anchors": [
+                    {
+                        "source_excerpt": "fuel protests",
+                        "visual_mapping": "Kirby responds to fuel protests",
+                    }
+                ],
+            },
+        )
+
+        engine.expand_goal(goal, "cel animation", [])
+
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("The supplied article is optional creative inspiration", user_prompt)
+        self.assertIn("make their visual relationship to the scene recognizable", user_prompt)
+        self.assertIn("Fuel protests and shortages affect several countries", user_prompt)
+        self.assertNotIn("Carry the validated source-to-scene mappings", user_prompt)
+
+    def test_user_given_news_driven_goal_when_expanded_then_source_events_and_anchors_are_required(self) -> None:
+        """User Given a news-driven goal with source anchors When the H3 brief is expanded Then the event and validated mappings remain required."""
         manager = _FakeManager(
             [
                 '{"creative_brief":"a grounded allegory","prompt":"Kirby reacts to an empty fuel can","negative_prompt":"text"}',
@@ -136,11 +214,18 @@ class LLMEngineTests(unittest.TestCase):
             style="cel animation",
             constraints={
                 "news_driven": True,
+                "news_grounding_required": True,
                 "news_context": {
                     "title": "Fuel protests and shortages affect several countries",
                     "keyword": "fuel protests",
                     "content": "Distinct events occurred in Guatemala and the Philippines.",
                 },
+                "news_source_anchors": [
+                    {
+                        "source_excerpt": "fuel protests",
+                        "visual_mapping": "Kirby responds to fuel protests",
+                    }
+                ],
             },
         )
 
@@ -150,6 +235,8 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("Preserve each documented location, actor, and event relationship", user_prompt)
         self.assertIn("do not merge events from different places", user_prompt)
         self.assertIn("use an unlocated metaphor", user_prompt)
+        self.assertIn("Carry the validated source-to-scene mappings", user_prompt)
+        self.assertIn("Kirby responds to fuel protests", user_prompt)
 
     def test_expand_goal_uses_reference_as_optional_visual_inspiration(self) -> None:
         manager = _FakeManager(
@@ -545,10 +632,11 @@ class LLMEngineTests(unittest.TestCase):
             ))
 
     def test_generate_autonomous_scene_prompt_uses_llm_when_available(self) -> None:
+        """User Given a news-driven article is selected for an autonomous scene When the first-stage idea is generated Then it must map an exact source fact to visible scene content and retain that mapping in its metadata."""
         with tempfile.TemporaryDirectory() as temp_dir:
             manager = _FakeManager(
                 [
-                    '{"prompt":"Kirby protects unmarked student records from a leak","creative_seed":"source anchor","source":"autonomous_llm"}',
+                    '{"prompt":"Kirby shields student records from a spreading leak","creative_seed":"source anchor","source":"autonomous_llm","source_anchors":[{"source_excerpt":"student data breach","visual_mapping":"Kirby shields student records from a spreading leak"}]}',
                 ]
             )
             recorder = RunRecorder(Path(temp_dir), "autonomous-scene")
@@ -565,13 +653,21 @@ class LLMEngineTests(unittest.TestCase):
                 news_grounding_required=True,
             )
 
-            self.assertEqual(result["prompt"], "Kirby protects unmarked student records from a leak")
+            self.assertEqual(result["prompt"], "Kirby shields student records from a spreading leak")
             self.assertEqual(result["creative_seed"], "source anchor")
             self.assertEqual(result["source"], "autonomous_llm")
             self.assertEqual(result["prompt_mode"], "llm")
+            self.assertEqual(
+                result["source_anchors"],
+                [{
+                    "source_excerpt": "student data breach",
+                    "visual_mapping": "Kirby shields student records from a spreading leak",
+                }],
+            )
             user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-            self.assertIn("Anchor the story in the article's main documented event or impact", user_prompt)
-            self.assertIn("Carry that anchor through the scenario", user_prompt)
+            self.assertIn("This is a news-grounded story, not optional mood or style inspiration", user_prompt)
+            self.assertIn("source_anchors", user_prompt)
+            self.assertIn("one or two", user_prompt)
             call_files = list((Path(temp_dir) / "autonomous-scene" / "llm").glob("*.json"))
             self.assertEqual(len(call_files), 1)
             call = json.loads(call_files[0].read_text(encoding="utf-8"))
@@ -579,22 +675,113 @@ class LLMEngineTests(unittest.TestCase):
             self.assertEqual(call["status"], "success")
             self.assertEqual(call["parsed_payload"]["prompt"], result["prompt"])
 
-    def test_news_grounded_autonomous_fallback_keeps_the_source_event(self) -> None:
-        """User Given a news-driven scene uses the template fallback, When it creates the prompt, Then the headline remains the event anchor and motifs do not replace it."""
-        title = "Mathspace reports a student data breach affecting 1.08 million people"
-        engine = LLMPromptEngine(mode="template")
+    def test_user_given_optional_news_context_when_scene_prompt_is_generated_then_anchors_are_not_required(self) -> None:
+        """User Given a usable article with news-driven mode off When an autonomous scene prompt is generated Then the article remains optional inspiration without a required anchor schema."""
+        manager = _FakeManager(
+            [
+                '{"prompt":"Kirby watches a robot fleet cross a field","creative_seed":"robot fleet field test","source":"autonomous_llm"}',
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        news = {
+            "title": "NASA field-tests an AI robot fleet",
+            "keyword": "NASA ASTRA robot fleet",
+        }
 
         result = engine.generate_autonomous_scene_prompt(
             character="Kirby",
             style="anime",
-            media_type="text2image2video",
-            news_context={"title": title, "keyword": "student data breach"},
-            news_grounding_required=True,
+            media_type="text2video",
+            news_context=news,
+            news_grounding_required=False,
         )
 
-        self.assertIn(title, result["prompt"])
-        self.assertIn("never render readable headlines", result["prompt"].casefold())
-        self.assertNotIn("news-inspired visual motifs only", result["prompt"])
+        self.assertFalse(result["news_grounding_required"])
+        self.assertNotIn("source_anchors", result)
+        user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
+        self.assertIn("The supplied article is optional creative inspiration", user_prompt)
+        self.assertIn("make their visual relationship to the scene recognizable", user_prompt)
+        self.assertIn("Return JSON with keys: prompt, creative_seed, source.", user_prompt)
+        self.assertNotIn("This is a news-grounded story", user_prompt)
+
+    def test_news_grounded_autonomous_scene_rejects_unquoted_source_excerpt(self) -> None:
+        """User Given the LLM returns a source excerpt that is absent from the article When the grounded response is validated Then generation fails closed instead of rendering an unrelated scene."""
+        invalid_response = json.dumps(
+            {
+                "prompt": "Kirby stands in a calm ink landscape.",
+                "creative_seed": "quiet mood",
+                "source": "autonomous_llm",
+                "source_anchors": [
+                    {
+                        "source_excerpt": "a student escapes a maze",
+                        "visual_mapping": "Kirby stands in a calm ink landscape",
+                    }
+                ],
+            }
+        )
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager([invalid_response, invalid_response, invalid_response]),
+        )
+
+        with self.assertRaises(PromptGenerationError):
+            engine.generate_autonomous_scene_prompt(
+                character="Kirby",
+                style="anime",
+                media_type="text2video",
+                news_context={
+                    "title": "Mathspace reports a student data breach",
+                    "keyword": "student data breach",
+                    "content": "Mathspace reports a student data breach affecting 1.08 million students.",
+                },
+                news_grounding_required=True,
+            )
+
+    def test_news_grounded_autonomous_scene_rejects_mapping_absent_from_prompt(self) -> None:
+        """User Given a source quote is real but its declared visual mapping is missing When the first-stage response is validated Then generation does not accept a disconnected anchor."""
+        invalid_response = json.dumps(
+            {
+                "prompt": "Kirby stands in a calm ink landscape.",
+                "creative_seed": "quiet mood",
+                "source": "autonomous_llm",
+                "source_anchors": [
+                    {
+                        "source_excerpt": "student data breach",
+                        "visual_mapping": "Kirby shields student records from a spreading leak",
+                    }
+                ],
+            }
+        )
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=_FakeManager([invalid_response, invalid_response, invalid_response]),
+        )
+
+        with self.assertRaises(PromptGenerationError):
+            engine.generate_autonomous_scene_prompt(
+                character="Kirby",
+                style="anime",
+                media_type="text2video",
+                news_context={
+                    "title": "Mathspace reports a student data breach",
+                    "keyword": "student data breach",
+                },
+                news_grounding_required=True,
+            )
+
+    def test_news_grounded_autonomous_scene_fails_closed_without_an_llm(self) -> None:
+        """User Given a news-grounded first-stage idea cannot reach its LLM When prompt generation falls back Then the workflow stops instead of sending an unverified template to rendering."""
+        title = "Mathspace reports a student data breach affecting 1.08 million people"
+        engine = LLMPromptEngine(mode="template")
+
+        with self.assertRaises(PromptGenerationError):
+            engine.generate_autonomous_scene_prompt(
+                character="Kirby",
+                style="anime",
+                media_type="text2image2video",
+                news_context={"title": title, "keyword": "student data breach"},
+                news_grounding_required=True,
+            )
 
     def test_news_grounded_goal_fallback_keeps_the_source_event(self) -> None:
         """User Given a news-driven goal cannot reach its language model, When the template brief is returned, Then the headline remains in its render prompts."""
@@ -673,7 +860,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"prompt":"segment llm prompt","narration":"segment llm narration"}',
+                    '{"prompt":"segment llm prompt","narration":"segment llm narration","overall_soundscape":"Quiet wind and one footstep.","non_diegetic_music":"N/A"}',
                 ]
             ),
         )
@@ -695,7 +882,7 @@ class LLMEngineTests(unittest.TestCase):
         engine = LLMPromptEngine(
             mode="llm",
             manager=_FakeManager(
-                ['{"prompt":"The hero leans, hops, and lands beyond the puddle, then blinks with delight. The camera tracks alongside the hop.","narration":"over the puddle"}']
+                ['{"prompt":"The hero leans, hops, and lands beyond the puddle, then blinks with delight. The camera tracks alongside the hop.","narration":"over the puddle","overall_soundscape":"Rain taps the umbrella and puddle.","non_diegetic_music":"N/A"}']
             ),
         )
         goal = GoalRequest(prompt="a character hops over a puddle", media_type="long_video", style="storybook")

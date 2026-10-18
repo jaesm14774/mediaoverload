@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    ExecutionNode,
+    ExecutionPlan,
+    GoalRequest,
+)
 from agentic.runtime.planning.common import PlanningContext
 
 
@@ -117,10 +122,16 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
     video_height = int(
         goal.constraints.get("sprite_video_height") or video_defaults.get("height", 352)
     )
-    target_duration_seconds = max(4, min(8, int(goal.duration_seconds or 8)))
-    video_length = int(
-        goal.constraints.get("sprite_video_length")
-        or round(target_duration_seconds * 24)
+    target_duration_seconds = max(
+        MIN_VIDEO_DURATION_SECONDS,
+        int(goal.duration_seconds or MIN_VIDEO_DURATION_SECONDS),
+    )
+    video_length = max(
+        round(MIN_VIDEO_DURATION_SECONDS * 24),
+        int(
+            goal.constraints.get("sprite_video_length")
+            or round(target_duration_seconds * 24)
+        ),
     )
     video_steps = int(goal.constraints.get("sprite_video_steps") or 16)
     cell_width = context.constraint_int(goal, "sprite_cell_width", 64)

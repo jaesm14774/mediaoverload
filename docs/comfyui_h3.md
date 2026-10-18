@@ -24,7 +24,7 @@ FL2VA Q4 diffusion 用於 T2VA、I2VA、FL2VA 與 L2VA；Ref2VA 使用其專用 
 
 ## 輸入與交付
 
-H3 使用 24 FPS、res_multistep、有效 CFG 1、video shift 12／audio shift 3。原始場景描述直接傳入，不加入提示詞增強、插幀或超解析度。使用者指定的 seed、步數及模型 profile 保留在請求紀錄。
+H3 使用 24 FPS、res_multistep、有效 CFG 1、video shift 12／audio shift 3。影片模式會依官方欄位組裝場景、環境音與配樂方向；I2VA／FL2VA／L2VA 另標明圖片在時間軸上的位置。長影片先用場景草稿製作錨點圖，再由 vision model 讀取實際首尾錨點寫出 H3 場景 prompt。此流程不含插幀或超解析度。使用者指定的 seed、步數及模型 profile 保留在請求紀錄。
 
 模型原生長寬對齊 32、幀數對齊 17k+5；交付沿用請求的長寬與幀數，必要時在完整生成時間線取樣，保留首尾錨點及音訊。既有的 2x 播放、canvas、QA 與包裝節點仍在上層技能圖處理。
 

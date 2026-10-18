@@ -7,7 +7,7 @@ from typing import Any
 
 MOTION_COMIC_ROLES = ("setup", "escalation", "payoff")
 MOTION_COMIC_DEFAULTS = {
-    "duration_seconds": 9,
+    "duration_seconds": 10,
     "width": 576,
     "height": 1024,
     "fps": 24,

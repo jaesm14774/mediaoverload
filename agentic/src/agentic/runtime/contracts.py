@@ -8,6 +8,35 @@ class ContractError(RuntimeError):
     """Raised when execution graph contracts are violated."""
 
 
+MIN_VIDEO_DURATION_SECONDS = 10
+VIDEO_OUTPUT_MEDIA_TYPES = frozenset(
+    {
+        "text2video",
+        "text2img2video",
+        "long_video",
+        "native_h3_story",
+        "native_h3_t2v_story",
+        "native_h3_fl2va_story",
+        "native_h3_l2va_story",
+        "native_h3_ref2va",
+        "text2image2native_h3_ref2va",
+        "game_sprite",
+        "motion_comic",
+        "image_to_video",
+        "image_to_video_audio",
+        "video_narrate",
+        "image_sequence_edit",
+    }
+)
+
+
+def normalize_video_duration(media_type: str, duration_seconds: int) -> int:
+    duration = int(duration_seconds)
+    if str(media_type or "").strip().lower() in VIDEO_OUTPUT_MEDIA_TYPES:
+        return max(MIN_VIDEO_DURATION_SECONDS, duration)
+    return duration
+
+
 @dataclass(slots=True)
 class GoalRequest:
     prompt: str
@@ -15,6 +44,17 @@ class GoalRequest:
     duration_seconds: int = 30
     style: str = "cinematic surreal"
     constraints: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.duration_seconds = normalize_video_duration(
+            self.media_type, self.duration_seconds
+        )
+        if str(self.media_type or "").strip().lower() in VIDEO_OUTPUT_MEDIA_TYPES:
+            duration_override = self.constraints.get("duration_override_seconds")
+            if duration_override not in (None, ""):
+                self.constraints["duration_override_seconds"] = (
+                    normalize_video_duration(self.media_type, int(duration_override))
+                )
 
 
 @dataclass(slots=True)

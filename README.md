@@ -60,15 +60,17 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 | `configs/workflow/` | 模型工作流與資產 metadata；名稱以檔案 stem 為準 |
 | `configs/storyboards/` | 目前故事與時間線契約 |
 | `agentic/src/agentic/` | 應用協調、計畫、技能、模型與服務轉接 |
-| `output/` | 圖片、影片、編輯、QA 與 review 產物 |
-| `logs/` | run manifest、事件、LLM 請求、portfolio 記錄 |
+| `output/<character>/` | 角色流程的圖片、影片、編輯、QA 與 review 產物；可由角色設定或 `--output-dir` 改寫 |
+| `agentic/output/` | 直接使用 Agentic CLI 且未指定 `--output-dir` 時的輸出根目錄 |
+| `logs/runs/<run_id>/` | 角色流程的 manifest、事件、node、LLM 與 lifecycle 記錄；直接 Agentic CLI 預設只印結果並保存 portfolio 摘要 |
+| `agentic/logs/agentic_portfolio.jsonl` | runtime 的輕量 workflow 摘要 |
 | `.tmp-tests/` | 測試與建置暫存，不作為正式流程輸入 |
 
 策略語意以 [strategies.py](agentic/src/agentic/runtime/strategies.py) 為準；已啟用候選以 routing YAML 為準。影片的模型型號與 conditioning 由工作流描述，新增同類模型通常只需新工作流與候選設定。
 
 ## 架構與維護
 
-[架構與擴充指南](docs/architecture.md) 說明共用與策略專用責任、如何新增策略／模型／LLM，以及驗證邊界。
+新維護者請先讀[工程師接手指南](docs/engineering-handover.md)，依一條實際生成路徑熟悉系統責任、審查關卡、run 證據與待確認的外部邊界。[架構與擴充指南](docs/architecture.md) 說明共用與策略專用責任、如何新增策略／模型／LLM，以及驗證邊界。
 
 - [ComfyUI H3 工作流與輸入契約](docs/comfyui_h3.md)
 - [H3 提示契約](docs/minimax_h3_prompting.md)

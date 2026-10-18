@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import random
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 import pytest
 import yaml
 
@@ -28,7 +28,7 @@ from agentic.skills.agent_primitives import register_agent_primitive_skills
 from agentic.skills.motion_comic import register_motion_comic_skills
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.media_services import register_media_service_tools
-from agentic.tools.motion_comic_adapter import wrap_caption
+from agentic.tools.motion_comic_adapter import compose_pages, load_recipe, wrap_caption
 from character_workflow_helpers import make_character_workflow_request
 from provider_fakes import ScriptedLLMManager
 
@@ -248,6 +248,71 @@ def test_user_given_a_caption_with_a_latin_name_when_text_wraps_then_the_name_st
     assert any("MetaKnight" in line for line in lines)
 
 
+def test_user_given_still_comic_panels_when_composed_then_each_panel_moves_slowly_in_the_saved_video(tmp_path):
+    """User Given three still comic panels When the motion comic is composed Then every panel has a slow camera move and its saved video frames change during that panel."""
+    tools = ToolRegistry()
+    register_media_service_tools(tools, tmp_path)
+    prepared = []
+    for index, color in enumerate(("#f4b6c2", "#a7d8f0", "#f1d78b")):
+        panel = Image.new("RGB", (240, 426), "#fffaf2")
+        draw = ImageDraw.Draw(panel)
+        draw.rectangle((20 + index * 12, 30, 215 - index * 8, 395), outline=color, width=9)
+        draw.ellipse((55 + index * 20, 110, 150 + index * 12, 205), fill=color)
+        for offset in range(35, 390, 32):
+            draw.line((15, offset, 225, 425 - offset), fill="#544456", width=2)
+        prepared.append(panel)
+    story = {
+        "fps": 24,
+        "width": 240,
+        "height": 426,
+        "panels": [
+            {"duration_seconds": 10 / 3},
+            {"duration_seconds": 10 / 3},
+            {"duration_seconds": 10 / 3},
+        ],
+    }
+
+    result = compose_pages(story, prepared, tmp_path / "comic", tools)
+
+    assert result["video_path"] and Path(result["video_path"]).is_file()
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    clips = manifest["plan"]["clips"]
+    assert len(clips) == 3
+    assert all(clip["motion"] != "none" for clip in clips)
+    sample_times = ((0.5, 3.0), (3.5, 6.0), (7.0, 9.5))
+    renderer = FFmpegAdapter()
+    for index, (start, end) in enumerate(sample_times):
+        first = tmp_path / f"panel-{index + 1}-start.png"
+        last = tmp_path / f"panel-{index + 1}-end.png"
+        renderer.extract_frame_at(result["video_path"], str(first), start)
+        renderer.extract_frame_at(result["video_path"], str(last), end)
+        with Image.open(first) as start_frame, Image.open(last) as end_frame:
+            assert ImageChops.difference(start_frame.convert("RGB"), end_frame.convert("RGB")).getbbox() is not None
+
+
+def test_user_given_a_motion_comic_recipe_under_ten_seconds_when_loaded_then_it_is_rejected_before_composition(
+    tmp_path,
+):
+    """User Given a three-panel motion comic recipe totaling less than ten seconds When the recipe is loaded Then it is rejected before any video is composed."""
+    panel = tmp_path / "panel.png"
+    Image.new("RGB", (240, 426), "#fffaf2").save(panel)
+    recipe = {
+        "title": "短片",
+        "width": 576,
+        "height": 1024,
+        "fps": 24,
+        "panels": [
+            {"caption": f"Beat {index}", "duration_seconds": 3, "image_path": str(panel)}
+            for index in range(3)
+        ],
+    }
+    path = tmp_path / "short-story.json"
+    path.write_text(json.dumps(recipe), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="at least 10 seconds"):
+        load_recipe(path)
+
+
 def test_user_given_a_rendered_comic_when_preparing_social_review_then_only_the_final_video_and_its_actual_story_are_selected(
     tmp_path,
 ):
@@ -377,7 +442,7 @@ def test_user_given_shared_story_notes_containing_an_initial_prop_state_when_ren
 def test_user_given_a_motion_comic_weight_when_character_routing_runs_then_the_strategy_has_defaults_and_a_complete_registered_plan(
     tmp_path,
 ):
-    """User Given positive motion_comic random weight When a character request selects its route Then nine-second portrait defaults, one image per beat and registered runtime steps require no story file or video model."""
+    """User Given positive motion_comic random weight When a character request selects its route Then ten-second portrait defaults, one image per beat and registered runtime steps require no story file or video model."""
     config = yaml.safe_load(
         (REPO / "configs/characters/kirby.yaml").read_text(encoding="utf-8")
     )
@@ -398,7 +463,7 @@ def test_user_given_a_motion_comic_weight_when_character_routing_runs_then_the_s
         )
     )
     assert payload["source_generation_type"] == "motion_comic"
-    assert payload["duration_seconds"] == 9
+    assert payload["duration_seconds"] == 10
     assert payload["constraints"]["video_speed"] == {"enabled": False, "factor": 1.0}
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
     assert not payload["constraints"]["video_workflow_name"]
