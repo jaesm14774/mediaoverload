@@ -330,7 +330,7 @@ class CreativeProfileTests(unittest.TestCase):
         self.assertEqual(canvas.inputs["target_width"], 640)
         self.assertEqual(canvas.inputs["target_height"], 360)
         self.assertEqual(canvas.depends_on, ["native-h3-render"])
-        self.assertEqual(qa.inputs["video_node"], "native-h3-canvas")
+        self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
 
     def test_long_video_segments_and_qa_use_shared_canvas(self) -> None:
         goal = GoalRequest(

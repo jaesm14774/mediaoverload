@@ -24,12 +24,17 @@ PROFILE = {
 
 @pytest.mark.parametrize("media_type", ["sticker_pack", "animated_sticker", "game_sprite"])
 @pytest.mark.parametrize("renderer", ["image", "keyframe"])
-def test_user_given_scene_style_when_rendering_an_isolated_asset_then_background_requirements_override_scene_guidance(
+def test_user_given_scene_style_when_rendering_assets_then_each_asset_keeps_its_background_contract(
     tmp_path, media_type, renderer,
 ):
-    """User Given a style with full-scene rules When a sticker or sprite reaches the image renderer Then subject appearance is preserved without scene composition or isolation exclusions overriding the required background."""
+    """User Given a scene-oriented style When a sticker or sprite reaches the renderer Then each asset type follows its background contract."""
+    request = (
+        "Kirby waves in a colorful garden"
+        if media_type == "game_sprite"
+        else "Kirby waves on a flat uniform chroma-key background #18e06f"
+    )
     goal = GoalRequest(
-        prompt="Kirby waves on a flat uniform chroma-key background #18e06f",
+        prompt=request,
         media_type=media_type, style=PROFILE["label"],
         constraints={"visual_style_profile": dict(PROFILE), "negative_prompt": "watermark"},
     )
@@ -65,12 +70,18 @@ def test_user_given_scene_style_when_rendering_an_isolated_asset_then_background
     for payload in submitted:
         prompt = payload["prompt"]
         assert PROFILE["prompt"] in prompt and PROFILE["palette"] in prompt
-        assert "subject only" in prompt.casefold()
-        assert "background requirements take priority" in prompt.casefold()
-        assert "#18e06f" in prompt
-        assert PROFILE["composition"] not in prompt
-        assert PROFILE["avoid"] not in prompt
-        assert PROFILE["avoid"] not in payload["negative_prompt"]
+        if media_type == "game_sprite":
+            assert PROFILE["composition"] in prompt
+            assert PROFILE["avoid"] in prompt
+            assert "chroma-key background" not in prompt.casefold()
+            assert PROFILE["avoid"] in payload["negative_prompt"]
+        else:
+            assert "subject only" in prompt.casefold()
+            assert "background requirements take priority" in prompt.casefold()
+            assert "#18e06f" in prompt
+            assert PROFILE["composition"] not in prompt
+            assert PROFILE["avoid"] not in prompt
+            assert PROFILE["avoid"] not in payload["negative_prompt"]
         assert "watermark" in payload["negative_prompt"]
 
 

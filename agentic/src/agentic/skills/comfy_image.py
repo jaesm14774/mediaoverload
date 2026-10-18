@@ -93,7 +93,7 @@ class ComfyImageSkills:
                     prompt = include_role_description(prompt, context.plan.goal)
                 prompt = apply_paper_storybook_art_direction(
                     prompt,
-                    isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+                    isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
                 )
                 prompt = include_visual_style_profile(prompt, context.plan.goal)
                 return {
@@ -105,7 +105,7 @@ class ComfyImageSkills:
             prompt = include_role_description(prompt, context.plan.goal)
         prompt = apply_paper_storybook_art_direction(
             prompt,
-            isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+            isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
         )
         prompt = include_visual_style_profile(prompt, context.plan.goal)
         return {"prompt": prompt, "negative_prompt": ""}

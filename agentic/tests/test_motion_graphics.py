@@ -173,11 +173,13 @@ class MotionGraphicsTests(unittest.TestCase):
 
         self.assertNotIn("motion-graphics-review", [node.node_id for node in default_plan.nodes])
         motion = next(node for node in enabled_plan.nodes if node.node_id == "motion-graphics-review")
+        vfx = next(node for node in enabled_plan.nodes if node.node_id == "video-nvidia-vfx")
         qa = next(node for node in enabled_plan.nodes if node.node_id == "video-qa")
         preview = next(node for node in enabled_plan.nodes if node.node_id == "gif-preview")
         self.assertEqual(motion.depends_on, ["video-speed"])
-        self.assertIn("motion-graphics-review", qa.depends_on)
-        self.assertEqual(preview.depends_on, ["motion-graphics-review"])
+        self.assertEqual(vfx.depends_on, ["motion-graphics-review"])
+        self.assertIn("video-nvidia-vfx", qa.depends_on)
+        self.assertEqual(preview.depends_on, ["video-nvidia-vfx"])
 
     def test_user_given_character_short_video_when_motion_graphics_are_requested_then_cli_option_reaches_plan_constraints(self) -> None:
         """User Given a Kirby short-video request When motion graphics are selected Then the explicit option reaches the planner."""

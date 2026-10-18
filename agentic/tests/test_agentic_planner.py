@@ -335,6 +335,59 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(plan.workflow_name, "text2img2img_v1")
         self.assertIn("refine-image", [node.node_id for node in plan.nodes])
 
+    def test_user_given_a_text_to_image_edit_when_planned_then_flux_is_the_selected_refiner_after_krea2(self) -> None:
+        """User Given a request to change a generated still When the image-edit plan is built Then Krea2 creates the source and FLUX performs the requested reference edit."""
+        goal = self.planner.create_goal(
+            prompt="Keep Kirby's identity and paper-book style; open the closed seed pod into a bright flower.",
+            media_type="text2img2img",
+            duration_seconds=30,
+            style="hand-drawn paper storybook animation",
+            constraints={
+                "image_workflow_name": "krea2_turbo",
+                "refine_workflow_name": "flux3_image_klein_img2img",
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+        source = next(node for node in plan.nodes if node.node_id == "render-image")
+        refine = next(node for node in plan.nodes if node.node_id == "refine-image")
+
+        self.assertEqual(source.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(refine.inputs["workflow_name"], "flux3_image_klein_img2img")
+        self.assertIn("render-image", refine.depends_on)
+
+    def test_user_given_a_long_story_with_transition_beats_when_planned_then_flux_edits_each_landing_from_its_krea_or_rendered_tail_anchor(self) -> None:
+        """User Given a multi-segment H3 story with distinct landing beats When transition segments are planned Then FLUX uses the current first anchor and segment prompt while later starts continue from rendered H3 tails."""
+        goal = self.planner.create_goal(
+            prompt="Kirby carries a closed seed pod through a storm, opens it, and plants the glowing flower in a clearing.",
+            media_type="long_video",
+            duration_seconds=60,
+            style="hand-drawn paper storybook animation",
+            constraints={
+                "longvideo_production_profile": "text2longvideo",
+                "segment_count": 6,
+                "longvideo_workflow_names": ["minimax_h3_i2va", "minimax_h3_fl2va"],
+                "image_workflow_name": "krea2_turbo",
+                "refine_workflow_name": "flux3_image_klein_img2img",
+                "require_human_review": False,
+                "pre_video_review_enabled": False,
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+        nodes = {node.node_id: node for node in plan.nodes}
+        landing = nodes["segment-anchor-last-candidates-03"]
+
+        self.assertEqual(landing.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(landing.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
+        self.assertTrue(landing.inputs["use_prior_frame"])
+        self.assertIn("segment-tail-02", landing.depends_on)
+        self.assertIn("segment-prompt-03", landing.depends_on)
+        self.assertEqual(landing.tool_name, "comfy.workflow.image_to_image")
+        self.assertEqual(nodes["segment-video-04"].inputs["anchor_nodes"]["first"], "segment-tail-03")
+        self.assertEqual(plan.metadata["keyframe_workflow"], "krea2_turbo")
+        self.assertEqual(plan.metadata["landing_frame_workflow"], "flux3_image_klein_img2img")
+
     def test_stage_probe_image_plan_keeps_candidates_and_auto_selects_one(self) -> None:
         goal = self.planner.create_goal(
             prompt="Kirby catches one visible news-derived object",
@@ -656,7 +709,8 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertIn("persist-text2img2video-summary", [node.node_id for node in plan.nodes])
 
-    def test_five_second_text2img2video_uses_exact_frame_override(self) -> None:
+    def test_user_given_a_five_second_i2v_request_when_planned_then_delivery_keeps_the_ten_second_minimum(self) -> None:
+        """User Given a five-second I2V request When its plan is built Then the public duration is clamped to the ten-second delivery minimum."""
         goal = self.planner.create_goal(
             prompt="Kirby swats one glowing orb into a target",
             media_type="text2img2video",
@@ -666,7 +720,9 @@ class AgenticPlannerTests(unittest.TestCase):
         )
         plan = self.planner.build_plan(goal)
         animate = next(node for node in plan.nodes if node.node_id == "animate-video")
-        self.assertEqual(animate.inputs["length"], 120)
+        self.assertEqual(goal.duration_seconds, 10)
+        self.assertEqual(goal.constraints["duration_override_seconds"], 10)
+        self.assertGreaterEqual(animate.inputs["length"] / 24, 10)
 
     def test_user_given_default_i2v_when_speed_is_2x_then_source_is_10_seconds_and_final_target_is_5(self) -> None:
         """User Given the default I2V route When speed is 2x Then it renders 10s before speed and targets 5s after."""
@@ -945,7 +1001,8 @@ class AgenticPlannerTests(unittest.TestCase):
         render_node = next(node for node in plan.nodes if node.node_id == "render-image")
         self.assertIn("idea-brief", render_node.depends_on)
 
-    def test_long_video_plan_respects_segment_count_and_review_selection_limit(self) -> None:
+    def test_user_given_more_short_segments_than_fit_the_minimum_when_planned_then_segments_remain_valid_and_review_limit_is_kept(self) -> None:
+        """User Given a twenty-second H3 video requesting four segments When its plan is built Then no segment falls below ten seconds and the review selection limit is preserved."""
         goal = self.planner.create_goal(
             prompt="kirby explores a rainy cyberpunk alley",
             media_type="long_video",
@@ -963,12 +1020,15 @@ class AgenticPlannerTests(unittest.TestCase):
         review_select = next(node for node in plan.nodes if node.node_id == "review-select")
         segment_video = next(node for node in plan.nodes if node.node_id == "segment-video-01")
 
-        self.assertEqual(script_plan.inputs["segment_count"], 4)
+        self.assertEqual(script_plan.inputs["segment_count"], plan.metadata["segment_count"])
+        self.assertLessEqual(script_plan.inputs["segment_count"], 2)
         self.assertEqual(review_select.inputs["limit"], 5)
         self.assertEqual(segment_video.inputs["workflow_name"], "minimax_h3_i2va")
+        self.assertGreaterEqual(segment_video.inputs["length"] / 24, 10)
 
 
-    def test_long_video_final_duration_is_trimmed_after_segment_concat(self) -> None:
+    def test_user_given_a_long_video_when_packaging_then_trim_and_vfx_finish_before_quality_review(self) -> None:
+        """User Given a long-video plan When the final duration is packaged Then trim precedes VFX and QA reviews the final post-processed output."""
         goal = self.planner.create_goal(
             prompt="kirby reaches a glowing seed in a windy meadow",
             media_type="long_video",
@@ -980,11 +1040,13 @@ class AgenticPlannerTests(unittest.TestCase):
         )
         plan = self.planner.build_plan(goal)
         trim = next(node for node in plan.nodes if node.node_id == "video-trim")
+        vfx = next(node for node in plan.nodes if node.node_id == "video-nvidia-vfx")
         qa = next(node for node in plan.nodes if node.node_id == "longvideo-video-qa")
         self.assertEqual(trim.depends_on, ["concat-final-video"])
         self.assertEqual(trim.inputs["duration_seconds"], 20.0)
-        self.assertEqual(qa.depends_on, ["video-trim"])
-        self.assertEqual(plan.metadata["final_video_node"], "video-trim")
+        self.assertEqual(vfx.depends_on, ["video-trim"])
+        self.assertIn("video-nvidia-vfx", qa.depends_on)
+        self.assertEqual(plan.metadata["final_video_node"], "video-nvidia-vfx")
 
     def test_long_video_speed_scales_final_trim_and_qa_duration(self) -> None:
         goal = self.planner.create_goal(
@@ -1003,7 +1065,8 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(trim.inputs["duration_seconds"], 10.0)
         self.assertEqual(qa.inputs["target_duration"], 10.0)
 
-    def test_long_video_review_metadata_points_to_review_output(self) -> None:
+    def test_user_given_a_reviewed_long_video_when_the_retry_is_packaged_then_metadata_points_to_the_final_postprocessed_output(self) -> None:
+        """User Given a reviewed long-video retry When its output is packaged Then final-output metadata identifies the post-processed video."""
         goal = self.planner.create_goal(
             prompt="kirby reaches a glowing seed in a windy meadow",
             media_type="long_video",
@@ -1015,7 +1078,7 @@ class AgenticPlannerTests(unittest.TestCase):
             },
         )
         plan = self.planner.build_plan(goal)
-        self.assertEqual(plan.metadata["final_video_node"], "review-video-trim")
+        self.assertEqual(plan.metadata["final_video_node"], "review-video-nvidia-vfx")
 
     def test_long_video_render_inputs_reject_unbounded_work(self) -> None:
         goal = self.planner.create_goal(
@@ -1031,7 +1094,8 @@ class AgenticPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "longvideo_length"):
             self.planner.build_plan(goal)
 
-    def test_long_video_default_is_four_anchor_segments_for_twenty_seconds(self) -> None:
+    def test_user_given_a_twenty_second_long_video_when_planned_then_i2v_segments_continue_from_their_rendered_tails_without_landing_frame_assets(self) -> None:
+        """User Given a two-segment long-video request without a planned landing transition When its plan is built Then H3 segments meet the duration minimum and continue from rendered tails without requiring FLUX assets."""
         goal = self.planner.create_goal(
             prompt="Kirby crosses a windy meadow and reaches a glowing seed",
             media_type="long_video",
@@ -1042,20 +1106,14 @@ class AgenticPlannerTests(unittest.TestCase):
         plan = self.planner.build_plan(goal)
         videos = [node for node in plan.nodes if node.node_id.startswith("segment-video-")]
 
-        self.assertEqual(plan.metadata["segment_count"], 4)
-        self.assertEqual(plan.metadata["recipe_sequence"], ["anchor_first", "anchor_first_last", "anchor_first_last", "anchor_first_last"])
-        self.assertEqual([node.inputs["workflow_name"] for node in videos], [
-            "minimax_h3_i2va",
-            "minimax_h3_fl2va",
-            "minimax_h3_fl2va",
-            "minimax_h3_fl2va",
-        ])
-        self.assertEqual([node.inputs["length"] for node in videos], [120, 120, 120, 120])
+        self.assertEqual(plan.metadata["segment_count"], len(videos))
+        self.assertEqual(len(videos), 2)
+        self.assertTrue(all(node.inputs["length"] / 24 >= 10 for node in videos))
         self.assertTrue(all(node.inputs["conditioning_plan"]["anchors"] for node in videos))
         self.assertTrue(any(node.node_id == "image-asset-check" for node in plan.nodes))
-        self.assertTrue(any(node.node_id == "refine-asset-check" for node in plan.nodes))
+        self.assertFalse(any(node.node_id == "refine-asset-check" for node in plan.nodes))
         tails = [node for node in plan.nodes if node.node_id.startswith("segment-tail-")]
-        self.assertEqual(len(tails), 4)
+        self.assertEqual(len(tails), len(videos))
         self.assertEqual(videos[1].inputs["conditioning_plan"]["continuation_node"], "segment-tail-01")
         self.assertIn("segment-tail-01", videos[1].depends_on)
 
@@ -1090,9 +1148,10 @@ class AgenticPlannerTests(unittest.TestCase):
         script_plan = next(node for node in plan.nodes if node.node_id == "script-plan")
 
         self.assertEqual(script_plan.inputs["production_profile"], "text2longvideo")
-        self.assertEqual(len(videos), 6)
-        self.assertEqual(len(tails), 6)
-        self.assertEqual(len(segment_qas), 6)
+        self.assertEqual(len(videos), plan.metadata["segment_count"])
+        self.assertEqual(len(tails), len(videos))
+        self.assertEqual(len(segment_qas), len(videos))
+        self.assertTrue(all(node.inputs["length"] / 24 >= 10 for node in videos))
         self.assertEqual(second_video.inputs["anchor_nodes"]["first"], "segment-tail-01")
         self.assertEqual(second_video.inputs["conditioning_plan"]["continuation_node"], "segment-tail-01")
         self.assertIn("segment-frame-01", first_h3_prompt.depends_on)

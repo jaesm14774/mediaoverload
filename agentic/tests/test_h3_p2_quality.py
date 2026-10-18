@@ -49,9 +49,9 @@ class H3P2VideoQualityTests(unittest.TestCase):
             def probe_media(self, path: str) -> dict[str, object]:
                 return {
                     "path": path,
-                    "duration": 5.166,
-                    "video_duration": 5.166,
-                    "audio_duration": 5.166 if has_audio else 0.0,
+                    "duration": 10.0,
+                    "video_duration": 10.0,
+                    "audio_duration": 10.0 if has_audio else 0.0,
                     "has_video": True,
                     "has_audio": has_audio,
                     "width": 608,
@@ -76,12 +76,13 @@ class H3P2VideoQualityTests(unittest.TestCase):
         tools._fixture_path = video  # type: ignore[attr-defined]
         return tools
 
-    def test_strict_gate_checks_declared_audio_and_records_loudness(self) -> None:
+    def test_user_given_a_ten_second_h3_clip_with_audio_when_checked_then_required_audio_evidence_is_recorded(self) -> None:
+        """User Given a ten-second H3 clip with stereo audio When strict QA runs Then the duration and required audio checks pass and measured loudness is retained."""
         tools = self._tools()
         result = tools.video_qa(
             {
                 "video_path": str(tools._fixture_path),  # type: ignore[attr-defined]
-                "target_duration": 5.166,
+                "target_duration": 10.0,
                 "expected_width": 608,
                 "expected_height": 352,
                 "expected_fps": 24,
@@ -96,12 +97,13 @@ class H3P2VideoQualityTests(unittest.TestCase):
         self.assertIn("mean_volume_db", result["audio_analysis"])
         self.assertTrue(result["checks"]["duration_alignment"])
 
-    def test_strict_gate_rejects_missing_audio(self) -> None:
+    def test_user_given_a_ten_second_h3_clip_without_audio_when_checked_then_the_missing_audio_is_rejected(self) -> None:
+        """User Given a ten-second H3 clip without audio When strict QA requires audio Then the clip fails with a missing-audio error."""
         tools = self._tools(has_audio=False)
         result = tools.video_qa(
             {
                 "video_path": str(tools._fixture_path),  # type: ignore[attr-defined]
-                "target_duration": 5.166,
+                "target_duration": 10.0,
                 "require_audio": True,
                 "require_stereo_audio": True,
                 "analyze_audio": True,

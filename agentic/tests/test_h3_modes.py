@@ -65,6 +65,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertAlmostEqual(qa.inputs["target_duration"], 362 / 24 / 2)
 
     def test_fl2va_plan_is_first_and_last_frame_workflow(self) -> None:
+        """User Given FL2VA without editorial review When the plan is built Then Krea2 creates the opening and FLUX refines it into the ending anchor."""
         plan = self._plan("native_h3_fl2va_story", no_review=True)
         node_ids = [node.node_id for node in plan.nodes]
         self.assertIn("native-opening-keyframe", node_ids)
@@ -79,29 +80,37 @@ class H3ModePlanTests(unittest.TestCase):
         story_prompt = next(node for node in plan.nodes if node.node_id == "native-story-prompt")
         self.assertEqual(story_prompt.inputs["render_mode"], "first_last_frame_to_video")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
-        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertTrue(ending.inputs["use_prior_frame"])
         self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
+        self.assertEqual(ending.tool_name, "comfy.workflow.image_to_image")
+        self.assertIn("native-refine-asset-check", ending.depends_on)
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertEqual(plan.workflow_name, "minimax_h3_fl2va")
         self.assertEqual(plan.metadata["recipe"], "native_h3_fl2va_story")
 
-    def test_fl2va_review_builds_six_independent_ending_candidates(self) -> None:
-        """User Given FL2VA needs six reviewed endings When the plan is built Then each ending is drawn from the final story state before review."""
+    def test_fl2va_review_builds_six_flux_refined_ending_candidates(self) -> None:
+        """User Given FL2VA needs six reviewed endings When the plan is built Then FLUX refines each from the opening using the final story state before review."""
         plan = self._plan("native_h3_fl2va_story")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
         ending_review = next(node for node in plan.nodes if node.node_id == "native-ending-review")
         speed_nodes = [node for node in plan.nodes if node.node_id == "native-h3-speed"]
 
         self.assertEqual(ending.inputs["image_count"], 6)
-        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertTrue(ending.inputs["use_prior_frame"])
         self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
+        self.assertEqual(ending.tool_name, "comfy.workflow.image_to_image")
+        self.assertIn("native-opening-review", ending.depends_on)
+        self.assertIn("native-refine-asset-check", ending.depends_on)
         self.assertEqual(ending.inputs["prompt_key"], "ending_keyframe_prompt")
         self.assertTrue(ending_review.inputs["review_all_candidates"])
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
         self.assertEqual(speed_nodes, [])
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
         canvas_nodes = [node for node in plan.nodes if node.node_id == "native-h3-canvas"]
-        self.assertEqual(qa.inputs["video_node"], "native-h3-canvas" if canvas_nodes else "native-h3-render")
+        self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
+        self.assertTrue(canvas_nodes)
         self.assertEqual(qa.inputs["target_duration"], 362 / 24)
 
     def test_ref2va_plan_records_manifest_and_disables_reference_audio(self) -> None:

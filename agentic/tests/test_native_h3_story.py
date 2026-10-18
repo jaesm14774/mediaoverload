@@ -127,6 +127,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native-keyframe-source-check",
             "native-h3-render",
             "native-h3-speed",
+            "native-h3-nvidia-vfx",
             "native-h3-qa",
             "native-h3-preview",
             "native-h3-package",
@@ -161,16 +162,16 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertFalse(render.inputs["use_last_frame"])
         self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
         self.assertEqual(qa.inputs["mode"], "discord_review_evidence_only")
-        self.assertEqual(qa.inputs["video_node"], "native-h3-canvas" if "native-h3-canvas" in node_ids else "native-h3-speed")
+        self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
         self.assertAlmostEqual(qa.inputs["target_duration"], render.inputs["length"] / 24 / 2)
-        self.assertEqual(qa.inputs["expected_fps"], 24.0)
+        self.assertEqual(qa.inputs["expected_fps"], 48.0)
         self.assertIsNone(qa.tool_name)
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
         self.assertFalse(plan.metadata["native_h3"]["use_last_frame"])
         self.assertIn("native_h3", plan.metadata)
 
-    def test_user_gets_reproducible_independent_ending_for_fl2va(self) -> None:
-        """User Given a FL2VA story and seed When the planner prepares both anchors Then the ending is drawn independently with reproducible generation seeds."""
+    def test_user_gets_a_distinct_flux_refined_ending_for_fl2va(self) -> None:
+        """User Given a FL2VA story and a reproducible seed When the planner prepares both anchors Then Krea2 creates the opening and FLUX edits that image into the prompted ending state."""
         planner, _runner, _memory = build_runtime(
             self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-paired-anchor-plan",
@@ -182,6 +183,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native_h3_use_last_frame": True,
             "native_h3_keyframe_candidate_count": 1,
             "native_h3_keyframe_workflow_name": "krea2_turbo",
+            "refine_workflow_name": "flux3_image_klein_img2img",
             "workflow_name": "minimax_h3_fl2va",
             "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
             "require_human_review": False,
@@ -199,16 +201,20 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         plan = planner.build_plan(goal)
         nodes = {node.node_id: node for node in plan.nodes}
         ending = nodes["native-ending-keyframe"]
-        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertTrue(ending.inputs["use_prior_frame"])
         self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
+        self.assertEqual(ending.tool_name, "comfy.workflow.image_to_image")
+        self.assertIn("native-opening-keyframe", ending.depends_on)
+        self.assertIn("native-refine-asset-check", ending.depends_on)
         self.assertEqual(ending.inputs["seed"], 730928)
         self.assertEqual(nodes["native-opening-keyframe"].inputs["seed"], 730927)
         self.assertEqual(nodes["native-h3-render"].inputs["seed"], 730929)
         self.assertTrue(nodes["native-h3-render"].inputs["use_last_frame"])
-        self.assertEqual(plan.metadata["native_h3"]["frame_pair_strategy"], "independent_text_to_image")
+        self.assertEqual(plan.metadata["native_h3"]["frame_pair_strategy"], "krea2_to_flux3_reference_refine")
 
-    def test_native_h3_last_frame_mode_adds_review_and_passes_both_frames(self) -> None:
-        """User Given FL2VA needs editorial review When the planner creates the ending Then it draws independent final-state candidates and sends both approved anchors to video generation."""
+    def test_native_h3_last_frame_mode_reviews_a_flux_refined_distinct_ending(self) -> None:
+        """User Given FL2VA needs editorial review When the planner creates the ending Then FLUX derives distinct ending candidates from the selected opening and H3 receives the reviewed frame pair."""
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.config_path,
@@ -241,8 +247,12 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
         self.assertEqual(ending.inputs["image_count"], 6)
-        self.assertFalse(ending.inputs["use_prior_frame"])
+        self.assertTrue(ending.inputs["use_prior_frame"])
         self.assertEqual(ending.inputs["workflow_name"], "krea2_turbo")
+        self.assertEqual(ending.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
+        self.assertEqual(ending.tool_name, "comfy.workflow.image_to_image")
+        self.assertIn("native-opening-review", ending.depends_on)
+        self.assertIn("native-refine-asset-check", ending.depends_on)
         self.assertEqual(ending_review.depends_on, ["native-ending-keyframe"])
         self.assertTrue(source_check.inputs["use_last_frame"])
         self.assertTrue(source_check.inputs["preserve_ending_frame"])
@@ -250,6 +260,48 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("native-ending-review", source_check.depends_on)
         self.assertTrue(render.inputs["use_last_frame"])
         self.assertTrue(plan.metadata["native_h3"]["use_last_frame"])
+
+    def test_user_given_an_l2va_story_when_the_landing_frame_is_prepared_then_flux_changes_the_krea_reference_before_h3_receives_it(self) -> None:
+        """User Given an L2VA story with a defined opening and landing state When its keyframes are planned Then Krea2 supplies identity, FLUX changes the state, and H3 receives only the reviewed landing frame."""
+        planner, _runner, _memory = build_runtime(
+            self.repo_root,
+            output_root=self.repo_root / ".tmp-tests" / "native-h3-l2va-flux-plan",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        goal = planner.create_goal(
+            prompt="Kirby carries a closed seed pod through a storm; it opens into a glowing flower at the landing.",
+            media_type="native_h3_l2va_story",
+            duration_seconds=15,
+            style="hand-drawn paper storybook animation",
+            constraints={
+                "character": "Kirby",
+                "native_h3_keyframe_workflow_name": "krea2_turbo",
+                "refine_workflow_name": "flux3_image_klein_img2img",
+                "workflow_name": "minimax_h3_l2va",
+                "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
+                "require_human_review": True,
+                "enable_review_loop": False,
+            },
+        )
+
+        plan = planner.build_plan(goal)
+        nodes = {node.node_id: node for node in plan.nodes}
+        source = nodes["native-l2va-identity-keyframe"]
+        landing = nodes["native-l2va-ending-keyframe"]
+        render = nodes["native-h3-render"]
+
+        self.assertEqual(source.inputs["workflow_name"], "krea2_turbo")
+        self.assertFalse(source.inputs["use_prior_frame"])
+        self.assertEqual(landing.inputs["workflow_name"], "krea2_turbo")
+        self.assertTrue(landing.inputs["use_prior_frame"])
+        self.assertEqual(landing.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
+        self.assertEqual(landing.tool_name, "comfy.workflow.image_to_image")
+        self.assertIn(source.node_id, landing.depends_on)
+        self.assertIn("native-refine-asset-check", landing.depends_on)
+        self.assertEqual(nodes["native-l2va-ending-review"].depends_on, [landing.node_id])
+        self.assertIn("native-l2va-frame-source-check", render.depends_on)
+        self.assertEqual(plan.metadata["native_h3"]["landing_frame_workflow"], "flux3_image_klein_img2img")
 
     def test_no_review_native_h3_uses_one_opening_candidate_and_skips_review_node(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(

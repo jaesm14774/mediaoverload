@@ -54,6 +54,39 @@ workflows:
         expected_size: 253806246
         sha256: "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
 
+  # FLUX Klein is the reference-edit stage for image changes and story landing frames.
+  # It requires ComfyUI whose CLIPLoader supports the flux3 type; live runtime is v0.41.0.
+  # Commercial output and production use follow the FLUX Kommunity License v1:
+  # qualifying users have under US$5M gross annualized revenue including affiliates.
+  # Other use requires a separate BFL commercial license.
+  "flux3_image_klein_img2img.json":
+    summary: "FLUX 3 Image Klein reference edit for image changes and story landing frames; requires flux3 CLIPLoader support and all gated assets; FLUX Kommunity License v1 applies; tested on ComfyUI 0.41.0"
+    media_types:
+      - image_refine
+    node_aliases:
+      load_image: "1"
+    required_assets:
+      - name: "flux3-image-klein-int8-convrot.safetensors"
+        kind: "diffusion_model"
+        target_dir: "ComfyUI/models/diffusion_models"
+        source: "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/flux3-image-klein-int8-convrot.safetensors"
+        expected_size: 5827874779
+      - name: "qwen3vl_4b_int8_convrot.safetensors"
+        kind: "text_encoder"
+        target_dir: "ComfyUI/models/text_encoders"
+        source: "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/qwen3vl_4b_int8_convrot.safetensors"
+        expected_size: 4858559240
+      - name: "flux2-vae.safetensors"
+        kind: "vae"
+        target_dir: "ComfyUI/models/vae"
+        source: "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/flux2-vae.safetensors"
+        expected_size: 336211292
+      - name: "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
+        kind: "text_encoder"
+        target_dir: "ComfyUI/models/text_encoders"
+        source: "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
+        expected_size: 6724090780
+
   # Z-Image + Nova hybrid workflow. This is retained as a hybrid candidate;
   # only the pure Z-Image workflows are retired.
   "z_image_plus_nova_model.json":

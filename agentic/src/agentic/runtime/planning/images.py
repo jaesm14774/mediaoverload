@@ -268,7 +268,7 @@ def build_text2img2img(context: PlanningContext, goal: GoalRequest) -> Execution
         ExecutionNode(
             node_id="refine-image",
             skill_name="media.image.refine",
-            inputs={},
+            inputs={"workflow_name": refine_manifest.name},
             depends_on=["idea-brief", "render-image", "refine-asset-check"],
             tags=["render", "image", "refine"],
             stage="render",

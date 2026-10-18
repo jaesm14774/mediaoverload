@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from PIL import Image
 
@@ -19,11 +19,10 @@ SPRITE_FRAME_COUNT = SPRITE_GRID_ROWS * SPRITE_GRID_COLS
 SPRITE_DEFAULT_CELL_WIDTH = 64
 SPRITE_DEFAULT_CELL_HEIGHT = 64
 SPRITE_DEFAULT_FPS = 12
-SPRITE_DEFAULT_CHROMA_THRESHOLD = 52
 
 
 class SpriteAdapter:
-    """Build a transparent 4x4 sprite atlas without a human curation step."""
+    """Package sampled frames while preserving their backgrounds and alpha."""
 
     def __init__(self, ffmpeg: FFmpegAdapter | None = None) -> None:
         self.ffmpeg = ffmpeg or FFmpegAdapter()
@@ -37,8 +36,6 @@ class SpriteAdapter:
         cell_height: int = SPRITE_DEFAULT_CELL_HEIGHT,
         fps: float = SPRITE_DEFAULT_FPS,
         loop: bool = True,
-        key_color: str | Iterable[int] = "magenta",
-        chroma_threshold: int = SPRITE_DEFAULT_CHROMA_THRESHOLD,
         frame_map: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         source = Path(video_path).resolve()
@@ -77,8 +74,6 @@ class SpriteAdapter:
             cell_height=cell_height,
             fps=fps,
             loop=loop,
-            key_color=key_color,
-            chroma_threshold=chroma_threshold,
             frame_map=frame_map,
         )
         result["source_video"] = str(source)
@@ -100,8 +95,6 @@ class SpriteAdapter:
         cell_height: int = SPRITE_DEFAULT_CELL_HEIGHT,
         fps: float = SPRITE_DEFAULT_FPS,
         loop: bool = True,
-        key_color: str | Iterable[int] = "magenta",
-        chroma_threshold: int = SPRITE_DEFAULT_CHROMA_THRESHOLD,
         frame_map: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         frame_count = len(frame_paths)
@@ -114,33 +107,26 @@ class SpriteAdapter:
         frame_rate = float(fps)
         if not math.isfinite(frame_rate) or frame_rate <= 0:
             raise ValueError("fps must be a finite number greater than zero")
-        threshold = _nonnegative_int(chroma_threshold, "chroma_threshold")
-        chroma = _parse_key_color(key_color)
-
         root = Path(output_dir).resolve()
         frames_dir = root / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
-        keyed_frames: list[Image.Image] = []
-        edge_contacts: list[dict[str, int]] = []
+        source_frames: list[Image.Image] = []
         for frame_path in frame_paths:
             source = Path(frame_path).resolve()
             if not source.is_file():
                 raise FileNotFoundError(f"Sprite frame does not exist: {source}")
             with Image.open(source) as image:
-                raw = image.convert("RGBA")
-                keyed = _chroma_key(raw, chroma, threshold)
-                keyed_frames.append(keyed)
-                edge_contacts.append(_edge_contact(keyed, raw=raw, chroma=chroma, threshold=threshold))
-        shared_bbox = _union_bbox(keyed_frames)
+                source_frames.append(_binary_alpha(image.convert("RGBA")))
+        shared_bbox = _union_bbox(source_frames)
         if shared_bbox is None:
-            raise ValueError("Sprite frames became fully transparent after chroma removal")
+            raise ValueError("Sprite source frames are fully transparent")
         normalized_frames: list[Image.Image] = []
         frame_records: list[dict[str, Any]] = []
         for index, frame_path in enumerate(frame_paths):
             source = Path(frame_path).resolve()
-            normalized = _fit_frame(keyed_frames[index], width, height, crop_bbox=shared_bbox)
+            normalized = _fit_frame(source_frames[index], width, height, crop_bbox=shared_bbox)
             if _alpha_bbox(normalized) is None:
-                raise ValueError(f"Sprite frame became fully transparent after chroma removal: {source}")
+                raise ValueError(f"Sprite source frame is fully transparent: {source}")
             frame_copy = normalized.copy()
             normalized_frames.append(frame_copy)
             target = frames_dir / f"frame-{index + 1:02d}.png"
@@ -205,7 +191,6 @@ class SpriteAdapter:
                 "nonempty_frames": all(count > 0 for count in alpha_counts),
             },
             "opaque_pixel_count": alpha_counts,
-            "edge_contacts": edge_contacts,
         }
         manifest = {
             "schema_version": 1,
@@ -217,7 +202,7 @@ class SpriteAdapter:
             "loop": bool(loop),
             "animation_kind": "periodic" if loop else "one_shot",
             "alpha": "binary",
-            "chroma": {"key_color": list(chroma), "threshold": threshold},
+            "background_mode": "preserved",
             "frames": frame_records,
             "outputs": {
                 "atlas": str(atlas_path),
@@ -252,116 +237,6 @@ def _positive_int(value: object, name: str) -> int:
     if parsed <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return parsed
-
-
-def _nonnegative_int(value: object, name: str) -> int:
-    parsed = int(value)
-    if parsed < 0:
-        raise ValueError(f"{name} must be non-negative")
-    return parsed
-
-
-def _parse_key_color(value: str | Iterable[int]) -> tuple[int, int, int]:
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        named = {
-            "magenta": (255, 0, 255),
-            "cyan": (0, 229, 255),
-            "green": (24, 224, 111),
-            "blue": (47, 107, 255),
-            "yellow": (255, 229, 31),
-            "violet": (122, 56, 255),
-            "orange": (255, 155, 47),
-        }
-        if normalized in named:
-            return named[normalized]
-        hex_value = normalized.removeprefix("#")
-        if len(hex_value) == 6 and "," not in normalized:
-            try:
-                return tuple(int(hex_value[index : index + 2], 16) for index in (0, 2, 4))  # type: ignore[return-value]
-            except ValueError as exc:
-                raise ValueError("key_color hex value must contain six hexadecimal digits") from exc
-        parts = [part.strip() for part in normalized.split(",")]
-        if len(parts) == 3:
-            try:
-                value = [int(part) for part in parts]
-            except ValueError as exc:
-                raise ValueError("key_color RGB channels must be integers") from exc
-        else:
-            raise ValueError(
-                "key_color must be a supported named color, #RRGGBB, or an RGB sequence"
-            )
-    values = tuple(int(channel) for channel in value)
-    if len(values) != 3 or any(channel < 0 or channel > 255 for channel in values):
-        raise ValueError("key_color must contain exactly three channels in the range 0..255")
-    return values
-
-
-def _chroma_key(image: Image.Image, key_color: tuple[int, int, int], threshold: int) -> Image.Image:
-    pixels = []
-    kr, kg, kb = key_color
-    threshold_sq = threshold * threshold
-    for red, green, blue, _alpha in image.getdata():
-        distance_sq = (red - kr) ** 2 + (green - kg) ** 2 + (blue - kb) ** 2
-        pixels.append((red, green, blue, 0 if distance_sq <= threshold_sq else 255))
-    image.putdata(pixels)
-    # Border cleanup needs a tighter tolerance than the chroma radius: a dark,
-    # shifted backdrop can otherwise be close enough to absorb a dark subject.
-    border_tolerance = max(12, min(32, threshold // 2))
-    return _remove_border_background(image, threshold=border_tolerance)
-
-
-def _remove_border_background(image: Image.Image, *, threshold: int) -> Image.Image:
-    """Remove flat or gently noisy backgrounds that H3 shifts away from the key color."""
-
-    width, height = image.size
-    pixels = list(image.getdata())
-    visited = bytearray(width * height)
-    opaque = [pixel[3] > 0 for pixel in pixels]
-    tolerance_sq = threshold * threshold
-
-    def color_distance_sq(left: tuple[int, int, int, int], right: tuple[int, int, int, int]) -> int:
-        return sum((left[channel] - right[channel]) ** 2 for channel in range(3))
-
-    edge_indices = list(range(width))
-    edge_indices.extend((height - 1) * width + column for column in range(width))
-    edge_indices.extend(row * width for row in range(1, height - 1))
-    edge_indices.extend(row * width + width - 1 for row in range(1, height - 1))
-
-    for seed in edge_indices:
-        if not opaque[seed] or visited[seed]:
-            continue
-        seed_color = pixels[seed]
-        queue = [seed]
-        visited[seed] = 1
-        component: list[int] = []
-        while queue:
-            current = queue.pop()
-            component.append(current)
-            row, column = divmod(current, width)
-            for neighbor in (
-                current - 1 if column else -1,
-                current + 1 if column + 1 < width else -1,
-                current - width if row else -1,
-                current + width if row + 1 < height else -1,
-            ):
-                if neighbor < 0 or visited[neighbor] or not opaque[neighbor]:
-                    continue
-                if color_distance_sq(pixels[neighbor], seed_color) > tolerance_sq:
-                    continue
-                visited[neighbor] = 1
-                queue.append(neighbor)
-        # Only remove a border-connected component when it is clearly a
-        # frame-wide background. A subject that touches an edge must remain
-        # available for Discord review instead of being mistaken for a DQ
-        # failure during preprocessing.
-        if len(component) >= max(16, (width * height) // 4):
-            for index in component:
-                red, green, blue, _alpha = pixels[index]
-                pixels[index] = (red, green, blue, 0)
-
-    image.putdata(pixels)
-    return image
 
 
 def _fit_frame(
@@ -402,79 +277,6 @@ def _union_bbox(images: list[Image.Image]) -> tuple[int, int, int, int] | None:
 
 def _alpha_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
     return image.getchannel("A").getbbox()
-
-
-def _edge_contact(
-    image: Image.Image,
-    *,
-    raw: Image.Image | None = None,
-    chroma: tuple[int, int, int] | None = None,
-    threshold: int = SPRITE_DEFAULT_CHROMA_THRESHOLD,
-    margin: int = 4,
-) -> dict[str, int]:
-    """Count opaque or likely-subject pixels touching non-floor edges."""
-
-    alpha = image.getchannel("A")
-    width, height = alpha.size
-    pixels = alpha.load()
-    band = max(1, min(int(margin), width, height))
-    contacts = {
-        "top": sum(
-            1
-            for y in range(band)
-            for x in range(width)
-            if pixels[x, y] > 0
-        ),
-        "left": sum(
-            1
-            for x in range(band)
-            for y in range(height)
-            if pixels[x, y] > 0
-        ),
-        "right": sum(
-            1
-            for x in range(width - band, width)
-            for y in range(height)
-            if pixels[x, y] > 0
-        ),
-    }
-    if raw is None or chroma is None:
-        return contacts
-
-    raw_pixels = raw.convert("RGB").load()
-    corner_points = (
-        (0, 0),
-        (width - 1, 0),
-        (0, height - 1),
-        (width - 1, height - 1),
-    )
-    background = tuple(
-        round(sum(raw_pixels[x, y][channel] for x, y in corner_points) / len(corner_points))
-        for channel in range(3)
-    )
-    threshold_sq = max(1, threshold) ** 2
-
-    def likely_subject(x: int, y: int) -> bool:
-        color = raw_pixels[x, y]
-        distance_sq = sum((color[channel] - background[channel]) ** 2 for channel in range(3))
-        if distance_sq <= threshold_sq:
-            return False
-        key_distance_sq = sum((color[channel] - chroma[channel]) ** 2 for channel in range(3))
-        return key_distance_sq > threshold_sq
-
-    contacts["top"] = max(
-        contacts["top"],
-        sum(1 for y in range(band) for x in range(width) if likely_subject(x, y)),
-    )
-    contacts["left"] = max(
-        contacts["left"],
-        sum(1 for x in range(band) for y in range(height) if likely_subject(x, y)),
-    )
-    contacts["right"] = max(
-        contacts["right"],
-        sum(1 for x in range(width - band, width) for y in range(height) if likely_subject(x, y)),
-    )
-    return contacts
 
 
 def _binary_alpha(image: Image.Image) -> Image.Image:

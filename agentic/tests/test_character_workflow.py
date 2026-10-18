@@ -70,7 +70,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertTrue(payload["constraints"]["visual_style_profile"]["prompt"])
         self.assertNotIn("story_card_refine_denoise", payload["constraints"])
 
-    def test_duration_policy_selects_single_action_or_native_story(self) -> None:
+    def test_user_given_a_five_second_request_when_routed_then_the_single_action_contract_keeps_the_minimum_duration(self) -> None:
+        """User Given a short character-video request When routing selects a single-action workflow Then the request remains on that route and carries the ten-second minimum."""
         short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
@@ -80,9 +81,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         ))
         self.assertEqual(short["source_generation_type"], "text2image2video")
         self.assertEqual(short["media_type"], "text2img2video")
-        self.assertEqual(short["duration_seconds"], 5)
+        self.assertEqual(short["duration_seconds"], 10)
         self.assertEqual(short["constraints"]["duration_profile"], "single_action")
-        self.assertEqual(short["constraints"]["duration_override_seconds"], 5)
+        self.assertEqual(short["constraints"]["duration_override_seconds"], 10)
 
         native = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -125,7 +126,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             publish_after_generate=False,
         ))
         self.assertEqual(long_video["duration_seconds"], 30)
-        self.assertEqual(long_video["constraints"]["segment_count"], 6)
+        self.assertEqual(long_video["constraints"]["segment_count"], 3)
+        self.assertGreaterEqual(long_video["constraints"]["longvideo_segment_duration"], 10)
         self.assertNotIn("storyboard_path", long_video["constraints"])
         self.assertEqual(long_video["character_config_summary"]["longvideo"]["default_duration_seconds"], 30)
         self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_i2va")
@@ -141,7 +143,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(production_long_video["source_generation_type"], "text2longvideo")
         self.assertEqual(production_long_video["media_type"], "long_video")
         self.assertEqual(production_long_video["constraints"]["longvideo_production_profile"], "text2longvideo")
-        self.assertEqual(production_long_video["constraints"]["segment_count"], 6)
+        self.assertEqual(production_long_video["constraints"]["segment_count"], 3)
         self.assertEqual(production_long_video["constraints"]["longvideo_continuity_mode"], "rendered_tail")
         self.assertEqual(production_long_video["constraints"]["video_speed"], {"enabled": False, "factor": 1.0})
 
@@ -254,7 +256,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertTrue(payload["constraints"]["pre_video_review_enabled"])
         self.assertTrue(payload["constraints"]["skip_upscale_for_i2v"])
 
-    def test_explicit_generation_override_still_randomizes_stage_workflow(self) -> None:
+    def test_user_given_a_short_image_to_video_route_when_stage_workflows_are_selected_then_krea2_and_h3_remain_fixed(self) -> None:
+        """User Given an explicit short I2V request with different random seeds When its stage workflows are selected Then Krea2 remains the image source and H3 remains the video renderer."""
         first = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
@@ -274,10 +277,10 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
         self.assertEqual(first["constraints"]["routing_selection_source"], "explicit_override")
         self.assertEqual(first["routing"]["workflow_selection_mode"], "weighted_random")
-        self.assertNotEqual(
-            first["routing"]["workflow_plan"]["image_workflow_name"],
-            second["routing"]["workflow_plan"]["image_workflow_name"],
-        )
+        self.assertEqual(first["routing"]["workflow_plan"]["image_workflow_name"], "krea2_turbo")
+        self.assertEqual(second["routing"]["workflow_plan"]["image_workflow_name"], "krea2_turbo")
+        self.assertEqual(first["routing"]["workflow_plan"]["video_workflow_name"], "minimax_h3_i2va")
+        self.assertEqual(second["routing"]["workflow_plan"]["video_workflow_name"], "minimax_h3_i2va")
 
     def test_empty_asset_manifest_is_not_treated_as_ready_for_routing(self) -> None:
         class Registry:
@@ -347,16 +350,19 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(result["generation_type"], "sticker_pack")
         self.assertEqual(result["selection_source"], "weighted_random")
 
-    def test_native_h3_rejects_unsupported_duration_override(self) -> None:
-        with self.assertRaisesRegex(ValueError, "supports duration_seconds=15"):
-            build_goal_payload_from_character_config(make_character_workflow_request(
-                self.repo_root,
-                self.kirby_config,
-                prompt="Kirby swats one glowing orb into a target",
-                preferred_generation_type="native_h3_story",
-                duration_seconds=5,
-                publish_after_generate=False,
-            ))
+    def test_user_given_a_non_fifteen_second_native_story_when_requested_then_the_fixed_duration_is_rejected(self) -> None:
+        """User Given the fixed fifteen-second native H3 route When a shorter or longer duration is requested Then routing reports the supported duration instead of silently changing it."""
+        for duration in (5, 20):
+            with self.subTest(duration=duration):
+                with self.assertRaisesRegex(ValueError, "supports duration_seconds=15"):
+                    build_goal_payload_from_character_config(make_character_workflow_request(
+                        self.repo_root,
+                        self.kirby_config,
+                        prompt="Kirby swats one glowing orb into a target",
+                        preferred_generation_type="native_h3_story",
+                        duration_seconds=duration,
+                        publish_after_generate=False,
+                    ))
 
     def test_extract_failure_details_promotes_node_log(self) -> None:
         details = _extract_failure_details(

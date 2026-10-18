@@ -614,10 +614,6 @@ def _collect_workflow_stage_candidates(
                     generation_workflows.get("native_h3_story"),
                     generation_workflows.get("text2image2video"),
                 ],
-                "refine_workflow_name": [
-                    native_recipe.get("identity_refine_workflow_name"),
-                    generation.get("identity_refine_workflow_name"),
-                ],
             }
         elif generation_type == "native_h3_t2v_story":
             native_recipe = dict(generation.get("native_h3_t2v_story", {}) or {})
@@ -658,6 +654,10 @@ def _collect_workflow_stage_candidates(
                     native_recipe.get("workflow_name"),
                     generation_workflows.get("native_h3_l2va_story"),
                     generation_workflows.get("text2image2video"),
+                ],
+                "refine_workflow_name": [
+                    native_recipe.get("identity_refine_workflow_name"),
+                    generation.get("identity_refine_workflow_name"),
                 ],
             }
         elif generation_type == "native_h3_ref2va":
@@ -867,9 +867,10 @@ def _resolve_duration_seconds(
             MIN_VIDEO_DURATION_SECONDS,
             int(native_recipe.get("duration_seconds", 15)),
         )
-        if requested is not None and requested > native_duration:
+        if requested is not None and requested != native_duration:
             raise ValueError(
-                f"{config_generation_type} supports up to {native_duration} seconds."
+                f"{config_generation_type} supports duration_seconds={native_duration}; "
+                f"received {requested}."
             )
         return native_duration
     if config_generation_type == "text2image2video":

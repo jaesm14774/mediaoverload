@@ -14,7 +14,7 @@ from agentic.runtime.creativity import IdeaDirector
 
 class PlanningContext:
     DEFAULT_IMAGE_WORKFLOWS = ("krea2_turbo",)
-    DEFAULT_REFINE_WORKFLOWS = ("krea2_turbo_img2img",)
+    DEFAULT_REFINE_WORKFLOWS = ("flux3_image_klein_img2img",)
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
     DEFAULT_T2V_WORKFLOWS = ("minimax_h3_t2va",)
     DEFAULT_I2V_WORKFLOWS = ("minimax_h3_i2va",)

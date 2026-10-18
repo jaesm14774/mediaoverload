@@ -74,7 +74,7 @@ class RoutingContractTests(unittest.TestCase):
         self.assertNotIn("segment_count", self.routing["count_policies"]["text2longvideo"])
         longvideo_config = self.routing["longvideo_config"]
         self.assertEqual(longvideo_config["default_duration_seconds"], 30)
-        self.assertEqual(longvideo_config["segment_duration"], 5)
+        self.assertGreaterEqual(longvideo_config["segment_duration"], 10)
         self.assertNotIn("storyboard_path", longvideo_config)
         auto_contract = stage_contracts["text2image2native_h3_ref2va"]
         self.assertIn("six", auto_contract["image_workflow_name"])

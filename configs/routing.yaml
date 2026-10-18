@@ -58,6 +58,7 @@ routing:
       nova_model_plus_z_image_anime: 1
       kirby_keyframe_anima: 1
     refine_workflow_name:
+      flux3_image_klein_img2img: 3
       krea2_turbo_img2img: 3
       image_to_image: 2
       kirby_continuity_img2img: 1
@@ -289,11 +290,6 @@ routing:
     text2image2video:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_i2va
       upscale_workflow_name:
@@ -301,79 +297,45 @@ routing:
     text2longvideo:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_i2va
       refine_workflow_name:
-        - krea2_turbo_img2img
+        - flux3_image_klein_img2img
     native_h3_story:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_i2va
-      refine_workflow_name:
-        - krea2_turbo_img2img
-        - image_to_image
-        - kirby_continuity_img2img
-        - kirby_identity_img2img
     native_h3_t2v_story:
       video_workflow_name:
         - minimax_h3_t2va
     native_h3_fl2va_story:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_fl2va
+      refine_workflow_name:
+        - flux3_image_klein_img2img
     native_h3_l2va_story:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_l2va
+      refine_workflow_name:
+        - flux3_image_klein_img2img
     native_h3_ref2va:
       video_workflow_name:
         - minimax_h3_ref2va
     text2image2native_h3_ref2va:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       video_workflow_name:
         - minimax_h3_ref2va
     text2image2image:
       image_workflow_name:
         - krea2_turbo
-        - anima_anime
-        - nova-anime-xl
-        - z_image_plus_nova_model
-        - nova_model_plus_z_image_anime
-        - kirby_keyframe_anima
       refine_workflow_name:
-        - krea2_turbo_img2img
-        - image_to_image
-        - kirby_continuity_img2img
-        - kirby_identity_img2img
+        - flux3_image_klein_img2img
     sticker_pack:
       image_workflow_name:
         - krea2_turbo
@@ -644,31 +606,32 @@ routing:
         image_workflow_name: "Optional ideation/cover artifact only; it is not connected as video conditioning."
         video_workflow_name: "Required T2V stage. Select only a workflow whose graph has no first_frame or last_frame input."
       text2image2video:
-        image_workflow_name: "Required first-stage image. Its selected output becomes the first-frame input to the I2V stage."
+        image_workflow_name: "Krea2 generates the opening-frame candidates; the selected image becomes H3 I2VA's first-frame input."
         video_workflow_name: "Required I2V stage. It must accept first_frame conditioning."
       text2image2image:
-        image_workflow_name: "Required source-image stage for the refine chain."
-        refine_workflow_name: "Required img2img refine stage. It must preserve the selected source image contract while applying the requested changes."
+        image_workflow_name: "Krea2 creates the source image for the reference edit."
+        refine_workflow_name: "FLUX Klein edits the Krea2 source with the requested change while using it as visual identity and composition reference."
       text2longvideo:
-        image_workflow_name: "Opening identity/reference stage and deliberate FL2V landing-frame stage."
+        image_workflow_name: "Krea2 creates the opening image; rendered H3 tails carry identity into later segments."
         video_workflow_name: "Required multi-segment H3 I2V stage; every segment after the opening consumes the previous segment's rendered tail."
-        refine_workflow_name: "Identity-preserving img2img used when preparing landing-frame anchors. Video conditioning recipes are selected separately by the long-video workflow policy."
+        refine_workflow_name: "FLUX Klein edits each planned landing frame from that segment's first anchor, preserving identity while changing the requested story state."
       native_h3_story:
-        image_workflow_name: "Opening keyframe candidate; review selects one first frame."
+        image_workflow_name: "Krea2 generates the opening keyframe candidates; review selects one first frame for H3 I2VA."
         video_workflow_name: "Native H3 I2VA stage. It receives first_frame and leaves the ending unconstrained."
-        refine_workflow_name: "Optional identity/continuity img2img before the opening frame is submitted."
       native_h3_t2v_story:
         video_workflow_name: "Required Native H3 T2V stage. It is prompt-only and must not receive first_frame, last_frame, or reference-manifest conditioning."
       native_h3_fl2va_story:
-        image_workflow_name: "Two keyframe candidates: opening first frame and landing last frame."
+        image_workflow_name: "Krea2 creates the opening image; FLUX uses that selected image to produce a distinct landing state."
         video_workflow_name: "Native H3 FL2VA stage. It receives both first_frame and last_frame."
+        refine_workflow_name: "FLUX Klein reference edit that preserves the selected opening identity while applying the ending prompt."
       native_h3_l2va_story:
-        image_workflow_name: "Landing keyframe candidate only."
+        image_workflow_name: "Krea2 creates an identity source; FLUX edits it into the reviewed landing keyframe."
         video_workflow_name: "Native H3 L2VA stage. It receives last_frame and leaves the opening unconstrained."
+        refine_workflow_name: "FLUX Klein reference edit from the Krea2 identity source into the requested final story state."
       native_h3_ref2va:
         video_workflow_name: "Reference-to-video stage. Existing reference images/videos are used directly; with no manifest, runtime first creates six T2I candidates and injects only Discord-selected references. Reference audio is forbidden."
       text2image2native_h3_ref2va:
-        image_workflow_name: "Required T2I reference-candidate stage. Generate six still candidates from the native story prompt; these are reviewable reference assets, not an implicit first frame."
+        image_workflow_name: "Krea2 generates six T2I reference candidates from the native story prompt; these are reviewable references, not an implicit first frame."
         video_workflow_name: "Required native H3 Ref2VA stage. It receives only the references explicitly selected by the user in Discord; reference audio is forbidden."
       sticker_pack:
         image_workflow_name: "Required batch image stage. Generate the configured expression candidates with transparent-background and sticker-safe composition rules. The sticker_pack planner ends after packaging; any optional video candidate belongs to the separate explicit animated_sticker route."
@@ -918,6 +881,12 @@ routing:
         - subtle redraw
         - image refinement
         - low denoise
+      flux3_image_klein_img2img:
+        - story landing frame
+        - preserve character identity from a reference image
+        - change pose or story state from the ending prompt
+        - multi-segment H3 transition anchor
+        - Krea2 source image refinement
       anima_anime:
         - anime character
         - line sticker
@@ -1018,6 +987,14 @@ routing:
           - "預設 8 steps、Euler、simple、CFG 1 與 denoise 0.25，偏向保留輸入構圖，而非重新生成另一個角色。"
         tradeoffs:
           - "這是影像修正階段，不是影片生成；過高 denoise 仍可能改變角色身份或構圖。"
+      flux3_image_klein_img2img:
+        summary: "FLUX 3 Image Klein reference-conditioned img2img，用於把 Krea2 起始圖轉成內容不同但角色與畫風連續的落點關鍵圖；主要接在 image edit、FL2VA、L2VA 與長影片轉場。"
+        strengths:
+          - "圖像作為 identity、構圖與風格參考，ending prompt 描述需要改變的動作、道具或故事狀態。"
+          - "保留 prompt upsampler，並確認 ComfyUI 0.41.0 的 flux3 encoder 與 gated 權重可載入。"
+        tradeoffs:
+          - "FLUX Klein 不產生影片；影片段落仍由 H3 負責。"
+          - "輸出用途依 FLUX Kommunity License v1 條件；符合商用輸出的 Qualifying User 門檻為含關係企業年化營收低於 US$5M，其他用途需另行取得 BFL 授權。"
       anima_anime:
         summary: "Anima Preview 2 anime 生圖 workflow，保留作為 Krea2 之外的角色與貼圖候選。"
         strengths:

@@ -178,7 +178,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                 skill_name="media.ensure_workflow",
                 inputs={"workflow_name": "minimax_h3_i2va"},
             ),
-            state={},
+            state=RunState(goal={}, metadata={}, node_outputs={}),
         )
 
         result = skills.ensure_workflow(context)
@@ -213,7 +213,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                     "height": 1024,
                 },
             ),
-            state={},
+            state=RunState(goal={}, metadata={}, node_outputs={}),
         )
 
         result = skills.animate_image(context)

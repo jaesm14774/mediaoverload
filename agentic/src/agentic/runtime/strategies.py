@@ -45,7 +45,10 @@ GENERATION_STRATEGIES = {
         news_grounded=True,
     ),
     "native_h3_story": GenerationStrategy(
-        "native_h3_story", _NATIVE, news_grounded=True, native_story=True
+        "native_h3_story",
+        ("video_workflow_name", "image_workflow_name"),
+        news_grounded=True,
+        native_story=True,
     ),
     "native_h3_t2v_story": GenerationStrategy(
         "native_h3_t2v_story",
@@ -58,7 +61,7 @@ GENERATION_STRATEGIES = {
     ),
     "native_h3_l2va_story": GenerationStrategy(
         "native_h3_l2va_story",
-        ("video_workflow_name", "image_workflow_name"),
+        ("video_workflow_name", "image_workflow_name", "refine_workflow_name"),
         news_grounded=True,
         native_story=True,
     ),

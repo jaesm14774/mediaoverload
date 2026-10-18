@@ -75,6 +75,7 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 - [ComfyUI H3 工作流與輸入契約](docs/comfyui_h3.md)
 - [H3 提示契約](docs/minimax_h3_prompting.md)
 - [Krea2 工作流操作](docs/krea2_comfyui_best_practice.md)
+- [模型來源與 ComfyUI 資產清單](docs/model_sources.md)
 - [圖片提示指南](docs/image_prompt_guide.md)
 - [Story Card 編輯指南](docs/story_card_editorial_guide.md)
 - [Game Sprite 輸出契約](docs/game_sprite.md)

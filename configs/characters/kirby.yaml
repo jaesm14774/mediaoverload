@@ -49,7 +49,7 @@ generation:
       mode: random
       catalog: krea2
   keyframe_workflow_name: krea2_turbo
-  identity_refine_workflow_name: krea2_turbo_img2img
+  identity_refine_workflow_name: flux3_image_klein_img2img
   motion_comic:
     duration_seconds: 10
     width: 576
@@ -89,8 +89,6 @@ generation:
     fps: 12
     cell_width: 64
     cell_height: 64
-    chroma_color: random
-    chroma_threshold: 52
   native_h3_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
@@ -120,6 +118,7 @@ generation:
     duration_seconds: 15
     workflow_name: minimax_h3_fl2va
     keyframe_workflow_name: krea2_turbo
+    identity_refine_workflow_name: flux3_image_klein_img2img
     keyframe_candidate_count: 6
     require_human_review: true
     use_last_frame: true
@@ -134,6 +133,7 @@ generation:
     duration_seconds: 15
     workflow_name: minimax_h3_l2va
     keyframe_workflow_name: krea2_turbo
+    identity_refine_workflow_name: flux3_image_klein_img2img
     keyframe_candidate_count: 1
     require_human_review: true
     last_frame_only: true

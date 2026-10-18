@@ -401,7 +401,7 @@ def format_native_h3_prompt(
         subject_context=dict(storyboard.get("subject_context") or {}),
         media_type=render_mode or "native_h3_story",
     )
-    return prompt.strip()
+    return f"Duration: {duration} seconds\n\n{prompt.strip()}"
 
 
 def format_native_h3_keyframe_prompt(

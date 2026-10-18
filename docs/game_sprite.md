@@ -9,11 +9,11 @@ story, Native H3, audio, review, publishing, or scheduler contracts.
 The mode passes the requested motion to image and video prompt generation and
 packages the rendered result as:
 
-- a transparent 4x4 atlas with exactly 16 frames;
+- a 4x4 RGBA atlas with exactly 16 frames, preserving each frame's generated background;
 - individual RGBA PNG frames;
-- a transparent looping GIF when the generated motion is periodic;
+- a looping GIF when the generated motion is periodic;
 - a lossless animated WebP;
-- `manifest.json` with frame geometry, timing, chroma-key settings, prompt
+- `manifest.json` with frame geometry, timing, background handling, prompt
   lineage, and deterministic QA results.
 
 The 4x4 grid is only the export format. The creative motion is not limited to
@@ -26,9 +26,8 @@ freely decide the motion.
 
 The system records optional motion notes when the prompt model supplies them.
 They do not need a fixed beat count or causal structure, and the system does
-not rewrite them through an identity or scene repair pass. The renderer still
-uses a uniform chroma-key background and a 4x4 atlas because those are required
-to extract the exported frames.
+not rewrite them through an identity or scene repair pass. Backgrounds may be
+colorful or detailed; packaging preserves them instead of requiring a color key.
 
 The reference pack is sampled per request and recorded in the motion plan for
 lineage. Nothing is written back to the strategy config, and no character is
@@ -80,18 +79,16 @@ Native H3 story fields such as `require_human_review: true`, 15-second story
 timing, and required audio remain unchanged and do not leak into this asset
 route.
 
-Each run chooses a flat chroma background from a palette. The adapter removes the
-recorded per-run chroma color, computes a shared alpha bounding box across all
-frames, fits the subject into one stable cell size, and rejects empty or
-motionless outputs. The H3 source clip is now configured for 8 seconds; the
-exported atlas still contains exactly 16 sampled frames. These checks are
-deterministic; visual review of the resulting atlas is still recommended for
-art quality, silhouette readability, and game feel.
+The adapter preserves sampled backgrounds and existing source transparency,
+computes one shared alpha bounding box across the frames, and fits them into one
+stable cell size. It rejects fully transparent source frames. The exported
+atlas contains exactly 16 sampled frames. These checks are deterministic;
+visual review of the resulting atlas is still recommended for art quality,
+silhouette readability, and game feel.
 
 ## Output checks
 
 The packager checks frame count, configured cell and atlas dimensions, binary
-alpha, nonempty frames, and per-frame edge-contact evidence. Edge contact is
-reported for review rather than used to reject a render. Subject size, identity,
-motion, and appearance remain creative review decisions. A pixel-area ratio
-is not a proxy for character quality.
+alpha, and nonempty frames. Subject size, identity, motion, background, and
+appearance remain creative review decisions. A pixel-area ratio is not a proxy
+for character quality.

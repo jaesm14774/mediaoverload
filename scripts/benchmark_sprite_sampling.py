@@ -34,8 +34,7 @@ def same_pixels(left: str, right: str) -> bool:
 
 
 def benchmark(source: Path, root: Path, *, repeats: int = 3, warmup: int = 1,
-              cell_size: int = 64, fps: float = 12, key_color: str = "magenta",
-              threshold: int = 52) -> dict:
+              cell_size: int = 64, fps: float = 12) -> dict:
     source = source.resolve(strict=True)
     root.mkdir(parents=True, exist_ok=False)
     ffmpeg = FFmpegAdapter()
@@ -46,8 +45,7 @@ def benchmark(source: Path, root: Path, *, repeats: int = 3, warmup: int = 1,
     epsilon = min(1 / max(float(probe.get("frame_rate") or 24), 1), duration / 100)
     timestamps = [min(duration - epsilon, duration * ((index + 0.5) / SPRITE_FRAME_COUNT))
                   for index in range(SPRITE_FRAME_COUNT)]
-    parameters = {"cell_width": cell_size, "cell_height": cell_size, "fps": fps,
-                  "key_color": key_color, "chroma_threshold": threshold}
+    parameters = {"cell_width": cell_size, "cell_height": cell_size, "fps": fps}
     source_digest = digest(source)
     report = {"source": str(source), "source_sha256": source_digest, "source_probe": probe,
               "parameters": parameters, "timestamps_seconds": timestamps, "repeats": repeats,
@@ -121,13 +119,11 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--cell-size", type=int, default=64)
     parser.add_argument("--fps", type=float, default=12)
-    parser.add_argument("--key-color", default="magenta")
-    parser.add_argument("--threshold", type=int, default=52)
     args = parser.parse_args()
     if args.repeats < 1 or args.warmup < 0:
         parser.error("repeats must be positive and warmup must be non-negative")
     report = benchmark(args.video, args.output_dir, repeats=args.repeats, warmup=args.warmup,
-                       cell_size=args.cell_size, fps=args.fps, key_color=args.key_color, threshold=args.threshold)
+                       cell_size=args.cell_size, fps=args.fps)
     print(json.dumps({key: report[key] for key in ("medians", "speedup", "passed")}, indent=2))
     return 0 if report["passed"] else 1
 

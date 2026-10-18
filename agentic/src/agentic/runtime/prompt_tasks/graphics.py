@@ -14,9 +14,7 @@ from agentic.runtime.prompting import (
     build_game_sprite_reference_context,
     compile_dynamic_sprite_video_prompt,
     dynamic_sprite_frame_map,
-    dynamic_sprite_source_contract,
     normalize_dynamic_sprite_beats,
-    resolve_dynamic_sprite_background,
     build_sticker_prompt,
     include_role_description,
     selected_role_description,
@@ -369,21 +367,13 @@ def build_dynamic_sprite_motion_plan(
     fallback = build_dynamic_sprite_motion_fallback(goal)
     reference_context = build_game_sprite_reference_context(goal)
     target_duration_seconds = max(
-        4.0,
+        10.0,
         min(
-            8.0,
+            362 / 24,
             float(
                 goal.duration_seconds or fallback.get("video_duration_seconds") or 8.0
             ),
         ),
-    )
-    requested_background = (
-        str(goal.constraints.get("sprite_chroma_color") or "").strip().casefold()
-    )
-    background_color = resolve_dynamic_sprite_background(
-        requested_background
-        if requested_background not in {"", "random", "auto"}
-        else fallback["background_color"]
     )
     user_prompt = "\n".join(
         part
@@ -391,11 +381,10 @@ def build_dynamic_sprite_motion_plan(
             f"Creative request: {goal.prompt}",
             f"Subject reference: {goal.constraints.get('character') or ''}",
             f"Style: {goal.style}",
-            f"Character-only style rules: {style_profile_direction(goal)}",
+            f"Style guidance: {style_profile_direction(goal)}",
             f"Reference notes (optional): {reference_context['prompt_text'] if reference_context['references'] else ''}",
             f"The render uses a {target_duration_seconds:g}-second clip sampled into a 4x4 frame atlas.",
-            f"Use a flat, uniform chroma-key background {background_color} for sprite extraction.",
-            "Apply the style to the character and its materials only; keep the required chroma background flat and uniform.",
+            "Do not impose a flat, monochrome, or chroma-key background; use any setting and colors that support the request.",
             "Return JSON with image_prompt and video_prompt. Other descriptive fields are optional.",
         )
         if part
@@ -415,7 +404,6 @@ def build_dynamic_sprite_motion_plan(
                     "beats": {"type": "array", "items": {"type": "object"}},
                     "animation_kind": {"type": "string"},
                     "fps": {"type": "number"},
-                    "background_color": {"type": "string"},
                     "negative_prompt": {"type": "string"},
                     "motion_name": {"type": "string"},
                 },
@@ -425,11 +413,6 @@ def build_dynamic_sprite_motion_plan(
         )
         if not isinstance(payload, dict):
             raise ValueError("dynamic sprite prompt response must be an object")
-        background_color = resolve_dynamic_sprite_background(
-            requested_background
-            if requested_background not in {"", "random", "auto"}
-            else payload.get("background_color") or background_color
-        )
         beats = normalize_dynamic_sprite_beats(
             payload.get("beats"), list(fallback.get("beats") or [])
         )
@@ -449,27 +432,16 @@ def build_dynamic_sprite_motion_plan(
                 payload.get("motion_name") or fallback["motion_name"]
             ).strip(),
             "motion_plan_mode": "direct_prompt",
-            "image_prompt": " ".join(
-                part
-                for part in (
-                    str(
-                        payload.get("image_prompt") or fallback["image_prompt"]
-                    ).strip(),
-                    dynamic_sprite_source_contract(background_color),
-                )
-                if part
-            ),
+            "image_prompt": str(
+                payload.get("image_prompt") or fallback["image_prompt"]
+            ).strip(),
             "creative_video_prompt": creative_video_prompt,
             "beats": beats,
-            "video_prompt": compile_dynamic_sprite_video_prompt(
-                creative_video_prompt, background_color
-            ),
+            "video_prompt": compile_dynamic_sprite_video_prompt(creative_video_prompt),
             "negative_prompt": str(goal.constraints.get("negative_prompt") or ""),
             "animation_kind": animation_kind,
             "fps": max(4.0, min(24.0, float(payload.get("fps", fallback["fps"])))),
             "video_duration_seconds": target_duration_seconds,
-            "chroma_color": background_color,
-            "background_color": background_color,
             "action_reference_pack": reference_context["pack_version"],
             "action_references": reference_context["references"],
             "frame_map": dynamic_sprite_frame_map(beats),
@@ -480,8 +452,7 @@ def build_dynamic_sprite_motion_plan(
         fallback["action_references"] = reference_context["references"]
         fallback["video_duration_seconds"] = target_duration_seconds
         fallback["video_prompt"] = compile_dynamic_sprite_video_prompt(
-            str(fallback.get("creative_video_prompt") or goal.prompt),
-            str(fallback["background_color"]),
+            str(fallback.get("creative_video_prompt") or goal.prompt)
         )
         return client.template_fallback(
             fallback, exc, fallback_reason="json_parse_failed"

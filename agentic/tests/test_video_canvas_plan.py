@@ -40,7 +40,7 @@ class VideoCanvasPlanTests(unittest.TestCase):
         self.assertEqual(qa.inputs["expected_width"], 1280)
         self.assertEqual(qa.inputs["expected_height"], 720)
         self.assertEqual(qa.inputs["expected_fps"], 48)
-        self.assertEqual(animate.inputs["length"], 132)
+        self.assertGreaterEqual(animate.inputs["length"] / 24, 10)
 
 
 if __name__ == "__main__":

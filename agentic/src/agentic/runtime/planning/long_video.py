@@ -111,6 +111,9 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         recipe.requires_first or recipe.requires_last or recipe.requires_references
         for recipe in recipe_contracts.values()
     )
+    requires_landing_refinement = any(
+        recipe.requires_last for recipe in recipe_contracts.values()
+    )
     image_manifest = (
         context.manifest_from_goal_constraints(
             goal,
@@ -128,7 +131,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             constraint_keys=("refine_workflow_name",),
             allowed_media_types={"image_refine"},
         )
-        if requires_image_conditioning
+        if requires_landing_refinement
         else None
     )
 
@@ -258,20 +261,21 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
     ]
     if requires_image_conditioning:
         assert image_manifest is not None
-        assert refine_manifest is not None
-        nodes.extend(
-            [
-                ExecutionNode(
-                    node_id="image-asset-check",
-                    skill_name="media.ensure_workflow",
-                    inputs={
-                        "workflow_name": image_manifest.name,
-                    },
-                    depends_on=["script-plan"],
-                    tags=["assets", "image"],
-                    tool_name="asset.ensure_workflow_ready",
-                    stage="assets",
-                ),
+        nodes.append(
+            ExecutionNode(
+                node_id="image-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={
+                    "workflow_name": image_manifest.name,
+                },
+                depends_on=["script-plan"],
+                tags=["assets", "image"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            )
+        )
+        if refine_manifest:
+            nodes.append(
                 ExecutionNode(
                     node_id="refine-asset-check",
                     skill_name="media.ensure_workflow",
@@ -282,9 +286,8 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     tags=["assets", "refine"],
                     tool_name="asset.ensure_workflow_ready",
                     stage="assets",
-                ),
-            ]
-        )
+                )
+            )
 
     def video_asset_check_for(workflow_name: str) -> str:
         node_id = f"video-asset-check-{workflow_name}"
@@ -357,7 +360,6 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 first_dependencies = [
                     prompt_node,
                     "image-asset-check",
-                    "refine-asset-check",
                 ]
                 first_count = (
                     frame_candidate_count
@@ -422,9 +424,16 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
 
         if recipe.requires_last:
             last_candidate = f"{prefix}-anchor-last-candidates-{suffix}"
-            last_dependencies = [prompt_node, "image-asset-check", "refine-asset-check"]
-            # Landing anchors are deliberate T2I state targets for FL2V;
-            # the next segment still starts from its rendered tail.
+            assert image_manifest is not None and refine_manifest is not None
+            prior_anchor_node = anchor_nodes.get("first")
+            if not prior_anchor_node:
+                raise ValueError("A landing-frame recipe requires its first-frame anchor")
+            last_dependencies = [
+                prompt_node,
+                "image-asset-check",
+                "refine-asset-check",
+                prior_anchor_node,
+            ]
             nodes.append(
                 ExecutionNode(
                     node_id=last_candidate,
@@ -432,6 +441,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     inputs={
                         "workflow_name": image_manifest.name,
                         "identity_refine_workflow_name": refine_manifest.name,
+                        "use_prior_frame": True,
                         "segment_index": index,
                         "anchor_position": "last",
                         "width": frame_width,
@@ -443,7 +453,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     },
                     depends_on=last_dependencies,
                     tags=["render", "image", "anchor", "last", "segment"],
-                    tool_name="comfy.workflow.text_to_image",
+                    tool_name="comfy.workflow.image_to_image",
                     stage="render",
                 )
             )
@@ -509,7 +519,6 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 reference_dependencies = [
                     prompt_node,
                     "image-asset-check",
-                    "refine-asset-check",
                 ]
                 nodes.append(
                     ExecutionNode(
@@ -1263,6 +1272,8 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         "selected_workflow": image_manifest.name
         if image_manifest
         else selected_capabilities[recipe_sequence[0]].workflow_name,
+        "keyframe_workflow": image_manifest.name if image_manifest else "",
+        "landing_frame_workflow": refine_manifest.name if refine_manifest else "",
         "required_assets": [
             *(
                 [asset.to_dict() for asset in image_manifest.required_assets]

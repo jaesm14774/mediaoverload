@@ -23,7 +23,7 @@ def story_file(root: Path) -> Path:
             {
                 "image_path": path.name,
                 "caption": ("只吃一口", "哎呀", "也不錯")[index],
-                "duration_seconds": 0.75,
+                "duration_seconds": 10 / 3,
             }
         )
     story = root / "story.json"
@@ -93,7 +93,7 @@ def test_user_given_three_panels_when_comparing_presentations_then_both_playable
         media = FFmpegAdapter().probe_media(report["outputs"][variant]["video_path"])
         assert media["has_video"] and (media["width"], media["height"]) == (240, 426)
         assert abs(media["frame_rate"] - 12) < 0.01
-        assert abs(media["video_duration"] - 2.25) <= 1 / 12
+        assert abs(media["video_duration"] - 10.0) <= 1 / 12
         assert abs(media["audio_duration"] - media["video_duration"]) <= 1 / 12
         assert report["median_seconds"][variant] > 0
         assert Path(report["outputs"][variant]["contact_sheet_path"]).is_file()
@@ -102,7 +102,7 @@ def test_user_given_three_panels_when_comparing_presentations_then_both_playable
         for path in tmp_path.glob("panel-*.png")
     }
     # Each settled beat must contain its own panel and every earlier panel.
-    for beat, timestamp in enumerate((0.5, 1.25, 2.0)):
+    for beat, timestamp in enumerate((0.5, 4.0, 7.5)):
         frame = output / f"comic-beat-{beat}.png"
         FFmpegAdapter().extract_frame_at(
             report["outputs"]["motion_comic"]["video_path"], str(frame), timestamp

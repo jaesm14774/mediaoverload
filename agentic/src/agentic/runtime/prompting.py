@@ -14,7 +14,7 @@ from agentic.video_directing import (
 from agentic.minimax_prompting import compose_minimax_h3_prompt
 
 
-_ISOLATED_ASSET_TYPES = frozenset({"sticker_pack", "animated_sticker", "game_sprite"})
+_ISOLATED_STICKER_TYPES = frozenset({"sticker_pack", "animated_sticker"})
 
 
 def selected_role_description(goal: GoalRequest) -> str:
@@ -108,53 +108,12 @@ Response in English only.
 STICKER_SYSTEM_PROMPT = "Follow the user's sticker brief and selected character identity. Derive scene content from the brief; the selected style controls visual treatment only."
 
 
-DYNAMIC_SPRITE_BACKGROUND_PALETTE = {
-    "cyan": "#00e5ff",
-    "green": "#18e06f",
-    "blue": "#2f6bff",
-    "yellow": "#ffe51f",
-    "violet": "#7a38ff",
-    "orange": "#ff9b2f",
-}
-DYNAMIC_SPRITE_BACKGROUND_ALIASES = {
-    "aqua": "cyan",
-    "teal": "cyan",
-    "emerald": "green",
-    "lime": "green",
-    "cobalt": "blue",
-    "azure": "blue",
-    "gold": "yellow",
-    "amber": "orange",
-    "purple": "violet",
-}
-DYNAMIC_SPRITE_DEFAULT_BACKGROUND = "random"
-
-
-def resolve_dynamic_sprite_background(value: object = None) -> str:
-    """Resolve one simple non-red chroma background for a sprite run."""
-
-    raw = str(value or "").strip().casefold()
-    if raw in DYNAMIC_SPRITE_BACKGROUND_PALETTE:
-        return DYNAMIC_SPRITE_BACKGROUND_PALETTE[raw]
-    if raw in DYNAMIC_SPRITE_BACKGROUND_PALETTE.values():
-        return raw
-    for alias, canonical in DYNAMIC_SPRITE_BACKGROUND_ALIASES.items():
-        if alias in raw:
-            return DYNAMIC_SPRITE_BACKGROUND_PALETTE[canonical]
-    return secrets.choice(tuple(DYNAMIC_SPRITE_BACKGROUND_PALETTE.values()))
-
-
-def dynamic_sprite_source_contract(background_color: str) -> str:
-    return (
-        f"game-sprite source with a flat, uniform chroma-key background {background_color}"
-    )
-
-
-def dynamic_sprite_video_contract(background_color: str) -> str:
-    return f"Use a flat, uniform chroma-key background {background_color} for sprite extraction."
-
-
-DYNAMIC_SPRITE_SYSTEM_PROMPT = "Follow the user's game-sprite brief and selected identities. Derive actions and props from the brief and source; the selected style controls visual treatment only. Return concise image and video prompts. Include a flat, uniform chroma-key background description for sprite extraction."
+DYNAMIC_SPRITE_SYSTEM_PROMPT = (
+    "Follow the user's game-sprite brief and selected identities. Derive the setting, background, "
+    "actions, and props from the brief and source; the selected style controls visual treatment only. "
+    "Keep the subject readable and consistent throughout. Do not impose a flat, monochrome, or "
+    "chroma-key background unless the user requests one. Return concise image and video prompts."
+)
 
 def build_game_sprite_reference_context(
     goal: GoalRequest,
@@ -431,19 +390,9 @@ def dynamic_sprite_frame_map(beats: list[dict[str, Any]], frame_count: int = 16)
     return output
 
 
-def compile_dynamic_sprite_video_prompt(
-    creative_prompt: str,
-    background_color: str,
-) -> str:
-    """Pass the requested motion through with the sprite extraction background."""
-    return " ".join(
-        part
-        for part in (
-            str(creative_prompt or "").strip(),
-            dynamic_sprite_video_contract(background_color),
-        )
-        if part
-    )
+def compile_dynamic_sprite_video_prompt(creative_prompt: str) -> str:
+    """Pass requested sprite motion through without imposing a background key."""
+    return str(creative_prompt or "").strip()
 
 
 def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
@@ -469,10 +418,6 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
         or 10
     )
     video_duration = max(10.0, configured_duration)
-    chroma_color = resolve_dynamic_sprite_background(
-        goal.constraints.get("sprite_chroma_color") or DYNAMIC_SPRITE_DEFAULT_BACKGROUND
-    )
-    chroma_threshold = int(goal.constraints.get("sprite_chroma_threshold") or 52)
     beats = _dynamic_sprite_fallback_beats(request)
     creative_prompt = f"{request}; Character rendering style: {character_style}"
     return {
@@ -480,24 +425,15 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
         "layout_mode": "single_motion",
         "motion_plan_mode": "direct_prompt",
         "beats": beats,
-        "image_prompt": (
-            f"{character}, {request}, Character rendering style: {character_style}, "
-            f"{dynamic_sprite_source_contract(chroma_color)}"
-        ),
+        "image_prompt": f"{character}, {request}, Character rendering style: {character_style}",
         "creative_video_prompt": creative_prompt,
-        "video_prompt": compile_dynamic_sprite_video_prompt(
-            creative_prompt,
-            chroma_color,
-        ),
+        "video_prompt": compile_dynamic_sprite_video_prompt(creative_prompt),
         "negative_prompt": str(goal.constraints.get("negative_prompt") or ""),
         "animation_kind": "one_shot",
         "fps": fps,
         "video_duration_seconds": video_duration,
         "grid": {"rows": 4, "columns": 4},
         "frame_map": dynamic_sprite_frame_map(beats),
-        "chroma_color": chroma_color,
-        "background_color": chroma_color,
-        "chroma_threshold": chroma_threshold,
     }
 
 
@@ -606,10 +542,10 @@ def _subject_anchor_clause(goal: GoalRequest) -> str:
 
 def style_profile_direction(goal: GoalRequest) -> str:
     profile = goal.constraints.get("visual_style_profile")
-    isolated_subject = goal.media_type in _ISOLATED_ASSET_TYPES
+    isolated_subject = goal.media_type in _ISOLATED_STICKER_TYPES
     if isolated_subject and isinstance(profile, dict):
         # Scene composition and unstructured exclusions can prohibit the very
-        # isolation that sticker and chroma-key renderers require.
+        # isolation that sticker renderers require.
         profile = {key: profile.get(key) for key in ("prompt", "palette", "motion")}
     direction = visual_style_profile_direction(
         profile,
@@ -618,7 +554,7 @@ def style_profile_direction(goal: GoalRequest) -> str:
     if isolated_subject and direction:
         return (
             "Apply the selected visual style to the subject only. "
-            "Required transparent, solid, or uniform chroma-key background requirements take priority. "
+            "Required sticker background requirements take priority. "
             "Ignore scene and background instructions in the style descriptor; do not add scenery or a floor. "
             + direction
         )
@@ -634,7 +570,7 @@ def include_visual_style_profile(prompt: object, goal: GoalRequest) -> str:
         return prompt_text
     priority_label = (
         "Selected subject rendering rules:"
-        if goal.media_type in _ISOLATED_ASSET_TYPES
+        if goal.media_type in _ISOLATED_STICKER_TYPES
         else "Selected visual style rules take priority over conflicting scene details:"
     )
     normalized_prompt = prompt_text.casefold()
@@ -670,7 +606,7 @@ def visual_style_profile_direction(profile: object, *, include_motion: bool = Tr
 
 
 def style_profile_avoidance(goal: GoalRequest) -> str:
-    if goal.media_type in _ISOLATED_ASSET_TYPES:
+    if goal.media_type in _ISOLATED_STICKER_TYPES:
         return ""
     profile = goal.constraints.get("visual_style_profile")
     if not isinstance(profile, dict):

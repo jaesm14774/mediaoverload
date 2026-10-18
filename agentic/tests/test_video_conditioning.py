@@ -128,7 +128,11 @@ class VideoConditioningTests(unittest.TestCase):
                         ]
                     },
                     "idea-brief": {"negative_prompt": "blurry"},
-                    "segment-prompt-01": {"prompt": "Kirby takes one determined step through the rain. The camera tracks alongside him."},
+                    "segment-prompt-01": {
+                        "prompt": "Kirby takes one determined step through the rain. The camera tracks alongside him.",
+                        "overall_soundscape": "Rain taps the harbor awning and the buoy chain rattles in the gust.",
+                        "non_diegetic_music": "N/A",
+                    },
                     "ending-frame": {"selected_assets": ["C:/tmp/ending.png"]},
                 },
             )
@@ -141,7 +145,9 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertTrue(captured["use_last_frame"])
         self.assertNotIn("image_path", captured)
         self.assertEqual(captured["last_image_path"], "C:/tmp/ending.png")
-        self.assertEqual(captured["prompt"], "Kirby takes one determined step through the rain. The camera tracks alongside him.")
+        self.assertIn("Kirby takes one determined step through the rain", captured["prompt"])
+        self.assertIn("overall_soundscape: Rain taps the harbor awning", captured["prompt"])
+        self.assertIn("non_diegetic_music: N/A", captured["prompt"])
         self.assertEqual(captured["length"], 81)
         self.assertIn("segment-01-opening_video", str(captured["run_dir"]))
 
@@ -206,7 +212,11 @@ class VideoConditioningTests(unittest.TestCase):
                         ]
                     },
                     "idea-brief": {"negative_prompt": "blurry"},
-                    "segment-prompt-01": {"prompt": "Keep the buoy visible and show the gust physically pulling it left."},
+                    "segment-prompt-01": {
+                        "prompt": "Keep the buoy visible and show the gust physically pulling it left.",
+                        "overall_soundscape": "Wind rushes across the harbor as the buoy chain knocks against the pier.",
+                        "non_diegetic_music": "N/A",
+                    },
                     "opening-frame": {"selected_assets": ["C:/tmp/opening.png"]},
                 },
             )

@@ -48,7 +48,7 @@ class ComfyWorkflowSpec:
 
 class ComfyWorkflowToolset:
     DEFAULT_IMAGE_WORKFLOWS = ("krea2_turbo",)
-    DEFAULT_REFINE_WORKFLOWS = ("krea2_turbo_img2img",)
+    DEFAULT_REFINE_WORKFLOWS = ("flux3_image_klein_img2img",)
     DEFAULT_UPSCALE_WORKFLOWS = ("Tile Upscaler SDXL",)
 
     def __init__(self, asset_registry: AssetRegistry, output_root: Path, comfy_host: str | None = None, comfy_port: int | None = None) -> None:

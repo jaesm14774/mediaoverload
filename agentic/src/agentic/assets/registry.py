@@ -100,6 +100,7 @@ class WorkflowManifest:
 _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "krea2_turbo": {"width": 1024, "height": 576, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple"},
     "krea2_turbo_img2img": {"steps": 8, "cfg": 1.0, "denoise": 0.25, "sampler_name": "euler", "scheduler": "simple"},
+    "flux3_image_klein_img2img": {"steps": 16, "cfg": 1.0, "denoise": 1.0, "sampler_name": "euler", "scheduler": "simple"},
     "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
 
 }

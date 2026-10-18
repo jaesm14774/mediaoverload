@@ -91,17 +91,12 @@ class ImageProvider:
         return {"saved_files": files, "workflow_name": payload["workflow_name"]}
 
 
-@pytest.mark.parametrize("explicit_opening_path", [False, True])
-def test_user_gets_independently_drawn_ending_candidates(tmp_path, explicit_opening_path):
-    """User Given an approved opening When FL2VA generates ending candidates Then it draws the final state from text with the same style and no opening image input."""
+def test_user_gets_flux_refined_ending_candidates(tmp_path):
+    """User Given an approved opening When FL2VA generates ending candidates Then FLUX refines that image into the final state while keeping the selected art style."""
     execution_plan = plan(tmp_path)
     ending = next(n for n in execution_plan.nodes if n.node_id == "native-ending-keyframe")
     opening_path = tmp_path / "approved_opening.png"
     Image.new("RGB", (64, 36), "green").save(opening_path)
-    if explicit_opening_path:
-        # The opt-out must also discard an explicit input, not just dependencies.
-        ending.inputs["use_prior_frame"] = False
-        ending.inputs["prior_frame_path"] = str(opening_path)
     provider = ImageProvider(tmp_path)
     tools = ToolRegistry()
     tools.register("comfy.workflow.text_to_image", provider.generate, "Generate image candidates")
@@ -119,11 +114,14 @@ def test_user_gets_independently_drawn_ending_candidates(tmp_path, explicit_open
 
     assert result.status == "success"
     assert len(result.outputs["saved_files"]) == 6
-    for method, payload in provider.requests:
-        assert method == "text_to_image"
-        assert "image_path" not in payload
-        assert "hand-inked 2D cartoon with coral and teal accents" in payload["prompt"]
-        assert "Kirby's hands are empty" in payload["prompt"]
+    assert len(provider.requests) == 1
+    method, payload = provider.requests[0]
+    assert method == "image_to_image"
+    assert payload["workflow_name"] == "flux3_image_klein_img2img"
+    assert payload["image_path"] == str(opening_path)
+    assert payload["image_count"] == 6
+    assert "hand-inked 2D cartoon with coral and teal accents" in payload["prompt"]
+    assert "Kirby's hands are empty" in payload["prompt"]
     assert all(Path(f).is_file() and f != str(opening_path) for f in result.outputs["saved_files"])
 
 

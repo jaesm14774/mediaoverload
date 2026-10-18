@@ -4,6 +4,8 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import random
+import subprocess
+import time
 
 from PIL import Image, ImageChops, ImageDraw
 import pytest
@@ -33,6 +35,57 @@ from character_workflow_helpers import make_character_workflow_request
 from provider_fakes import ScriptedLLMManager
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def ffmpeg_nvidia_vfx_boundary(payload: dict[str, object]) -> dict[str, object]:
+    """Exercise the real file boundary with FFmpeg while ComfyUI is offline."""
+    adapter = FFmpegAdapter()
+    source = Path(str(payload["video_path"])).resolve(strict=True)
+    target = Path(str(payload["output_path"])).resolve()
+    source_info = adapter.probe_media(str(source))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    output_fps = float(source_info["frame_rate"]) * 2
+    started = time.perf_counter()
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source),
+        "-vf", f"scale={int(source_info['width']) * 2}:{int(source_info['height']) * 2}:flags=lanczos,fps={output_fps:g}",
+        "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+    ]
+    if source_info["has_audio"]:
+        command.extend(["-c:a", "copy"])
+    command.extend(["-movflags", "+faststart", "-y", str(target)])
+    subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
+    result_info = adapter.probe_media(str(target))
+    expected = {
+        "width": int(source_info["width"]) * 2,
+        "height": int(source_info["height"]) * 2,
+        "fps": output_fps,
+    }
+    if (result_info["width"], result_info["height"]) != (expected["width"], expected["height"]):
+        raise AssertionError("FFmpeg VFX fixture did not double the canvas")
+    if abs(float(result_info["frame_rate"]) - output_fps) > 0.15:
+        raise AssertionError("FFmpeg VFX fixture did not double the frame rate")
+    if abs(float(result_info["duration"]) - float(source_info["duration"])) > 1 / output_fps:
+        raise AssertionError("FFmpeg VFX fixture changed the video duration")
+    if bool(result_info["has_audio"]) != bool(source_info["has_audio"]):
+        raise AssertionError("FFmpeg VFX fixture did not preserve audio presence")
+    summary_path = target.with_name(f"{target.stem}_nvidia_vfx_summary.json")
+    summary_path.write_text(
+        json.dumps({"success": True, "source": source_info, "result": result_info}, indent=2),
+        encoding="utf-8",
+    )
+    return {
+        "video_path": str(target),
+        "final_video_path": str(target),
+        "saved_files": [str(target)],
+        "summary_path": str(summary_path),
+        "source": source_info,
+        "result": {**result_info, "fps": float(result_info["frame_rate"])},
+        "settings": {"upscale_factor": 2, "frame_rate_multiplier": 2},
+        "chunk_count": 1,
+        "wall_seconds": time.perf_counter() - started,
+    }
 
 
 def story_response():
@@ -119,6 +172,11 @@ def runtime(output, response=None, *, mode="llm", image_failure=""):
         ImageFixtureProvider(image_failure),
         "Injected Comfy image provider",
     )
+    tools.register(
+        "comfy.nvidia_vfx_postprocess",
+        ffmpeg_nvidia_vfx_boundary,
+        "FFmpeg boundary fixture that verifies the NVIDIA VFX file contract",
+    )
     engine = LLMPromptEngine(
         mode=mode,
         manager=ScriptedLLMManager([response or story_response()], repeat_last=True),
@@ -166,7 +224,7 @@ def test_user_given_theme_and_character_when_motion_comic_runs_without_a_story_f
     probe = FFmpegAdapter().probe_media(outputs["final_video_path"])
     assert probe["has_video"] and probe["has_audio"]
     assert (probe["width"], probe["height"]) == (240, 426)
-    assert abs(probe["duration"] - 9) < 0.05 and abs(probe["frame_rate"] - 24) < 0.01
+    assert abs(probe["duration"] - 10) < 0.05 and abs(probe["frame_rate"] - 24) < 0.01
     assert outputs["perceptual_review"]["status"] == "awaiting_review"
     assert result.state["motion-comic-write"]["prompt_mode"] == "llm"
     assert Path(outputs["summary_path"]).is_file()
@@ -321,9 +379,8 @@ def test_user_given_a_rendered_comic_when_preparing_social_review_then_only_the_
     result = runner.run(planner.build_plan(goal()))
     assert result.status == "success", result.to_dict()
     data = result.to_dict()
-    assert collect_media_paths_from_run_result(data) == [
-        result.state["motion-comic-compose"]["final_video_path"]
-    ]
+    final_video_path = result.state["motion-comic-nvidia-vfx"]["final_video_path"]
+    assert collect_media_paths_from_run_result(data) == [final_video_path]
     publish_context, source = _resolve_publish_prompt(
         data, fallback_prompt="An unrelated earlier theme"
     )

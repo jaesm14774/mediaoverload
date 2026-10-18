@@ -14,7 +14,8 @@ from agentic.storyboard import format_native_h3_prompt, load_storyboard
 
 class StoryboardContractTests(unittest.TestCase):
 
-    def test_native_15s_preset_contains_render_defaults_without_a_fixed_story(self) -> None:
+    def test_user_given_the_native_fifteen_second_preset_when_formatted_then_duration_is_clear_without_a_fixed_story(self) -> None:
+        """User Given a native H3 preset When its prompt is formatted Then the target duration is clear without imposing a fixed story."""
         repo_root = Path(__file__).resolve().parents[2]
         storyboard_path = repo_root / "configs/storyboards/native_h3_15s.yaml"
         native = load_storyboard(storyboard_path)

@@ -10,7 +10,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, SkillContext
+from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
 from agentic.runtime.llm_engine import LLMPromptEngine
 from provider_fakes import ScriptedLLMManager
 from agentic.runtime.prompting import build_game_sprite_reference_context, normalize_dynamic_sprite_beats
@@ -40,9 +40,12 @@ def test_user_given_sprite_prompt_when_planned_then_direct_prompt_and_render_met
     assert plan["grid"] == {"rows": 4, "columns": 4}
     assert len(plan["frame_map"]) == 16
     assert plan["beats"][0]["action"] == goal.prompt
-    assert plan["video_duration_seconds"] == 8.0
-    assert plan["chroma_color"] == plan["background_color"]
-    assert plan["chroma_color"] != "#ff00ff"
+    assert plan["video_duration_seconds"] >= 10.0
+    assert "chroma_color" not in plan
+    assert "background_color" not in plan
+    assert "chroma_threshold" not in plan
+    assert "chroma-key" not in plan["image_prompt"].casefold()
+    assert "chroma-key" not in plan["video_prompt"].casefold()
     assert isinstance(plan["image_prompt"], str) and plan["image_prompt"].strip()
     assert isinstance(plan["video_prompt"], str) and plan["video_prompt"].strip()
 
@@ -131,8 +134,11 @@ def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() 
 
     prompt = str(manager.text_model.calls[0]["messages"][1]["content"])
     assert "Optional inspiration notes" in prompt
+    assert "Do not impose a flat, monochrome, or chroma-key background" in prompt
     assert "do not assign or register abilities" not in prompt
     assert "action_reference_pack" in plan
+    assert "chroma_color" not in plan
+    assert "chroma_threshold" not in plan
     assert len(plan["action_references"]) == 8
     assert "idle, walk, jump, attack" not in prompt.lower()
 
@@ -284,7 +290,7 @@ def test_game_sprite_plan_has_no_human_review_or_fixed_action_nodes() -> None:
         "sprite-package",
     } <= node_ids
     video_node = next(node for node in plan.nodes if node.node_id == "sprite-motion-video")
-    assert video_node.inputs["length"] == 192
+    assert video_node.inputs["length"] >= 240
 
 
 def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
@@ -317,7 +323,7 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
                 "steps": 16,
             },
         ),
-        state={},
+        state=RunState(goal={}, metadata={}, node_outputs={}),
     )
 
     result = skills.animate_image(context)
@@ -347,9 +353,10 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
 
     assert payload["source_generation_type"] == "game_sprite"
     assert payload["media_type"] == "game_sprite"
-    assert payload["duration_seconds"] == 8
-    assert payload["constraints"]["sprite_video_length"] == 192
-    assert payload["constraints"]["sprite_chroma_color"] == "random"
+    assert payload["duration_seconds"] == 10
+    assert payload["constraints"]["sprite_video_length"] == 240
+    assert "sprite_chroma_color" not in payload["constraints"]
+    assert "sprite_chroma_threshold" not in payload["constraints"]
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
     assert payload["constraints"]["video_workflow_name"] == "minimax_h3_i2va"
     assert payload["constraints"]["sprite_source_width"] == 1024
@@ -393,8 +400,8 @@ def test_kirby_yaml_can_weight_game_sprite_for_random_selection(tmp_path: Path) 
     assert result["selection_source"] == "weighted_random"
 
 
-def test_sprite_adapter_builds_transparent_4x4_gif_atlas(tmp_path: Path) -> None:
-    """User Given sixteen generated frames When packaging runs Then a transparent atlas contract is produced."""
+def test_sprite_adapter_builds_4x4_atlas_with_background_preserved(tmp_path: Path) -> None:
+    """User Given sixteen generated frames When packaging runs Then their backgrounds remain visible in the atlas and animation."""
     source_dir = tmp_path / "source"
     source_dir.mkdir()
     source_paths = []
@@ -414,7 +421,6 @@ def test_sprite_adapter_builds_transparent_4x4_gif_atlas(tmp_path: Path) -> None
         cell_height=32,
         fps=12,
         loop=True,
-        key_color="#ff00ff",
     )
 
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
@@ -427,14 +433,45 @@ def test_sprite_adapter_builds_transparent_4x4_gif_atlas(tmp_path: Path) -> None
     assert manifest["qa"]["passed"] is True
     assert atlas.size == (128, 128)
     assert atlas.mode == "RGBA"
-    assert atlas.getpixel((0, 0))[3] == 0
+    assert atlas.getpixel((16, 16)) == (255, 0, 255, 255)
     assert gif.n_frames == 16
     assert gif.info["loop"] == 0
-    assert gif.convert("RGBA").getpixel((0, 0))[3] == 0
-    assert len(manifest["qa"]["edge_contacts"]) == 16
+    assert gif.convert("RGBA").getpixel((16, 16))[3] == 255
+    assert manifest["background_mode"] == "preserved"
 
 
-def test_sprite_adapter_removes_h3_shifted_border_background(tmp_path: Path) -> None:
+def test_user_given_varied_backgrounds_and_a_solid_red_frame_when_packaged_then_all_frames_remain_visible(tmp_path: Path) -> None:
+    """User Given varied backgrounds and one solid red frame When packaging runs Then every frame remains visible without chroma removal."""
+    source_dir = tmp_path / "varied-backgrounds"
+    source_dir.mkdir()
+    source_paths = []
+    for index in range(16):
+        image = Image.new("RGB", (128, 96), (224, 14, 0) if index == 4 else (20, 70, 180))
+        draw = ImageDraw.Draw(image)
+        if index != 4:
+            draw.rectangle((0, 0, 63, 47), fill=(20, 180, 45))
+            draw.rectangle((64, 0, 127, 47), fill=(230, 180, 30))
+            draw.rectangle((0, 48, 63, 95), fill=(150, 40, 170))
+            draw.ellipse((48, 30, 80, 66), fill=(240, 240, 245))
+        path = source_dir / f"frame-{index + 1:02d}.png"
+        image.save(path)
+        source_paths.append(str(path))
+
+    result = SpriteAdapter().build_from_frames(
+        source_paths,
+        output_dir=str(tmp_path / "varied-output"),
+        cell_width=32,
+        cell_height=32,
+    )
+
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    fifth_frame = Image.open(manifest["frames"][4]["path"]).convert("RGBA")
+    assert result["qa"]["passed"] is True
+    assert fifth_frame.getpixel((16, 16)) == (224, 14, 0, 255)
+    assert len(manifest["frames"]) == 16
+
+
+def test_sprite_adapter_preserves_h3_shifted_backgrounds(tmp_path: Path) -> None:
     source_dir = tmp_path / "shifted-background"
     source_dir.mkdir()
     source_paths = []
@@ -455,8 +492,11 @@ def test_sprite_adapter_removes_h3_shifted_border_background(tmp_path: Path) -> 
         cell_height=64,
     )
 
-    atlas = Image.open(result["atlas_path"]).convert("RGBA")
-    assert atlas.getpixel((0, 0))[3] == 0
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    first = Image.open(manifest["frames"][0]["path"]).convert("RGBA")
+    second = Image.open(manifest["frames"][1]["path"]).convert("RGBA")
+    assert first.getpixel((6, 15)) == (168, 54, 42, 255)
+    assert second.getpixel((6, 15)) == (32, 180, 48, 255)
     assert all(check for check in result["qa"]["checks"].values())
 
 
@@ -483,7 +523,9 @@ def test_user_given_sprite_touches_a_non_floor_edge_when_packaged_then_discord_c
     )
 
     assert result["qa"]["passed"] is True
-    assert result["qa"]["edge_contacts"][7]["left"] > 0
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    packaged_frame = Image.open(manifest["frames"][7]["path"]).convert("RGBA")
+    assert packaged_frame.getchannel("A").getbbox() is not None
 
 
 def test_sprite_adapter_keeps_technical_frame_contracts(tmp_path: Path) -> None:

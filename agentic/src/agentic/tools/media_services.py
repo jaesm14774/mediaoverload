@@ -292,8 +292,6 @@ class MediaServiceTools:
             cell_height=int(payload.get("cell_height", 64)),
             fps=float(payload.get("fps", 12)),
             loop=bool(payload.get("loop", True)),
-            key_color=payload.get("key_color", "magenta"),
-            chroma_threshold=int(payload.get("chroma_threshold", 52)),
             frame_map=payload.get("frame_map") if isinstance(payload.get("frame_map"), list) else None,
         )
 
@@ -373,7 +371,7 @@ def register_media_service_tools(
     tool_registry.register("media.normalize_video_canvas", tools.normalize_video_canvas, "Fit video inside an exact canvas while preserving aspect ratio")
     tool_registry.register("media.trim_video", tools.trim_video, "Trim a packaged video to an explicit duration")
     tool_registry.register("media.video_to_gif", tools.video_to_gif, "Convert a video to a GIF")
-    tool_registry.register("media.video_to_sprite", tools.video_to_sprite, "Convert a generated motion video to a transparent game sprite atlas")
+    tool_registry.register("media.video_to_sprite", tools.video_to_sprite, "Convert a generated motion video to a game sprite atlas while preserving its background")
     tool_registry.register("media.video_qa", tools.video_qa, "Probe duration/streams and create a video contact sheet")
     tool_registry.register("media.probe_video", tools.probe_video, "Read video stream timing, canvas, and audio metadata")
     tool_registry.register("media.compose_motion_graphics", tools.compose_motion_graphics, "Render a declarative Pillow motion layer over a source video")

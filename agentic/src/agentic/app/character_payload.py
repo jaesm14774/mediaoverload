@@ -767,12 +767,6 @@ def build_goal_payload_from_character_config(
                     game_sprite_config.get("h3_model_profile", "q2")
                 ),
                 "sprite_fps": float(game_sprite_config.get("fps", 12)),
-                "sprite_chroma_color": str(
-                    game_sprite_config.get("chroma_color", "random")
-                ),
-                "sprite_chroma_threshold": int(
-                    game_sprite_config.get("chroma_threshold", 52)
-                ),
                 "sprite_cell_width": int(game_sprite_config.get("cell_width", 64)),
                 "sprite_cell_height": int(game_sprite_config.get("cell_height", 64)),
             }

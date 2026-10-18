@@ -387,7 +387,12 @@ class AgentMediaSkills:
         return asset_check_result(result, "Checked workflow assets for an agent step.")
 
     def refine_image(self, context: SkillContext) -> SkillResult:
-        workflow_name = str(context.plan.goal.constraints.get("identity_refine_workflow_name") or "")
+        workflow_name = str(
+            context.node.inputs.get("workflow_name")
+            or context.plan.goal.constraints.get("refine_workflow_name")
+            or context.plan.goal.constraints.get("identity_refine_workflow_name")
+            or ""
+        )
         prompt_key = str(context.node.inputs.get("prompt_key") or "").strip()
         prompt = ""
         if prompt_key:
@@ -424,7 +429,7 @@ class AgentMediaSkills:
             prompt = include_role_description(prompt, context.plan.goal)
             prompt = apply_paper_storybook_art_direction(
                 prompt,
-                isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+                isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
             )
             return include_visual_style_profile(prompt, context.plan.goal)
 
@@ -438,8 +443,9 @@ class AgentMediaSkills:
         if isinstance(prior_frame_path, str) and prior_frame_path:
             workflow_name = str(
                 context.node.inputs.get("identity_refine_workflow_name")
+                or context.plan.goal.constraints.get("refine_workflow_name")
                 or context.plan.goal.constraints.get("identity_refine_workflow_name")
-                or "krea2_turbo_img2img"
+                or "flux3_image_klein_img2img"
             )
             payload = {
                 "workflow_name": workflow_name,
@@ -689,7 +695,7 @@ class AgentMediaSkills:
             prompt = include_role_description(prompt_set["prompt"], context.plan.goal)
             prompt = apply_paper_storybook_art_direction(
                 prompt,
-                isolated_subject=media_type in {"sticker_pack", "animated_sticker", "game_sprite"},
+                isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
             )
             prompt = include_visual_style_profile(prompt, context.plan.goal)
             result = self.tools.call(
@@ -1302,8 +1308,6 @@ class AgentMediaSkills:
                 "cell_height": int(context.node.inputs.get("cell_height", 64)),
                 "fps": float(context.node.inputs.get("fps", motion_plan.get("fps", 12))),
                 "loop": str(motion_plan.get("animation_kind") or "periodic") == "periodic",
-                "key_color": motion_plan.get("chroma_color", "magenta"),
-                "chroma_threshold": int(motion_plan.get("chroma_threshold", 52)),
                 "frame_map": motion_plan.get("frame_map", []),
             },
         )
@@ -1342,7 +1346,7 @@ class AgentMediaSkills:
                 "node_prompt_modes": summary["node_prompt_modes"],
             },
             metrics={"frame_count": len(result.get("frame_paths", []))},
-            logs=["Packaged an automatically generated dynamic motion into a transparent 4x4 game sprite atlas."],
+            logs=["Packaged generated motion into a 4x4 game sprite atlas while preserving its background."],
         )
 
     def package_animated_sticker_outputs(self, context: SkillContext) -> SkillResult:

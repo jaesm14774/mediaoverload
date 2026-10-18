@@ -46,5 +46,5 @@ def test_user_given_an_image_when_editing_through_the_runtime_then_a_playable_qa
     assert video_path.is_file()
     media = FFmpegAdapter().probe_media(str(video_path))
     assert media["width"] == 320 and media["height"] == 320
-    assert abs(media["duration"] - 2) < 0.35
+    assert abs(media["duration"] - 10) < 0.35
     assert all(record.status == "success" for record in result.records)

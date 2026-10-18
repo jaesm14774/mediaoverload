@@ -69,6 +69,16 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
     use_last_frame = goal.media_type == "native_h3_fl2va_story" or bool(
         goal.constraints.get("native_h3_use_last_frame", False)
     )
+    refine_manifest = (
+        context.manifest_from_goal_constraints(
+            goal,
+            *context.DEFAULT_REFINE_WORKFLOWS,
+            constraint_keys=("refine_workflow_name", "identity_refine_workflow_name"),
+            allowed_media_types={"image_refine"},
+        )
+        if use_last_frame
+        else None
+    )
     experiment_seed = goal.constraints.get("native_h3_experiment_seed")
     if experiment_seed is not None:
         experiment_seed = int(experiment_seed)
@@ -158,6 +168,18 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             stage="render",
         ),
     ]
+    if refine_manifest:
+        nodes.append(
+            ExecutionNode(
+                node_id="native-refine-asset-check",
+                skill_name="media.ensure_workflow",
+                inputs={"workflow_name": refine_manifest.name},
+                depends_on=["native-story-prompt"],
+                tags=["assets", "refine", "native-h3"],
+                tool_name="asset.ensure_workflow_ready",
+                stage="assets",
+            )
+        )
     opening_source_node = "native-opening-keyframe"
     if require_human_review or stage_probe_auto_select:
         opening_review_node = "native-opening-review"
@@ -182,17 +204,18 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         opening_source_node = opening_review_node
     ending_source_node = ""
     if use_last_frame:
+        assert refine_manifest is not None
         ending_dependencies = [
             opening_source_node,
             "native-story-prompt",
             "native-image-asset-check",
+            "native-refine-asset-check",
         ]
         ending_inputs = {
             "workflow_name": image_manifest.name,
             "prompt_key": "ending_keyframe_prompt",
-            # The ending is a new story state, not a refinement of the opening.
-            # Keep the opening dependency only to preserve the review order.
-            "use_prior_frame": False,
+            "identity_refine_workflow_name": refine_manifest.name,
+            "use_prior_frame": True,
             "width": width,
             "height": height,
             "image_count": keyframe_candidate_count,
@@ -207,7 +230,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
                 inputs=ending_inputs,
                 depends_on=ending_dependencies,
                 tags=["render", "image", "last-frame", "native-h3"],
-                tool_name="comfy.workflow.text_to_image",
+                tool_name="comfy.workflow.image_to_image",
                 stage="render",
             )
         )
@@ -313,6 +336,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             asset.to_dict()
             for asset in (
                 *image_manifest.required_assets,
+                *(refine_manifest.required_assets if refine_manifest else []),
                 *video_manifest.required_assets,
             )
         ],
@@ -326,7 +350,8 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             "require_human_review": require_human_review,
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_last_frame": use_last_frame,
-            "frame_pair_strategy": "independent_text_to_image" if use_last_frame else "",
+            "frame_pair_strategy": "krea2_to_flux3_reference_refine" if use_last_frame else "",
+            "landing_frame_workflow": refine_manifest.name if refine_manifest else "",
             "experiment_seed": experiment_seed,
             "backend": "comfyui",
         },
@@ -499,6 +524,12 @@ def build_native_h3_l2va_story(
         ),
         allowed_media_types={"image"},
     )
+    refine_manifest = context.manifest_from_goal_constraints(
+        goal,
+        *context.DEFAULT_REFINE_WORKFLOWS,
+        constraint_keys=("refine_workflow_name", "identity_refine_workflow_name"),
+        allowed_media_types={"image_refine"},
+    )
     video_manifest = context.manifest_from_goal_constraints(
         goal,
         "minimax_h3_l2va",
@@ -569,6 +600,15 @@ def build_native_h3_l2va_story(
             stage="assets",
         ),
         ExecutionNode(
+            node_id="native-refine-asset-check",
+            skill_name="media.ensure_workflow",
+            inputs={"workflow_name": refine_manifest.name},
+            depends_on=["native-story-prompt"],
+            tags=["assets", "refine", "native-h3", "l2va"],
+            tool_name="asset.ensure_workflow_ready",
+            stage="assets",
+        ),
+        ExecutionNode(
             node_id="native-video-asset-check",
             skill_name="media.ensure_workflow",
             inputs={
@@ -580,19 +620,42 @@ def build_native_h3_l2va_story(
             stage="assets",
         ),
         ExecutionNode(
+            node_id="native-l2va-identity-keyframe",
+            skill_name="media.image.generate_keyframe",
+            inputs={
+                "workflow_name": image_manifest.name,
+                "prompt_key": "opening_keyframe_prompt",
+                "use_prior_frame": False,
+                "width": width,
+                "height": height,
+                "image_count": 1,
+                "suffix": "native_h3_l2va_identity_source",
+            },
+            depends_on=["native-story-prompt", "native-image-asset-check"],
+            tags=["render", "image", "identity-source", "native-h3", "l2va"],
+            tool_name="comfy.workflow.text_to_image",
+            stage="render",
+        ),
+        ExecutionNode(
             node_id=ending_source_node,
             skill_name="media.image.generate_keyframe",
             inputs={
                 "workflow_name": image_manifest.name,
+                "identity_refine_workflow_name": refine_manifest.name,
                 "prompt_key": "ending_keyframe_prompt",
+                "use_prior_frame": True,
                 "width": width,
                 "height": height,
                 "image_count": candidate_count,
                 "suffix": "native_h3_l2va_last",
             },
-            depends_on=["native-story-prompt", "native-image-asset-check"],
+            depends_on=[
+                "native-l2va-identity-keyframe",
+                "native-story-prompt",
+                "native-refine-asset-check",
+            ],
             tags=["render", "image", "last-frame", "native-h3", "l2va"],
-            tool_name="comfy.workflow.text_to_image",
+            tool_name="comfy.workflow.image_to_image",
             stage="render",
         ),
     ]
@@ -682,6 +745,7 @@ def build_native_h3_l2va_story(
             asset.to_dict()
             for asset in (
                 *image_manifest.required_assets,
+                *refine_manifest.required_assets,
                 *video_manifest.required_assets,
             )
         ],
@@ -693,6 +757,8 @@ def build_native_h3_l2va_story(
             "target_duration": int(goal.duration_seconds),
             "require_human_review": require_human_review,
             "stage_probe_auto_select": stage_probe_auto_select,
+            "identity_source_workflow": image_manifest.name,
+            "landing_frame_workflow": refine_manifest.name,
             "backend": "comfyui",
         },
         "render_mode": "last_frame_to_video",
