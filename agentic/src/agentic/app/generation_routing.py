@@ -18,7 +18,16 @@ from agentic.runtime.strategies import (
     NATIVE_STORY_GENERATION_TYPES,
     WORKFLOW_STAGE_KEYS,
     active_count_policy,
+    media_type_for_generation,
     primary_workflow_name,
+)
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    normalize_video_duration,
+)
+from agentic.runtime.news_grounding import (
+    is_brand_safe_news_selection,
+    is_usable_news_selection,
 )
 from agentic.tools.context_services import NewsContextService
 from agentic.app.character_config import _normalize_generation_type, _resolve_repo_path
@@ -854,27 +863,31 @@ def _resolve_duration_seconds(
         native_recipe = _native_recipe_for_generation(
             dict(generation or {}), config_generation_type
         )
-        native_duration = max(1, int(native_recipe.get("duration_seconds", 15)))
-        if requested is not None and requested != native_duration:
+        native_duration = max(
+            MIN_VIDEO_DURATION_SECONDS,
+            int(native_recipe.get("duration_seconds", 15)),
+        )
+        if requested is not None and requested > native_duration:
             raise ValueError(
-                f"{config_generation_type} supports duration_seconds={native_duration}; "
-                "use text2image2video for a 10-second source clip."
+                f"{config_generation_type} supports up to {native_duration} seconds."
             )
         return native_duration
     if config_generation_type == "text2image2video":
-        # The default I2V source clip is 10 seconds at 24 fps. A configured 2x
-        # playback transform can then produce the intended ~5-second final
-        # social clip without collapsing the generated action to ~2 seconds.
-        return requested or 10
+        return max(MIN_VIDEO_DURATION_SECONDS, requested or 10)
     if config_generation_type == "game_sprite":
         sprite_config = dict((generation or {}).get("game_sprite", {}) or {})
-        configured_duration = int(sprite_config.get("duration_seconds", 8))
-        return max(4, min(8, requested or configured_duration))
+        configured_duration = int(sprite_config.get("duration_seconds", 10))
+        return max(MIN_VIDEO_DURATION_SECONDS, requested or configured_duration)
     if config_generation_type == "motion_comic":
         comic_config = dict((generation or {}).get("motion_comic", {}) or {})
-        return requested or int(comic_config.get("duration_seconds", 9))
+        return max(
+            MIN_VIDEO_DURATION_SECONDS,
+            requested or int(comic_config.get("duration_seconds", 10)),
+        )
     if config_generation_type != "text2longvideo":
-        return requested or 30
+        return normalize_video_duration(
+            media_type_for_generation(config_generation_type), requested or 30
+        )
     configured_longvideo = dict(longvideo_config or {})
     if not configured_longvideo:
         longvideo = dict(strategies.get("text2longvideo", {}) or {})
@@ -893,20 +906,23 @@ def _resolve_duration_seconds(
     segment_count = int(
         routed_segment_count or configured_longvideo.get("segment_count", 3)
     )
-    segment_duration = int(configured_longvideo.get("segment_duration", 5))
-    return max(10, segment_count * segment_duration)
+    segment_duration = max(
+        MIN_VIDEO_DURATION_SECONDS,
+        int(configured_longvideo.get("segment_duration", MIN_VIDEO_DURATION_SECONDS)),
+    )
+    return max(MIN_VIDEO_DURATION_SECONDS, segment_count * segment_duration)
 
 
 def _duration_strategy_override(
     requested_duration_seconds: int | None,
     generation_type_candidates: list[str],
 ) -> str:
-    """Keep short clips on a single-action route and 15s clips on native H3."""
+    """Keep requests through ten seconds on the single-action route."""
     if requested_duration_seconds is None:
         return ""
     duration = max(1, int(requested_duration_seconds))
     candidates = set(generation_type_candidates)
-    if duration <= 6 and "text2image2video" in candidates:
+    if duration <= MIN_VIDEO_DURATION_SECONDS and "text2image2video" in candidates:
         return "text2image2video"
     if duration == 15 and "native_h3_story" in candidates:
         return "native_h3_story"
@@ -917,7 +933,7 @@ def _duration_profile(duration_seconds: int | None) -> str:
     if duration_seconds is None:
         return "config_default"
     duration = max(1, int(duration_seconds))
-    if duration <= 6:
+    if duration <= MIN_VIDEO_DURATION_SECONDS:
         return "single_action"
     if duration <= 15:
         return "compact_story"
@@ -991,14 +1007,15 @@ def _resolve_autonomous_prompt(
 ) -> dict[str, Any]:
     explicit_prompt = str(prompt).strip()
     news_context = dict(news_context_override or {})
+    resolved_news_driven = bool(news_driven)
     if news_context:
         title = str(news_context.get("title") or "")
         keyword = str(news_context.get("keyword") or "")
-        if not NewsContextService.is_usable_selection(title, keyword):
+        if not is_usable_news_selection(title, keyword):
             raise ValueError(
                 "Explicit news context requires a usable title and keyword."
             )
-        if not NewsContextService.is_brand_safe_selection(title, keyword):
+        if not is_brand_safe_news_selection(title, keyword):
             raise ValueError("Explicit news context is not brand safe.")
     if explicit_prompt and not news_driven:
         return {
@@ -1007,6 +1024,9 @@ def _resolve_autonomous_prompt(
             "prompt_mode": "user",
             "creative_seed": "",
             "news_context": news_context,
+            "news_driven": False,
+            "news_grounding_required": False,
+            "source_anchors": [],
         }
 
     if not news_context:
@@ -1014,13 +1034,28 @@ def _resolve_autonomous_prompt(
             news_service = NewsContextService()
             selected_news = news_service.get_random_news()
             if selected_news is not None:
-                news_context = selected_news.to_dict()
+                selected_context = selected_news.to_dict()
+                selected_title = str(selected_context.get("title") or "")
+                selected_keyword = str(selected_context.get("keyword") or "")
+                if (
+                    is_usable_news_selection(
+                        selected_title, selected_keyword
+                    )
+                    and is_brand_safe_news_selection(
+                        selected_title, selected_keyword
+                    )
+                ):
+                    news_context = selected_context
+                    resolved_news_driven = True
         except Exception as exc:
             if news_driven:
                 raise
             news_context = {"error": f"{type(exc).__name__}: {exc}"}
 
-    if news_driven and not news_context:
+    news_grounding_required = resolved_news_driven
+    if resolved_news_driven and not is_usable_news_selection(
+        news_context.get("title", ""), news_context.get("keyword", "")
+    ):
         raise RuntimeError(
             "News-driven generation did not receive a usable news context."
         )
@@ -1032,6 +1067,9 @@ def _resolve_autonomous_prompt(
             "prompt_mode": "news",
             "creative_seed": "",
             "news_context": news_context,
+            "news_driven": resolved_news_driven,
+            "news_grounding_required": news_grounding_required,
+            "source_anchors": [],
         }
 
     bundle = LLMPromptEngine(
@@ -1042,8 +1080,12 @@ def _resolve_autonomous_prompt(
         style=style,
         media_type=media_type,
         news_context=news_context,
-        news_grounding_required=news_driven,
+        news_grounding_required=news_grounding_required,
     )
     bundle.setdefault("prompt_mode", "template")
     bundle.setdefault("source", "autonomous_fallback")
+    bundle["news_context"] = news_context
+    bundle["news_driven"] = resolved_news_driven
+    bundle["news_grounding_required"] = news_grounding_required
+    bundle.setdefault("source_anchors", [])
     return bundle

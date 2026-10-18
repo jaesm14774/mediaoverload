@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import math
-from agentic.runtime.contracts import ExecutionNode, GoalRequest
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    ExecutionNode,
+    GoalRequest,
+)
 from agentic.assets.registry import AssetRegistry, WorkflowManifest
 from agentic.runtime.creativity import IdeaDirector
 
@@ -94,6 +98,14 @@ class PlanningContext:
         goal: GoalRequest, manifest: WorkflowManifest, *, default_steps: int = 16
     ) -> dict[str, int]:
         defaults = dict(manifest.recommended_defaults or {})
+        minimum_length = round(MIN_VIDEO_DURATION_SECONDS * 24)
+        configured_length = int(
+            goal.constraints.get("native_h3_length")
+            or max(
+                107,
+                math.ceil((min(15, goal.duration_seconds) * 24 - 5) / 17) * 17 + 5,
+            )
+        )
         return {
             "width": int(
                 goal.constraints.get("canvas_width") or defaults.get("width", 608)
@@ -101,13 +113,7 @@ class PlanningContext:
             "height": int(
                 goal.constraints.get("canvas_height") or defaults.get("height", 352)
             ),
-            "length": int(
-                goal.constraints.get("native_h3_length")
-                or max(
-                    107,
-                    math.ceil((min(15, goal.duration_seconds) * 24 - 5) / 17) * 17 + 5,
-                )
-            ),
+            "length": max(minimum_length, configured_length),
             "steps": int(
                 goal.constraints.get("native_h3_steps")
                 or defaults.get("steps", default_steps)
@@ -130,13 +136,19 @@ class PlanningContext:
         goal: GoalRequest, manifest: WorkflowManifest
     ) -> dict[str, object]:
         defaults = dict(manifest.recommended_defaults or {})
-        fps = float(
-            defaults.get("frame_rate") or goal.constraints.get("video_frame_rate") or 24
+        frame_rate = max(
+            1.0,
+            float(defaults.get("frame_rate") or goal.constraints.get("video_frame_rate") or 24),
         )
+        fps = frame_rate
         length = defaults.get("length")
         target_duration = goal.constraints.get("duration_override_seconds")
         if target_duration in {None, ""} and length not in {None, ""} and fps > 0:
             target_duration = float(length) / fps
+        if target_duration not in {None, ""}:
+            target_duration = max(
+                MIN_VIDEO_DURATION_SECONDS, float(target_duration)
+            )
         return {
             "expected_width": goal.constraints.get("canvas_width")
             or defaults.get("width"),
@@ -161,9 +173,8 @@ class PlanningContext:
                 duration = goal.duration_seconds
             else:
                 return None
-        frames = round(
-            int(duration) * float(goal.constraints.get("video_frame_rate") or 24)
-        )
+        frame_rate = max(1.0, float(goal.constraints.get("video_frame_rate") or 24))
+        frames = round(int(duration) * frame_rate)
         if str(goal.media_type or "").strip().lower() == "text2img2video":
             try:
                 safe_limit = int(goal.constraints.get("max_i2v_frames") or 240)
@@ -171,7 +182,11 @@ class PlanningContext:
                 raise ValueError("max_i2v_frames must be a positive integer") from exc
             if safe_limit <= 0:
                 raise ValueError("max_i2v_frames must be a positive integer")
-            frames = min(frames, safe_limit)
+            minimum_frames = round(
+                MIN_VIDEO_DURATION_SECONDS
+                * frame_rate
+            )
+            frames = min(max(frames, minimum_frames), max(safe_limit, minimum_frames))
         return frames
 
     @staticmethod
@@ -212,14 +227,30 @@ class PlanningContext:
         result = dict(inputs)
         speed = cls.video_speed_config(goal)
         target_duration = result.get("target_duration")
-        if bool(speed["enabled"]):
-            source_duration = target_duration
-            if source_duration in {None, ""} and goal.duration_seconds > 0:
-                source_duration = goal.duration_seconds
-            if source_duration not in {None, ""}:
-                result["target_duration"] = float(source_duration) / float(
-                    speed["factor"]
+        if target_duration in {None, ""} and goal.duration_seconds > 0:
+            target_duration = goal.duration_seconds
+        if (
+            target_duration not in {None, ""}
+            and str(goal.media_type or "").strip().lower() == "text2img2video"
+        ):
+            source_length = cls.text2img2video_length(goal)
+            frame_rate = max(
+                1.0, float(goal.constraints.get("video_frame_rate") or 24)
+            )
+            if source_length is not None:
+                target_duration = min(
+                    float(target_duration), float(source_length) / frame_rate
                 )
+        if bool(speed["enabled"]):
+            if target_duration not in {None, ""}:
+                target_duration = float(target_duration) / float(speed["factor"])
+        if target_duration not in {None, ""}:
+            result["target_duration"] = float(target_duration)
+        result["minimum_duration"] = (
+            min(MIN_VIDEO_DURATION_SECONDS, float(target_duration))
+            if bool(speed["enabled"]) and target_duration not in {None, ""}
+            else MIN_VIDEO_DURATION_SECONDS
+        )
         if cls.nvidia_vfx_postprocess_enabled(goal):
             for key in ("expected_width", "expected_height"):
                 value = result.get(key)

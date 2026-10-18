@@ -612,6 +612,9 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     "width": context.canvas_dimensions(goal, image_manifest)[0],
                     "height": context.canvas_dimensions(goal, image_manifest)[1],
                     "video_count": context.constraint_int(goal, "video_count", 1),
+                    "length": context.native_h3_render_config(
+                        goal, video_manifest
+                    )["length"],
                 },
                 depends_on=animate_dependencies,
                 tags=["render", "video"],

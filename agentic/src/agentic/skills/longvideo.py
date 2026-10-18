@@ -5,8 +5,16 @@ import re
 from pathlib import Path
 from typing import Any
 
-from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
-from agentic.minimax_prompting import require_h3_prompt
+from agentic.h3_reference import (
+    build_reference_lineage,
+    format_ref2va_prompt,
+    normalize_reference_manifest,
+)
+from agentic.minimax_prompting import (
+    extract_h3_scene_description,
+    format_h3_video_prompt,
+    require_h3_prompt,
+)
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
 from agentic.runtime.reference_video import format_reference_video_directive
@@ -35,6 +43,48 @@ def _bounded_int(value: object, *, name: str, minimum: int, maximum: int) -> int
     if parsed < minimum or parsed > maximum:
         raise RuntimeError(f"Native H3 {name} must be between {minimum} and {maximum}; received {parsed}")
     return parsed
+
+
+def _format_native_h3_video_prompt(
+    story: dict[str, Any],
+    *,
+    mode: str,
+    duration_seconds: float,
+    references: list[dict[str, Any]] | None = None,
+) -> str:
+    source = require_h3_prompt(story.get("prompt"))
+    scene = extract_h3_scene_description(source)
+    audio = story.get("native_audio")
+    if isinstance(audio, dict):
+        overall_soundscape = str(audio.get("overall_soundscape") or "").strip()
+        non_diegetic_music = str(audio.get("non_diegetic_music") or "N/A").strip()
+    else:
+        raw_audio = str(audio or "").strip()
+        match = re.search(
+            r"Overall soundscape:\s*(.*?)\s*Non-diegetic music:\s*(.*)$",
+            raw_audio,
+            re.IGNORECASE,
+        )
+        if match:
+            overall_soundscape, non_diegetic_music = match.group(1).strip(), match.group(2).strip()
+        else:
+            overall_soundscape, non_diegetic_music = raw_audio, "N/A"
+    if not overall_soundscape:
+        overall_soundscape = "Sound follows the scene's visible physical actions and setting."
+    if mode == "ref2va":
+        return format_ref2va_prompt(
+            scene,
+            references or [],
+            overall_soundscape=overall_soundscape,
+            non_diegetic_music=non_diegetic_music,
+        )
+    return format_h3_video_prompt(
+        scene,
+        mode=mode,
+        duration_seconds=duration_seconds,
+        overall_soundscape=overall_soundscape,
+        non_diegetic_music=non_diegetic_music,
+    )
 
 
 def _apply_selected_character_to_storyboard(
@@ -278,7 +328,9 @@ class LongVideoSkills:
                 "ending_keyframe_prompt": ending_prompt,
                 "story_spine": dict(storyboard.get("story_spine") or {}),
                 "gag_card": dict(storyboard.get("gag_card") or {}),
-                "native_audio": str(storyboard.get("native_audio") or ""),
+                "native_audio": dict(storyboard.get("native_audio") or {})
+                if isinstance(storyboard.get("native_audio"), dict)
+                else str(storyboard.get("native_audio") or ""),
                 "duration_seconds": duration_seconds,
                 "prompt_mode": str(story_payload["prompt_mode"]),
                 "story_source": str(story_payload["source"]),
@@ -372,7 +424,10 @@ class LongVideoSkills:
             raise RuntimeError("Conditioning plan 'reference_bundle' did not resolve a reference manifest")
 
         constraints = context.plan.goal.constraints
-        prompt_node_id = str(context.node.depends_on[0]) if context.node.depends_on else ""
+        prompt_node_id = str(
+            context.node.inputs.get("h3_prompt_node")
+            or (context.node.depends_on[0] if context.node.depends_on else "")
+        )
         prepared_prompt_output = context.state.node_outputs.get(prompt_node_id)
         prompt = ", ".join(
             part
@@ -380,10 +435,11 @@ class LongVideoSkills:
             if part
         )
         if workflow_name.startswith("minimax_h3_"):
-            prompt = require_h3_prompt(
+            scene_prompt = require_h3_prompt(
                 prepared_prompt_output.get("prompt") if isinstance(prepared_prompt_output, dict) else None
             )
-        prompt = include_visual_style_profile(prompt, context.plan.goal)
+        else:
+            prompt = include_visual_style_profile(prompt, context.plan.goal)
 
         width = context.node.inputs.get("width") or constraints.get("canvas_width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
         height = context.node.inputs.get("height") or constraints.get("canvas_height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
@@ -401,6 +457,30 @@ class LongVideoSkills:
             "anchor_last": "l2va",
             "reference_bundle": "ref2va",
         }.get(recipe, recipe)
+        if workflow_name.startswith("minimax_h3_"):
+            if not isinstance(prepared_prompt_output, dict):
+                raise RuntimeError("H3 segment rendering requires a prepared scene and audio prompt")
+            overall_soundscape = str(prepared_prompt_output.get("overall_soundscape") or "").strip()
+            non_diegetic_music = str(prepared_prompt_output.get("non_diegetic_music") or "").strip()
+            duration_seconds = float(
+                context.node.inputs.get("target_duration_seconds")
+                or float(length) / 24.0
+            )
+            if h3_mode == "ref2va":
+                prompt = format_ref2va_prompt(
+                    scene_prompt,
+                    reference_manifest,
+                    overall_soundscape=overall_soundscape,
+                    non_diegetic_music=non_diegetic_music,
+                )
+            else:
+                prompt = format_h3_video_prompt(
+                    scene_prompt,
+                    mode=h3_mode,
+                    duration_seconds=duration_seconds,
+                    overall_soundscape=overall_soundscape,
+                    non_diegetic_music=non_diegetic_music,
+                )
         idea_brief = context.state.node_outputs.get("idea-brief")
         if not isinstance(idea_brief, dict):
             idea_brief = {}
@@ -468,15 +548,23 @@ class LongVideoSkills:
         if use_last_frame and not last_frame:
             raise RuntimeError("Native H3 render with use_last_frame=true requires last_frame_path")
         default_model_profile = "q4"
-        prompt = include_visual_style_profile(
-            require_h3_prompt(story["prompt"]), context.plan.goal
+        mode = "fl2va" if use_last_frame else "i2va"
+        prompt_length = int(
+            context.node.inputs.get("length")
+            or context.plan.goal.constraints.get("native_h3_length")
+            or 362
+        )
+        prompt = _format_native_h3_video_prompt(
+            story,
+            mode=mode,
+            duration_seconds=prompt_length / 24.0,
         )
         payload = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "native_h3")),
             "image_path": first_frame,
             "use_last_frame": use_last_frame,
-            "h3_mode": "fl2va" if use_last_frame else "i2va",
+            "h3_mode": mode,
             "prompt": prompt,
             "negative_prompt": str(story.get("negative_prompt") or ""),
             "character": str(context.plan.goal.constraints.get("character") or ""),
@@ -663,8 +751,13 @@ class LongVideoSkills:
         last_frame = str(source_check.get("last_frame_path") or "")
         if not workflow_name or not last_frame:
             raise RuntimeError("Native H3 L2VA render requires workflow_name and last_frame_path")
-        prompt = include_visual_style_profile(
-            require_h3_prompt(story["prompt"]), context.plan.goal
+        prompt_length = int(
+            context.node.inputs.get("length")
+            or context.plan.goal.constraints.get("native_h3_length")
+            or 362
+        )
+        prompt = _format_native_h3_video_prompt(
+            story, mode="l2va", duration_seconds=prompt_length / 24.0
         )
         payload = {
             "workflow_name": workflow_name,
@@ -747,8 +840,16 @@ class LongVideoSkills:
         )
         if not workflow_name:
             raise RuntimeError("Native H3 Ref2VA render requires workflow_name")
-        prompt = include_visual_style_profile(
-            require_h3_prompt(story["prompt"]), context.plan.goal
+        prompt_length = int(
+            context.node.inputs.get("length")
+            or context.plan.goal.constraints.get("native_h3_length")
+            or 124
+        )
+        prompt = _format_native_h3_video_prompt(
+            story,
+            mode="ref2va",
+            duration_seconds=prompt_length / 24.0,
+            references=references,
         )
         payload = {
             "workflow_name": workflow_name,
@@ -830,8 +931,13 @@ class LongVideoSkills:
         if not workflow_name:
             raise RuntimeError("Native H3 T2V render requires workflow_name")
         constraints = context.plan.goal.constraints
-        prompt = include_visual_style_profile(
-            require_h3_prompt(story["prompt"]), context.plan.goal
+        prompt_length = int(
+            context.node.inputs.get("length")
+            or constraints.get("native_h3_length")
+            or 362
+        )
+        prompt = _format_native_h3_video_prompt(
+            story, mode="t2va", duration_seconds=prompt_length / 24.0
         )
         payload = {
             "workflow_name": workflow_name,

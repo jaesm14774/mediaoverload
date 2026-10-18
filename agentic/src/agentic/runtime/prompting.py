@@ -316,14 +316,12 @@ def build_minimax_h3_prompt(
     goal: GoalRequest,
     segment: dict[str, Any],
     prior_frame: str | None = None,
-    *,
-    official_shot_syntax: bool = False,
 ) -> dict[str, Any]:
     """Build an H3 prompt from the current segment and optional audio direction."""
     base = build_segment_prompt(goal, segment, prior_frame=prior_frame)
     character = _subject_names(goal) or "the main character"
     audio_direction = str(goal.constraints.get("h3_audio_direction") or "").strip()
-    duration = max(1, int(goal.duration_seconds or 5))
+    duration = max(10, int(goal.duration_seconds or 10))
     raw_shots = segment.get("shots")
     shots = [dict(item) for item in raw_shots if isinstance(item, dict)] if isinstance(raw_shots, list) else []
     prompt = compose_minimax_h3_prompt(
@@ -333,15 +331,16 @@ def build_minimax_h3_prompt(
         base_prompt=base["prompt"],
         story_spine=segment.get("story_spine") if isinstance(segment.get("story_spine"), dict) else {},
         shots=shots,
-        audio=audio_direction,
+        overall_soundscape=audio_direction
+        or "Sound follows the scene's visible physical actions and setting.",
+        non_diegetic_music=str(
+            goal.constraints.get("h3_non_diegetic_music") or "N/A"
+        ),
         render_mode="image_to_video" if prior_frame else "text_to_video",
         prior_frame=bool(prior_frame),
         subject_context=_subject_context(goal),
-        official_shot_syntax=official_shot_syntax,
         media_type=goal.media_type,
     )
-    if audio_direction:
-        prompt = "\n".join((prompt, f"Audio direction: {audio_direction}"))
     return {
         **base,
         "prompt": prompt,
@@ -467,9 +466,9 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
     configured_duration = float(
         goal.duration_seconds
         or goal.constraints.get("sprite_duration_seconds")
-        or 5
+        or 10
     )
-    video_duration = min(8.0, max(4.0, configured_duration))
+    video_duration = max(10.0, configured_duration)
     chroma_color = resolve_dynamic_sprite_background(
         goal.constraints.get("sprite_chroma_color") or DYNAMIC_SPRITE_DEFAULT_BACKGROUND
     )

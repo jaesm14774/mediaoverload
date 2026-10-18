@@ -9,6 +9,7 @@ from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.reference_video import format_reference_video_directive
+from agentic.minimax_prompting import format_h3_video_prompt
 from agentic.runtime.story_cards import (
     STORY_CARD_DEFAULT_HEIGHT,
     STORY_CARD_DEFAULT_WIDTH,
@@ -113,7 +114,6 @@ class AgentPlanningSkills:
     def prepare_segment(self, context: SkillContext) -> SkillResult:
         segment_index = int(context.node.inputs["segment_index"])
         segment = context.state["script-plan"]["segments"][segment_index]
-        prior_frame = self._resolve_first_value(context, ("frame_path", "saved_files"))
         previous_segment = context.state["script-plan"]["segments"][segment_index - 1] if segment_index > 0 else None
         # Only a review node may inject a revision direction.  The ordinary
         # idea-brief dependency also exposes ``prompt``; treating that as a
@@ -126,7 +126,6 @@ class AgentPlanningSkills:
             segment,
             str(context.state["idea-brief"].get("negative_prompt", "")),
             previous_segment=previous_segment,
-            prior_frame=prior_frame,
         )
         if segment_index == 0:
             opening_frame_prompt = str(
@@ -152,6 +151,82 @@ class AgentPlanningSkills:
             outputs["prompt"] = ", ".join(part for part in (outputs["prompt"], f"revision direction: {review_direction}") if part)
             outputs["revised_prompt"] = outputs["prompt"]
         return SkillResult(status="success", outputs=outputs, logs=[f"Prepared prompt package for {segment['segment_id']}."])
+
+    def prepare_h3_segment(self, context: SkillContext) -> SkillResult:
+        segment_index = int(context.node.inputs["segment_index"])
+        segment = context.state["script-plan"]["segments"][segment_index]
+        scene_node = str(context.node.inputs["scene_prompt_node"])
+        draft = context.state.node_outputs.get(scene_node)
+        if not isinstance(draft, dict):
+            raise RuntimeError(f"H3 scene draft '{scene_node}' is missing")
+
+        image_references: list[dict[str, str]] = []
+        anchor_nodes = dict(context.node.inputs.get("anchor_nodes") or {})
+        recipe = str(context.node.inputs.get("recipe") or "")
+        anchor_labels = {
+            "first": "<Picture 1>",
+            "last": "<Picture 1>" if recipe == "anchor_last" else "<Picture 2>",
+        }
+        for position, role in (("first", "first-frame input"), ("last", "last-frame input")):
+            node_id = str(anchor_nodes.get(position) or "")
+            if not node_id:
+                continue
+            output = context.state.node_outputs.get(node_id)
+            path = self._first_path_from_output(
+                output,
+                ("frame_path", "selected_frame_path", "selected_assets", "saved_files", "media_paths"),
+            )
+            if path:
+                image_references.append({"path": path, "label": anchor_labels[position], "role": role})
+
+        reference_node = str(context.node.inputs.get("reference_node") or "")
+        reference_output = context.state.node_outputs.get(reference_node) if reference_node else None
+        if isinstance(reference_output, dict):
+            references = reference_output.get("reference_manifest") or []
+            if isinstance(references, list):
+                for reference in references:
+                    if not isinstance(reference, dict) or reference.get("type") == "video":
+                        continue
+                    path = str(reference.get("path") or "").strip()
+                    if path:
+                        image_references.append(
+                            {
+                                "path": path,
+                                "label": str(reference.get("prompt_label") or "reference image"),
+                                "role": str(reference.get("role") or "visual reference"),
+                            }
+                        )
+
+        outputs = self.prompt_engine.prepare_h3_segment(
+            context.plan.goal,
+            segment,
+            draft_prompt=str(draft.get("prompt") or ""),
+            overall_soundscape=str(draft.get("overall_soundscape") or ""),
+            non_diegetic_music=str(draft.get("non_diegetic_music") or "N/A"),
+            duration_seconds=float(context.node.inputs.get("duration_seconds") or 10.0),
+            image_references=image_references,
+        )
+        return SkillResult(
+            status="success",
+            outputs=outputs,
+            metrics={"conditioning_image_count": len(image_references)},
+            logs=[f"Prepared the final H3 prompt after inspecting {len(image_references)} conditioning image(s)."],
+        )
+
+    @staticmethod
+    def _first_path_from_output(output: object, keys: tuple[str, ...]) -> str:
+        if not isinstance(output, dict):
+            return ""
+        for key in keys:
+            value = output.get(key)
+            candidates = value if isinstance(value, list) else [value]
+            for candidate in candidates:
+                if isinstance(candidate, dict):
+                    candidate = candidate.get("path") or candidate.get("file_path")
+                path = str(candidate or "").strip()
+                if path:
+                    return path
+        return ""
 
     def generate_sticker_expressions(self, context: SkillContext) -> SkillResult:
         character = str(context.node.inputs.get("character", "")).strip()
@@ -516,12 +591,37 @@ class AgentMediaSkills:
 
     def animate_image(self, context: SkillContext) -> SkillResult:
         workflow_name = str(context.node.inputs.get("workflow_name", ""))
+        raw_prompt = self._resolve_prompt(context)
+        if workflow_name == "minimax_h3_i2va":
+            brief = context.state.node_outputs.get("idea-brief", {})
+            length = context.node.inputs.get("length")
+            duration_seconds = (
+                float(length) / 24.0
+                if length is not None
+                else float(context.plan.goal.duration_seconds or 10)
+            )
+            i2va_description = (
+                "The attached image is the exact opening frame. Preserve its visible subject identity, "
+                "pose, silhouette, colors, composition, and existing props. Continue immediately from "
+                "this frame through the following motion: "
+                f"{raw_prompt}"
+            )
+            prompt = format_h3_video_prompt(
+                i2va_description,
+                mode="i2va",
+                duration_seconds=duration_seconds,
+                overall_soundscape=str(
+                    brief.get("overall_soundscape")
+                    or "Sound follows the scene's visible physical actions and setting."
+                ),
+                non_diegetic_music=str(brief.get("non_diegetic_music") or "N/A"),
+            )
+        else:
+            prompt = include_visual_style_profile(raw_prompt, context.plan.goal)
         payload: dict[str, object] = {
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
-            "prompt": include_visual_style_profile(
-                self._resolve_prompt(context), context.plan.goal
-            ),
+            "prompt": prompt,
             "model_profile": str(
                 context.node.inputs.get("model_profile")
                 or context.plan.goal.constraints.get("native_h3_model_profile")
@@ -925,6 +1025,12 @@ class AgentMediaSkills:
         )
         if not video_path:
             raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
+        output_name = str(
+            context.node.inputs.get("output_name")
+            or f"{Path(video_path).stem}_trimmed.mp4"
+        )
+        if Path(output_name).name != output_name:
+            raise ValueError("video trim output_name must be a filename")
         duration_seconds = float(
             context.node.inputs.get("duration_seconds")
             or context.plan.goal.duration_seconds
@@ -933,7 +1039,7 @@ class AgentMediaSkills:
             "media.trim_video",
             {
                 "video_path": video_path,
-                "output_path": str(video_dir / f"{Path(video_path).stem}_trimmed.mp4"),
+                "output_path": str(video_dir / output_name),
                 "duration_seconds": duration_seconds,
                 "normalize_audio": bool(context.node.inputs.get("normalize_audio", False)),
             },
@@ -1382,6 +1488,7 @@ def register_agent_primitive_skills(
     skill_registry.register("agent.prompt.compose", planning.compose_prompt, "Compose a reusable prompt bundle")
     skill_registry.register("agent.story.segment", planning.segment_story, "Break a story into reusable segments")
     skill_registry.register("agent.segment.prepare", planning.prepare_segment, "Prepare one segment prompt bundle")
+    skill_registry.register("agent.segment.prepare_h3", planning.prepare_h3_segment, "Prepare a final H3 prompt from the scene draft and conditioning images")
     skill_registry.register("agent.review.refine_prompt", planning.refine_prompt_after_review, "Refine a prompt using review feedback")
     skill_registry.register("agent.sticker.expressions", planning.generate_sticker_expressions, "Generate sticker expression ideas")
     skill_registry.register("agent.sticker.prompt_set", planning.build_sticker_prompt_set, "Build sticker prompt sets")

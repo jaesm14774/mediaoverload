@@ -102,6 +102,23 @@ def merge_native_h3_storyboard(
                 return value
         return ""
 
+    def first_camera_text(mapping: dict[str, Any]) -> str:
+        for key in ("camera", "camera_direction", "camera_movement", "shot"):
+            value = mapping.get(key)
+            if isinstance(value, dict):
+                parts = [
+                    f"{field.replace('_', ' ')}: {str(detail).strip()}"
+                    for field, detail in value.items()
+                    if isinstance(detail, str) and detail.strip()
+                ]
+                if parts:
+                    return "; ".join(parts)
+            else:
+                text = str(value or "").strip()
+                if text:
+                    return text
+        return ""
+
     duration_seconds = float(
         base_storyboard.get("native_duration_seconds")
         or 15
@@ -164,9 +181,7 @@ def merge_native_h3_storyboard(
                 "creative_brief",
             ) or str(base_storyboard.get("base_prompt") or "").strip()
         title = first_text(raw_shot, "title", "name", "beat") or first_text(base_shot, "title", "name", "beat")
-        camera = first_text(raw_shot, "camera", "camera_direction", "camera_movement", "shot") or first_text(
-            base_shot, "camera", "camera_direction", "camera_movement", "shot"
-        )
+        camera = first_camera_text(raw_shot) or first_camera_text(base_shot)
         cause = first_text(raw_shot, "cause", "physical_cause") or first_text(base_shot, "cause", "physical_cause")
         effect = first_text(raw_shot, "effect", "physical_effect") or first_text(base_shot, "effect", "physical_effect")
         state_change = first_text(
@@ -283,18 +298,31 @@ def merge_native_h3_storyboard(
     negative_prompt = str(base_storyboard.get("negative_prompt") or "").strip()
     native_audio = generated_story.get("native_audio")
     if isinstance(native_audio, dict):
-        native_audio = " ".join(
-            f"{label}: {str(native_audio.get(key) or '').strip()}"
-            for key, label in (("overall_soundscape", "Overall soundscape"), ("non_diegetic_music", "Non-diegetic music"))
-            if str(native_audio.get(key) or "").strip()
+        native_audio = {
+            "overall_soundscape": str(native_audio.get("overall_soundscape") or "").strip(),
+            "non_diegetic_music": str(native_audio.get("non_diegetic_music") or "N/A").strip(),
+        }
+    elif isinstance(native_audio, str):
+        native_audio = native_audio.strip()
+    else:
+        native_audio = ""
+    if not native_audio or (
+        isinstance(native_audio, dict)
+        and not native_audio.get("overall_soundscape")
+    ):
+        existing_music = (
+            str(native_audio.get("non_diegetic_music") or "").strip()
+            if isinstance(native_audio, dict)
+            else ""
         )
-    native_audio = str(native_audio or "").strip()
-    if not native_audio:
-        native_audio = "; ".join(
-            first_text(shot, "audio_direction", "audio")
-            for shot in shots
-            if isinstance(shot, dict) and first_text(shot, "audio_direction", "audio")
-        )
+        native_audio = {
+            "overall_soundscape": "; ".join(
+                first_text(shot, "audio_direction", "audio")
+                for shot in shots
+                if isinstance(shot, dict) and first_text(shot, "audio_direction", "audio")
+            ),
+            "non_diegetic_music": existing_music or "N/A",
+        }
 
     gag_card = generated_story.get("gag_card")
     news_trace = generated_story.get("news_trace")
@@ -333,6 +361,7 @@ def format_native_h3_prompt(
     style: str = "cinematic 2D anime",
     creative_brief: str = "",
     duration_seconds: int | None = None,
+    render_mode: str | None = None,
 ) -> str:
     """Build a native H3 prompt from the user's story and optional shot notes.
 
@@ -346,11 +375,19 @@ def format_native_h3_prompt(
     world = dict(storyboard.get("world") or {})
     character = str(storyboard.get("character") or "the protagonist").strip()
     duration = int(duration_seconds or storyboard.get("native_duration_seconds") or 15)
-    render_mode = str(storyboard.get("render_mode") or "").strip()
+    render_mode = str(render_mode or storyboard.get("render_mode") or "").strip()
     shot_payloads: list[dict[str, Any]] = []
     for index, shot in enumerate(shots, start=1):
         shot_payloads.append(dict(shot) if isinstance(shot, dict) else {"action": str(shot or "")})
-    audio = str(storyboard.get("native_audio") or "").strip()
+    native_audio = storyboard.get("native_audio")
+    if isinstance(native_audio, dict):
+        overall_soundscape = str(native_audio.get("overall_soundscape") or "").strip()
+        non_diegetic_music = str(native_audio.get("non_diegetic_music") or "N/A").strip()
+    else:
+        overall_soundscape = str(native_audio or "").strip()
+        non_diegetic_music = "N/A"
+    if not overall_soundscape:
+        overall_soundscape = "Sound follows the scene's visible physical actions and setting."
     prompt = compose_minimax_h3_prompt(
         duration_seconds=duration,
         character=character,
@@ -358,7 +395,8 @@ def format_native_h3_prompt(
         setting=str(world.get("setting") or ""),
         visual_language=str(world.get("visual_language") or ""),
         shots=shot_payloads,
-        audio=audio,
+        overall_soundscape=overall_soundscape,
+        non_diegetic_music=non_diegetic_music,
         render_mode=render_mode,
         subject_context=dict(storyboard.get("subject_context") or {}),
         media_type=render_mode or "native_h3_story",

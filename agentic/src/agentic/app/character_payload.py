@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 from agentic.app.character_requests import CharacterWorkflowRequest
 from agentic.app.creative_profiles import resolve_creative_profile
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    normalize_video_duration,
+)
 from agentic.runtime.observability import RunRecorder
 from agentic.runtime.prompting import visual_style_profile_direction
 from agentic.runtime.strategies import (
@@ -213,6 +217,10 @@ def build_goal_payload_from_character_config(
         )
     )
     agentic_media_type = media_type_for_generation(config_generation_type)
+    if requested_duration_seconds is not None:
+        requested_duration_seconds = normalize_video_duration(
+            agentic_media_type, requested_duration_seconds
+        )
     native_recipe = dict(
         _native_recipe_for_generation(generation, config_generation_type)
     )
@@ -322,6 +330,9 @@ def build_goal_payload_from_character_config(
         routed_segment_count=routing.get("count_plan", {}).get("segment_count"),
         requested_duration_seconds=requested_duration_seconds,
         longvideo_config=longvideo_config,
+    )
+    duration_seconds = normalize_video_duration(
+        agentic_media_type, duration_seconds
     )
     reference_video_source = (
         requested_reference_video_source
@@ -584,7 +595,13 @@ def build_goal_payload_from_character_config(
         "enable_review_loop": bool(enable_review_loop and not no_review),
         "allow_regenerate_review": bool(review.allow_regenerate),
         "review_notes": review_notes,
-        "news_driven": effective_news_driven,
+        "news_driven": bool(
+            autonomous_prompt.get("news_driven", effective_news_driven)
+        ),
+        "news_grounding_required": bool(
+            autonomous_prompt.get("news_grounding_required", effective_news_driven)
+        ),
+        "news_source_anchors": list(autonomous_prompt.get("source_anchors") or []),
         "native_h3_arc_instruction": requested_native_h3_arc_instruction,
         "native_h3_keyframe_candidate_count": native_keyframe_candidate_count,
         "pre_video_review_enabled": pre_video_review_enabled,
@@ -634,7 +651,12 @@ def build_goal_payload_from_character_config(
         "source_config_path": str(path),
         "source_generation_type": config_generation_type,
         "duration_override_seconds": (
-            max(1, int(requested_duration_seconds))
+            duration_seconds
+            if config_generation_type in NATIVE_STORY_GENERATION_TYPES
+            else normalize_video_duration(
+                agentic_media_type,
+                requested_duration_seconds,
+            )
             if requested_duration_seconds is not None
             else None
         ),
@@ -769,7 +791,10 @@ def build_goal_payload_from_character_config(
                 or ""
             ),
             "native_h3_duration_seconds": int(
-                native_recipe.get("duration_seconds") or duration_seconds
+                max(
+                    MIN_VIDEO_DURATION_SECONDS,
+                    int(native_recipe.get("duration_seconds") or duration_seconds),
+                )
             ),
             "native_h3_length": int(
                 native_recipe.get("length")
@@ -842,12 +867,13 @@ def build_goal_payload_from_character_config(
         ):
             # The routing count policy is intentionally conservative for LLM
             # schema generation. Production duration, however, must determine
-            # the actual number of five-second H3 clips so 30s and 45s do not
-            # render four clips and stretch the final image for the remainder.
+            # a viable count of H3 clips that each run for at least ten seconds.
             if requested_duration_seconds is not None:
-                duration_seconds = max(1, int(requested_duration_seconds))
+                duration_seconds = max(
+                    MIN_VIDEO_DURATION_SECONDS, int(requested_duration_seconds)
+                )
             constraints["segment_count"] = max(
-                2, math.ceil(float(duration_seconds) / 5.0)
+                1, int(duration_seconds) // MIN_VIDEO_DURATION_SECONDS
             )
     character_config_summary = _summarize_character_config(
         path=path,

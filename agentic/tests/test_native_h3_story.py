@@ -17,6 +17,7 @@ from provider_fakes import ScriptedLLMManager
 from agentic.runtime.llm_client import PromptGenerationError
 from agentic.runtime.model_backends import OpenRouterModelCatalog
 from agentic.runtime.contracts import RunState
+from agentic.runtime.news_grounding import is_usable_news_selection
 from agentic.skills.agent_primitives import AgentMediaSkills
 from agentic.skills.longvideo import LongVideoSkills
 from agentic.storyboard import (
@@ -25,7 +26,6 @@ from agentic.storyboard import (
     load_storyboard,
     merge_native_h3_storyboard,
 )
-from agentic.tools.context_services import NewsContextService
 
 
 def _unavailable_manager(backend):
@@ -38,8 +38,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         cls.repo_root = Path(__file__).resolve().parents[2]
         cls.config_path = cls.repo_root / "configs" / "characters" / "kirby.yaml"
 
-    def test_user_given_an_llm_video_prompt_and_selected_style_profile_when_native_h3_l2va_renders_then_all_profile_rules_reach_the_video_model(self) -> None:
-        """User Given an LLM video prompt and a selected visual style profile When Native H3 L2VA renders Then the full profile remains in the final video-model prompt."""
+    def test_user_given_an_llm_video_prompt_and_selected_style_profile_when_native_h3_l2va_renders_then_mode_fields_anchor_the_supplied_last_frame(self) -> None:
+        """User Given a scene prompt and selected visual style profile, When Native H3 L2VA renders, Then official fields and end-frame alignment reach the video model without a redundant style preamble."""
         calls: list[tuple[str, dict[str, object]]] = []
 
         class FakeTools:
@@ -85,8 +85,11 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(calls[0][0], "comfy.render_h3")
         self.assertEqual(calls[0][1]["h3_mode"], "l2va")
-        for rule in profile.values():
-            self.assertIn(rule, calls[0][1]["prompt"])
+        self.assertIn("<Picture 1> (from [Shot 1]) aligns with the 15.08-second mark", calls[0][1]["prompt"])
+        self.assertIn("integrated_multimodal_description: [Shot 1] Kirby kneels", calls[0][1]["prompt"])
+        self.assertIn("overall_soundscape:", calls[0][1]["prompt"])
+        self.assertIn("non_diegetic_music:", calls[0][1]["prompt"])
+        self.assertNotIn("Selected visual style rules take priority", calls[0][1]["prompt"])
 
     def test_character_route_builds_native_h3_graph_without_power_shell_entrypoint(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -470,7 +473,9 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         )
         self.assertIn("Kirby runs through a blue-hour summer storm", prompt)
         self.assertIn("camera tracks beside Kirby", prompt)
-        self.assertIn("Duration: 15 seconds.", prompt)
+        self.assertIn("integrated_multimodal_description:", prompt)
+        self.assertIn("overall_soundscape:", prompt)
+        self.assertIn("non_diegetic_music:", prompt)
         self.assertNotIn("contract", prompt.lower())
         self.assertNotIn("Creative variation for this run", prompt)
         self.assertNotIn("Follow the supplied creative brief", prompt)
@@ -587,7 +592,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(merged["gag_card"]["prop_rule"], generated_story["gag_card"]["prop_rule"])
         prompt = format_native_h3_prompt(merged, duration_seconds=15)
         self.assertIn("runaway cushion", prompt)
-        self.assertIn("cushion hugs back", prompt.lower())
+        self.assertIn("wraps him in a soft hug", prompt.lower())
 
         pair_base = dict(base_storyboard)
         pair_base["subject_context"] = {
@@ -701,9 +706,9 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn('document', result['story']['base_prompt'])
 
     def test_news_selection_rejects_placeholder_titles(self) -> None:
-        self.assertFalse(NewsContextService.is_usable_selection("...", "gold;reserve"))
-        self.assertFalse(NewsContextService.is_usable_selection("", "gold;reserve"))
-        self.assertTrue(NewsContextService.is_usable_selection("Central bank changes reserve policy", "gold;reserve"))
+        self.assertFalse(is_usable_news_selection("...", "gold;reserve"))
+        self.assertFalse(is_usable_news_selection("", "gold;reserve"))
+        self.assertTrue(is_usable_news_selection("Central bank changes reserve policy", "gold;reserve"))
 
     def test_user_given_story_missing_optional_spine_fields_when_generated_shots_are_merged_then_the_prompt_gets_grounded_fallbacks(self) -> None:
         """User Given optional spine fields are missing from an otherwise usable generated story When its shots are merged Then visible shot states provide grounded stakes and climax without another generation gate."""
@@ -1266,7 +1271,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn(merged["native_shots"][0]["action"], render_prompt)
         self.assertNotIn("\nNews grounding context:", render_prompt)
         self.assertNotIn("\nAdditional source context:", render_prompt)
-        self.assertIn("Cause: The scheduled system migration updates the instructions without being triggered by Kirby.", render_prompt)
+        self.assertIn("Because The scheduled system migration updates the instructions without being triggered by Kirby", render_prompt)
 
     def test_user_given_news_gag_when_story_is_formatted_then_physical_cause_and_full_payoff_reach_video_prompt(self) -> None:
         """User Given a character-led news gag, When formatted, Then H3 receives the final shots' cause, setback and payoff without the editorial staging card."""
@@ -1341,7 +1346,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         prompt = format_native_h3_prompt(merged, duration_seconds=15)
 
-        self.assertIn("Cause: The article's correction reveals that the saved instructions continue under the Skills name.", prompt)
+        self.assertIn("Because The article's correction reveals that the saved instructions continue under the Skills name", prompt)
         self.assertIn("Kirby starts a solemn farewell wave", prompt)
         self.assertIn("stops the farewell mid-wave", prompt)
         self.assertIn("hold a clear shared relief pose", prompt)

@@ -28,6 +28,35 @@ class ImageConditioningWorkflowTests(unittest.TestCase):
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
+    def test_user_given_approved_first_frame_when_h3_prompt_is_composed_then_official_i2va_fields_anchor_the_action(self) -> None:
+        """User Given an approved first frame and one scene action, When the H3 I2VA prompt is composed, Then it starts with the official frame alignment and contains the three audiovisual fields."""
+        prompt = compose_minimax_h3_prompt(
+            duration_seconds=5,
+            character="MetaKnight",
+            style="bold inked 2D comic",
+            shots=[
+                {
+                    "action": "MetaKnight lowers his hand from the mask and turns toward the warning monitor.",
+                    "camera": "The camera pushes in slowly while keeping the monitor beside him.",
+                    "state_change": "MetaKnight faces the warning with his hand lowered.",
+                }
+            ],
+            render_mode="i2va",
+            prior_frame=True,
+            overall_soundscape="A soft electronic pulse sounds once under quiet clinic room tone.",
+        )
+
+        self.assertTrue(
+            prompt.startswith(
+                "For the target video, at 0.00 seconds into the target video, "
+                "<Picture 1> (from [Shot 1]) is fully referenced.\n\n"
+            )
+        )
+        self.assertIn("integrated_multimodal_description: [Shot 1]", prompt)
+        self.assertIn("overall_soundscape: A soft electronic pulse", prompt)
+        self.assertIn("non_diegetic_music: N/A", prompt)
+        self.assertIn("MetaKnight lowers his hand", prompt)
+
     def test_user_given_character_profile_when_prompt_is_composed_then_it_is_passed_as_reference(self) -> None:
         reference = subject_reference(
             "Waddle Dee",
@@ -61,8 +90,9 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         )
         self.assertLess(len(prompt), 7000)
         self.assertNotIn("Video action and camera direction:", prompt)
-        self.assertIn("[Shot 1 | 0-6s]", prompt)
-        self.assertLess(prompt.index("Protagonist objective:"), prompt.index("Shot progression:"))
+        self.assertIn("integrated_multimodal_description: [Shot 1]", prompt)
+        self.assertIn("overall_soundscape:", prompt)
+        self.assertLess(prompt.index("aims to save the seed"), prompt.index("Kirby runs and catches the seed"))
         self.assertLess(prompt.index("Kirby runs and catches the seed"), prompt.index("tracking shot follows the run"))
         self.assertNotIn("Input relation:", prompt)
 

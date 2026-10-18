@@ -1,6 +1,11 @@
 """Automatic three-beat story, illustrations and progressive-panel video."""
 
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    ExecutionNode,
+    ExecutionPlan,
+    GoalRequest,
+)
 from agentic.runtime.motion_comics import MOTION_COMIC_DEFAULTS
 from agentic.runtime.planning.common import PlanningContext
 
@@ -10,6 +15,11 @@ def build_motion_comic(context: PlanningContext, goal: GoalRequest) -> Execution
         **MOTION_COMIC_DEFAULTS,
         **dict(goal.constraints.get("motion_comic") or {}),
     }
+    config["duration_seconds"] = max(
+        goal.duration_seconds,
+        int(config.get("duration_seconds") or MIN_VIDEO_DURATION_SECONDS),
+        MIN_VIDEO_DURATION_SECONDS,
+    )
     manifest = context.manifest_from_goal_constraints(
         goal,
         *context.DEFAULT_IMAGE_WORKFLOWS,
@@ -59,7 +69,7 @@ def build_motion_comic(context: PlanningContext, goal: GoalRequest) -> Execution
             inputs=context.scaled_video_qa_inputs(
                 goal,
                 {
-                    "target_duration": goal.duration_seconds,
+                    "target_duration": config["duration_seconds"],
                     "expected_width": config["width"],
                     "expected_height": config["height"],
                     "expected_fps": config["fps"],

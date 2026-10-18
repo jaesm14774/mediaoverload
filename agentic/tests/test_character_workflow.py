@@ -21,6 +21,7 @@ from agentic.app.character_payload import build_goal_payload_from_character_conf
 from agentic.app.character_selection import resolve_character_selection
 from character_workflow_helpers import make_character_workflow_request
 from agentic.tools.context_services import NewsContextService, NewsSelection
+from agentic.runtime.news_grounding import is_brand_safe_news_selection
 from agentic.app.main import _allow_runtime_output_for_visual_evidence
 
 
@@ -845,7 +846,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     prompt="Kirby sticker emotions: happy, angry, crying, sleepy",
                 ))
 
-    def test_build_goal_payload_generates_prompt_from_news_when_prompt_missing(self) -> None:
+    def test_user_given_blank_prompt_when_random_news_is_selected_then_payload_marks_news_driven_and_grounded(self) -> None:
+        """User Given an empty brief When this workflow selects a random article Then that selected article becomes the required creative source."""
         with patch(
             "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
             return_value={
@@ -884,7 +886,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "creative_seed": "Taipei panda steals zongzi",
                 "news_context": {"title": "Taipei panda steals zongzi", "keyword": "panda"},
             },
-        ):
+        ) as generate_prompt:
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
                 self.repo_root,
                 self.kirby_config,
@@ -899,11 +901,69 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["prompt_source"], "autonomous_llm")
         self.assertEqual(payload["constraints"]["creative_seed"], "Taipei panda steals zongzi")
         self.assertEqual(payload["constraints"]["news_context"]["keyword"], "panda")
+        self.assertTrue(payload["constraints"]["news_driven"])
+        self.assertTrue(payload["constraints"]["news_grounding_required"])
+        self.assertTrue(generate_prompt.call_args.kwargs["news_grounding_required"])
+
+    def test_user_given_optional_news_context_when_news_driven_is_false_then_context_does_not_promote_mode(self) -> None:
+        """User Given an optional supplied article When an autonomous prompt is generated with news-driven mode off Then the article remains optional context."""
+        news = {
+            "title": "NASA field-tests an AI robot fleet",
+            "keyword": "NASA ASTRA robot fleet",
+        }
+        with patch(
+            "agentic.runtime.llm_engine.LLMPromptEngine.route_generation_strategy",
+            return_value={
+                "generation_type": "text2video",
+                "workflow_plan": {
+                    "image_workflow_name": "",
+                    "video_workflow_name": "minimax_h3_t2va",
+                    "refine_workflow_name": "",
+                    "transition_workflow_name": "",
+                    "upscale_workflow_name": "",
+                },
+                "count_plan": {
+                    "image_count": 1,
+                    "video_count": 1,
+                    "segment_count": 1,
+                    "review_selection_limit": 1,
+                    "sticker_expression_count": 1,
+                    "images_per_prompt": 1,
+                },
+                "reason": "Short animated scene fits text2video.",
+                "prompt_mode": "llm",
+            },
+        ), patch(
+            "agentic.tools.context_services.NewsContextService.get_random_news",
+            side_effect=AssertionError("an explicitly supplied context should be reused"),
+        ), patch(
+            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
+            return_value={
+                "prompt": "Kirby watches a robot fleet cross a field",
+                "source": "autonomous_llm",
+                "prompt_mode": "llm",
+                "creative_seed": "robot fleet field test",
+                "news_context": news,
+            },
+        ) as generate_prompt:
+            payload = build_goal_payload_from_character_config(make_character_workflow_request(
+                self.repo_root,
+                self.kirby_config,
+                prompt="",
+                preferred_generation_type="text2video",
+                news_driven=False,
+                news_context=news,
+            ))
+
+        self.assertEqual(payload["constraints"]["news_context"], news)
+        self.assertFalse(payload["constraints"]["news_driven"])
+        self.assertFalse(payload["constraints"]["news_grounding_required"])
+        self.assertFalse(generate_prompt.call_args.kwargs["news_grounding_required"])
 
     def test_news_selection_rejects_brand_unsafe_titles(self) -> None:
-        self.assertTrue(NewsContextService.is_brand_safe_selection("Cloudflare launches WebMCP", "AI agent"))
-        self.assertFalse(NewsContextService.is_brand_safe_selection("AI性愛機器人新產品", "AI;性愛機器人"))
-        self.assertFalse(NewsContextService.is_brand_safe_selection("牙醫猝逝後愛貓也離世", "生活焦點"))
+        self.assertTrue(is_brand_safe_news_selection("Cloudflare launches WebMCP", "AI agent"))
+        self.assertFalse(is_brand_safe_news_selection("AI性愛機器人新產品", "AI;性愛機器人"))
+        self.assertFalse(is_brand_safe_news_selection("牙醫猝逝後愛貓也離世", "生活焦點"))
 
     def test_native_h3_news_mode_does_not_create_a_second_autonomous_prompt(self) -> None:
         news = type(

@@ -37,13 +37,12 @@ routing:
   longvideo_config:
     production_profile: text2longvideo
     default_duration_seconds: 30
-    segment_duration: 5
+    segment_duration: 10
     review_policy: opening_only
     continuity_mode: rendered_tail
     workflow_names:
       - minimax_h3_i2va
       - minimax_h3_fl2va
-    length: 120
     steps: 16
     model_profile: q2
 
