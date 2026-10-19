@@ -70,8 +70,6 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 
 ## 架構與維護
 
-新維護者請先讀[工程師接手指南](docs/engineering-handover.md)，依一條實際生成路徑熟悉系統責任、審查關卡、run 證據與待確認的外部邊界。[架構與擴充指南](docs/architecture.md) 說明共用與策略專用責任、如何新增策略／模型／LLM，以及驗證邊界。
-
 - [ComfyUI H3 工作流與輸入契約](docs/comfyui_h3.md)
 - [H3 提示契約](docs/minimax_h3_prompting.md)
 - [Krea2 工作流操作](docs/krea2_comfyui_best_practice.md)

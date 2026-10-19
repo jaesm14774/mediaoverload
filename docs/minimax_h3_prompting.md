@@ -24,6 +24,17 @@ This order lets the prompt writer inspect the actual image while keeping keyfram
 
 Describe motion positively as an ordered chain: what moves from the first moment, its target and path, the next connected action, and the visible resulting state. Use two or three concrete action verbs. A state description plus negative rules such as “do not hold” did not produce reliable movement in the paired H3 renders; an ordered sword-to-chart action did.
 
+## Single-focus action continuity
+
+### Acceptance scenarios
+
+- User Given a multi-segment action story with one lead subject, a required supporting pursuer, and connected street changes, When the segments and H3 scene prompts are prepared, Then the lead remains the sole visual focus, the pursuer keeps its supporting role and relative position, and each setting change follows the route or a motivated cut without reversing screen direction.
+- User Given a brief that explicitly requests an ensemble or co-leads, When the video prompts are prepared, Then the requested subjects can share focus while their stated identities and relationships remain consistent.
+
+Unless the brief requests an ensemble or co-leads, video planning selects one primary visual focus. Other necessary subjects stay subordinate to it; they retain their named identity, action role, and stated lead/follow or pursuer/fleeing relationship across segments. Vary camera distance, angle, and setting to create energy without reversing the action axis or making a supporting subject take over. A location change must follow a described route or a motivated cut, and the new shot must preserve the action's readable direction and spatial order.
+
+These are prompt-planning constraints, not a guarantee from H3. Review every segment and both sides of each cut for role, identity, and screen-direction continuity before accepting the assembled clip.
+
 ## Review and limits
 
 Local contracts verify which prompt and image paths reach the ComfyUI boundary. They do not prove visual quality. Review the generated video for identity, image adherence, visible action, endpoint continuity, and audible scene response. The official MiniMax prompt skill and ComfyUI H3 documentation are the format sources:
