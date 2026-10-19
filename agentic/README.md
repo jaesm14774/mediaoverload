@@ -8,4 +8,4 @@ python -m pip install -e "./agentic[dev]"
 agentic --goal "A hero catches a falling seed" --media-type image
 ```
 
-安裝與操作請看 [專案 README](../README.md)。共用邊界、策略與模型擴充方式請看 [架構指南](../docs/architecture.md)。此文件不另維護一份策略或環境變數清單。
+安裝與操作請看 [專案 README](../README.md)。此文件不另維護一份策略或環境變數清單。

@@ -83,6 +83,11 @@ SCENE_RESPONSE_CONTRACT = (
 
 H3_SEGMENT_RESPONSE_CONTRACT = (
     "Return a concise H3 scene description in prompt, separate from the two audio fields. "
+    "Unless the brief explicitly requests an ensemble or co-leads, choose one primary visual focus "
+    "and keep every other required subject subordinate. Preserve each subject's identity, action role, "
+    "and stated spatial relationship across the segment; never reverse who leads, follows, pursues, "
+    "or flees. When the setting changes, connect it through the subject's route or a motivated cut, "
+    "preserving readable screen direction and subject order. "
     "overall_soundscape must give 1–4 concrete sentences about ambience and audible physical actions. "
     "non_diegetic_music must give 1–3 concrete sentences about instrumentation, tempo, rhythm, and dynamics, "
     "or N/A when no score is requested. Do not repeat dialogue or music in overall_soundscape. "
@@ -90,6 +95,9 @@ H3_SEGMENT_RESPONSE_CONTRACT = (
 
 H3_INITIAL_ACTION_CONTRACT = (
     "For a video request, write prompt as a motion-only timeline for H3 I2VA, not as another image prompt. "
+    "Unless the brief explicitly requests an ensemble or co-leads, keep one primary visual focus; "
+    "other required subjects remain subordinate and retain their stated roles and spatial relationship. "
+    "Do not reverse who leads, follows, pursues, or flees. "
     "The selected image is the exact opening state and supplies the subject's visible identity, pose, style, "
     "composition, colors, setting, and existing props. Describe only what changes after that state: immediate "
     "action onset, a chronological physical path, camera movement that supports that path, follow-through, and "
@@ -525,6 +533,11 @@ def segment_story(
             key for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS
         )
         camera_contract = (
+            "Unless the brief explicitly requests an ensemble or co-leads, choose one primary visual "
+            "focus and identify it in every segment; keep other required subjects subordinate and "
+            "preserve their identities, roles, and spatial order. Do not reverse who leads, follows, "
+            "pursues, or flees. When a setting changes, connect it through the subject's route or a "
+            "motivated cut; preserve screen direction, or re-establish it clearly before changing the axis. "
             "Give every segment a distinct consecutive beat and a readable start and result. "
             "For a causal story, keep one visible goal, one obstacle, and one turn that changes the outcome; "
             "each beat changes a visible state and causes the next, and the ending resolves or reframes the opening. "
