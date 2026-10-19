@@ -70,6 +70,7 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 
 ## 架構與維護
 
+- [MediaOverload 工程交接指南](docs/engineering-handover/index.md)：依一筆媒體請求理解角色流程、審查關卡、run 記錄與維護邊界。
 - [ComfyUI H3 工作流與輸入契約](docs/comfyui_h3.md)
 - [H3 提示契約](docs/minimax_h3_prompting.md)
 - [Krea2 工作流操作](docs/krea2_comfyui_best_practice.md)
