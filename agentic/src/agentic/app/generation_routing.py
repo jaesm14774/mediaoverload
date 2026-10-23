@@ -1014,7 +1014,7 @@ def _resolve_autonomous_prompt(
         keyword = str(news_context.get("keyword") or "")
         if not is_usable_news_selection(title, keyword):
             raise ValueError(
-                "Explicit news context requires a usable title and keyword."
+                "Explicit news context requires a usable title."
             )
         if not is_brand_safe_news_selection(title, keyword):
             raise ValueError("Explicit news context is not brand safe.")
@@ -1033,7 +1033,7 @@ def _resolve_autonomous_prompt(
     if not news_context:
         try:
             news_service = NewsContextService()
-            selected_news = news_service.get_random_news()
+            selected_news = news_service.select_news()
             if selected_news is not None:
                 selected_context = selected_news.to_dict()
                 selected_title = str(selected_context.get("title") or "")

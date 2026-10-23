@@ -133,7 +133,7 @@ class NativeH3StoryServiceTests(unittest.TestCase):
         }
         service = NativeH3StoryService(
             llm_engine=FakeLLM(),
-            news_service=SimpleNamespace(get_random_news=lambda: None),
+            news_service=SimpleNamespace(select_news=lambda: None),
             storyboard_merger=lambda base, story: {"base": base, "story": story},
         )  # type: ignore[arg-type]
 
@@ -156,7 +156,7 @@ class NativeH3StoryServiceTests(unittest.TestCase):
         arc_guidance = "Use hook_payoff: pose one question, build a clue, then answer it visibly."
 
         class FakeNewsService:
-            def get_random_news(self) -> SimpleNamespace:
+            def select_news(self) -> SimpleNamespace:
                 return SimpleNamespace(to_dict=lambda: {"title": "rain warning", "keyword": "weather"})
 
         class FakeLLM:
@@ -192,7 +192,7 @@ class NativeH3StoryServiceTests(unittest.TestCase):
         calls: list[dict[str, object]] = []
 
         class FakeNewsService:
-            def get_random_news(self) -> SimpleNamespace:
+            def select_news(self) -> SimpleNamespace:
                 return SimpleNamespace(to_dict=lambda: {"title": "rain warning", "keyword": "weather"})
 
         class FakeLLM:

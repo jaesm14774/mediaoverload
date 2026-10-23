@@ -877,7 +877,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "prompt_mode": "llm",
             },
         ), patch(
-            "agentic.tools.context_services.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.select_news",
             return_value=type(
                 "_News",
                 (),
@@ -940,7 +940,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 "prompt_mode": "llm",
             },
         ), patch(
-            "agentic.tools.context_services.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.select_news",
             side_effect=AssertionError("an explicitly supplied context should be reused"),
         ), patch(
             "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
@@ -978,7 +978,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             {"to_dict": lambda self: {"title": "Taipei panda steals zongzi", "keyword": "panda"}},  # noqa: ARG005
         )()
         with tempfile.TemporaryDirectory(), patch(
-            "agentic.tools.context_services.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.select_news",
             return_value=news,
         ), patch(
             "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
@@ -1081,7 +1081,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             category="technology",
         )
         with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "agentic.tools.context_services.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.select_news",
             return_value=news,
         ), patch(
             "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
@@ -1115,7 +1115,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             category="technology",
         )
         with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "agentic.tools.context_services.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.select_news",
             return_value=news,
         ), patch(
             "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
@@ -1167,7 +1167,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 }
             },
         ), patch(
-            "agentic.tools.context_services.NewsContextService.get_random_news",
+            "agentic.tools.context_services.NewsContextService.select_news",
             return_value=NewsSelection(
                 title="CI fixture headline",
                 keyword="fixture",

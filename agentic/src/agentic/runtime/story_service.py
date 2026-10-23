@@ -49,7 +49,7 @@ class NativeH3StoryService:
             str(resolved_news.get("title") or ""),
             str(resolved_news.get("keyword") or ""),
         ):
-            selected_news = self.news_service.get_random_news()
+            selected_news = self.news_service.select_news()
             if selected_news is None:
                 raise RuntimeError("Native H3 requires a selectable news item; no news context was available")
             resolved_news = selected_news.to_dict()

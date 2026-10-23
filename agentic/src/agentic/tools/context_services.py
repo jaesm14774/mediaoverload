@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import random
+import re
 import textwrap
 import uuid
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,7 @@ from agentic.runtime.news_grounding import (
     is_brand_safe_news_selection,
     is_usable_news_selection,
 )
+from agentic.runtime.news_selection import is_traceable_news, select_news_candidate
 
 
 REVIEW_MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
@@ -48,8 +50,12 @@ class NewsSelection:
     created_at: str = ""
     content: str = ""
     url: str = ""
+    source: str = ""
+    selection_reason: str = "regular_fallback"
+    event_title: str = ""
+    selection_evidence: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "keyword": self.keyword,
@@ -57,6 +63,10 @@ class NewsSelection:
             "created_at": self.created_at,
             "content": self.content,
             "url": self.url,
+            "source": self.source,
+            "selection_reason": self.selection_reason,
+            "event_title": self.event_title,
+            "selection_evidence": dict(self.selection_evidence or {}),
         }
 
 
@@ -98,7 +108,7 @@ class NewsContextService:
             for key in ("mysql_host", "mysql_port", "mysql_user", "mysql_password", "mysql_db_name")
         )
 
-    def get_random_news(
+    def select_news(
         self,
         *,
         lookback_days: int = 7,
@@ -112,18 +122,58 @@ class NewsContextService:
         import pymysql
 
         categories = list(exclude_categories or self.DEFAULT_EXCLUDE_CATEGORIES)
-        date_filter = (datetime.now() - timedelta(days=max(1, int(lookback_days)))).strftime("%Y-%m-%d %H:%M:%S")
-        placeholders = ", ".join(["%s"] * len(categories))
+        reference_time = datetime.now()
+        date_filter = (reference_time - timedelta(days=max(1, int(lookback_days)))).strftime("%Y-%m-%d %H:%M:%S")
+        six_hours_ago = (reference_time - timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")
+        one_day_ago = (reference_time - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        two_days_ago = (reference_time - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+        current_time = reference_time.strftime("%Y-%m-%d %H:%M:%S")
+        excluded_category_pattern = (
+            r"(^|[;；,，|])\s*(?:"
+            + "|".join(re.escape(category) for category in categories)
+            + r")\s*($|[;；,，|])"
+        )
         query = f"""
-            SELECT title, keyword, category, created_at, content, article_url AS url
+            SELECT title, keyword, category, created_at, content, article_url AS url, source
             FROM news_ch.news
-            WHERE category NOT IN ({placeholders})
-              AND COALESCE(keyword, '') != ''
+            WHERE category IS NOT NULL
+              AND category NOT REGEXP %s
               AND created_at >= %s
-            ORDER BY id DESC
+              AND created_at <= %s
+            ORDER BY created_at DESC, id DESC
             LIMIT %s
         """
-        params: list[Any] = [*categories, date_filter, max(1, int(limit))]
+        params: list[Any] = [
+            excluded_category_pattern,
+            date_filter,
+            current_time,
+            max(1, int(limit)),
+        ]
+        volume_query = """
+            SELECT
+                SUM(created_at >= %s) AS total_6h,
+                SUM(created_at >= %s) AS total_24h,
+                SUM(created_at >= %s AND created_at < %s) AS total_previous_24h
+            FROM news_ch.news
+            WHERE created_at >= %s AND created_at < %s
+        """
+        volume_params = [
+            six_hours_ago,
+            one_day_ago,
+            two_days_ago,
+            one_day_ago,
+            two_days_ago,
+            current_time,
+        ]
+        ptt_query = """
+            SELECT title, board, created_at, create_time, comment_count, like_count,
+                   neutral_count, dislike_count
+            FROM ptt_article
+            WHERE created_at >= %s AND created_at < %s
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+        """
+        ptt_params = [two_days_ago, current_time, 3000]
 
         _logger().info("news.fetch.start | lookback_days=%s | limit=%s", lookback_days, limit)
         connection = pymysql.connect(
@@ -135,10 +185,26 @@ class NewsContextService:
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
         )
+        ptt_rows: list[dict[str, Any]] = []
+        news_volume: dict[str, int] = {"6h": 0, "24h": 0, "previous_24h": 0}
         try:
             with connection.cursor() as cursor:
                 cursor.execute(query, params)
                 rows = list(cursor.fetchall() or [])
+                cursor.execute(volume_query, volume_params)
+                volume_row = cursor.fetchone() or {}
+                news_volume = {
+                    "6h": int(volume_row.get("total_6h") or 0),
+                    "24h": int(volume_row.get("total_24h") or 0),
+                    "previous_24h": int(volume_row.get("total_previous_24h") or 0),
+                }
+                try:
+                    cursor.execute(ptt_query, ptt_params)
+                    ptt_rows = list(cursor.fetchall() or [])
+                except Exception as exc:
+                    _logger().warning(
+                        "news.fetch.ptt_unavailable | error=%s", type(exc).__name__
+                    )
         finally:
             connection.close()
 
@@ -147,17 +213,29 @@ class NewsContextService:
             for row in rows
             if is_usable_news_selection(row.get("title", ""), row.get("keyword", ""))
             and is_brand_safe_news_selection(row.get("title", ""), row.get("keyword", ""))
+            and is_traceable_news(row)
         ]
         if not rows:
-            _logger().info("news.fetch.empty | reason=no_usable_news_rows")
+            _logger().info("news.fetch.empty | reason=no_traceable_usable_news_rows")
             return None
-        selected = random.choice(rows)
+        decision = select_news_candidate(
+            rows,
+            ptt_rows=ptt_rows,
+            news_volume=news_volume,
+            reference_time=reference_time,
+        )
+        selected = decision.selected
         _logger().info("news.fetch.title | %s", str(selected.get("title") or "").strip())
         _logger().info(
-            "news.fetch.selected | title=%s | keyword=%s | category=%s",
+            "news.fetch.selected | reason=%s | event_title=%s | evidence=%s | title=%s | keyword=%s | category=%s | source=%s | url=%s",
+            decision.reason,
+            decision.event_title,
+            decision.evidence or {},
             str(selected.get("title") or "").strip(),
             str(selected.get("keyword") or "").strip(),
             str(selected.get("category") or "").strip(),
+            str(selected.get("source") or "").strip(),
+            str(selected.get("url") or selected.get("article_url") or "").strip(),
         )
         return NewsSelection(
             title=str(selected.get("title") or "").strip(),
@@ -165,7 +243,11 @@ class NewsContextService:
             category=str(selected.get("category") or "").strip(),
             created_at=str(selected.get("created_at") or "").strip(),
             content=str(selected.get("content") or "").strip(),
-            url=str(selected.get("url") or "").strip(),
+            url=str(selected.get("url") or selected.get("article_url") or "").strip(),
+            source=str(selected.get("source") or "").strip(),
+            selection_reason=decision.reason,
+            event_title=decision.event_title,
+            selection_evidence=decision.evidence,
         )
 
 

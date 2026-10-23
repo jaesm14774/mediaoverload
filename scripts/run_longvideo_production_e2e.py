@@ -121,7 +121,7 @@ def _load_news_context(args: argparse.Namespace, output_root: Path) -> tuple[dic
         source = "file"
     elif args.news_from_db:
         service = NewsContextService()
-        selected = service.get_random_news(
+        selected = service.select_news(
             lookback_days=max(1, int(args.news_lookback_days)),
             limit=max(1, int(args.news_limit)),
         )
