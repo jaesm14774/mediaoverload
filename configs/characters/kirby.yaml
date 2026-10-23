@@ -194,10 +194,10 @@ generation:
     native_h3_l2va_story: 1
     native_h3_ref2va: 1
     text2image2native_h3_ref2va: 1
-    sticker_pack: 4
+    sticker_pack: 3
     story_card: 2
     motion_comic: 2
-    game_sprite: 6
+    game_sprite: 3
 
 social_media:
   # Hashtags are generated from the final article and visible media.

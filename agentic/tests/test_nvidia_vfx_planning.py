@@ -7,6 +7,62 @@ from agentic.app.main import build_runtime
 
 
 class NvidiaVfxPlanningTests(unittest.TestCase):
+    def test_user_given_game_sprite_default_when_plan_is_built_then_packaging_uses_nvidia_video(self) -> None:
+        """User Given a game-sprite goal with default video enhancement When its plan is built Then sprite packaging consumes the NVIDIA-processed animation."""
+        repo_root = Path(__file__).resolve().parents[2]
+        planner, _runner, _memory = build_runtime(
+            repo_root,
+            output_root=repo_root / ".tmp-tests" / "nvidia-vfx-game-sprite",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        goal = planner.create_goal(
+            prompt="A paper boat glides under a warm lantern",
+            media_type="game_sprite",
+            duration_seconds=10,
+            style="painted storybook",
+        )
+
+        plan = planner.build_plan(goal)
+        by_id = {node.node_id: node for node in plan.nodes}
+
+        self.assertEqual(
+            by_id["sprite-motion-nvidia-vfx"].depends_on,
+            ["sprite-motion-video"],
+        )
+        self.assertEqual(
+            by_id["sprite-package"].inputs["video_node"],
+            "sprite-motion-nvidia-vfx",
+        )
+        self.assertIn("sprite-motion-nvidia-vfx", by_id["sprite-package"].depends_on)
+
+    def test_user_given_game_sprite_vfx_opt_out_when_plan_is_built_then_packaging_uses_raw_animation(self) -> None:
+        """User Given a game-sprite goal that disables video enhancement When its plan is built Then sprite packaging consumes the original animation without an NVIDIA node."""
+        repo_root = Path(__file__).resolve().parents[2]
+        planner, _runner, _memory = build_runtime(
+            repo_root,
+            output_root=repo_root / ".tmp-tests" / "nvidia-vfx-game-sprite-opt-out",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        goal = planner.create_goal(
+            prompt="A paper boat glides under a warm lantern",
+            media_type="game_sprite",
+            duration_seconds=10,
+            style="painted storybook",
+            constraints={"enable_nvidia_vfx_postprocess": False},
+        )
+
+        plan = planner.build_plan(goal)
+        by_id = {node.node_id: node for node in plan.nodes}
+
+        self.assertNotIn("sprite-motion-nvidia-vfx", by_id)
+        self.assertEqual(
+            by_id["sprite-package"].inputs["video_node"],
+            "sprite-motion-video",
+        )
+        self.assertIn("sprite-motion-video", by_id["sprite-package"].depends_on)
+
     def test_user_given_generated_video_when_short_video_plan_is_built_then_qa_and_review_use_nvidia_output(self) -> None:
         """User Given a generated short video When its plan is built Then final QA, preview, and review use NVIDIA VFX output."""
         repo_root = Path(__file__).resolve().parents[2]

@@ -207,13 +207,21 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
             tool_name="comfy.render_h3",
             stage="render",
         ),
+    ]
+    sprite_video_node = context.append_nvidia_vfx_postprocess_node(
+        goal,
+        nodes,
+        source_node="sprite-motion-video",
+        node_id="sprite-motion-nvidia-vfx",
+    )
+    nodes.append(
         ExecutionNode(
             node_id="sprite-package",
             skill_name="agent.sprite.package",
             inputs={
                 "motion_node": "sprite-motion-plan",
                 "image_node": "sprite-master-image",
-                "video_node": "sprite-motion-video",
+                "video_node": sprite_video_node,
                 "cell_width": cell_width,
                 "cell_height": cell_height,
                 "fps": float(goal.constraints.get("sprite_fps") or 12),
@@ -221,12 +229,12 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
             depends_on=[
                 "sprite-motion-plan",
                 "sprite-master-image",
-                "sprite-motion-video",
+                sprite_video_node,
             ],
             tags=["artifact", "sprite", "gif", "atlas"],
             stage="package",
-        ),
-    ]
+        )
+    )
     metadata = {
         "selected_workflows": [image_manifest.name, video_manifest.name],
         "required_assets": [

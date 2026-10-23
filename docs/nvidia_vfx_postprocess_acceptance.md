@@ -43,3 +43,10 @@ User
 Given a video generation workflow reaches technical QA, preview, review, or packaging
 When NVIDIA VFX post-processing is enabled
 Then those final stages use the upscaled and interpolated file and its expected dimensions and frame rate.
+
+### Game-sprite packaging samples the enhanced animation
+
+User
+Given a game-sprite goal with NVIDIA VFX post-processing enabled and an H3 output whose dimensions are divisible by 4
+When the generated animation enters sprite packaging
+Then NVIDIA VFX upscales and interpolates the animation before the packager samples frames for the atlas, while an explicit `enable_nvidia_vfx_postprocess: false` setting sends the original animation directly to packaging.
