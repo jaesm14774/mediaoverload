@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
 from agentic.runtime.planner import TaskPlanner
-from agentic.skills.agent_primitives import AgentPlanningSkills
+from agentic.runtime.registry import ToolRegistry
+from agentic.skills.agent_social import AgentSocialSkills
+from agentic.skills.agent_primitives import AgentMediaSkills, AgentPlanningSkills
 
 
 class AgenticPlannerTests(unittest.TestCase):
@@ -1162,6 +1165,137 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(plan.metadata["publish_package_node"], "persist-publish-ready-longvideo")
         self.assertEqual(publish_package.inputs["summary_scope"], "publish_ready_longvideo")
         self.assertTrue(publish_package.inputs["summary_metadata"]["publish_contract"]["human_review_required"])
+
+    def test_user_given_every_segment_review_when_long_video_is_planned_then_only_accepted_video_can_supply_the_next_tail(self) -> None:
+        """User Given every-segment human review is required, When a long video plan chains rendered tails, Then each segment waits for acceptance before its tail can condition the next segment."""
+        goal = self.planner.create_goal(
+            prompt="Kirby carries a glowing seed through a windy meadow and plants it in a warm clearing",
+            media_type="long_video",
+            duration_seconds=30,
+            style="polished 2D anime cinematic",
+            constraints={
+                "longvideo_production_profile": "text2longvideo",
+                "longvideo_review_policy": "every_segment",
+                "require_human_review": True,
+                "pre_video_review_enabled": False,
+                "segment_count": 3,
+                "longvideo_width": 608,
+                "longvideo_height": 352,
+                "longvideo_length": 120,
+                "longvideo_steps": 16,
+            },
+        )
+
+        plan = self.planner.build_plan(goal)
+        final_assembly = next(
+            node for node in plan.nodes if node.node_id == "concat-final-video"
+        )
+        self.assertTrue(
+            all(
+                f"segment-review-{index:02d}" in final_assembly.depends_on
+                for index in range(1, 4)
+            )
+        )
+        for index in range(1, 4):
+            suffix = f"{index:02d}"
+            segment_review = next(
+                node
+                for node in plan.nodes
+                if node.node_id == f"segment-review-{suffix}"
+            )
+            segment_video = next(
+                node
+                for node in plan.nodes
+                if node.node_id == f"segment-video-{suffix}"
+            )
+            segment_qa = next(
+                node
+                for node in plan.nodes
+                if node.node_id == f"segment-qa-{suffix}"
+            )
+            segment_tail = next(
+                node
+                for node in plan.nodes
+                if node.node_id == f"segment-tail-{suffix}"
+            )
+
+            self.assertEqual(segment_review.skill_name, "review.assets.select")
+            self.assertEqual(segment_review.inputs["review_scope"], "final_video")
+            self.assertEqual(segment_review.inputs["review_phase"], "segment_acceptance")
+            self.assertTrue(segment_review.inputs["require_human_review"])
+            self.assertIn(segment_video.node_id, segment_review.depends_on)
+            self.assertIn(segment_qa.node_id, segment_review.depends_on)
+            self.assertEqual(segment_tail.inputs["source_video_node"], segment_review.node_id)
+            self.assertEqual(segment_tail.depends_on, [segment_review.node_id])
+            if index < 3:
+                next_video = next(
+                    node
+                    for node in plan.nodes
+                    if node.node_id == f"segment-video-{index + 1:02d}"
+                )
+                self.assertIn(segment_tail.node_id, next_video.depends_on)
+
+    def test_user_given_an_accepted_segment_review_when_its_tail_is_extracted_then_the_accepted_video_is_used(self) -> None:
+        """User Given Discord accepted a segment and exposed its media path, When the tail frame is extracted, Then the accepted video is sent to the media extraction tool."""
+        accepted_video_path = r"C:\runs\segment_01.mp4"
+        goal = GoalRequest(
+            prompt="Continue the meadow story",
+            media_type="long_video",
+            style="anime",
+        )
+        review_node = ExecutionNode(
+            node_id="segment-review-01",
+            skill_name="review.assets.select",
+            inputs={},
+        )
+        tail_node = ExecutionNode(
+            node_id="segment-tail-01",
+            skill_name="media.video.extract_last_frame",
+            depends_on=[review_node.node_id],
+            inputs={},
+        )
+        plan = ExecutionPlan(goal=goal, workflow_name="long_video", nodes=[review_node, tail_node])
+        state = RunState(
+            goal={"prompt": goal.prompt},
+            metadata={},
+            node_outputs={review_node.node_id: {"media_paths": [accepted_video_path]}},
+        )
+        context = SkillContext(plan=plan, node=tail_node, state=state)
+        captured_payload: dict[str, object] = {}
+        tools = ToolRegistry()
+
+        def extract_last_frame(payload: dict[str, object]) -> dict[str, object]:
+            captured_payload.update(payload)
+            return {"frame_path": str(payload["output_path"])}
+
+        tools.register(
+            "media.extract_last_frame",
+            extract_last_frame,
+            "Extract the last frame from a video",
+        )
+        with TemporaryDirectory() as temp_dir:
+            skills = AgentMediaSkills(tools, Path(temp_dir))
+            result = skills.extract_last_frame(context)
+
+        self.assertEqual(captured_payload["video_path"], accepted_video_path)
+        self.assertEqual(result.outputs["frame_path"], captured_payload["output_path"])
+
+    def test_user_given_a_segment_acceptance_review_when_its_message_is_prepared_then_the_tail_consequence_is_clear(self) -> None:
+        """User Given a rendered segment is awaiting human acceptance, When its review message is prepared, Then the reviewer is told that acceptance enables continuation from the observed tail."""
+        guidance = (
+            "Accept only if this segment is suitable for the next segment to continue "
+            "from its observed final frame. Reject to stop the sequence."
+        )
+
+        review_text = AgentSocialSkills._build_final_publish_review_text(
+            draft_caption="Overall story brief",
+            draft_hashtags="",
+            platforms=[],
+            review_guidance=guidance,
+        )
+
+        self.assertIn(guidance, review_text)
+        self.assertIn("Overall story brief", review_text)
 
     def test_text2video_plan_respects_video_count(self) -> None:
         goal = self.planner.create_goal(

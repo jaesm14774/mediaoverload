@@ -313,6 +313,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
 
     segment_video_nodes: list[str] = []
     tts_nodes: list[str] = []
+    segment_review_nodes_by_video: dict[str, str] = {}
 
     def append_segment(
         prefix: str,
@@ -720,25 +721,10 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 )
             )
             delivered_video_node = trim_node
+        continuation_source_node = delivered_video_node
         tail_node: str | None = None
         segment_qa_node: str | None = None
         if continuity_mode == "rendered_tail":
-            tail_node = f"{prefix}-tail-{suffix}"
-            nodes.append(
-                ExecutionNode(
-                    node_id=tail_node,
-                    skill_name="media.video.extract_last_frame",
-                    inputs={
-                        "output_name": f"{prefix}_tail_{suffix}.png",
-                        "source_video_node": delivered_video_node,
-                    },
-                    depends_on=[delivered_video_node],
-                    tags=["quality", "continuity", "tail", "segment"]
-                    + (["retry"] if retry else []),
-                    tool_name="media.extract_last_frame",
-                    stage="quality",
-                )
-            )
             segment_qa_node = f"{prefix}-qa-{suffix}"
             segment_duration = max(
                 1.0, float(render_inputs["length"]) / max(segment_frame_rate, 1.0)
@@ -765,6 +751,54 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     tags=["quality", "technical-qa", "segment"]
                     + (["retry"] if retry else []),
                     tool_name="media.video_qa",
+                    stage="quality",
+                )
+            )
+            if (
+                require_human_review
+                and review_policy == "every_segment"
+                and not stage_probe_auto_select
+            ):
+                segment_review_node = f"{prefix}-review-{suffix}"
+                nodes.append(
+                    ExecutionNode(
+                        node_id=segment_review_node,
+                        skill_name="review.assets.select",
+                        inputs={
+                            "limit": 1,
+                            "review_all_candidates": True,
+                            "review_scope": "final_video",
+                            "review_phase": "segment_acceptance",
+                            "require_human_review": True,
+                            "review_notes": (
+                                f"Segment {index + 1} of {segment_count} acceptance: inspect "
+                                "the rendered action and continuity. "
+                                "Accept only if this segment is suitable for the next segment to "
+                                "continue from its observed final frame. Reject to stop the sequence "
+                                "before that frame is used."
+                            ),
+                        },
+                        depends_on=[delivered_video_node, segment_qa_node],
+                        tags=["review", "human-acceptance", "segment", "continuity"]
+                        + (["retry"] if retry else []),
+                        stage="review",
+                    )
+                )
+                segment_review_nodes_by_video[video_node] = segment_review_node
+                continuation_source_node = segment_review_node
+            tail_node = f"{prefix}-tail-{suffix}"
+            nodes.append(
+                ExecutionNode(
+                    node_id=tail_node,
+                    skill_name="media.video.extract_last_frame",
+                    inputs={
+                        "output_name": f"{prefix}_tail_{suffix}.png",
+                        "source_video_node": continuation_source_node,
+                    },
+                    depends_on=[continuation_source_node],
+                    tags=["quality", "continuity", "tail", "segment"]
+                    + (["retry"] if retry else []),
+                    tool_name="media.extract_last_frame",
                     stage="quality",
                 )
             )
@@ -806,6 +840,12 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         if segment_qa_node:
             segment_qa_nodes.append(segment_qa_node)
 
+    segment_acceptance_nodes = [
+        segment_review_nodes_by_video[video_node]
+        for video_node in segment_video_nodes
+        if video_node in segment_review_nodes_by_video
+    ]
+
     longvideo_edit_profile = str(
         goal.constraints.get("longvideo_edit_profile") or ""
     ).strip()
@@ -846,7 +886,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                         goal.constraints.get("edit_transition_duration") or 0.1
                     ),
                 },
-                depends_on=segment_video_nodes,
+                depends_on=[*segment_video_nodes, *segment_acceptance_nodes],
                 tags=["package", "video", "editing", "timeline"],
                 tool_name="media.compose_edit",
                 stage="package",
@@ -859,7 +899,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 node_id=final_video_node,
                 skill_name="media.video.concat",
                 inputs={"method": "demuxer"},
-                depends_on=segment_video_nodes,
+                depends_on=[*segment_video_nodes, *segment_acceptance_nodes],
                 tags=["package", "video"],
                 tool_name="media.concat_videos",
                 stage="package",
@@ -1051,6 +1091,11 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 retry_rendered_tail = retry_tail
             if retry_qa:
                 retry_qa_nodes.append(retry_qa)
+        retry_acceptance_nodes = [
+            segment_review_nodes_by_video[video_node]
+            for video_node in retry_video_nodes
+            if video_node in segment_review_nodes_by_video
+        ]
         if longvideo_edit_profile:
             retry_preview_dependency = "review-edit-segment-timeline"
             nodes.append(
@@ -1081,7 +1126,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                             goal.constraints.get("edit_transition_duration") or 0.1
                         ),
                     },
-                    depends_on=retry_video_nodes,
+                    depends_on=[*retry_video_nodes, *retry_acceptance_nodes],
                     tags=["package", "video", "editing", "timeline", "retry"],
                     tool_name="media.compose_edit",
                     stage="package",
@@ -1094,7 +1139,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     node_id=retry_preview_dependency,
                     skill_name="media.video.concat",
                     inputs={"method": "demuxer"},
-                    depends_on=retry_video_nodes,
+                    depends_on=[*retry_video_nodes, *retry_acceptance_nodes],
                     tags=["package", "video", "retry"],
                     tool_name="media.concat_videos",
                     stage="package",

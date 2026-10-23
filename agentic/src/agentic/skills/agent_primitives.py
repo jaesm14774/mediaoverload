@@ -1132,7 +1132,10 @@ class AgentMediaSkills:
         result = self.tools.call(
             "media.extract_last_frame",
             {
-                "video_path": str(context.node.inputs.get("video_path") or self._resolve_first(context, ("video_path", "saved_files"))),
+                "video_path": str(
+                    context.node.inputs.get("video_path")
+                    or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
+                ),
                 "output_path": str(frame_dir / output_name),
             },
         )

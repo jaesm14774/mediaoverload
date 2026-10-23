@@ -38,6 +38,7 @@ routing:
     production_profile: text2longvideo
     default_duration_seconds: 30
     segment_duration: 10
+    # every_segment requires clip acceptance before tail continuation and final assembly.
     review_policy: opening_only
     continuity_mode: rendered_tail
     workflow_names:

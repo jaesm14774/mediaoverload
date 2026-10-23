@@ -251,6 +251,7 @@ class AgentSocialSkills:
             or self._infer_review_scope(media_paths)
         ).strip().lower()
         review_phase = str(context.node.inputs.get("review_phase") or "").strip().lower()
+        segment_acceptance_review = review_phase == "segment_acceptance"
         first_frame_review = review_scope == "first_frame" or review_phase == "opening_frame"
         last_frame_review = review_scope == "last_frame"
         anchor_set_review = review_scope in {"anchor_set", "anchors"} or review_phase == "anchor_set"
@@ -358,7 +359,7 @@ class AgentSocialSkills:
         caption_media_paths = review_media_paths if (review_all_candidates or final_video_review or final_media_review) else (selected or ranked[:limit])
         hashtags = context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or [])]
-        if auto_select_for_probe:
+        if auto_select_for_probe or segment_acceptance_review:
             caption_bundle = {"caption": context.plan.goal.prompt, "hashtags": ""}
         else:
             caption_bundle = self.prompt_engine.prepare_publish_caption(
@@ -381,6 +382,9 @@ class AgentSocialSkills:
                 draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
                 draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
                 platforms=platforms,
+                review_guidance=(
+                    review_notes if review_phase == "segment_acceptance" else ""
+                ),
             )
         else:
             review_text = self._build_review_text(
@@ -403,7 +407,13 @@ class AgentSocialSkills:
                 media_paths=review_media_paths,
                 timeout_seconds=int(context.plan.goal.constraints.get("discord_review_timeout_seconds") or 3600),
                 allow_asset_selection=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
-                allow_text_edit=not (first_frame_review or last_frame_review or anchor_set_review or reference_review),
+                allow_text_edit=not (
+                    first_frame_review
+                    or last_frame_review
+                    or anchor_set_review
+                    or reference_review
+                    or segment_acceptance_review
+                ),
                 selection_mode="single" if (first_frame_review or last_frame_review) else "multi",
                 selection_required=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
                 selection_limit=(1 if (first_frame_review or last_frame_review) else (limit if (anchor_set_review or reference_review) else None)),
@@ -468,9 +478,16 @@ class AgentSocialSkills:
                     logs=["Blocked workflow because the Discord reviewer rejected the candidate set."],
                 )
             if decision.status == "failed":
-                failure_policy = str(
-                    context.plan.goal.constraints.get("pre_video_review_failure_policy") or "block"
-                ).strip().lower()
+                failure_policy = (
+                    "block"
+                    if segment_acceptance_review
+                    else str(
+                        context.plan.goal.constraints.get(
+                            "pre_video_review_failure_policy"
+                        )
+                        or "block"
+                    ).strip().lower()
+                )
                 fallback_selected = ranked[:limit]
                 if failure_policy == "fallback_to_top" and fallback_selected:
                     fallback_reason = str(getattr(decision, "fallback_reason", "") or "Discord review did not complete")
@@ -811,13 +828,23 @@ class AgentSocialSkills:
         return textwrap.shorten("\n".join(lines).strip(), width=1900, placeholder="...")
 
     @staticmethod
-    def _build_final_publish_review_text(*, draft_caption: str, draft_hashtags: str, platforms: list[str]) -> str:
-        """Build only the final publish copy; editing is enabled at this stage."""
-        return AgentSocialSkills._format_review_post(
+    def _build_final_publish_review_text(
+        *,
+        draft_caption: str,
+        draft_hashtags: str,
+        platforms: list[str],
+        review_guidance: str = "",
+    ) -> str:
+        """Build final-media review text with an optional instruction for the reviewer."""
+        review_text = AgentSocialSkills._format_review_post(
             caption=draft_caption,
             hashtags=draft_hashtags,
             platforms=platforms,
         )
+        guidance = str(review_guidance or "").strip()
+        if not guidance:
+            return review_text
+        return f"{guidance}\n\n{review_text}".strip()
 
     @staticmethod
     def _candidate_label(media_path: str) -> str:
