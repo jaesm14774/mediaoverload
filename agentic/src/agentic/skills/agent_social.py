@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import textwrap
 from pathlib import Path
 from typing import Any
 
-from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.contracts import (
+    DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS,
+    SkillContext,
+    SkillResult,
+)
 from agentic.runtime.platform_content import (
     build_platform_bundle,
     enrich_publish_bundle,
@@ -14,6 +19,7 @@ from agentic.runtime.platform_content import (
 from agentic.runtime.post_strategy import resolve_post_strategy
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
+from agentic.runtime.serial_video import store_from_constraints
 from agentic.tools.context_services import DiscordHumanReviewService
 from agentic.tools.publishing_adapter import build_dispatch_plan, merge_platform_delivery_variants
 
@@ -35,8 +41,29 @@ class AgentSocialSkills:
         self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
         self.discord_review = discord_review or DiscordHumanReviewService(output_root=self.output_root)
 
+    @staticmethod
+    def _ensure_serial_episode_heading(
+        caption: str, episode_number: object, episode_topic: object
+    ) -> str:
+        try:
+            number = int(episode_number or 0)
+        except (TypeError, ValueError):
+            number = 0
+        topic = " ".join(str(episode_topic or "").split())
+        body = str(caption or "").strip()
+        if number < 1 or not topic:
+            return body
+        heading = f"第 {number} 集｜主題：{topic}"
+        lines = body.splitlines()
+        if lines and re.match(r"^第\s*\d+\s*集\s*[｜|]\s*主題：", lines[0]):
+            body = "\n".join(lines[1:]).strip()
+        return f"{heading}\n\n{body}" if body else heading
+
     def prepare_caption(self, context: SkillContext) -> SkillResult:
         prefix = str(context.node.inputs.get("prefix", "")).strip()
+        serial_mode = bool(context.plan.goal.constraints.get("serial_mode"))
+        if serial_mode:
+            prefix = ""
         hashtags = context.node.inputs.get("hashtags") or context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or context.node.inputs.get("platforms") or [])]
         selected_media = self._collect_media_from_dependencies(context)
@@ -85,6 +112,37 @@ class AgentSocialSkills:
                 ),
             )
             bundle = enrich_publish_bundle(bundle, context.plan.goal, platforms, selected_media)
+        if serial_mode:
+            heading_caption = self._ensure_serial_episode_heading(
+                str(bundle.get("caption") or ""),
+                context.plan.goal.constraints.get("serial_episode_number"),
+                context.plan.goal.constraints.get("episode_topic"),
+            )
+            platform_captions = bundle.get("platform_captions")
+            if not isinstance(platform_captions, dict):
+                platform_captions = {}
+            platform_captions = {
+                platform: self._ensure_serial_episode_heading(
+                    str(platform_captions.get(platform) or bundle.get("caption") or ""),
+                    context.plan.goal.constraints.get("serial_episode_number"),
+                    context.plan.goal.constraints.get("episode_topic"),
+                )
+                for platform in platforms
+            }
+            bundle = {
+                **bundle,
+                "caption": heading_caption,
+                "platform_captions": platform_captions,
+                "platform_bundle": build_platform_bundle(
+                    goal=context.plan.goal,
+                    caption=heading_caption,
+                    hashtags=str(bundle.get("hashtags") or ""),
+                    platform_captions=platform_captions,
+                    platforms=platforms,
+                    media_paths=selected_media,
+                    post_strategy=post_strategy,
+                ),
+            }
         return SkillResult(
             status="success",
             outputs={
@@ -99,6 +157,7 @@ class AgentSocialSkills:
                 "selected_assets": selected_media,
                 "approved_review_text": approved_review_text,
                 "edited_review_text": edited_review_text,
+                "publication_attempt_number": review_select.get("publication_attempt_number"),
             },
             logs=["Prepared a reusable social caption bundle."],
         )
@@ -193,7 +252,21 @@ class AgentSocialSkills:
             )
         ]
         blocked_platforms = list(dict.fromkeys([*blocked_platforms, *platform_validation_failures]))
+        serial_store = store_from_constraints(context.plan.goal.constraints)
+        review_select = context.state[context.node.depends_on[1]] if len(context.node.depends_on) > 1 else {}
+        publication_attempt_number = review_select.get("publication_attempt_number") or caption_bundle.get(
+            "publication_attempt_number"
+        )
         if blocked_platforms and not dry_run:
+            if serial_store is not None and publication_attempt_number:
+                serial_store.record_publication_dispatch(
+                    str(context.plan.goal.constraints.get("serial_episode_id") or ""),
+                    int(publication_attempt_number),
+                    results={platform: False for platform in platforms},
+                    receipts={},
+                    errors={platform: "dispatch readiness validation failed" for platform in platforms},
+                    dispatch_status="blocked",
+                )
             return SkillResult(
                 status="blocked",
                 outputs={
@@ -211,9 +284,17 @@ class AgentSocialSkills:
                 },
                 logs=["Blocked social dispatch because one or more platforms failed publish-readiness validation."],
             )
-        result = self.tools.call(
-            "publish.social",
-            {
+        try:
+            if serial_store is not None:
+                if not publication_attempt_number:
+                    raise RuntimeError("Serial social dispatch has no approved publication attempt.")
+                serial_store.assert_publication_media_current(
+                    str(context.plan.goal.constraints.get("serial_episode_id") or ""),
+                    int(publication_attempt_number),
+                )
+            result = self.tools.call(
+                "publish.social",
+                {
                 "media_paths": context.node.inputs.get("media_paths") or processed.get("media_paths", []),
                 "caption": context.node.inputs.get("caption") or caption_bundle.get("caption", ""),
                 "hashtags": context.node.inputs.get("hashtags") or caption_bundle.get("hashtags", ""),
@@ -226,8 +307,19 @@ class AgentSocialSkills:
                 "platform_bundle": platform_bundle,
                 "delivery_variants": processed.get("delivery_variants", {}),
                 "manifest_dir": str(self.output_root),
-            },
-        )
+                },
+            )
+        except Exception as exc:
+            if serial_store is not None and publication_attempt_number:
+                serial_store.record_publication_dispatch(
+                    str(context.plan.goal.constraints.get("serial_episode_id") or ""),
+                    int(publication_attempt_number),
+                    results={platform: False for platform in platforms},
+                    receipts={},
+                    errors={platform: f"{type(exc).__name__}: {exc}" for platform in platforms},
+                    dispatch_status="failed",
+                )
+            raise
         outputs = dict(result)
         outputs["platform_bundle"] = platform_bundle
         outputs["delivery_variants"] = processed.get("delivery_variants", {})
@@ -239,11 +331,38 @@ class AgentSocialSkills:
             and not platform_ineligible
         )
         dispatch_status = str(outputs.get("status") or "").strip().lower()
+        if serial_store is not None and publication_attempt_number:
+            result_map = outputs.get("results") if isinstance(outputs.get("results"), dict) else {}
+            receipt_map = (
+                outputs.get("publish_receipts")
+                if isinstance(outputs.get("publish_receipts"), dict)
+                else {}
+            )
+            error_map = outputs.get("errors") if isinstance(outputs.get("errors"), dict) else {}
+            serial_store.record_publication_dispatch(
+                str(context.plan.goal.constraints.get("serial_episode_id") or ""),
+                int(publication_attempt_number),
+                results=result_map,
+                receipts=receipt_map,
+                errors=error_map,
+                dispatch_status=dispatch_status,
+            )
         skill_status = "success" if dispatch_status in {"success", "dry_run", "awaiting_user_action"} else "failed"
         return SkillResult(status=skill_status, outputs=outputs, logs=["Dispatched a social publishing action."])
 
     def select_best_assets(self, context: SkillContext) -> SkillResult:
-        media_paths = self._collect_media_from_dependencies(context)
+        preferred_video_node = str(context.node.inputs.get("preferred_video_node") or "").strip()
+        preferred_video_path = self._preferred_video_path(context, preferred_video_node)
+        explicit_media_paths = context.node.inputs.get("media_paths") or []
+        if isinstance(explicit_media_paths, str):
+            explicit_media_paths = [explicit_media_paths]
+        media_paths = [str(path) for path in explicit_media_paths if path]
+        if not media_paths:
+            media_paths = (
+                [preferred_video_path]
+                if preferred_video_path
+                else self._collect_media_from_dependencies(context)
+            )
         limit = int(context.node.inputs.get("limit", 10))
         review_scope = str(
             context.node.inputs.get("review_scope")
@@ -307,6 +426,10 @@ class AgentSocialSkills:
                 "Final video review: inspect the rendered video for a clear opening conflict, visible escalation or reversal, "
                 "and a concrete ending. Accept to approve, Edit to update the caption, or Reject to stop publishing."
             )
+        serial_lifecycle_guidance = (
+            "連載選項：Accept 會發布本集並保留續集資格；「完成系列並發布本集」會發布本集並結束系列；"
+            "「廢棄系列」會記錄廢棄並停止本集發布。未選終止按鈕時，系列預設維持可接續。"
+        )
         if final_media_review and not review_notes.strip():
             review_notes = (
                 "Final media review: inspect every attached image or video, choose the media to publish, and verify the "
@@ -364,7 +487,15 @@ class AgentSocialSkills:
         else:
             caption_bundle = self.prompt_engine.prepare_publish_caption(
                 context.plan.goal,
-                prefix="",
+                prefix=(
+                    ""
+                    if bool(context.plan.goal.constraints.get("serial_mode"))
+                    else str(
+                        context.node.inputs.get("caption_prefix")
+                        or context.plan.goal.constraints.get("caption_prefix")
+                        or ""
+                    )
+                ),
                 hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
                 platforms=platforms,
                 media_paths=caption_media_paths,
@@ -375,13 +506,21 @@ class AgentSocialSkills:
                 ),
             )
         review_metadata = self._review_metadata(context)
+        review_context_text = self._build_review_context_text(
+            context=context,
+            strategy=review_metadata["strategy"],
+            workflow=review_metadata["workflow"],
+            review_phase=review_phase,
+            review_scope=review_scope,
+        )
+        if review_phase == "serial_final_publish":
+            review_context_text = f"{review_context_text}\n\n{serial_lifecycle_guidance}".strip()
         if first_frame_review or last_frame_review or anchor_set_review or reference_review:
             review_text = self._build_stage_review_text(strategy=review_metadata["strategy"])
         elif final_video_review or final_media_review:
             review_text = self._build_final_publish_review_text(
                 draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
                 draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
-                platforms=platforms,
                 review_guidance=(
                     review_notes if review_phase == "segment_acceptance" else ""
                 ),
@@ -396,7 +535,6 @@ class AgentSocialSkills:
                 selection_limit=limit,
                 draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
                 draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
-                platforms=platforms,
                 candidate_paths=review_media_paths,
                 review_scope=review_scope,
             )
@@ -404,8 +542,14 @@ class AgentSocialSkills:
         if human_review_enabled:
             decision = self.discord_review.review_candidates(
                 text=review_text,
+                context_text=review_context_text,
                 media_paths=review_media_paths,
-                timeout_seconds=int(context.plan.goal.constraints.get("discord_review_timeout_seconds") or 3600),
+                timeout_seconds=int(
+                    context.plan.goal.constraints.get(
+                        "discord_review_timeout_seconds"
+                    )
+                    or DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
+                ),
                 allow_asset_selection=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
                 allow_text_edit=not (
                     first_frame_review
@@ -419,6 +563,7 @@ class AgentSocialSkills:
                 selection_limit=(1 if (first_frame_review or last_frame_review) else (limit if (anchor_set_review or reference_review) else None)),
                 review_scope=review_scope,
                 allow_regenerate=bool(context.plan.goal.constraints.get("allow_regenerate_review", False)),
+                allow_series_lifecycle_choice=review_phase == "serial_final_publish",
             )
         if require_human_review and (decision is None or getattr(decision, "review_mode", "") != "discord"):
             fallback_reason = str(getattr(decision, "fallback_reason", "Discord human review did not start."))
@@ -473,6 +618,7 @@ class AgentSocialSkills:
                         "reviewer": decision.reviewer,
                         "review_session_id": decision.session_id,
                         "review_session_path": decision.session_path,
+                        "review_delivery": dict(getattr(decision, "delivery", {}) or {}),
                         "prompt_mode": str(bundle.get("prompt_mode", "template")),
                     },
                     logs=["Blocked workflow because the Discord reviewer rejected the candidate set."],
@@ -790,6 +936,86 @@ class AgentSocialSkills:
         return {"strategy": strategy or "unknown", "workflow": workflow or "unknown"}
 
     @staticmethod
+    def _build_review_context_text(
+        *,
+        context: SkillContext,
+        strategy: str,
+        workflow: str,
+        review_phase: str,
+        review_scope: str,
+    ) -> str:
+        constraints = context.plan.goal.constraints
+        serial_mode = bool(constraints.get("serial_mode"))
+        phase_labels = {
+            "segment_acceptance": "分段驗收",
+            "serial_final_publish": "最終成片・發布前審核",
+            "opening_frame": "開場畫面選擇",
+            "ending_frame": "結尾畫面審核",
+            "reference_selection": "參考素材選擇",
+            "anchor_set": "首尾畫面配對選擇",
+        }
+        scope_labels = {
+            "first_frame": "開場畫面選擇",
+            "last_frame": "結尾畫面審核",
+            "anchor_set": "首尾畫面配對選擇",
+            "anchors": "首尾畫面配對選擇",
+            "reference": "參考素材選擇",
+            "final_video": "成片審核",
+            "final_media": "發布素材審核",
+        }
+        phase_label = phase_labels.get(
+            review_phase,
+            scope_labels.get(review_scope, "素材審核"),
+        )
+        lines = ["【審核任務】"]
+        if serial_mode:
+            lines.append(f"策略：連載影片（{strategy}）")
+            episode_number = int(constraints.get("serial_episode_number") or 0)
+            automation_mode = str(
+                constraints.get("serial_automation_mode") or "manual"
+            ).strip().lower()
+            if automation_mode == "new":
+                series_relation = "新開系列"
+            elif automation_mode == "continue":
+                series_relation = "接續上集"
+            elif automation_mode == "resume":
+                series_relation = "續跑未完成集數"
+            elif episode_number > 1:
+                series_relation = f"接續第 {episode_number - 1} 集"
+            else:
+                series_relation = "新系列首集"
+            episode_label = f"第 {episode_number} 集" if episode_number > 0 else "集數未提供"
+            lines.append(f"系列：{series_relation}｜{episode_label}")
+
+            if review_phase == "segment_acceptance":
+                segment_index = max(0, int(context.node.inputs.get("segment_index", 0)))
+                segment_indices = {
+                    int(node.inputs["segment_index"])
+                    for node in context.plan.nodes
+                    if str(node.inputs.get("review_phase") or "").strip().lower()
+                    == "segment_acceptance"
+                    and node.inputs.get("segment_index") is not None
+                }
+                segment_count = max(segment_indices, default=segment_index) + 1
+                lines.append(f"段落：第 {segment_index + 1}/{segment_count} 段・連續性驗收")
+            else:
+                lines.append(f"審核：{phase_label}")
+
+            topic = str(constraints.get("episode_topic") or "").strip()
+            if topic:
+                lines.append(f"主題：{textwrap.shorten(topic, width=90, placeholder='…')}")
+            lines.append(f"工作流：{workflow}")
+        else:
+            lines.extend(
+                [
+                    f"策略：{strategy}",
+                    f"工作流：{workflow}",
+                    f"審核：{phase_label}",
+                ]
+            )
+        return "\n".join(lines)
+
+    @staticmethod
     def _build_stage_review_text(*, strategy: str) -> str:
         return f"Strategy: {strategy}\nstage: preview"
 
@@ -804,7 +1030,6 @@ class AgentSocialSkills:
         selection_limit: int,
         draft_caption: str,
         draft_hashtags: str,
-        platforms: list[str],
         candidate_paths: list[str] | None = None,
         review_scope: str = "",
     ) -> str:
@@ -821,7 +1046,6 @@ class AgentSocialSkills:
         review_body = AgentSocialSkills._format_review_post(
             caption=str(draft_caption or prompt),
             hashtags=str(draft_hashtags or ""),
-            platforms=platforms,
         )
         if review_body:
             lines.extend(["", review_body])
@@ -832,14 +1056,12 @@ class AgentSocialSkills:
         *,
         draft_caption: str,
         draft_hashtags: str,
-        platforms: list[str],
         review_guidance: str = "",
     ) -> str:
         """Build final-media review text with an optional instruction for the reviewer."""
         review_text = AgentSocialSkills._format_review_post(
             caption=draft_caption,
             hashtags=draft_hashtags,
-            platforms=platforms,
         )
         guidance = str(review_guidance or "").strip()
         if not guidance:
@@ -857,8 +1079,7 @@ class AgentSocialSkills:
         return f"`{safe_label}`"
 
     @staticmethod
-    def _format_review_post(*, caption: str, hashtags: str, platforms: list[str]) -> str:
-        del platforms
+    def _format_review_post(*, caption: str, hashtags: str) -> str:
         lines = [str(caption).strip()]
         if hashtags.strip():
             lines.extend(["", hashtags.strip()])
@@ -907,6 +1128,28 @@ class AgentSocialSkills:
                     media_paths.append(value)
         return list(dict.fromkeys(media_paths))
 
+    @staticmethod
+    def _preferred_video_path(context: SkillContext, node_id: str) -> str:
+        if not node_id:
+            return ""
+        try:
+            output = context.state[node_id]
+        except (KeyError, TypeError):
+            output = {}
+        if not isinstance(output, dict):
+            return ""
+        values: list[str] = []
+        for key in ("final_video_path", "video_path"):
+            value = output.get(key)
+            if isinstance(value, str) and value:
+                values.append(value)
+            elif isinstance(value, list):
+                values.extend(str(item) for item in value if item)
+        for value in values:
+            if Path(value).suffix.lower() in VIDEO_REVIEW_EXTENSIONS:
+                return value
+        return ""
+
 def register_agent_social_skills(
     skill_registry: SkillRegistry,
     tool_registry: ToolRegistry,
@@ -919,4 +1162,183 @@ def register_agent_social_skills(
     skill_registry.register("publish.media.collect", skills.collect_media, "Collect media artifacts for publishing")
     skill_registry.register("publish.media.process", skills.process_media, "Prepare media files for publishing")
     skill_registry.register("publish.social.dispatch", skills.publish_social, "Dispatch content to social platforms")
-    skill_registry.register("review.assets.select", skills.select_best_assets, "Select a shortlist of candidate assets")
+
+    def select_and_record_serial_review(context: SkillContext) -> SkillResult:
+        serial_store = store_from_constraints(context.plan.goal.constraints)
+        review_phase = str(context.node.inputs.get("review_phase") or "").strip().lower()
+        serial_acceptance = (
+            serial_store is not None
+            and review_phase == "segment_acceptance"
+        )
+        serial_final_publish = serial_store is not None and review_phase == "serial_final_publish"
+        publication_attempt = None
+        if serial_final_publish:
+            episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+            video_path = skills._preferred_video_path(
+                context, str(context.node.inputs.get("preferred_video_node") or "").strip()
+            )
+            if not video_path:
+                explicit_paths = context.node.inputs.get("media_paths") or []
+                if isinstance(explicit_paths, str):
+                    explicit_paths = [explicit_paths]
+                video_candidates = [
+                    str(path)
+                    for path in explicit_paths
+                    if path and Path(str(path)).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
+                ]
+                if not video_candidates:
+                    video_candidates = [
+                        path
+                        for path in skills._collect_media_from_dependencies(context)
+                        if Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
+                    ]
+                if len(video_candidates) == 1:
+                    video_path = video_candidates[0]
+            if not episode_id or not video_path:
+                raise RuntimeError("Final serial publication review requires its episode ID and QA-passed assembled MP4.")
+            publication_attempt = serial_store.begin_publication_attempt(
+                episode_id,
+                platforms=context.node.inputs.get("platforms")
+                or context.plan.goal.constraints.get("platforms")
+                or [],
+                episode_topic=str(context.plan.goal.constraints.get("episode_topic") or ""),
+                caption="",
+                hashtags=" ".join(str(tag) for tag in context.plan.goal.constraints.get("hashtags", []) or []),
+                media_path=video_path,
+            )
+        try:
+            result = skills.select_best_assets(context)
+        except Exception as exc:
+            if publication_attempt is not None:
+                serial_store.record_publication_review(
+                    str(context.plan.goal.constraints.get("serial_episode_id") or ""),
+                    int(publication_attempt["attempt_number"]),
+                    decision="failed",
+                    details={"error": f"{type(exc).__name__}: {exc}"},
+                )
+            if serial_acceptance:
+                episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+                if episode_id:
+                    serial_store.record_review(
+                        episode_id,
+                        int(context.node.inputs.get("segment_index", 0)) + 1,
+                        "failed",
+                        details={"error": f"{type(exc).__name__}: {exc}"},
+                    )
+            raise
+        if serial_final_publish and publication_attempt is not None:
+            outputs = dict(result.outputs)
+            selected = outputs.get("selected_assets") or outputs.get("media_paths") or []
+            selected_paths = [str(item) for item in selected if item]
+            review_mode = str(outputs.get("review_mode") or "").strip().lower()
+            reason = " ".join(
+                str(outputs.get(key) or "")
+                for key in ("selection_rationale", "fallback_reason")
+            ).lower()
+            if result.status == "success" and review_mode == "discord" and selected_paths:
+                decision = "accepted"
+            elif outputs.get("regeneration_requested") or outputs.get("review_decision") == "regenerate":
+                decision = "rejected"
+            elif review_mode != "discord":
+                decision = "unavailable"
+            else:
+                decision = "timeout" if "timed out" in reason else "rejected" if "rejected" in reason else "failed"
+            approved_text = str(outputs.get("approved_review_text") or "").strip()
+            if not approved_text:
+                approved_text = "\n\n".join(
+                    part
+                    for part in (
+                        str(outputs.get("review_draft_caption") or "").strip(),
+                        str(outputs.get("review_draft_hashtags") or "").strip(),
+                    )
+                    if part
+                )
+            caption, hashtags = skills._split_review_caption_and_hashtags(approved_text)
+            if decision == "accepted":
+                caption = skills._ensure_serial_episode_heading(
+                    caption,
+                    context.plan.goal.constraints.get("serial_episode_number"),
+                    context.plan.goal.constraints.get("episode_topic"),
+                )
+                approved_text = "\n\n".join(
+                    part for part in (caption, hashtags) if part
+                )
+                outputs["approved_review_text"] = approved_text
+            serial_store.record_publication_review(
+                str(context.plan.goal.constraints.get("serial_episode_id") or ""),
+                int(publication_attempt["attempt_number"]),
+                decision=decision,
+                review_session_id=str(outputs.get("review_session_id") or ""),
+                caption=caption or None,
+                hashtags=hashtags or None,
+                details={
+                    "review_mode": review_mode,
+                    "reviewer": outputs.get("reviewer", ""),
+                    "review_session_path": outputs.get("review_session_path", ""),
+                    "review_decision": outputs.get("review_decision", ""),
+                    "selected_paths": selected_paths,
+                    "result_status": result.status,
+                    "series_disposition": str(
+                        (outputs.get("review_delivery") or {}).get("series_disposition") or ""
+                    ),
+                },
+            )
+            series_disposition = str(
+                (outputs.get("review_delivery") or {}).get("series_disposition") or ""
+            ).strip().lower()
+            if series_disposition in {"completed", "discarded"}:
+                serial_store.set_series_lifecycle_status(
+                    str(context.plan.goal.constraints.get("series_id") or ""),
+                    series_disposition,
+                    note=(
+                        f"Creator selected {series_disposition} after reviewing episode "
+                        f"{context.plan.goal.constraints.get('serial_episode_number')}"
+                    ),
+                )
+            outputs["publication_attempt_number"] = publication_attempt["attempt_number"]
+            result.outputs = outputs
+            if not selected_paths:
+                return result
+        if not serial_acceptance:
+            return result
+
+        episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+        if not episode_id:
+            raise RuntimeError("Serial segment review requires a persisted episode ID")
+        outputs = dict(result.outputs)
+        selected = outputs.get("selected_assets") or outputs.get("media_paths") or []
+        selected_paths = [str(item) for item in selected if item]
+        review_mode = str(outputs.get("review_mode") or "").strip().lower()
+        if result.status == "success" and review_mode == "discord" and selected_paths:
+            decision = "accepted"
+            reviewed_path = selected_paths[0]
+        elif outputs.get("regeneration_requested") or outputs.get("review_decision") == "regenerate":
+            decision = "regeneration_requested"
+            reviewed_path = None
+        elif review_mode != "discord":
+            decision = "unavailable"
+            reviewed_path = None
+        else:
+            reason = " ".join(
+                str(outputs.get(key) or "") for key in ("selection_rationale", "fallback_reason")
+            ).lower()
+            decision = "rejected" if "rejected" in reason else "timeout" if "timed out" in reason else "failed"
+            reviewed_path = None
+        serial_store.record_review(
+            episode_id,
+            int(context.node.inputs.get("segment_index", 0)) + 1,
+            decision,
+            reviewed_path,
+            {
+                "review_mode": review_mode,
+                "reviewer": outputs.get("reviewer", ""),
+                "review_session_id": outputs.get("review_session_id", ""),
+                "review_session_path": outputs.get("review_session_path", ""),
+                "fallback_reason": outputs.get("fallback_reason", ""),
+                "selected_paths": selected_paths,
+                "result_status": result.status,
+            },
+        )
+        return result
+
+    skill_registry.register("review.assets.select", select_and_record_serial_review, "Select a shortlist of candidate assets")

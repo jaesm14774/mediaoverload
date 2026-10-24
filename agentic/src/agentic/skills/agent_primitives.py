@@ -25,6 +25,7 @@ from agentic.runtime.prompting import (
 )
 from agentic.video_directing import apply_video_opening_frame_direction
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
+from agentic.runtime.serial_video import store_from_constraints
 from agentic.skills.shared import (
     asset_check_result,
     build_run_dir,
@@ -104,6 +105,12 @@ class AgentPlanningSkills:
             production_profile=str(context.node.inputs.get("production_profile") or ""),
         )
         validate_story_segments(segments, segment_count)
+        serial_store = store_from_constraints(context.plan.goal.constraints)
+        if serial_store is not None:
+            episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+            if not episode_id:
+                raise RuntimeError("Serial story planning requires a persisted episode ID")
+            serial_store.record_story(episode_id, segments)
         return SkillResult(
             status="success",
             outputs={"segments": segments, "segment_count": segment_count},
@@ -1050,6 +1057,25 @@ class AgentMediaSkills:
                 "normalize_audio": bool(context.node.inputs.get("normalize_audio", False)),
             },
         )
+        serial_store = store_from_constraints(context.plan.goal.constraints)
+        if serial_store is not None and context.node.inputs.get("segment_index") is not None:
+            episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+            if not episode_id:
+                raise RuntimeError("Serial segment delivery requires a persisted episode ID")
+            delivered_path = result.get("final_video_path") or result.get("video_path")
+            if isinstance(delivered_path, list):
+                delivered_path = next((path for path in delivered_path if path), "")
+            if not delivered_path:
+                delivered_path = next(
+                    (path for path in result.get("saved_files", []) if path), ""
+                )
+            if not delivered_path:
+                raise RuntimeError("Video trim did not expose its delivered MP4 path")
+            serial_store.bind_delivered_video(
+                episode_id,
+                int(context.node.inputs.get("segment_index", 0)) + 1,
+                str(delivered_path),
+            )
         return SkillResult(
             status="success",
             outputs=result,
@@ -1114,6 +1140,32 @@ class AgentMediaSkills:
         observed_passed = bool(result.get("passed", False))
         result["automatic_gate_applied"] = False
         result["observed_passed"] = observed_passed
+        serial_store = store_from_constraints(context.plan.goal.constraints)
+        if serial_store is not None:
+            segment_index = context.node.inputs.get("segment_index")
+            episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+            if not episode_id:
+                raise RuntimeError("Serial technical QA requires a persisted episode ID")
+            if segment_index is not None:
+                serial_store.record_technical_qa(
+                    episode_id,
+                    int(segment_index) + 1,
+                    video_path,
+                    observed_passed,
+                    result,
+                )
+            elif observed_passed:
+                serial_store.complete_episode(episode_id, "success", video_path)
+            if not observed_passed:
+                return SkillResult(
+                    status="failed",
+                    outputs=result,
+                    metrics={
+                        "observed_passed": False,
+                        "duration": result.get("duration", 0),
+                    },
+                    logs=["Stopped serial continuation because the segment failed technical QA."],
+                )
         return SkillResult(
             status="success",
             outputs=result,
@@ -1129,16 +1181,33 @@ class AgentMediaSkills:
         frame_dir = run_dir / "frames"
         frame_dir.mkdir(parents=True, exist_ok=True)
         output_name = str(context.node.inputs.get("output_name", "last_frame.png"))
+        video_path = str(
+            context.node.inputs.get("video_path")
+            or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
+        )
+        serial_store = store_from_constraints(context.plan.goal.constraints)
+        episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
+        segment_number = int(context.node.inputs.get("segment_index", 0)) + 1
+        if serial_store is not None:
+            if not episode_id:
+                raise RuntimeError("Serial tail extraction requires a persisted episode ID")
+            serial_store.assert_can_continue(episode_id, segment_number, video_path)
+        frame_path = frame_dir / output_name
         result = self.tools.call(
             "media.extract_last_frame",
             {
-                "video_path": str(
-                    context.node.inputs.get("video_path")
-                    or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
-                ),
-                "output_path": str(frame_dir / output_name),
+                "video_path": video_path,
+                "output_path": str(frame_path),
             },
         )
+        if serial_store is not None:
+            serial_store.record_tail(
+                episode_id,
+                segment_number,
+                video_path,
+                str(result.get("frame_path") or frame_path),
+                episode_end=bool(context.node.inputs.get("episode_end", False)),
+            )
         return SkillResult(status="success", outputs=result, logs=["Extracted a tail frame for an agent step."])
 
     def collect_outputs(self, context: SkillContext) -> SkillResult:

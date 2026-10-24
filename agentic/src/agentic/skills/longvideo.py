@@ -27,6 +27,7 @@ from agentic.runtime.prompting import (
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
+from agentic.runtime.serial_video import store_from_constraints
 from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
 from agentic.storyboard import (
     format_native_h3_keyframe_prompt,
@@ -210,6 +211,13 @@ class LongVideoSkills:
     def segment_story(self, context: SkillContext) -> SkillResult:
         segment_count = int(context.node.inputs["segment_count"])
         brief = str(context.state["idea-brief"]["creative_brief"])
+        constraints = context.plan.goal.constraints
+        serial_context = str(constraints.get("serial_story_context") or "").strip()
+        if bool(constraints.get("serial_mode")) and serial_context:
+            brief = (
+                "Series continuity from the last approved episode:\n"
+                f"{serial_context}\n\nCurrent episode request:\n{brief}"
+            )
         segments = build_story_segments(
             context.plan.goal,
             brief,
@@ -222,6 +230,12 @@ class LongVideoSkills:
             ),
         )
         validate_story_segments(segments, segment_count)
+        serial_store = store_from_constraints(constraints)
+        if serial_store is not None:
+            episode_id = str(constraints.get("serial_episode_id") or "").strip()
+            if not episode_id:
+                raise RuntimeError("Serial story planning requires a persisted episode ID")
+            serial_store.record_story(episode_id, segments)
         return SkillResult(
             status="success",
             outputs={"segments": segments, "segment_count": segment_count},
@@ -508,7 +522,44 @@ class LongVideoSkills:
             payload["reference_manifest"] = reference_manifest
 
         tool_name = str(context.node.inputs.get("render_tool") or "comfy.render_h3")
-        result = self.tools.call(tool_name, payload)
+        serial_store = store_from_constraints(constraints)
+        render_id = ""
+        if serial_store is not None:
+            episode_id = str(constraints.get("serial_episode_id") or "").strip()
+            if not episode_id:
+                raise RuntimeError("Serial H3 rendering requires a persisted episode ID")
+            conditioning_paths = (
+                [str(item["path"]) for item in reference_manifest if isinstance(item, dict)]
+                if h3_mode == "ref2va"
+                else ([first_frame] if first_frame else [])
+            )
+            render_id = serial_store.begin_render(
+                episode_id,
+                int(context.node.inputs.get("segment_index", 0)) + 1,
+                workflow_name=workflow_name,
+                h3_mode=h3_mode,
+                conditioning_paths=conditioning_paths,
+                render_inputs={
+                    "prompt": prompt,
+                    "negative_prompt": str(payload.get("negative_prompt") or ""),
+                    "width": width,
+                    "height": height,
+                    "length": length,
+                    "steps": steps,
+                    "seed": constraints.get("seed"),
+                },
+            )
+        try:
+            result = self.tools.call(tool_name, payload)
+            if serial_store is not None:
+                saved_files = [str(path) for path in result.get("saved_files", []) if path]
+                if len(saved_files) != 1:
+                    raise RuntimeError("Serial H3 must produce exactly one MP4 for each planned segment")
+                serial_store.complete_render(render_id, saved_files[0])
+        except Exception as exc:
+            if serial_store is not None and render_id:
+                serial_store.fail_render(render_id, f"{type(exc).__name__}: {exc}")
+            raise
         outputs: dict[str, object] = {
             **result,
             "recipe": recipe,

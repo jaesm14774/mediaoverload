@@ -223,6 +223,55 @@ def test_user_given_conditioning_images_and_scene_draft_when_h3_prompt_is_prepar
     assert "reach the resolved endpoint only in the final tenth" in str(vision_model.calls[0]["messages"][1]["content"])
 
 
+def test_user_given_later_episode_plan_when_vision_prompt_repeats_prior_prop_then_h3_prompt_keeps_new_action_primary() -> None:
+    """User Given a later serial episode with a new planned event When vision guidance repeats the prior episode prop Then H3 still receives the new action, outcome, and a brief-continuity instruction as primary."""
+    action = "Kirby guides a lost firefly across moonlit stepping stones to a hollow tree."
+    outcome = "The firefly reaches its glowing home beneath the old tree."
+    vision_model = RecordedTextModel(
+        [
+            {
+                "prompt": "Kirby cups a glowing star flower as the camera pushes into a macro close-up.",
+                "overall_soundscape": "The flower hums softly in the garden night.",
+                "non_diegetic_music": "A gentle glockenspiel melody.",
+            }
+        ]
+    )
+    engine = LLMPromptEngine(
+        mode="llm",
+        manager=SimpleNamespace(
+            text_model=RecordedTextModel([]), vision_model=vision_model
+        ),
+    )
+    prepared = engine.prepare_h3_segment(
+        GoalRequest(
+            prompt="Kirby follows the star flower's glow as it leads a lost firefly home.",
+            media_type="long_video",
+            style="watercolor storybook animation",
+            constraints={"serial_mode": True, "serial_episode_number": 2},
+        ),
+        {
+            "segment_id": "episode-2-segment-1",
+            "action": action,
+            "effect": outcome,
+            "visual": "A distinct moonlit path leads away from the star flower to the firefly's home.",
+        },
+        draft_prompt="A lost firefly follows Kirby across the garden toward its home.",
+        overall_soundscape="Night insects and soft steps on stone.",
+        non_diegetic_music="N/A",
+        duration_seconds=10.0,
+        image_references=[],
+    )
+
+    assert action in prepared["prompt"]
+    assert outcome in prepared["prompt"]
+    assert "opening continuity point only" in prepared["prompt"].casefold()
+    assert "required action takes priority" in prepared["prompt"].casefold()
+    assert "macro close-up" in prepared["prompt"]
+    vision_request = str(vision_model.calls[0]["messages"][1]["content"])
+    assert "This is a later serial episode." in vision_request
+    assert "Explicit characters, props, and locations named in that plan must be shown" in vision_request
+
+
 def test_user_given_nested_llm_prompt_when_repaired_then_only_scene_text_is_accepted() -> None:
     """User Given an LLM prompt object like the retained failed run, When the response is repaired, Then the accepted prompt is description text rather than a serialized object."""
     description = "Kirby catches a drifting lantern and lifts it above the canal."

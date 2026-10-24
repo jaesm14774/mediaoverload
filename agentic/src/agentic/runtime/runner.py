@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from hashlib import sha1
+from typing import Any, Mapping
 
 from agentic.memory import PortfolioMemory, RunMemory
 from agentic.memory.run import MemoryEvent
@@ -30,7 +31,12 @@ class WorkflowRunner:
         self.logger = logger
         self.recorder = recorder or getattr(logger, "run_recorder", None)
 
-    def run(self, plan: ExecutionPlan) -> WorkflowRunResult:
+    def run(
+        self,
+        plan: ExecutionPlan,
+        *,
+        initial_node_outputs: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> WorkflowRunResult:
         graph = plan.as_graph()
         ordered_nodes = graph.topological_order()
         state = RunState(
@@ -44,33 +50,43 @@ class WorkflowRunner:
             metadata=plan.metadata,
         )
         records: list[RunRecord] = []
+        persisted_outputs = dict(initial_node_outputs or {})
 
         for node in ordered_nodes:
             skill = self.skill_registry.get(node.skill_name)
             context = SkillContext(plan=plan, node=node, state=state)
+            reused = node.node_id in persisted_outputs
             attempts = 0
             while True:
-                attempts += 1
-                self._log(f"node.start | id={node.node_id} | skill={node.skill_name} | attempt={attempts} | stage={node.stage or 'runtime'}")
-                if self.recorder:
-                    self.recorder.record_event(
-                        "node.started",
-                        node_id=node.node_id,
-                        skill_name=node.skill_name,
-                        attempt=attempts,
-                        stage=node.stage or "runtime",
-                    )
-                try:
-                    result = skill.handler(context)
-                except Exception as exc:
+                if reused:
                     result = SkillResult(
-                        status="failed",
-                        outputs={},
-                        logs=[f"{type(exc).__name__}: {exc}"],
+                        status="success",
+                        outputs=dict(persisted_outputs[node.node_id]),
+                        logs=["Reused persisted output from an accepted prior segment."],
                     )
-                self._log(
-                    f"node.end | id={node.node_id} | skill={node.skill_name} | status={result.status} | attempt={attempts}"
-                )
+                    self._log(f"node.reuse | id={node.node_id} | stage={node.stage or 'runtime'}")
+                else:
+                    attempts += 1
+                    self._log(f"node.start | id={node.node_id} | skill={node.skill_name} | attempt={attempts} | stage={node.stage or 'runtime'}")
+                    if self.recorder:
+                        self.recorder.record_event(
+                            "node.started",
+                            node_id=node.node_id,
+                            skill_name=node.skill_name,
+                            attempt=attempts,
+                            stage=node.stage or "runtime",
+                        )
+                    try:
+                        result = skill.handler(context)
+                    except Exception as exc:
+                        result = SkillResult(
+                            status="failed",
+                            outputs={},
+                            logs=[f"{type(exc).__name__}: {exc}"],
+                        )
+                    self._log(
+                        f"node.end | id={node.node_id} | skill={node.skill_name} | status={result.status} | attempt={attempts}"
+                    )
                 state[node.node_id] = result.outputs
                 records.append(
                     RunRecord(
@@ -108,7 +124,7 @@ class WorkflowRunner:
                 self._capture_prompt_metadata(state, node.node_id, result.outputs, attempts)
                 if result.status == "success":
                     break
-                if not self.retry_policy.should_retry(result.status, attempts):
+                if reused or not self.retry_policy.should_retry(result.status, attempts):
                     run_result = WorkflowRunResult(
                         workflow_name=plan.workflow_name,
                         status="failed",

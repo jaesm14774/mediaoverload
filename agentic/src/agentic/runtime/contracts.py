@@ -9,6 +9,7 @@ class ContractError(RuntimeError):
 
 
 MIN_VIDEO_DURATION_SECONDS = 10
+DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS = 1800
 VIDEO_OUTPUT_MEDIA_TYPES = frozenset(
     {
         "text2video",

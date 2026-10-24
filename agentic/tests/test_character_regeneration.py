@@ -116,6 +116,7 @@ def test_user_given_final_review_when_regenerate_is_clicked_then_the_decision_re
             allow_text_edit=values["allow_text_edit"], selection_mode=values["selection_mode"],
             selection_required=values["selection_required"], selection_limit=values["selection_limit"],
             allow_regenerate=values["allow_regenerate"],
+            allow_series_lifecycle_choice=values["allow_series_lifecycle_choice"],
         )
         observed["labels"] = {button.label for button in view.children if isinstance(button, discord.ui.Button)}
         message = ReviewMessage()
@@ -166,6 +167,31 @@ def test_user_given_disabled_regeneration_when_buttons_are_created_then_only_sta
         return labels
 
     assert asyncio.run(inspect_view()) == {"Accept", "Reject", "Edit"}
+
+
+def test_user_given_a_serial_final_publish_review_when_completed_or_discarded_is_chosen_then_the_review_records_the_terminal_series_action(monkeypatch):
+    """User Given a serial episode's final Discord review When the creator chooses Complete and publish or Discard series Then the view records the matching lifecycle action and discard does not accept media."""
+    from agentic.tools.discord_review_view import create_discord_review_view
+
+    monkeypatch.setenv("discord_review_allowed_user_ids", "42")
+
+    async def choose(label):
+        view = create_discord_review_view(
+            files=[],
+            content="第 3 集｜主題：夜光種子",
+            timeout=30,
+            allow_asset_selection=False,
+            allow_series_lifecycle_choice=True,
+        )
+        button = next(item for item in view.children if getattr(item, "label", "") == label)
+        response = InteractionResponse()
+        await button.callback(SimpleNamespace(user=SimpleNamespace(id=42), response=response))
+        result = (view.result, view.series_disposition, response.acknowledged, view.selected_files)
+        view.stop()
+        return result
+
+    assert asyncio.run(choose("完成系列並發布本集")) == ("accept", "completed", True, [])
+    assert asyncio.run(choose("廢棄系列")) == ("reject", "discarded", True, [])
 
 
 def test_user_given_an_unauthorized_reviewer_when_regenerate_is_clicked_then_no_rerun_is_requested(monkeypatch):
@@ -233,6 +259,7 @@ class ReviewTransportBoundary:
                 selection_required=values["selection_required"],
                 selection_limit=values["selection_limit"],
                 allow_regenerate=values["allow_regenerate"],
+                allow_series_lifecycle_choice=values["allow_series_lifecycle_choice"],
             )
             label = next(self.decisions)
             self.reviewed.append({

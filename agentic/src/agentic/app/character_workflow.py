@@ -295,6 +295,7 @@ def run_character_workflow(
                             "story_card_width",
                             "story_card_height",
                             "source_generation_type",
+                            "discord_review_timeout_seconds",
                         )
                         if key in payload["constraints"]
                     },

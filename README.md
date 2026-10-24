@@ -78,6 +78,7 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 - [圖片提示指南](docs/image_prompt_guide.md)
 - [Story Card 編輯指南](docs/story_card_editorial_guide.md)
 - [Game Sprite 輸出契約](docs/game_sprite.md)
+- [連載影片策略與操作](docs/serial-video.md)
 - [生成策略候選與受控實驗](docs/strategy_experiments.md)
 - [自動分格漫畫與隨機策略](docs/motion_comic.md)
 - [影片參考分析](docs/reference_video_remix.md)

@@ -120,6 +120,43 @@ def validate_scene_response(payload: Any) -> dict[str, Any]:
     return payload
 
 
+def _preserve_later_episode_action(
+    prompt: str, goal: GoalRequest, segment: dict[str, Any]
+) -> str:
+    """Keep the current episode's planned event primary after vision prompt writing."""
+    if not goal.constraints.get("serial_mode"):
+        return prompt
+    try:
+        episode_number = int(goal.constraints.get("serial_episode_number") or 1)
+    except (TypeError, ValueError):
+        episode_number = 1
+    if episode_number <= 1:
+        return prompt
+
+    action = str(segment.get("action") or "").strip()
+    effect = str(segment.get("effect") or segment.get("end_state") or "").strip()
+    visual = str(segment.get("visual") or "").strip()
+    if not any((action, effect, visual)):
+        return prompt
+
+    required = [
+        "Current episode action (required and visually primary): "
+        + (action or visual),
+    ]
+    if effect:
+        required.append("Current episode visible outcome (required): " + effect)
+    if visual and visual != action:
+        required.append("Current episode visual direction: " + visual)
+    required.extend(
+        [
+            "Cross-episode continuity: preserve character identity, world, and palette from the prior reference. Treat that image as the opening continuity point only; develop the current episode's new action immediately instead of repeating the prior pose or composition.",
+            "The required action takes priority over reference-aware scene notes if they conflict. Use those notes for compatible appearance and camera details only.",
+            "Reference-aware appearance and camera notes: " + prompt,
+        ]
+    )
+    return "\n\n".join(required)
+
+
 def validate_segment_response(payload: Any) -> dict[str, Any]:
     payload = validate_scene_response(payload)
     if not isinstance(payload.get("narration"), str):
@@ -783,6 +820,17 @@ def prepare_h3_segment(
         f"Existing score direction: {non_diegetic_music}",
         *image_context,
     ]
+    try:
+        serial_episode_number = int(
+            goal.constraints.get("serial_episode_number") or 1
+        )
+    except (TypeError, ValueError):
+        serial_episode_number = 1
+    if goal.constraints.get("serial_mode") and serial_episode_number > 1:
+        prompt_context.insert(
+            2,
+            "This is a later serial episode. The prior episode reference is only the opening continuity moment: preserve the character identity and world, then move away from the prior pose and composition as the current action unfolds. The structured current segment plan is authoritative for the new plot event. Explicit characters, props, and locations named in that plan must be shown even when they are absent from the prior reference image.",
+        )
     news_context = goal.constraints.get("news_context")
     if isinstance(news_context, dict) and news_context:
         prompt_context.append(
@@ -825,7 +873,9 @@ def prepare_h3_segment(
         return client.mark_payload(
             {
                 "segment_id": str(segment.get("segment_id") or ""),
-                "prompt": require_h3_prompt(payload.get("prompt")),
+                "prompt": _preserve_later_episode_action(
+                    require_h3_prompt(payload.get("prompt")), goal, segment
+                ),
                 "overall_soundscape": payload["overall_soundscape"],
                 "non_diegetic_music": payload["non_diegetic_music"],
                 "image_references": image_references,

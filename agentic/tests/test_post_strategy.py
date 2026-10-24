@@ -8,6 +8,7 @@ from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.platform_content import build_platform_bundle
 from agentic.runtime.post_strategy import resolve_post_strategy
+from agentic.skills.agent_social import AgentSocialSkills
 
 
 class _FakeTextModel:
@@ -24,6 +25,16 @@ class _FakeManager:
 
 
 class PostStrategyTests(unittest.TestCase):
+    def test_user_given_publish_caption_when_review_post_is_formatted_then_only_the_caption_and_hashtags_are_shown(self) -> None:
+        """User Given a publish caption and hashtags When Discord review text is formatted Then it contains only publish-ready content."""
+        caption = "A comet crosses the pastel sky and glows above the hill."
+        review = AgentSocialSkills._format_review_post(
+            caption=caption,
+            hashtags="#Kirby",
+        )
+
+        self.assertEqual(review, f"{caption}\n\n#Kirby")
+
     def test_strategy_is_reproducible_but_seeded_posts_can_rotate(self) -> None:
         goal = GoalRequest(
             prompt="publish a short visual story",

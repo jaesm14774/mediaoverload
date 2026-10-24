@@ -10,6 +10,7 @@ from typing import Any
 from agentic.app.character_requests import CharacterWorkflowRequest
 from agentic.app.creative_profiles import resolve_creative_profile
 from agentic.runtime.contracts import (
+    DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS,
     MIN_VIDEO_DURATION_SECONDS,
     normalize_video_duration,
 )
@@ -46,6 +47,7 @@ from agentic.app.character_config import (
     _merge_social_media_config,
     _normalize_platform_configs,
     _normalize_video_speed_config,
+    configured_discord_review_timeout_seconds,
     _resolve_output_dir,
     _summarize_character_config,
     load_character_config,
@@ -590,6 +592,10 @@ def build_goal_payload_from_character_config(
         "platform_configs": platform_configs,
         "dry_run": dry_run_publish,
         "publish_mode": str(publish_mode or "").strip().lower(),
+        "discord_review_timeout_seconds": (
+            configured_discord_review_timeout_seconds(generation)
+            or DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
+        ),
         "facebook_profile_share_url": facebook_profile_share_url,
         "selection_limit": routing.get("count_plan", {}).get("review_selection_limit"),
         "enable_review_loop": bool(enable_review_loop and not no_review),

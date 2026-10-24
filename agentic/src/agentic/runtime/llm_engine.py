@@ -13,6 +13,7 @@ from agentic.runtime.prompt_tasks import (
     story_cards,
     motion_comic,
     publishing,
+    serial_episodes,
 )
 
 
@@ -269,4 +270,18 @@ class LLMPromptEngine:
             media_paths,
             review_notes,
             visual_paths,
+        )
+
+    def generate_serial_episode_idea(
+        self,
+        *,
+        character: str,
+        automation_mode: str,
+        story_context: str = "",
+    ) -> dict[str, Any]:
+        return serial_episodes.generate_serial_episode_idea(
+            self.client,
+            character=character,
+            automation_mode=automation_mode,
+            story_context=story_context,
         )

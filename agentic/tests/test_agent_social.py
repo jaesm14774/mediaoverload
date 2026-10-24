@@ -908,6 +908,56 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["hashtags"], "#edited #tags")
         self.assertEqual(result.outputs["platform_bundle"]["instagram"]["caption"], "Edited caption body")
 
+    def test_user_given_a_serial_caption_edited_without_its_episode_heading_when_publish_content_is_prepared_then_every_platform_caption_restores_the_heading(self) -> None:
+        """User Given a creator edits a serial caption without its heading When platform-specific captions are prepared Then every platform caption restores the canonical episode and topic heading."""
+        skills = AgentSocialSkills(ToolRegistry(), self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
+        prefix = "第 1 集｜主題：星種發芽，守護花園裡的星花"
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby plants a fallen star seed and watches a star flower bloom.",
+                media_type="publish_review",
+                style="social promo",
+                constraints={
+                    "serial_mode": True,
+                    "serial_episode_number": 1,
+                    "episode_topic": "星種發芽，守護花園裡的星花",
+                    "caption_prefix": prefix,
+                    "platforms": ["instagram_graph", "facebook", "youtube"],
+                },
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="prepare-caption",
+            skill_name="publish.caption.prepare",
+            depends_on=["review-select", "process-media"],
+            inputs={"platforms": ["instagram_graph", "facebook", "youtube"]},
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={
+                "review-select": {
+                    "review_mode": "discord",
+                    "approved_review_text": "Kirby plants a fallen star seed and watches a tiny flower glow.\n\n#Kirby #starflower",
+                    "edited_review_text": "Kirby plants a fallen star seed and watches a tiny flower glow.\n\n#Kirby #starflower",
+                },
+                "process-media": {"media_paths": ["C:\\selected.mp4"]},
+            },
+        )
+
+        result = skills.prepare_caption(SkillContext(plan=plan, node=node, state=state))
+
+        expected_caption = f"{prefix}\n\nKirby plants a fallen star seed and watches a tiny flower glow."
+        self.assertEqual(result.outputs["caption"], expected_caption)
+        self.assertTrue(
+            all(caption == expected_caption for caption in result.outputs["platform_captions"].values())
+        )
+        youtube_title = result.outputs["platform_bundle"]["youtube"]["additional_params"]["youtube_title"]
+        self.assertTrue(youtube_title)
+        self.assertIn("星種發芽，守護花園裡的星花", youtube_title)
+
     def test_prepare_caption_uses_approved_review_text_without_second_llm_gate(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
