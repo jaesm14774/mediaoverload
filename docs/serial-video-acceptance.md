@@ -4,6 +4,32 @@
 
 ## Acceptance scenarios
 
+### User Given eligible old series and default 0.5/0.5 weights When serial auto-next selects a mode Then it starts new-series onboarding for a roll below 0.5 and continues an eligible series for a roll at or above 0.5
+
+### User Given no eligible old series When serial auto-next selects a mode Then it starts new-series story onboarding with 100% probability regardless of configured weights
+
+### User Given a character profile sets series-selection weights When serial auto-next runs with eligible old series Then it uses that profile's configured new and continue proportions
+
+### User Given a new series is selected When its story, character reference, and episode outline reach human review Then each review happens in Discord and an accepted decision continues the same serial run through video generation
+
+### User Given a creator starts serial video with a selected character When the series story is drafted Then that selected character is the protagonist and directly drives the story
+
+### User Given no complexity is specified When the series story and episode outline are drafted Then the result is a simple short drama with one clear goal, one main obstacle, a small cast, and an easy-to-follow resolution
+
+### User Given the creator selects cinematic story complexity When the series story and episode outline are drafted Then the model may use layered stakes and character arcs while keeping the same selected protagonist
+
+### User Given Discord review is unavailable or times out When serial onboarding reaches a review gate Then the run blocks without accepting the draft or starting video generation
+
+### User Given a new serial story draft with the default inspiration mode When it is generated Then one safe traceable news article may inspire one small fictional problem and its source details are saved beside the treatment for human review
+
+### User Given random news is unavailable When a new story draft starts Then the request stops with an actionable message and does not silently generate an ungrounded story
+
+### User Given a custom premise and explicit news opt-out When a story draft starts Then the LLM uses the premise without news context and the saved inspiration mode is none
+
+### User Given a creator edited the saved story Markdown When they accept that plan Then the exact reviewed text, reviewer decision, and approved SHA are saved while the production series remains unactivated until character approval
+
+### User Given a story treatment is requested When the text model generates it Then MediaOverload keeps the readable text directly and does not request JSON schema or structured-output validation
+
 ### Later episodes preserve their new story action through H3 prompt preparation
 
 User Given a later-episode segment plan requires a new visible event and its Ref2VA opening image depicts the prior episode's ending, When the vision prompt writer returns a scene focused only on the old pose or prop, Then the final H3 prompt still gives the current segment's action and visible outcome priority and treats the old image as an opening continuity point rather than the target composition.
@@ -206,3 +232,7 @@ The resume command reuses the persisted plan and accepted MP4s. If a review time
 ## Validation boundary
 
 Local tests can prove the CLI contract, MySQL state transitions, lineage invalidation, planner workflow selection, fail-closed review behavior, and video-only assembly contract. They cannot prove H3 visual continuity or that social platforms accepted a publication. Those require a fresh ComfyUI/GPU run, inspection of generated clips and transition frames, a recorded human review decision, and provider delivery receipts.
+# User Given an approved series story When a character card is drafted Then the creator can specify preferences or let the model invent the character, and the draft waits for human approval
+# User Given a character card draft When the creator approves its text and selected reference image Then the approved card and exact reference image SHA are saved before production series creation
+# User Given an approved story and character When an episode outline is drafted Then it connects the episode to the series arc and waits for human approval before video generation
+# User Given an approved episode outline When serial generation starts Then the approved outline, story version, character card and reference image are the inputs to the existing segment review and accepted-tail flow

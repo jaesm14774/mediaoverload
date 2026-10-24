@@ -2,11 +2,144 @@
 
 連載模式以固定角色逐集製作短片。故事計畫、段落、H3 render、QA、人工接受、參考影格、成片與各平台發布結果都存進 MySQL 資料庫 mediaoverload_serial。角色參考圖與影片仍是輸出目錄中的檔案；MySQL 保存路徑、SHA-256 和流程紀錄。
 
+## Story-first 連載流程
+
+新系列沿用命令列選定的角色作為主角。預設 `simple` 複雜度適合動畫短劇：一條清楚主線、小範圍事件、最多三集和少量角色。想寫多層因果、較大事件與角色弧線時，可選 `cinematic`。
+
+從 repo 根目錄啟動完整流程：
+
+~~~powershell
+python run_media_interface.py --character kirby --generation-type serial_video
+~~~
+
+也可以選擇複雜度並提供故事方向：
+
+~~~powershell
+python run_media_interface.py --character kirby --generation-type serial_video --story-complexity cinematic --prompt "Kirby helps a lost star find its way home."
+~~~
+
+故事、角色卡與參考圖、首集大綱都會送到 Discord 審核。按 Accept 後，同一個執行流程自動接續下一階段，最後進入既有影片生成、片段審核和發布流程。拒絕、逾時或 Discord 無法審核時，流程會停在該關卡，不會在本機要求手動核准，也不會略過審核。
+
+`--story-complexity` 可選 `simple` 或 `cinematic`；未指定時讀取 `generation.serial_video.story_complexity`，預設為 `simple`。`--prompt` 提供故事方向；若未指定，隨機新聞只提供一個小型虛構靈感，不會成為故事主線的事件清單。故事、角色和分集大綱的核准內容及 SHA-256 會保存到 MySQL。
+
+角色參考圖會依核准角色卡自動生成並在 Discord 供創作者挑選；若 YAML 已設定 `identity_references`，則將它們列為候選圖。沒有可用 Discord 審核或圖片生成失敗時，流程會回報阻塞原因，不會用未核准的角色參考圖開始影片生成。
+
+### 單階段操作（維護用）
+
+以下命令只執行單一 onboarding 階段；一般連載請使用上方的 `run_media_interface.py` 完整流程，讓人類審核留在 Discord 並在接受後繼續生成。預設會從現有 `news_ch.news` 新聞庫隨機挑選一則可追溯來源的文章當靈感；若使用自訂故事且明確不採新聞靈感，傳 `--serial-news-inspiration none`。
+
+在 repo 根目錄建立故事草稿：
+
+~~~powershell
+$env:PYTHONPATH = "agentic/src"
+python -m agentic.app.main `
+  --serial-story-draft `
+  --goal "一名燈塔守望者幫迷路的雲朵找回海洋。" `
+  --output-dir "agentic/output/serial-series"
+~~~
+
+命令會回報 `series_id`、`story_plan_id` 和 Markdown 檔案路徑。先打開並編輯該檔案，確認完整故事、因果、基調與結局。若使用自訂故事且明確不採新聞靈感：
+
+~~~powershell
+python -m agentic.app.main `
+  --serial-story-draft `
+  --serial-news-inspiration none `
+  --goal "一名燈塔守望者幫迷路的雲朵找回海洋。" `
+  --output-dir "agentic/output/serial-series"
+~~~
+
+使用回報的 `story_plan_id` 與同一份 Markdown 檔核准；系統會把審核當下的文字、審核人和 SHA 存入 MySQL：
+
+~~~powershell
+python -m agentic.app.main `
+  --serial-story-review-plan-id <story_plan_id> `
+  --serial-story-review-decision accepted `
+  --serial-story-reviewed-file "<story_markdown_path>"
+~~~
+
+拒絕草稿時不需要傳檔案，可加上原因：
+
+~~~powershell
+python -m agentic.app.main `
+  --serial-story-review-plan-id <story_plan_id> `
+  --serial-story-review-decision rejected `
+  --serial-story-review-notes "主角的目標和結尾還不夠清楚。"
+~~~
+
+故事核准後，用剛才回報的 `series_id` 生角色卡。可以加角色偏好；不提供時會請 LLM 依核准故事創作主角：
+
+~~~powershell
+python -m agentic.app.main `
+  --serial-character-draft `
+  --series-id <series_id> `
+  --serial-character-preferences "主角是一名勇敢但有點迷糊的海豹郵差。" `
+  --output-dir "agentic/output/serial-series"
+~~~
+
+先讀取角色卡中的「角色參考圖提示」，用既有圖片流程生成候選圖，再由人挑選畫面。這會實際呼叫目前設定的 LLM 和 ComfyUI：
+
+~~~powershell
+python -m agentic.app.main `
+  --goal "<貼上角色卡中的角色參考圖提示>" `
+  --media-type image `
+  --execute `
+  --output-dir "agentic/output/serial-series"
+~~~
+
+編輯 Markdown 角色卡後，核准時同時指定最終角色名稱和挑選的參考圖。最多可選三張，核准後每集固定使用這些圖的 SHA-256：
+
+~~~powershell
+python -m agentic.app.main `
+  --series-id <series_id> `
+  --serial-character-card-review-id <character_card_id> `
+  --serial-character-card-review-decision accepted `
+  --serial-character-card-name "潮汐" `
+  --serial-character-card-reviewed-file "<character_card_path>" `
+  --serial-character-reference "<selected_identity_image.png>"
+~~~
+
+每集先產生故事節點、場景與鏡頭文字清單。提供集名／主題，`--goal` 可選填本集方向。輸出會列出目的、開場狀態、角色動作、道具變化、鏡頭構圖或移動、結尾狀態：
+
+~~~powershell
+python -m agentic.app.main `
+  --serial-episode-plan-draft `
+  --series-id <series_id> `
+  --serial-episode-number 1 `
+  --episode-topic "燈塔失去訊號" `
+  --goal "潮汐發現鹽晶體擋住燈罩，必須找出原因。" `
+  --output-dir "agentic/output/serial-series"
+~~~
+
+審閱或修改分鏡 Markdown，再核准該集：
+
+~~~powershell
+python -m agentic.app.main `
+  --serial-episode-plan-review-id <outline_id> `
+  --serial-episode-plan-review-decision accepted `
+  --serial-episode-plan-reviewed-file "<outline_path>"
+~~~
+
+故事、角色和該集分鏡都核准後，才開始生成。`--character-config` 指定現有的生成與發布設定檔；資料庫核准的角色名稱、身份卡和參考圖仍是此系列實際使用的角色資料。核准分鏡會自動作為本集影片故事內容，不必再複製到 `--goal`：
+
+~~~powershell
+python -m agentic.app.main `
+  --media-type long_video `
+  --serial-mode `
+  --series-id <series_id> `
+  --character-config "configs/characters/kirby.yaml" `
+  --duration-seconds 30 `
+  --execute
+~~~
+
+`--character-config` 應指向你要使用的影片、Discord 審核與平台發布設定檔。`generation.serial_video.series_selection_weights` 控制自動策略在新系列與續接系列間的比例，預設各為 `0.5`。若沒有符合條件的舊系列，系統一律開始新系列故事草稿，不受權重影響；草稿會停在人工審核，不會直接產生影片。故事核准後再依序建立並審核主角身分卡與參考圖、分集劇情／場景／鏡頭分鏡，全部核准後才進入影片生成。故事、角色或分鏡改版時，舊角色參考與受影響集數會標記 stale，必須核准新版角色與分鏡後再生成。
+
+故事、角色卡、分集分鏡與每集實際 lineage 會分別記錄在 `series_story_plans`、`series_character_cards`、`series_episode_outlines` 和 `episode_onboarding_lineage`。新建過程不會建立可生成影片的 production `series`；第一集開始時才建立。
+
 ## 目前可操作的流程
 
 新集生成完成且最終影片技術 QA 通過後，Discord 最終發布審核只顯示即將發布的文案與標籤。Accept 後才會把審核通過的公開內容送到已啟用的平台；集數、主題與工作流資訊只留在內部故事規劃和 MySQL 紀錄，不放進發布審核內容。各平台的結果、錯誤與 provider receipt 都記到 episode_publications。拒絕、逾時、Discord 無法審核或發布失敗，都會留下可辨識的狀態；技術 QA 通過不代表影片已發布。
 
-連載策略整合在既有 `run_media_interface.py` 入口中，不需要另外執行 PowerShell 腳本，也沒有新增瀏覽器頁面。角色 YAML 的 `generation.serial_video` 控制預設片長、連跑集數、風格、輸出目錄、Discord 審核逾時與固定身份參考圖；啟用的平台和發布設定沿用同一份角色 YAML 的 `social_media.platforms`。
+連載策略整合在既有 `run_media_interface.py` 入口中，不需要另外執行 PowerShell 腳本，也沒有新增瀏覽器頁面。角色 YAML 的 `generation.serial_video` 控制預設片長、連跑集數、風格、輸出目錄、故事複雜度、Discord 審核逾時與固定身份參考圖；啟用的平台和發布設定沿用同一份角色 YAML 的 `social_media.platforms`。
 
 ~~~mermaid
 flowchart LR
@@ -40,11 +173,12 @@ serial_video_mysql_user=mediaoverload_serial_app
 serial_video_mysql_password=<your-generated-password>
 ~~~
 
-正式資料庫共有八張表：
+正式資料庫的影片執行帳本有八張表，另有一張故事草稿與審核版本表：
 
 | 資料表 | 一列代表什麼 |
 |---|---|
 | series | 固定角色的系列與目前故事狀態 |
+| series_story_plans | 完整系列故事草稿、新聞靈感快照、人工決定與 SHA-256；角色核准前獨立於 production series |
 | episodes | 一集的一個版本，含主題、總片長、前集、狀態、最終影片路徑與 SHA-256 |
 | episode_plans | 綁定該集的執行計畫及其 SHA-256 |
 | segments | 有序故事段落、預計片長、目前與已接受的 render、尾幀狀態 |
@@ -119,7 +253,9 @@ python -m agentic.app.main --goal "Kirby guides a lost firefly home with the sta
 python run_media_interface.py --character kirby --generation-type serial_video
 ~~~
 
-不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 40；若抽中連載，會直接交給同一個連載 runner，執行連載點子生成、連續性審核和發布流程。
+不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 40；若抽中連載，會直接交給同一個連載 runner，執行故事、角色與首集大綱的 Discord 審核，再接續影片流程。審核遭拒、逾時或生成失敗時，入口會回報 blocked／failed，不會假裝整個流程成功。
+
+預設 `simple` 是短劇模式：一件小事、少量角色、簡單結果。要提高故事層次時可加 `--story-complexity cinematic`；也能在角色 YAML 的 `generation.serial_video.story_complexity` 設定預設值。
 
 Kirby 預設每次跑一集、每集 30 秒。想一次連跑五集、每集 60 秒：
 
@@ -134,6 +270,7 @@ serial_video:
   enabled: true
   default_duration_seconds: 30
   episodes_per_run: 1
+  story_complexity: simple
   style: watercolor storybook animation
   output_dir: output
   discord_review_timeout_seconds: 1800
@@ -142,9 +279,9 @@ serial_video:
 
 這個角色設定會套用到每個片段審核和最終發布審核；設定值優先於命令列值。未設定時使用 1800 秒預設值。
 
-每集送 Discord 審核和發布完成後，才會開始下一集。自動策略先查找最新的失敗集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做；如果 Discord 審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。下次啟動會先重試這集，不會先抽新系列或下一集。沒有待重試集時，才以 50/50 選擇新系列或從 active 系列最新 ready 集續集。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
+每集送 Discord 審核和發布完成後，才會開始下一集。自動策略先查找最新的失敗集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做；如果 Discord 審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。下次啟動會先重試這集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
 
-使用 `--prompt` 和 `--episode-topic` 可指定這次連跑的第一集；後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。第一次建立系列前，請在 YAML 的 `identity_references` 設定固定身份參考圖；已有角色身份圖登記在 MySQL 時可以留空。
+使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
 
 ## 產生新集
 

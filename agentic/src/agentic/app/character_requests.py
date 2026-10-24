@@ -26,6 +26,7 @@ class CharacterGenerationOptions:
     seed: int | None = None
     subject_mode: str | None = None
     motion_graphics: bool = False
+    story_complexity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

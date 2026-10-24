@@ -10,6 +10,10 @@ generation:
   # Weighted selection enters the same serial workflow as the explicit CLI option.
   serial_video:
     enabled: true
+    story_complexity: simple
+    series_selection_weights:
+      new: 0.5
+      continue: 0.5
     default_duration_seconds: 30
     episodes_per_run: 1
     style: watercolor storybook animation

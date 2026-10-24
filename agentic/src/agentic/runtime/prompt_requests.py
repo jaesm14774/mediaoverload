@@ -38,3 +38,18 @@ class JsonChatRequest:
     language_contract: str = ""
     output_contract: str = ""
     validate_response: Callable[[Any], Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TextChatRequest:
+    """One plain-text LLM call with prompt and provenance recording."""
+
+    manager: Any
+    system_prompt: str
+    user_prompt: str
+    step_name: str
+    model: str = "text"
+    images: list[str] | None = None
+    recorder: Any = None
+    request_timeout: float | None = None
+    language_contract: str = ""

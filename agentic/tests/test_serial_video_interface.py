@@ -7,7 +7,11 @@ import pytest
 import yaml
 
 import run_media_interface
-from agentic.app.main import _serial_publish_configuration, parse_args
+from agentic.app.main import (
+    _serial_publish_configuration,
+    _serial_series_selection_weights_configuration,
+    parse_args,
+)
 from agentic.app.character_requests import (
     CharacterGenerationOptions,
     CharacterReviewOptions,
@@ -63,14 +67,21 @@ def _write_config(
 class SerialRunnerBoundary:
     """Captures the serial CLI contract without invoking external media providers."""
 
-    def __init__(self, *, fail_on_call: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_call: int | None = None,
+        result: dict[str, object] | None = None,
+    ) -> None:
         self.calls: list[list[str]] = []
         self.fail_on_call = fail_on_call
+        self.result = result
 
-    def __call__(self, argv: list[str]) -> None:
+    def __call__(self, argv: list[str]) -> dict[str, object] | None:
         self.calls.append(argv)
         if self.fail_on_call == len(self.calls):
             raise SystemExit(3)
+        return self.result
 
 
 def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defaults_reach_the_serial_runner(tmp_path, capsys):
@@ -154,6 +165,7 @@ def test_user_given_a_character_request_selects_serial_video_when_the_shared_dis
         "status": "success",
         "generation_type": "serial_video",
         "episodes_started": 1,
+        "automation_decisions": [],
     }
     command = serial.calls[0]
     assert "--serial-auto-next" in command
@@ -162,6 +174,67 @@ def test_user_given_a_character_request_selects_serial_video_when_the_shared_dis
     assert "--platform" in command and command[command.index("--platform") + 1] == "youtube"
     assert "--dry-run-publish" in command
     assert "--comfy-host" in command and command[command.index("--comfy-host") + 1] == "127.0.0.1"
+
+
+def test_user_given_new_series_is_selected_when_story_onboarding_starts_then_dispatch_stops_after_one_draft(tmp_path):
+    """User Given auto-next selects a new series When the story draft reaches human review Then serial dispatch stops after that draft and records the new-series decision."""
+    config_path = _write_config(tmp_path / "kirby.yaml", episodes_per_run=2)
+    serial = SerialRunnerBoundary(
+        result={
+            "status": "success",
+            "workflow_stage": "story_onboarding",
+            "automation_mode": "new",
+            "series_id": "auto-kirby-123456789abc",
+            "story_plan_id": "a" * 32,
+        }
+    )
+    request = CharacterWorkflowRequest(
+        repo_root=tmp_path,
+        config_path=config_path,
+        generation=CharacterGenerationOptions(prompt="A firefly finds a way home."),
+        review=CharacterReviewOptions(dry_run_publish=True, publish_platforms=("youtube",)),
+        runtime=CharacterRuntimeOptions(),
+    )
+
+    result = dispatch_serial_video_request(request, serial_runner=serial)
+
+    assert len(serial.calls) == 1
+    assert result == {
+        "status": "success",
+        "generation_type": "serial_video",
+        "episodes_started": 0,
+        "automation_decisions": [
+            {
+                "mode": "new",
+                "series_id": "auto-kirby-123456789abc",
+                "episode_number": None,
+            }
+        ],
+        "onboarding_stage": "story_draft",
+        "onboarding_series_id": "auto-kirby-123456789abc",
+        "story_plan_id": "a" * 32,
+    }
+
+
+def test_user_given_series_selection_weights_in_character_config_when_loaded_then_runtime_uses_them(tmp_path):
+    """User Given a character profile configures new and continuation weights When serial selection settings load Then the configured values reach the series selector."""
+    config_path = _write_config(tmp_path / "kirby.yaml")
+    profile = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    profile["generation"]["serial_video"]["series_selection_weights"] = {
+        "new": 0.7,
+        "continue": 0.3,
+    }
+    config_path.write_text(
+        yaml.safe_dump(profile, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    weights = _serial_series_selection_weights_configuration(
+        tmp_path,
+        "Kirby",
+        config_path,
+    )
+
+    assert weights == {"new": 0.7, "continue": 0.3}
 
 
 def test_user_given_the_selected_character_yaml_enables_three_platforms_when_serial_publish_config_is_loaded_then_all_three_are_targets(tmp_path):

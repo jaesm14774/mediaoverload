@@ -73,6 +73,7 @@ def _serial_video_argv(
         comfy_host=args.comfy_host,
         comfy_port=args.comfy_port,
         comfy_root=args.comfy_root,
+        story_complexity=args.story_complexity,
     )
 
 
@@ -81,7 +82,7 @@ def _run_serial_video(
     config_path: Path,
     *,
     parser: argparse.ArgumentParser,
-    serial_runner: Callable[[Sequence[str]], None] | None,
+    serial_runner: Callable[[Sequence[str]], Any] | None,
 ) -> dict[str, Any]:
     if args.no_publish or args.no_review or args.stage_probe:
         parser.error(
@@ -103,12 +104,59 @@ def _run_serial_video(
         )
     if serial_runner is None:
         from agentic.app.main import main as serial_runner
+    episodes_started = 0
+    automation_decisions: list[dict[str, Any]] = []
     for episode_index in range(episode_count):
-        serial_runner(_serial_video_argv(args, config_path, episode_index=episode_index))
+        run_result = serial_runner(
+            _serial_video_argv(args, config_path, episode_index=episode_index)
+        )
+        if not isinstance(run_result, dict):
+            return {
+                "status": "failed",
+                "generation_type": "serial_video",
+                "episodes_started": episodes_started,
+                "reason": "The serial runner ended without a completion status.",
+            }
+        if run_result.get("workflow_stage") == "serial_onboarding_blocked":
+            return {
+                "status": "blocked",
+                "generation_type": "serial_video",
+                "episodes_started": episodes_started,
+                "onboarding_stage": str(run_result.get("onboarding_stage") or "unknown"),
+                "series_id": str(run_result.get("series_id") or ""),
+                "reason": str(run_result.get("reason") or "Discord review did not complete."),
+            }
+        status = str(run_result.get("status") or "").strip().lower()
+        if status in {"blocked", "failed"}:
+            return {
+                "status": status,
+                "generation_type": "serial_video",
+                "episodes_started": episodes_started,
+                "automation_decisions": automation_decisions,
+                "reason": str(run_result.get("reason") or "Serial video execution did not complete."),
+            }
+        if status != "success":
+            return {
+                "status": "failed",
+                "generation_type": "serial_video",
+                "episodes_started": episodes_started,
+                "reason": "The serial runner returned an unknown completion status.",
+            }
+        mode = str(run_result.get("automation_mode") or "").strip()
+        if mode:
+            automation_decisions.append(
+                {
+                    "mode": mode,
+                    "series_id": str(run_result.get("series_id") or ""),
+                    "episode_number": run_result.get("episode_number"),
+                }
+            )
+        episodes_started += 1
     return {
         "status": "success",
         "generation_type": "serial_video",
-        "episodes_started": episode_count,
+        "episodes_started": episodes_started,
+        "automation_decisions": automation_decisions,
     }
 
 
@@ -116,7 +164,7 @@ def main(
     argv: list[str] | None = None,
     *,
     workflow_runner: Callable[[CharacterWorkflowRequest], dict[str, Any]] = run_character_workflow,
-    serial_runner: Callable[[Sequence[str]], None] | None = None,
+    serial_runner: Callable[[Sequence[str]], Any] | None = None,
 ) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -133,6 +181,11 @@ def main(
         help="Requested clip duration; 5 seconds uses one clear action, 15 seconds uses a compact native H3 story",
     )
     parser.add_argument("--episode-topic", type=str, help="Optional topic for the first serial episode in this run")
+    parser.add_argument(
+        "--story-complexity",
+        choices=("simple", "cinematic"),
+        help="Serial story complexity; defaults to the character profile or simple",
+    )
     parser.add_argument("--serial-episodes", type=int, help="Number of serial episodes to run; defaults to generation.serial_video.episodes_per_run")
     parser.add_argument("--reference-video", type=str, help="Optional local reference video or URL used as structural visual evidence")
     parser.add_argument("--reference-video-depth", choices=("standard", "deep"), default="standard")
@@ -204,12 +257,10 @@ def main(
 
     config_path = _resolve_config_path(args)
     if str(args.generation_type or "").strip().lower() == "serial_video":
-        _run_serial_video(
-            args,
-            config_path,
-            parser=parser,
-            serial_runner=serial_runner,
+        result = _run_serial_video(
+            args, config_path, parser=parser, serial_runner=serial_runner
         )
+        print(dumps_result(result))
         return
     if args.serial_episodes is not None or args.episode_topic:
         parser.error("--serial-episodes and --episode-topic require --generation-type serial_video")
@@ -232,6 +283,7 @@ def main(
             rng=random.Random(),
             seed=args.seed,
             motion_graphics=args.motion_graphics,
+            story_complexity=args.story_complexity,
         ),
         review=CharacterReviewOptions(
             dry_run_publish=args.dry_run_publish,

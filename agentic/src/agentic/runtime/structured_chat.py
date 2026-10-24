@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 from agentic.runtime.observability import RunRecorder
-from agentic.runtime.prompt_requests import JsonChatRequest
+from agentic.runtime.prompt_requests import JsonChatRequest, TextChatRequest
 
 
 def chat_json(request: JsonChatRequest) -> Any:
@@ -241,6 +241,76 @@ def chat_json(request: JsonChatRequest) -> Any:
             f"JSON repair attempt also failed: {type(repair_error).__name__}: {repair_error}"
         )
     raise first_error from (repair_errors[-1] if repair_errors else None)
+
+
+def chat_text(request: TextChatRequest) -> str:
+    """Return provider text as written, without parsing or validating its shape."""
+    manager = request.manager
+    chat_model = manager.vision_model if request.model == "vision" else manager.text_model
+    recorder = request.recorder or getattr(manager, "_mediaoverload_run_recorder", None)
+    language_contract = str(request.language_contract or "").strip()
+    system_prompt = str(request.system_prompt or "").strip()
+    user_prompt = str(request.user_prompt or "").strip()
+    if language_contract:
+        system_prompt = f"{system_prompt}\n\n{language_contract}" if system_prompt else language_contract
+        user_prompt = f"{user_prompt}\n\n{language_contract}" if user_prompt else language_contract
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    timeout = request.request_timeout
+    if timeout is None:
+        try:
+            timeout = max(1.0, float(os.environ.get("AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS", "30")))
+        except ValueError:
+            timeout = 30.0
+    try:
+        total_timeout = max(1.0, float(os.environ.get("AGENTIC_LLM_TOTAL_TIMEOUT_SECONDS", "180")))
+    except ValueError:
+        total_timeout = 180.0
+    model_id_before_call = model_id(chat_model)
+    call_path = (
+        recorder.start_llm_call(
+            schema_name=request.step_name,
+            attempt=1,
+            messages=messages,
+            schema={},
+            model=request.model,
+            model_id=model_id_before_call,
+            images=request.images,
+            response_format_used=False,
+        )
+        if isinstance(recorder, RunRecorder)
+        else None
+    )
+    response: Any = None
+    try:
+        response = chat_model.chat_completion(
+            messages=messages,
+            images=request.images,
+            request_timeout=max(1.0, float(timeout)),
+            _deadline=time.monotonic() + total_timeout,
+        )
+        result = str(response or "").strip()
+        if not result:
+            raise ValueError("The text model returned an empty response.")
+        if isinstance(recorder, RunRecorder) and call_path is not None:
+            recorder.complete_llm_call(
+                call_path,
+                response=response,
+                parsed_payload=result,
+                model_id=model_id(chat_model),
+            )
+        return result
+    except Exception as exc:
+        if isinstance(recorder, RunRecorder) and call_path is not None:
+            recorder.complete_llm_call(
+                call_path,
+                response=response,
+                error=f"{type(exc).__name__}: {exc}",
+                model_id=model_id(chat_model),
+            )
+        raise
 
 
 def model_id(model: Any) -> str:

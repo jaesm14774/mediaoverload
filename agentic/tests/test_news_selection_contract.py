@@ -6,7 +6,10 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from agentic.runtime.news_selection import select_news_candidate
+from agentic.runtime.news_selection import (
+    select_news_candidate,
+    select_random_news_inspiration,
+)
 from agentic.tools.context_services import NewsContextService
 from scripts.run_longvideo_production_e2e import parse_args
 
@@ -142,6 +145,31 @@ def test_user_given_news_without_a_publisher_or_article_url_when_selecting_then_
             [{"title": "台北活動延期公告", "created_at": datetime(2026, 10, 22, 18)}],
             reference_time=datetime(2026, 10, 22, 18),
         )
+
+
+def test_user_given_random_story_inspiration_when_selecting_then_it_chooses_uniformly_from_only_safe_traceable_articles():
+    """User Given safe and unsafe recent article rows When choosing a random story seed Then the injected chooser receives only usable, brand-safe, traceable articles and the decision records its pool size."""
+    allowed = _news("社區修復老橋讓居民重新通行", "Outlet A", "2026-10-24 09:00:00", "bridge")
+    rejected = _news("政治人物宣布競選政策", "Outlet B", "2026-10-24 08:00:00", "politics")
+
+    class ChooseLast:
+        def __init__(self):
+            self.seen = []
+
+        def choice(self, values):
+            self.seen = list(values)
+            return values[-1]
+
+    chooser = ChooseLast()
+    decision = select_random_news_inspiration(
+        [allowed, rejected, {"title": "untraceable", "keyword": "x"}],
+        rng=chooser,
+    )
+
+    assert decision.reason == "random_inspiration"
+    assert decision.selected is allowed
+    assert chooser.seen == [allowed]
+    assert decision.evidence["eligible_article_count"] == 1
 
 
 def test_user_given_coverage_older_than_the_active_event_window_when_selecting_then_old_articles_do_not_make_it_hot():

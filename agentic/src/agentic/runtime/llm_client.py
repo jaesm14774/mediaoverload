@@ -6,9 +6,9 @@ import json
 from typing import Any, Callable
 from agentic.runtime.llm_manager_adapter import build_llm_manager
 from agentic.runtime.llm_config import resolve_backend_info
-from agentic.runtime.structured_chat import chat_json, model_id
+from agentic.runtime.structured_chat import chat_json, chat_text, model_id
 from agentic.runtime.observability import RunRecorder
-from agentic.runtime.prompt_requests import JsonChatRequest
+from agentic.runtime.prompt_requests import JsonChatRequest, TextChatRequest
 from agentic.runtime.prompting import ENGLISH_GENERATION_RESPONSE_CONTRACT
 
 
@@ -129,6 +129,30 @@ class PromptClient:
         kwargs["recorder"] = self.recorder
         kwargs.setdefault("language_contract", ENGLISH_GENERATION_RESPONSE_CONTRACT)
         return chat_json(JsonChatRequest(*args, **kwargs))
+
+    def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        step_name: str,
+        model: str = "text",
+        images: list[str] | None = None,
+        language_contract: str = "",
+    ) -> str:
+        manager = self.require_manager()
+        return chat_text(
+            TextChatRequest(
+                manager=manager,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                step_name=step_name,
+                model=model,
+                images=images,
+                recorder=self.recorder,
+                language_contract=language_contract,
+            )
+        )
 
     def current_model_id(self, modality: str) -> str:
         manager = self._manager

@@ -251,7 +251,10 @@ def format_ref2va_prompt(
     detailed = scene if scene.lstrip().startswith("[Shot 1]") else f"[Shot 1] {scene}"
     if summary_labels and not has_frame_anchor:
         detailed = (
-            "Preserve the visual features assigned in subject_definitions while carrying out this scene. "
+            "Start with a crisp, sharply focused opening frame. Keep the primary subject large enough to read clearly "
+            "from 0.00 seconds and maintain focus as the camera moves; do not begin out of focus, rack focus from "
+            "blur to clarity, or add unintended motion blur. Preserve the visual features assigned in "
+            "subject_definitions while carrying out this scene. "
             + detailed
         )
     if has_frame_anchor:

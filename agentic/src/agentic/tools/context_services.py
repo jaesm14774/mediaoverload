@@ -21,10 +21,15 @@ from agentic.runtime.news_grounding import (
     is_brand_safe_news_selection,
     is_usable_news_selection,
 )
-from agentic.runtime.news_selection import is_traceable_news, select_news_candidate
+from agentic.runtime.news_selection import (
+    is_traceable_news,
+    select_news_candidate,
+    select_random_news_inspiration,
+)
 
 
 REVIEW_MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+REVIEW_DOCUMENT_EXTENSIONS = {".md", ".txt"}
 MAX_REVIEW_FILE_BYTES = 200 * 1024 * 1024
 
 
@@ -115,6 +120,8 @@ class NewsContextService:
         lookback_days: int = 7,
         limit: int = 5000,
         exclude_categories: list[str] | None = None,
+        random_inspiration: bool = False,
+        random_source: Any | None = None,
     ) -> NewsSelection | None:
         if not self.is_configured():
             _logger().info("news.fetch.skipped | reason=mysql_not_configured")
@@ -192,20 +199,21 @@ class NewsContextService:
             with connection.cursor() as cursor:
                 cursor.execute(query, params)
                 rows = list(cursor.fetchall() or [])
-                cursor.execute(volume_query, volume_params)
-                volume_row = cursor.fetchone() or {}
-                news_volume = {
-                    "6h": int(volume_row.get("total_6h") or 0),
-                    "24h": int(volume_row.get("total_24h") or 0),
-                    "previous_24h": int(volume_row.get("total_previous_24h") or 0),
-                }
-                try:
-                    cursor.execute(ptt_query, ptt_params)
-                    ptt_rows = list(cursor.fetchall() or [])
-                except Exception as exc:
-                    _logger().warning(
-                        "news.fetch.ptt_unavailable | error=%s", type(exc).__name__
-                    )
+                if not random_inspiration:
+                    cursor.execute(volume_query, volume_params)
+                    volume_row = cursor.fetchone() or {}
+                    news_volume = {
+                        "6h": int(volume_row.get("total_6h") or 0),
+                        "24h": int(volume_row.get("total_24h") or 0),
+                        "previous_24h": int(volume_row.get("total_previous_24h") or 0),
+                    }
+                    try:
+                        cursor.execute(ptt_query, ptt_params)
+                        ptt_rows = list(cursor.fetchall() or [])
+                    except Exception as exc:
+                        _logger().warning(
+                            "news.fetch.ptt_unavailable | error=%s", type(exc).__name__
+                        )
         finally:
             connection.close()
 
@@ -219,11 +227,15 @@ class NewsContextService:
         if not rows:
             _logger().info("news.fetch.empty | reason=no_traceable_usable_news_rows")
             return None
-        decision = select_news_candidate(
-            rows,
-            ptt_rows=ptt_rows,
-            news_volume=news_volume,
-            reference_time=reference_time,
+        decision = (
+            select_random_news_inspiration(rows, rng=random_source)
+            if random_inspiration
+            else select_news_candidate(
+                rows,
+                ptt_rows=ptt_rows,
+                news_volume=news_volume,
+                reference_time=reference_time,
+            )
         )
         selected = decision.selected
         _logger().info("news.fetch.title | %s", str(selected.get("title") or "").strip())
@@ -652,12 +664,37 @@ class DiscordHumanReviewService:
             filtered.append(str(resolved))
         return list(dict.fromkeys(filtered))
 
+    def _filter_document_paths(self, document_paths: list[str]) -> list[str]:
+        allowed_roots = [self.output_root.resolve()]
+        for raw_root in str(os.getenv("discord_review_allowed_roots") or "").split(","):
+            if raw_root.strip():
+                allowed_roots.append(Path(raw_root.strip()).expanduser().resolve())
+        filtered: list[str] = []
+        for raw_path in document_paths:
+            try:
+                resolved = Path(raw_path).resolve(strict=True)
+                if not any(
+                    resolved == root or root in resolved.parents
+                    for root in allowed_roots
+                ):
+                    raise ValueError("outside allowed document root")
+                if not resolved.is_file() or resolved.suffix.lower() not in REVIEW_DOCUMENT_EXTENSIONS:
+                    raise ValueError("unsupported review document type")
+                if resolved.stat().st_size > 10 * 1024 * 1024:
+                    raise ValueError("review document is too large")
+            except (OSError, RuntimeError, ValueError) as exc:
+                _logger().warning("discord.review.document_rejected | path=%s | reason=%s", raw_path, exc)
+                continue
+            filtered.append(str(resolved))
+        return list(dict.fromkeys(filtered))
+
     def review_candidates(
         self,
         *,
         text: str,
         context_text: str = "",
         media_paths: list[str],
+        document_paths: list[str] | None = None,
         timeout_seconds: int = DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS,
         allow_asset_selection: bool = True,
         allow_text_edit: bool = True,
@@ -669,26 +706,33 @@ class DiscordHumanReviewService:
         allow_series_lifecycle_choice: bool = False,
     ) -> HumanReviewDecision:
         filtered_media_paths = self._filter_media_paths(media_paths)
+        filtered_document_paths = self._filter_document_paths(document_paths or [])
         normalized_selection_limit = None
         if selection_limit is not None:
             normalized_selection_limit = max(1, int(selection_limit))
             if selection_mode == "single":
                 normalized_selection_limit = 1
-        if not filtered_media_paths or not self.is_configured():
+        if (not filtered_media_paths and not filtered_document_paths) or not self.is_configured():
             _logger().info(
-                "discord.review.skipped | configured=%s | candidate_count=%s",
+                "discord.review.skipped | configured=%s | candidate_count=%s | document_count=%s",
                 self.is_configured(),
                 len(filtered_media_paths),
+                len(filtered_document_paths),
             )
             return HumanReviewDecision(
                 status="skipped",
                 selected_paths=filtered_media_paths,
                 edited_text=text,
                 review_mode="auto",
-                fallback_reason="discord review is not configured or no candidate files were found",
+                fallback_reason="discord review is not configured or no review files were found",
             )
 
-        _logger().info("discord.review.start | candidate_count=%s | timeout_seconds=%s", len(filtered_media_paths), timeout_seconds)
+        _logger().info(
+            "discord.review.start | candidate_count=%s | document_count=%s | timeout_seconds=%s",
+            len(filtered_media_paths),
+            len(filtered_document_paths),
+            timeout_seconds,
+        )
         discord_text = _fit_discord_message(
             text,
             max_length=1900,
@@ -696,23 +740,24 @@ class DiscordHumanReviewService:
             review_scope=review_scope,
         )
         try:
-            decision = asyncio.run(
-                self.feedback_process(
-                    token=str(os.getenv("discord_review_bot_token")),
-                    channel_id=int(str(os.getenv("discord_review_channel_id"))),
-                    text=discord_text,
-                    context_text=_fit_discord_message(context_text, max_length=500),
-                    filepaths=filtered_media_paths,
-                    timeout=float(timeout_seconds),
-                    allow_asset_selection=allow_asset_selection,
-                    allow_text_edit=allow_text_edit,
-                    selection_mode=selection_mode,
-                    selection_required=selection_required,
-                    selection_limit=normalized_selection_limit,
-                    allow_regenerate=allow_regenerate,
-                    allow_series_lifecycle_choice=allow_series_lifecycle_choice,
-                )
-            )
+            review_request = {
+                "token": str(os.getenv("discord_review_bot_token")),
+                "channel_id": int(str(os.getenv("discord_review_channel_id"))),
+                "text": discord_text,
+                "context_text": _fit_discord_message(context_text, max_length=500),
+                "filepaths": filtered_media_paths,
+                "timeout": float(timeout_seconds),
+                "allow_asset_selection": allow_asset_selection,
+                "allow_text_edit": allow_text_edit,
+                "selection_mode": selection_mode,
+                "selection_required": selection_required,
+                "selection_limit": normalized_selection_limit,
+                "allow_regenerate": allow_regenerate,
+                "allow_series_lifecycle_choice": allow_series_lifecycle_choice,
+            }
+            if filtered_document_paths:
+                review_request["document_paths"] = filtered_document_paths
+            decision = asyncio.run(self.feedback_process(**review_request))
         except Exception as exc:
             _logger().exception("discord.review.error | error=%s", exc)
             decision = ("error", None, text, None, {"status": "error", "error": str(exc)})
@@ -753,6 +798,7 @@ class DiscordHumanReviewService:
             "discord_text": discord_text,
             "edited_text": edited_text,
             "media_paths": filtered_media_paths,
+            "document_paths": filtered_document_paths,
             "selected_paths": selected_paths,
             "status": status,
             "reviewer": reviewer or "",
@@ -886,6 +932,7 @@ async def _run_discord_file_feedback_process(
     text: str,
     context_text: str = "",
     filepaths: list[str],
+    document_paths: list[str] | None = None,
     timeout: float,
     allow_asset_selection: bool = True,
     allow_text_edit: bool = True,
@@ -926,6 +973,7 @@ async def _run_discord_file_feedback_process(
                     completed.set()
                     return
             files = [discord.File(path) for path in filepaths]
+            documents = [discord.File(path) for path in (document_paths or [])]
             view = create_discord_review_view(
                 files,
                 text or "Review request",
@@ -938,9 +986,10 @@ async def _run_discord_file_feedback_process(
                 allow_regenerate=allow_regenerate,
                 allow_series_lifecycle_choice=allow_series_lifecycle_choice,
             )
-            if context_text.strip():
+            if context_text.strip() or documents:
                 await channel.send(
-                    content=context_text,
+                    content=context_text or "審核文件附於此訊息。",
+                    files=documents,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             message = await channel.send(
@@ -955,8 +1004,8 @@ async def _run_discord_file_feedback_process(
                 "message_id": str(getattr(message, "id", "") or ""),
                 "channel_id": str(channel_id),
                 "sent_at": datetime.now().isoformat(),
-                "attachment_count": len(filepaths),
-                "attachment_names": [Path(path).name for path in filepaths],
+                "attachment_count": len(filepaths) + len(documents),
+                "attachment_names": [Path(path).name for path in (document_paths or []) + filepaths],
                 "edit_requested": False,
                 "series_disposition": "",
             }
@@ -964,7 +1013,7 @@ async def _run_discord_file_feedback_process(
                 "discord.review.delivered | channel_id=%s | message_id=%s | attachment_count=%s",
                 channel_id,
                 str(delivery.get("message_id") or ""),
-                len(filepaths),
+                len(filepaths) + len(documents),
             )
             try:
                 await asyncio.wait_for(view.wait(), timeout=timeout)

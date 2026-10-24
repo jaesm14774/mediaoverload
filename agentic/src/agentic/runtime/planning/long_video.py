@@ -683,7 +683,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 or context.longvideo_int(
                     goal,
                     "longvideo_width",
-                    int(goal.constraints.get("longvideo_h3_width") or 512),
+                    int(goal.constraints.get("longvideo_h3_width") or 608),
                     2048,
                 )
             ),
@@ -692,7 +692,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 or context.longvideo_int(
                     goal,
                     "longvideo_height",
-                    int(goal.constraints.get("longvideo_h3_height") or 288),
+                    int(goal.constraints.get("longvideo_h3_height") or 352),
                     2048,
                 )
             ),

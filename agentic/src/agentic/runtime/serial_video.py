@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -197,6 +198,102 @@ class SerialVideoStore:
             KEY idx_publication_episode_status(episode_id, status),
             CONSTRAINT fk_publication_episode FOREIGN KEY(episode_id) REFERENCES episodes(episode_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        """CREATE TABLE IF NOT EXISTS series_story_plans (
+            story_plan_id CHAR(32) PRIMARY KEY,
+            series_id VARCHAR(191) NOT NULL,
+            version INT NOT NULL,
+            status VARCHAR(24) NOT NULL,
+            user_idea LONGTEXT NOT NULL,
+            inspiration_json LONGTEXT NOT NULL DEFAULT ('{}'),
+            story_treatment LONGTEXT NOT NULL,
+            story_sha256 CHAR(64) NOT NULL,
+            reviewed_treatment LONGTEXT NOT NULL DEFAULT (''),
+            reviewed_sha256 VARCHAR(64) NOT NULL DEFAULT ('') ,
+            approved_sha256 VARCHAR(64) NOT NULL DEFAULT ('') ,
+            prompt_sha256 CHAR(64) NOT NULL DEFAULT ('') ,
+            model_id VARCHAR(191) NOT NULL DEFAULT ('') ,
+            artifact_path TEXT NOT NULL DEFAULT ('') ,
+            review_decision VARCHAR(24) NOT NULL DEFAULT ('pending'),
+            reviewer VARCHAR(191) NOT NULL DEFAULT ('') ,
+            review_notes TEXT NOT NULL DEFAULT ('') ,
+            created_at VARCHAR(40) NOT NULL,
+            reviewed_at VARCHAR(40) NOT NULL DEFAULT ('') ,
+            updated_at VARCHAR(40) NOT NULL,
+            UNIQUE KEY uq_series_story_version(series_id, version),
+            KEY idx_series_story_status(series_id, status, version)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        """CREATE TABLE IF NOT EXISTS series_character_cards (
+            character_card_id CHAR(32) PRIMARY KEY,
+            series_id VARCHAR(191) NOT NULL,
+            story_plan_id CHAR(32) NOT NULL,
+            version INT NOT NULL,
+            status VARCHAR(24) NOT NULL,
+            character_name VARCHAR(191) NOT NULL DEFAULT ('') ,
+            user_preferences LONGTEXT NOT NULL,
+            character_card LONGTEXT NOT NULL,
+            card_sha256 CHAR(64) NOT NULL,
+            reviewed_card LONGTEXT NOT NULL DEFAULT ('') ,
+            reviewed_sha256 VARCHAR(64) NOT NULL DEFAULT ('') ,
+            approved_sha256 VARCHAR(64) NOT NULL DEFAULT ('') ,
+            reference_assets_json LONGTEXT NOT NULL DEFAULT ('[]'),
+            prompt_sha256 CHAR(64) NOT NULL DEFAULT ('') ,
+            model_id VARCHAR(191) NOT NULL DEFAULT ('') ,
+            artifact_path TEXT NOT NULL DEFAULT ('') ,
+            review_decision VARCHAR(24) NOT NULL DEFAULT ('pending'),
+            reviewer VARCHAR(191) NOT NULL DEFAULT ('') ,
+            review_notes TEXT NOT NULL DEFAULT ('') ,
+            created_at VARCHAR(40) NOT NULL,
+            reviewed_at VARCHAR(40) NOT NULL DEFAULT ('') ,
+            updated_at VARCHAR(40) NOT NULL,
+            UNIQUE KEY uq_series_character_version(series_id, version),
+            KEY idx_series_character_status(series_id, status, version),
+            KEY idx_character_story(story_plan_id, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        """CREATE TABLE IF NOT EXISTS series_episode_outlines (
+            outline_id CHAR(32) PRIMARY KEY,
+            series_id VARCHAR(191) NOT NULL,
+            episode_number INT NOT NULL,
+            version INT NOT NULL,
+            status VARCHAR(24) NOT NULL,
+            episode_topic VARCHAR(512) NOT NULL,
+            episode_direction LONGTEXT NOT NULL,
+            story_plan_id CHAR(32) NOT NULL,
+            story_sha256 CHAR(64) NOT NULL,
+            character_card_id CHAR(32) NOT NULL,
+            character_sha256 CHAR(64) NOT NULL,
+            outline_text LONGTEXT NOT NULL,
+            outline_sha256 CHAR(64) NOT NULL,
+            reviewed_outline LONGTEXT NOT NULL DEFAULT ('') ,
+            reviewed_sha256 VARCHAR(64) NOT NULL DEFAULT ('') ,
+            approved_sha256 VARCHAR(64) NOT NULL DEFAULT ('') ,
+            prompt_sha256 CHAR(64) NOT NULL DEFAULT ('') ,
+            model_id VARCHAR(191) NOT NULL DEFAULT ('') ,
+            artifact_path TEXT NOT NULL DEFAULT ('') ,
+            review_decision VARCHAR(24) NOT NULL DEFAULT ('pending'),
+            reviewer VARCHAR(191) NOT NULL DEFAULT ('') ,
+            review_notes TEXT NOT NULL DEFAULT ('') ,
+            created_at VARCHAR(40) NOT NULL,
+            reviewed_at VARCHAR(40) NOT NULL DEFAULT ('') ,
+            updated_at VARCHAR(40) NOT NULL,
+            UNIQUE KEY uq_series_episode_outline_version(series_id, episode_number, version),
+            KEY idx_series_episode_outline_status(series_id, episode_number, status, version),
+            KEY idx_episode_outline_lineage(story_plan_id, character_card_id, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        """CREATE TABLE IF NOT EXISTS episode_onboarding_lineage (
+            episode_id CHAR(32) PRIMARY KEY,
+            story_plan_id CHAR(32) NOT NULL,
+            story_sha256 CHAR(64) NOT NULL,
+            character_card_id CHAR(32) NOT NULL,
+            character_sha256 CHAR(64) NOT NULL,
+            outline_id CHAR(32) NOT NULL,
+            outline_sha256 CHAR(64) NOT NULL,
+            reference_assets_json LONGTEXT NOT NULL,
+            created_at VARCHAR(40) NOT NULL,
+            KEY idx_onboarding_lineage_story(story_plan_id),
+            KEY idx_onboarding_lineage_character(character_card_id),
+            KEY idx_onboarding_lineage_outline(outline_id),
+            CONSTRAINT fk_onboarding_lineage_episode FOREIGN KEY(episode_id) REFERENCES episodes(episode_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
     )
 
     def __init__(
@@ -299,12 +396,714 @@ class SerialVideoStore:
         return [{"path": row["path"], "sha256": row["sha256"]} for row in rows]
 
     @staticmethod
-    def choose_auto_next_mode(roll: float, *, has_continuation_candidates: bool) -> str:
-        """Use the lower half of the random interval for continuation when one is eligible."""
+    def choose_auto_next_mode(
+        roll: float,
+        *,
+        has_continuation_candidates: bool,
+        series_selection_weights: dict[str, Any] | None = None,
+    ) -> str:
+        """Choose new onboarding or continuation using configured relative weights."""
         value = float(roll)
         if not 0 <= value < 1:
             raise ValueError("The automatic series choice roll must be in [0, 1).")
-        return "continue" if has_continuation_candidates and value < 0.5 else "new"
+        raw_weights = (
+            {"new": 0.5, "continue": 0.5}
+            if series_selection_weights is None
+            else series_selection_weights
+        )
+        if not isinstance(raw_weights, dict) or set(raw_weights) != {"new", "continue"}:
+            raise ValueError(
+                "generation.serial_video.series_selection_weights must define exactly new and continue."
+            )
+        weights: dict[str, float] = {}
+        for mode, raw_weight in raw_weights.items():
+            if isinstance(raw_weight, bool):
+                raise ValueError("Automatic series selection weights must be finite non-negative numbers.")
+            try:
+                weight = float(raw_weight)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Automatic series selection weights must be finite non-negative numbers."
+                ) from exc
+            if not math.isfinite(weight) or weight < 0:
+                raise ValueError("Automatic series selection weights must be finite non-negative numbers.")
+            weights[mode] = weight
+        total_weight = weights["new"] + weights["continue"]
+        if total_weight <= 0:
+            raise ValueError("At least one automatic series selection weight must be positive.")
+        if not has_continuation_candidates:
+            return "new"
+        return "new" if value < weights["new"] / total_weight else "continue"
+
+    @staticmethod
+    def _story_plan_payload(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        payload = dict(row)
+        try:
+            payload["inspiration"] = json.loads(payload.pop("inspiration_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload["inspiration"] = {}
+        payload["approved_treatment"] = (
+            str(payload.get("reviewed_treatment") or "")
+            if payload.get("approved_sha256")
+            else ""
+        )
+        return payload
+
+    def save_series_story_draft(
+        self,
+        series_id: str,
+        story_treatment: str,
+        *,
+        user_idea: str = "",
+        inspiration: dict[str, Any] | None = None,
+        prompt_sha256: str = "",
+        model_id: str = "",
+        artifact_path: str = "",
+        story_plan_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist one editable story treatment version before a production series exists."""
+        normalized_series_id = str(series_id or "").strip()
+        treatment = str(story_treatment or "")
+        if not normalized_series_id:
+            raise ValueError("A serial story draft requires a series ID.")
+        if not treatment.strip():
+            raise ValueError("A serial story draft cannot be empty.")
+        plan_id = str(story_plan_id or uuid.uuid4().hex).strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{32}", plan_id):
+            raise ValueError("A serial story plan ID must contain 32 hexadecimal characters.")
+        now = _now()
+        story_sha = hashlib.sha256(treatment.encode("utf-8")).hexdigest()
+        with self._connection(write=True) as connection:
+            version_row = connection.execute(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM series_story_plans WHERE series_id = ?",
+                (normalized_series_id,),
+            ).fetchone()
+            version = int(version_row["version"]) + 1 if version_row else 1
+            connection.execute(
+                "UPDATE series_story_plans SET status = 'superseded', updated_at = ? WHERE series_id = ? AND status = 'pending_review'",
+                (now, normalized_series_id),
+            )
+            connection.execute(
+                """INSERT INTO series_story_plans(
+                       story_plan_id, series_id, version, status, user_idea,
+                       inspiration_json, story_treatment, story_sha256,
+                       prompt_sha256, model_id, artifact_path, created_at, updated_at
+                   ) VALUES (?, ?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    plan_id,
+                    normalized_series_id,
+                    version,
+                    str(user_idea or "").strip(),
+                    _json(dict(inspiration or {})),
+                    treatment,
+                    story_sha,
+                    str(prompt_sha256 or "").strip(),
+                    str(model_id or "").strip(),
+                    str(artifact_path or "").strip(),
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM series_story_plans WHERE story_plan_id = ?", (plan_id,)
+            ).fetchone()
+        payload = self._story_plan_payload(row)
+        if payload is None:
+            raise RuntimeError("The serial story draft could not be read after saving.")
+        return payload
+
+    def get_series_story_plan(self, story_plan_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM series_story_plans WHERE story_plan_id = ?",
+                (str(story_plan_id or "").strip(),),
+            ).fetchone()
+        payload = self._story_plan_payload(row)
+        if payload is None:
+            raise ValueError("Serial story plan does not exist.")
+        return payload
+
+    def get_latest_approved_series_story(self, series_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT * FROM series_story_plans
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (str(series_id or "").strip(),),
+            ).fetchone()
+        return self._story_plan_payload(row)
+
+    def record_series_story_decision(
+        self,
+        story_plan_id: str,
+        decision: str,
+        *,
+        reviewed_treatment: str = "",
+        reviewer: str = "operator",
+        notes: str = "",
+    ) -> dict[str, Any]:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"accepted", "rejected"}:
+            raise ValueError("A serial story decision must be accepted or rejected.")
+        reviewed_text = str(reviewed_treatment or "")
+        if normalized_decision == "accepted" and not reviewed_text.strip():
+            raise ValueError("Approving a serial story requires the exact reviewed story text.")
+        reviewed_sha = (
+            hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest()
+            if reviewed_text
+            else ""
+        )
+        now = _now()
+        plan_id = str(story_plan_id or "").strip()
+        with self._connection(write=True) as connection:
+            plan = connection.execute(
+                "SELECT * FROM series_story_plans WHERE story_plan_id = ?",
+                (plan_id,),
+            ).fetchone()
+            if plan is None:
+                raise ValueError("Serial story plan does not exist.")
+            if plan["status"] != "pending_review":
+                raise ValueError("Only a pending serial story draft can receive a human decision.")
+            status = "approved" if normalized_decision == "accepted" else "rejected"
+            if status == "approved":
+                connection.execute(
+                    """UPDATE series_story_plans SET status = 'superseded', updated_at = ?
+                       WHERE series_id = ? AND status = 'approved'""",
+                    (now, plan["series_id"]),
+                )
+                connection.execute(
+                    """UPDATE series_character_cards SET status = 'superseded', updated_at = ?
+                       WHERE series_id = ? AND status IN ('approved', 'pending_review')""",
+                    (now, plan["series_id"]),
+                )
+                connection.execute(
+                    """UPDATE series_episode_outlines SET status = 'superseded', updated_at = ?
+                       WHERE series_id = ? AND status IN ('approved', 'pending_review')""",
+                    (now, plan["series_id"]),
+                )
+                connection.execute(
+                    """UPDATE reference_assets SET status = 'stale'
+                       WHERE series_id = ? AND role = 'character_identity' AND status = 'active'""",
+                    (plan["series_id"],),
+                )
+                self._stale_series_episode_trees(connection, str(plan["series_id"]))
+            connection.execute(
+                """UPDATE series_story_plans SET status = ?, review_decision = ?,
+                       reviewed_treatment = ?, reviewed_sha256 = ?, approved_sha256 = ?,
+                       reviewer = ?, review_notes = ?, reviewed_at = ?, updated_at = ?
+                   WHERE story_plan_id = ? AND status = 'pending_review'""",
+                (
+                    status,
+                    normalized_decision,
+                    reviewed_text,
+                    reviewed_sha,
+                    reviewed_sha if status == "approved" else "",
+                    str(reviewer or "operator").strip(),
+                    str(notes or "").strip(),
+                    now,
+                    now,
+                    plan_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM series_story_plans WHERE story_plan_id = ?", (plan_id,)
+            ).fetchone()
+        payload = self._story_plan_payload(row)
+        if payload is None:
+            raise RuntimeError("The serial story decision could not be read after saving.")
+        return payload
+
+    @staticmethod
+    def _character_card_payload(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        payload = dict(row)
+        try:
+            payload["reference_assets"] = json.loads(
+                payload.pop("reference_assets_json") or "[]"
+            )
+        except (TypeError, json.JSONDecodeError):
+            payload["reference_assets"] = []
+        payload["approved_card"] = (
+            str(payload.get("reviewed_card") or "")
+            if payload.get("approved_sha256")
+            else ""
+        )
+        return payload
+
+    def save_series_character_card_draft(
+        self,
+        series_id: str,
+        story_plan_id: str,
+        character_card: str,
+        *,
+        user_preferences: str = "",
+        prompt_sha256: str = "",
+        model_id: str = "",
+        artifact_path: str = "",
+        character_card_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a character proposal derived from the latest approved story."""
+        normalized_series_id = str(series_id or "").strip()
+        normalized_story_id = str(story_plan_id or "").strip()
+        card_text = str(character_card or "")
+        if not normalized_series_id or not normalized_story_id:
+            raise ValueError("A character card requires a series ID and approved story plan ID.")
+        if not card_text.strip():
+            raise ValueError("A character card draft cannot be empty.")
+        card_id = str(character_card_id or uuid.uuid4().hex).strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{32}", card_id):
+            raise ValueError("A character card ID must contain 32 hexadecimal characters.")
+        now = _now()
+        card_sha = hashlib.sha256(card_text.encode("utf-8")).hexdigest()
+        with self._connection(write=True) as connection:
+            story = connection.execute(
+                """SELECT * FROM series_story_plans
+                   WHERE series_id = ? AND story_plan_id = ? AND status = 'approved'""",
+                (normalized_series_id, normalized_story_id),
+            ).fetchone()
+            if story is None:
+                raise ValueError("Character design requires the matching approved series story.")
+            latest_story = connection.execute(
+                """SELECT story_plan_id FROM series_story_plans
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (normalized_series_id,),
+            ).fetchone()
+            if latest_story is None or latest_story["story_plan_id"] != normalized_story_id:
+                raise ValueError("Character design must use the latest approved series story.")
+            version_row = connection.execute(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM series_character_cards WHERE series_id = ?",
+                (normalized_series_id,),
+            ).fetchone()
+            version = int(version_row["version"]) + 1 if version_row else 1
+            connection.execute(
+                """UPDATE series_character_cards SET status = 'superseded', updated_at = ?
+                   WHERE series_id = ? AND status = 'pending_review'""",
+                (now, normalized_series_id),
+            )
+            connection.execute(
+                """INSERT INTO series_character_cards(
+                       character_card_id, series_id, story_plan_id, version, status,
+                       user_preferences, character_card, card_sha256, prompt_sha256,
+                       model_id, artifact_path, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    card_id,
+                    normalized_series_id,
+                    normalized_story_id,
+                    version,
+                    str(user_preferences or "").strip(),
+                    card_text,
+                    card_sha,
+                    str(prompt_sha256 or "").strip(),
+                    str(model_id or "").strip(),
+                    str(artifact_path or "").strip(),
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM series_character_cards WHERE character_card_id = ?", (card_id,)
+            ).fetchone()
+        payload = self._character_card_payload(row)
+        if payload is None:
+            raise RuntimeError("The serial character card draft could not be read after saving.")
+        return payload
+
+    def get_series_character_card(self, character_card_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM series_character_cards WHERE character_card_id = ?",
+                (str(character_card_id or "").strip(),),
+            ).fetchone()
+        payload = self._character_card_payload(row)
+        if payload is None:
+            raise ValueError("Serial character card does not exist.")
+        return payload
+
+    def get_latest_approved_character_card(self, series_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT * FROM series_character_cards
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (str(series_id or "").strip(),),
+            ).fetchone()
+        return self._character_card_payload(row)
+
+    def get_series_onboarding(self, series_id: str) -> dict[str, Any]:
+        """Return the current approved story and a character card pinned to that story."""
+        story = self.get_latest_approved_series_story(series_id)
+        character = self.get_latest_approved_character_card(series_id)
+        if character and (not story or character.get("story_plan_id") != story.get("story_plan_id")):
+            character = None
+        return {
+            "story": story,
+            "character": character,
+            "is_complete": bool(story and character),
+        }
+
+    def production_series_exists(self, series_id: str) -> bool:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT series_id FROM series WHERE series_id = ?",
+                (str(series_id or "").strip(),),
+            ).fetchone()
+        return row is not None
+
+    def get_production_series_character_name(self, series_id: str) -> str | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT character_name FROM series WHERE series_id = ?",
+                (str(series_id or "").strip(),),
+            ).fetchone()
+        return str(row["character_name"]) if row else None
+
+    def get_episode_onboarding_lineage(self, episode_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM episode_onboarding_lineage WHERE episode_id = ?",
+                (str(episode_id or "").strip(),),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = dict(row)
+        try:
+            payload["reference_assets"] = json.loads(payload.pop("reference_assets_json") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            payload["reference_assets"] = []
+        return payload
+
+    def record_series_character_card_decision(
+        self,
+        character_card_id: str,
+        decision: str,
+        *,
+        character_name: str = "",
+        reviewed_card: str = "",
+        reference_paths: Sequence[str | Path] = (),
+        reviewer: str = "operator",
+        notes: str = "",
+    ) -> dict[str, Any]:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"accepted", "rejected"}:
+            raise ValueError("A character card decision must be accepted or rejected.")
+        name = str(character_name or "").strip()
+        reviewed_text = str(reviewed_card or "")
+        assets: list[dict[str, str]] = []
+        if normalized_decision == "accepted":
+            if not name:
+                raise ValueError("Approving a character card requires the final character name.")
+            if not reviewed_text.strip():
+                raise ValueError("Approving a character card requires the exact reviewed card text.")
+            if len(reference_paths) > 3:
+                raise ValueError("A character card can lock at most three identity reference images.")
+            assets = self._identity_files(reference_paths)
+        reviewed_sha = (
+            hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest()
+            if normalized_decision == "accepted"
+            else ""
+        )
+        now = _now()
+        card_id = str(character_card_id or "").strip()
+        with self._connection(write=True) as connection:
+            card = connection.execute(
+                "SELECT * FROM series_character_cards WHERE character_card_id = ?",
+                (card_id,),
+            ).fetchone()
+            if card is None:
+                raise ValueError("Serial character card does not exist.")
+            if card["status"] != "pending_review":
+                raise ValueError("Only a pending character card can receive a human decision.")
+            latest_story = connection.execute(
+                """SELECT story_plan_id FROM series_story_plans
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (card["series_id"],),
+            ).fetchone()
+            if latest_story is None or latest_story["story_plan_id"] != card["story_plan_id"]:
+                raise ValueError("This character card is stale because its approved story has changed.")
+            status = "approved" if normalized_decision == "accepted" else "rejected"
+            if status == "approved":
+                connection.execute(
+                    """UPDATE series_character_cards SET status = 'superseded', updated_at = ?
+                       WHERE series_id = ? AND status = 'approved'""",
+                    (now, card["series_id"]),
+                )
+                connection.execute(
+                    """UPDATE series_episode_outlines SET status = 'superseded', updated_at = ?
+                       WHERE series_id = ? AND status IN ('approved', 'pending_review')""",
+                    (now, card["series_id"]),
+                )
+                connection.execute(
+                    """UPDATE reference_assets SET status = 'stale'
+                       WHERE series_id = ? AND role = 'character_identity' AND status = 'active'""",
+                    (card["series_id"],),
+                )
+                self._stale_series_episode_trees(connection, str(card["series_id"]))
+            connection.execute(
+                """UPDATE series_character_cards SET status = ?, character_name = ?,
+                       review_decision = ?, reviewed_card = ?, reviewed_sha256 = ?,
+                       approved_sha256 = ?, reference_assets_json = ?, reviewer = ?,
+                       review_notes = ?, reviewed_at = ?, updated_at = ?
+                   WHERE character_card_id = ? AND status = 'pending_review'""",
+                (
+                    status,
+                    name if status == "approved" else "",
+                    normalized_decision,
+                    reviewed_text if status == "approved" else "",
+                    reviewed_sha,
+                    reviewed_sha if status == "approved" else "",
+                    _json(assets),
+                    str(reviewer or "operator").strip(),
+                    str(notes or "").strip(),
+                    now,
+                    now,
+                    card_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM series_character_cards WHERE character_card_id = ?", (card_id,)
+            ).fetchone()
+        payload = self._character_card_payload(row)
+        if payload is None:
+            raise RuntimeError("The serial character card decision could not be read after saving.")
+        return payload
+
+    @staticmethod
+    def _episode_outline_payload(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        payload = dict(row)
+        payload["approved_outline"] = (
+            str(payload.get("reviewed_outline") or "")
+            if payload.get("approved_sha256")
+            else ""
+        )
+        return payload
+
+    def save_series_episode_outline_draft(
+        self,
+        series_id: str,
+        episode_number: int,
+        episode_topic: str,
+        outline_text: str,
+        *,
+        episode_direction: str = "",
+        prompt_sha256: str = "",
+        model_id: str = "",
+        artifact_path: str = "",
+        outline_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist one episode outline pinned to the current approved story and card."""
+        normalized_series_id = str(series_id or "").strip()
+        number = int(episode_number)
+        topic = str(episode_topic or "").strip()
+        text = str(outline_text or "")
+        if not normalized_series_id or number < 1:
+            raise ValueError("An episode outline requires a series ID and positive episode number.")
+        if not topic or not text.strip():
+            raise ValueError("An episode outline requires a topic and readable outline text.")
+        plan_id = str(outline_id or uuid.uuid4().hex).strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{32}", plan_id):
+            raise ValueError("An episode outline ID must contain 32 hexadecimal characters.")
+        now = _now()
+        outline_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        with self._connection(write=True) as connection:
+            story = connection.execute(
+                """SELECT * FROM series_story_plans
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (normalized_series_id,),
+            ).fetchone()
+            if story is None:
+                raise ValueError("Episode planning requires an approved series story.")
+            character = connection.execute(
+                """SELECT * FROM series_character_cards
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (normalized_series_id,),
+            ).fetchone()
+            if character is None or character["story_plan_id"] != story["story_plan_id"]:
+                raise ValueError("Episode planning requires a character card approved for the current story.")
+            version_row = connection.execute(
+                """SELECT COALESCE(MAX(version), 0) AS version FROM series_episode_outlines
+                   WHERE series_id = ? AND episode_number = ?""",
+                (normalized_series_id, number),
+            ).fetchone()
+            version = int(version_row["version"]) + 1 if version_row else 1
+            connection.execute(
+                """UPDATE series_episode_outlines SET status = 'superseded', updated_at = ?
+                   WHERE series_id = ? AND episode_number = ? AND status = 'pending_review'""",
+                (now, normalized_series_id, number),
+            )
+            connection.execute(
+                """INSERT INTO series_episode_outlines(
+                       outline_id, series_id, episode_number, version, status,
+                       episode_topic, episode_direction, story_plan_id, story_sha256,
+                       character_card_id, character_sha256, outline_text, outline_sha256,
+                       prompt_sha256, model_id, artifact_path, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    plan_id,
+                    normalized_series_id,
+                    number,
+                    version,
+                    topic,
+                    str(episode_direction or "").strip(),
+                    story["story_plan_id"],
+                    story["approved_sha256"],
+                    character["character_card_id"],
+                    character["approved_sha256"],
+                    text,
+                    outline_sha,
+                    str(prompt_sha256 or "").strip(),
+                    str(model_id or "").strip(),
+                    str(artifact_path or "").strip(),
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM series_episode_outlines WHERE outline_id = ?", (plan_id,)
+            ).fetchone()
+        payload = self._episode_outline_payload(row)
+        if payload is None:
+            raise RuntimeError("The serial episode outline could not be read after saving.")
+        return payload
+
+    def get_series_episode_outline(self, outline_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM series_episode_outlines WHERE outline_id = ?",
+                (str(outline_id or "").strip(),),
+            ).fetchone()
+        payload = self._episode_outline_payload(row)
+        if payload is None:
+            raise ValueError("Serial episode outline does not exist.")
+        return payload
+
+    def get_latest_approved_series_episode_outline(
+        self, series_id: str, episode_number: int
+    ) -> dict[str, Any] | None:
+        normalized_series_id = str(series_id or "").strip()
+        number = int(episode_number)
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT * FROM series_episode_outlines
+                   WHERE series_id = ? AND episode_number = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (normalized_series_id, number),
+            ).fetchone()
+            story = connection.execute(
+                """SELECT story_plan_id, approved_sha256 FROM series_story_plans
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (normalized_series_id,),
+            ).fetchone()
+            character = connection.execute(
+                """SELECT character_card_id, approved_sha256 FROM series_character_cards
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (normalized_series_id,),
+            ).fetchone()
+        if row is None or story is None or character is None:
+            return None
+        if (
+            row["story_plan_id"] != story["story_plan_id"]
+            or row["story_sha256"] != story["approved_sha256"]
+            or row["character_card_id"] != character["character_card_id"]
+            or row["character_sha256"] != character["approved_sha256"]
+        ):
+            return None
+        return self._episode_outline_payload(row)
+
+    def record_series_episode_outline_decision(
+        self,
+        outline_id: str,
+        decision: str,
+        *,
+        reviewed_outline: str = "",
+        reviewer: str = "operator",
+        notes: str = "",
+    ) -> dict[str, Any]:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"accepted", "rejected"}:
+            raise ValueError("An episode outline decision must be accepted or rejected.")
+        reviewed_text = str(reviewed_outline or "")
+        if normalized_decision == "accepted" and not reviewed_text.strip():
+            raise ValueError("Approving an episode outline requires the exact reviewed text.")
+        reviewed_sha = (
+            hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest()
+            if normalized_decision == "accepted"
+            else ""
+        )
+        now = _now()
+        plan_id = str(outline_id or "").strip()
+        with self._connection(write=True) as connection:
+            outline = connection.execute(
+                "SELECT * FROM series_episode_outlines WHERE outline_id = ?", (plan_id,)
+            ).fetchone()
+            if outline is None:
+                raise ValueError("Serial episode outline does not exist.")
+            if outline["status"] != "pending_review":
+                raise ValueError("Only a pending episode outline can receive a human decision.")
+            story = connection.execute(
+                """SELECT story_plan_id, approved_sha256 FROM series_story_plans
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (outline["series_id"],),
+            ).fetchone()
+            character = connection.execute(
+                """SELECT character_card_id, approved_sha256 FROM series_character_cards
+                   WHERE series_id = ? AND status = 'approved'
+                   ORDER BY version DESC LIMIT 1""",
+                (outline["series_id"],),
+            ).fetchone()
+            if (
+                story is None
+                or character is None
+                or outline["story_plan_id"] != story["story_plan_id"]
+                or outline["story_sha256"] != story["approved_sha256"]
+                or outline["character_card_id"] != character["character_card_id"]
+                or outline["character_sha256"] != character["approved_sha256"]
+            ):
+                raise ValueError("This episode outline is stale because its approved story or character changed.")
+            status = "approved" if normalized_decision == "accepted" else "rejected"
+            if status == "approved":
+                connection.execute(
+                    """UPDATE series_episode_outlines SET status = 'superseded', updated_at = ?
+                       WHERE series_id = ? AND episode_number = ? AND status = 'approved'""",
+                    (now, outline["series_id"], outline["episode_number"]),
+                )
+            connection.execute(
+                """UPDATE series_episode_outlines SET status = ?, review_decision = ?,
+                       reviewed_outline = ?, reviewed_sha256 = ?, approved_sha256 = ?,
+                       reviewer = ?, review_notes = ?, reviewed_at = ?, updated_at = ?
+                   WHERE outline_id = ? AND status = 'pending_review'""",
+                (
+                    status,
+                    normalized_decision,
+                    reviewed_text if status == "approved" else "",
+                    reviewed_sha,
+                    reviewed_sha if status == "approved" else "",
+                    str(reviewer or "operator").strip(),
+                    str(notes or "").strip(),
+                    now,
+                    now,
+                    plan_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM series_episode_outlines WHERE outline_id = ?", (plan_id,)
+            ).fetchone()
+        payload = self._episode_outline_payload(row)
+        if payload is None:
+            raise RuntimeError("The serial episode outline decision could not be read after saving.")
+        return payload
 
     def list_auto_continuation_candidates(
         self, character: str | None = None
@@ -367,8 +1166,9 @@ class SerialVideoStore:
         identity_reference_paths: Sequence[str | Path] = (),
         *,
         random_source: Any | None = None,
+        series_selection_weights: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Resume the latest failed episode first, otherwise choose a new or ready series at 50/50."""
+        """Resume failed work first, otherwise select story-first onboarding or a ready series."""
         normalized_character = str(character or "").strip()
         if not normalized_character:
             raise ValueError("Automatic serial generation requires a fixed character.")
@@ -380,6 +1180,7 @@ class SerialVideoStore:
                 str(selected["series_id"]),
                 normalized_character,
                 episode_number=int(selected["blocked_episode_number"]),
+                require_story_first_for_new=True,
             )
             context["automation_mode"] = "resume"
             context["automation_source_series_id"] = str(selected["series_id"])
@@ -391,47 +1192,49 @@ class SerialVideoStore:
             return context
 
         candidates = self.list_auto_continuation_candidates(normalized_character)
+        eligible_candidates: list[dict[str, Any]] = []
+        for candidate in candidates:
+            candidate_series_id = str(candidate["series_id"])
+            onboarding = self.get_series_onboarding(candidate_series_id)
+            if onboarding["story"] is not None:
+                if not onboarding["is_complete"]:
+                    continue
+                next_number = int(candidate["latest_episode_number"]) + 1
+                if self.get_latest_approved_series_episode_outline(candidate_series_id, next_number) is None:
+                    continue
+            eligible_candidates.append(candidate)
+        candidates = eligible_candidates
         mode = self.choose_auto_next_mode(
-            source.random(), has_continuation_candidates=bool(candidates)
+            source.random(),
+            has_continuation_candidates=bool(candidates),
+            series_selection_weights=series_selection_weights,
         )
         if mode == "continue":
             selected = source.choice(candidates)
             context = self.prepare_series_context(
                 str(selected["series_id"]),
                 normalized_character,
+                identity_reference_paths,
                 episode_number=int(selected["latest_episode_number"]) + 1,
+                require_story_first_for_new=True,
+                require_episode_outline=True,
             )
             context["automation_mode"] = "continue"
             context["automation_source_series_id"] = str(selected["series_id"])
             context["automation_source_episode_id"] = str(selected["latest_episode_id"])
             return context
 
-        identity_references = list(identity_reference_paths)
-        templates: list[list[dict[str, str]]] = []
-        with self._connection() as connection:
-            rows = connection.execute(
-                "SELECT series_id FROM series WHERE character_name = ? ORDER BY series_id",
-                (normalized_character,),
-            ).fetchall()
-            for row in rows:
-                references = self._active_identity_files(connection, str(row["series_id"]))
-                if references:
-                    templates.append(references)
-        if not identity_references and templates:
-            identity_references = [item["path"] for item in source.choice(templates)]
-        if not identity_references:
-            raise ValueError(
-                "Starting a new automatic series requires a registered character identity image."
-            )
         slug = re.sub(r"[^a-z0-9]+", "-", normalized_character.lower()).strip("-") or "series"
-        series_id = f"auto-{slug}-{uuid.uuid4().hex[:12]}"
-        context = self.prepare_series_context(
-            series_id, normalized_character, identity_references
-        )
-        context["automation_mode"] = "new"
-        context["automation_source_series_id"] = ""
-        context["automation_source_episode_id"] = ""
-        return context
+        return {
+            "series_id": f"auto-{slug}-{uuid.uuid4().hex[:12]}",
+            "character": normalized_character,
+            "episode_number": 1,
+            "story_context": "",
+            "reference_manifest": [],
+            "automation_mode": "new",
+            "automation_source_series_id": "",
+            "automation_source_episode_id": "",
+        }
 
     def set_series_lifecycle_status(
         self, series_id: str, status: str, *, note: str = ""
@@ -464,12 +1267,41 @@ class SerialVideoStore:
         character: str,
         identity_reference_paths: Sequence[str | Path] = (),
         episode_number: int | None = None,
+        *,
+        require_story_first_for_new: bool = False,
+        require_episode_outline: bool = False,
     ) -> dict[str, Any]:
         """Resolve read-only episode context and current reference assets."""
         normalized_series_id = str(series_id or "").strip()
         normalized_character = str(character or "").strip()
         if not normalized_series_id:
             raise ValueError("serial mode requires a non-empty series ID")
+        onboarding = self.get_series_onboarding(normalized_series_id)
+        production_series_exists = self.production_series_exists(normalized_series_id)
+        if require_story_first_for_new:
+            if onboarding["story"] is not None and not onboarding["is_complete"]:
+                raise ValueError(
+                    "The approved series story needs an approved character card and reference image before video generation."
+                )
+            if not production_series_exists and not onboarding["is_complete"]:
+                raise ValueError(
+                    "A new serial series must approve its complete story, character card, and reference image before video generation."
+                )
+        if onboarding["is_complete"]:
+            approved_character = onboarding["character"]
+            approved_name = str(approved_character["character_name"] or "").strip()
+            if not normalized_character:
+                normalized_character = approved_name
+            if normalized_character != approved_name:
+                raise ValueError("The requested character differs from the approved character card.")
+            approved_assets = self._identity_files(
+                [item["path"] for item in approved_character["reference_assets"]]
+            )
+            if identity_reference_paths:
+                supplied_assets = self._identity_files(identity_reference_paths)
+                if supplied_assets != approved_assets:
+                    raise ValueError("Character references differ from the approved character card.")
+            identity_reference_paths = [item["path"] for item in approved_assets]
         if not normalized_character:
             raise ValueError("serial mode requires an explicit fixed character")
         supplied_identity = self._identity_files(identity_reference_paths)
@@ -482,11 +1314,16 @@ class SerialVideoStore:
                     raise ValueError("A new series requires at least one fixed character identity image.")
                 identity_files = supplied_identity
             else:
-                if series["character_name"] != normalized_character:
+                if series["character_name"] != normalized_character and not (
+                    require_story_first_for_new and onboarding["is_complete"]
+                ):
                     raise ValueError("The requested character differs from this series' fixed character.")
                 identity_files = self._active_identity_files(connection, normalized_series_id)
                 if not identity_files:
-                    raise ValueError("This series has no active fixed character references.")
+                    if require_story_first_for_new and onboarding["is_complete"]:
+                        identity_files = supplied_identity
+                    else:
+                        raise ValueError("This series has no active fixed character references.")
                 if supplied_identity and supplied_identity != identity_files:
                     raise ValueError("Character reference paths or bytes changed; serial generation is blocked.")
                 for item in identity_files:
@@ -517,6 +1354,41 @@ class SerialVideoStore:
                     raise ValueError(
                         f"Episode {target_number - 1} must be ready before episode {target_number} can start."
                     )
+            onboarding_lineage = None
+            if onboarding["is_complete"]:
+                story = onboarding["story"]
+                character_card = onboarding["character"]
+                outline_row = connection.execute(
+                    """SELECT * FROM series_episode_outlines
+                       WHERE series_id = ? AND episode_number = ? AND status = 'approved'
+                         AND story_plan_id = ? AND story_sha256 = ?
+                         AND character_card_id = ? AND character_sha256 = ?
+                       ORDER BY version DESC LIMIT 1""",
+                    (
+                        normalized_series_id,
+                        target_number,
+                        story["story_plan_id"],
+                        story["approved_sha256"],
+                        character_card["character_card_id"],
+                        character_card["approved_sha256"],
+                    ),
+                ).fetchone()
+                if require_episode_outline and outline_row is None:
+                    raise ValueError(
+                        f"Episode {target_number} needs an approved story, scene and shot outline before video generation."
+                    )
+                if outline_row is not None:
+                    onboarding_lineage = {
+                        "story_plan_id": str(story["story_plan_id"]),
+                        "story_sha256": str(story["approved_sha256"]),
+                        "character_card_id": str(character_card["character_card_id"]),
+                        "character_sha256": str(character_card["approved_sha256"]),
+                        "outline_id": str(outline_row["outline_id"]),
+                        "outline_sha256": str(outline_row["approved_sha256"]),
+                        "reference_assets": list(character_card["reference_assets"]),
+                        "episode_topic": str(outline_row["episode_topic"]),
+                        "episode_outline": str(outline_row["reviewed_outline"]),
+                    }
             reference_manifest: list[dict[str, str]] = []
             previous_tail: dict[str, Any] | None = None
             story_context = ""
@@ -575,6 +1447,9 @@ class SerialVideoStore:
                 "identity_references": identity_files,
                 "previous_tail": previous_tail,
                 "reference_manifest": reference_manifest,
+                "onboarding_story": onboarding["story"],
+                "onboarding_character": onboarding["character"],
+                "onboarding_lineage": onboarding_lineage,
             }
 
     @staticmethod
@@ -618,12 +1493,76 @@ class SerialVideoStore:
             raise ValueError("A serial episode target duration must be positive.")
         episode_id = uuid.uuid4().hex
         now = _now()
+        onboarding_lineage = context.get("onboarding_lineage")
+        normalized_lineage: dict[str, Any] | None = None
+        if onboarding_lineage is not None:
+            if not isinstance(onboarding_lineage, dict):
+                raise ValueError("Serial onboarding lineage must be a mapping.")
+            required_lineage_fields = (
+                "story_plan_id",
+                "story_sha256",
+                "character_card_id",
+                "character_sha256",
+                "outline_id",
+                "outline_sha256",
+                "reference_assets",
+            )
+            if any(not str(onboarding_lineage.get(key) or "").strip() for key in required_lineage_fields[:-1]):
+                raise ValueError("Serial onboarding lineage is incomplete.")
+            lineage_assets = self._identity_files(
+                [item["path"] for item in onboarding_lineage.get("reference_assets", [])]
+            )
+            episode_identity = self._identity_files([item["path"] for item in context["identity_references"]])
+            if lineage_assets != episode_identity:
+                raise ValueError("Episode identity references differ from the approved character card.")
+            normalized_lineage = dict(onboarding_lineage)
+            normalized_lineage["reference_assets"] = lineage_assets
         with self._connection(write=True) as connection:
             series = connection.execute(
                 "SELECT * FROM series WHERE series_id = ?", (series_id,)
             ).fetchone()
             if series is not None and series["lifecycle_status"] != "active":
                 raise ValueError("A completed or discarded series cannot start or rerender an episode.")
+            if normalized_lineage is not None:
+                story = connection.execute(
+                    """SELECT story_plan_id, approved_sha256 FROM series_story_plans
+                       WHERE series_id = ? AND status = 'approved'
+                       ORDER BY version DESC LIMIT 1""",
+                    (series_id,),
+                ).fetchone()
+                character_card = connection.execute(
+                    """SELECT character_card_id, approved_sha256, reference_assets_json
+                       FROM series_character_cards WHERE series_id = ? AND status = 'approved'
+                       ORDER BY version DESC LIMIT 1""",
+                    (series_id,),
+                ).fetchone()
+                outline = connection.execute(
+                    """SELECT outline_id, story_plan_id, story_sha256, character_card_id,
+                              character_sha256, approved_sha256
+                       FROM series_episode_outlines
+                       WHERE series_id = ? AND episode_number = ? AND status = 'approved'
+                       ORDER BY version DESC LIMIT 1""",
+                    (series_id, episode_number),
+                ).fetchone()
+                if (
+                    story is None
+                    or character_card is None
+                    or outline is None
+                    or story["story_plan_id"] != normalized_lineage["story_plan_id"]
+                    or story["approved_sha256"] != normalized_lineage["story_sha256"]
+                    or character_card["character_card_id"] != normalized_lineage["character_card_id"]
+                    or character_card["approved_sha256"] != normalized_lineage["character_sha256"]
+                    or outline["outline_id"] != normalized_lineage["outline_id"]
+                    or outline["approved_sha256"] != normalized_lineage["outline_sha256"]
+                    or outline["story_plan_id"] != normalized_lineage["story_plan_id"]
+                    or outline["character_card_id"] != normalized_lineage["character_card_id"]
+                ):
+                    raise ValueError("Approved serial story, character or episode outline changed before generation.")
+                stored_assets = self._identity_files(
+                    [item["path"] for item in json.loads(character_card["reference_assets_json"] or "[]")]
+                )
+                if stored_assets != normalized_lineage["reference_assets"]:
+                    raise ValueError("Approved character reference images changed before episode creation.")
             identity = list(context["identity_references"])
             if series is None:
                 connection.execute(
@@ -643,10 +1582,28 @@ class SerialVideoStore:
                         now=now,
                     )
             else:
-                if series["character_name"] != character:
+                if series["character_name"] != character and normalized_lineage is None:
                     raise ValueError("The requested character differs from this series' fixed character.")
-                if self._active_identity_files(connection, series_id) != identity:
-                    raise ValueError("Character reference assets changed while the episode was being prepared.")
+                active_identity = self._active_identity_files(connection, series_id)
+                if active_identity != identity:
+                    if normalized_lineage is None or active_identity:
+                        raise ValueError("Character reference assets changed while the episode was being prepared.")
+                    for item in identity:
+                        self._insert_reference(
+                            connection,
+                            series_id=series_id,
+                            episode_id=None,
+                            segment_number=0,
+                            role="character_identity",
+                            source_render_id=None,
+                            path=item["path"],
+                            sha256=item["sha256"],
+                            now=now,
+                        )
+                    connection.execute(
+                        "UPDATE series SET character_name = ?, updated_at = ? WHERE series_id = ?",
+                        (character, now, series_id),
+                    )
 
             previous_episode_id = str(context.get("previous_episode_id") or "") or None
             if previous_episode_id:
@@ -696,6 +1653,25 @@ class SerialVideoStore:
                     now,
                 ),
             )
+            if normalized_lineage is not None:
+                connection.execute(
+                    """INSERT INTO episode_onboarding_lineage(
+                           episode_id, story_plan_id, story_sha256, character_card_id,
+                           character_sha256, outline_id, outline_sha256,
+                           reference_assets_json, created_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        episode_id,
+                        normalized_lineage["story_plan_id"],
+                        normalized_lineage["story_sha256"],
+                        normalized_lineage["character_card_id"],
+                        normalized_lineage["character_sha256"],
+                        normalized_lineage["outline_id"],
+                        normalized_lineage["outline_sha256"],
+                        _json(normalized_lineage["reference_assets"]),
+                        now,
+                    ),
+                )
             previous_tail = context.get("previous_tail")
             if previous_tail:
                 # Recheck the frame bytes at the moment the episode binds them.
@@ -1311,6 +2287,17 @@ class SerialVideoStore:
         if [str(path) for path in supplied] != [str(frame)]:
             raise ValueError("I2VA must use only the immediately preceding accepted segment's actual tail frame.")
         return {"path": str(frame), "sha256": tail["sha256"], "role": "segment_tail"}, str(render["render_id"])
+
+    def _stale_series_episode_trees(
+        self, connection: _MySQLSession, series_id: str
+    ) -> None:
+        first_current = connection.execute(
+            """SELECT MIN(episode_number) AS first_episode FROM episodes
+               WHERE series_id = ? AND is_current = 1""",
+            (series_id,),
+        ).fetchone()
+        if first_current is not None and first_current["first_episode"] is not None:
+            self._stale_episode_tree(connection, series_id, int(first_current["first_episode"]))
 
     def _stale_episode_tree(
         self, connection: _MySQLSession, series_id: str, from_episode_number: int

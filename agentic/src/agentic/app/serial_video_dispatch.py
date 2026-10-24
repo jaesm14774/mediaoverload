@@ -50,6 +50,7 @@ def build_serial_video_argv(
     comfy_host: str | None = None,
     comfy_port: int | None = None,
     comfy_root: str | None = None,
+    story_complexity: str | None = None,
 ) -> list[str]:
     character, generation, serial, social = load_serial_video_settings(config_path)
     try:
@@ -65,6 +66,12 @@ def build_serial_video_argv(
         raise ValueError("Serial video duration and review timeout must be integers") from exc
     if duration < 1 or timeout < 1:
         raise ValueError("Serial video duration and Discord review timeout must be positive")
+
+    complexity = str(
+        story_complexity or serial.get("story_complexity") or "simple"
+    ).strip().lower()
+    if complexity not in {"simple", "cinematic"}:
+        raise ValueError("generation.serial_video.story_complexity must be simple or cinematic")
 
     style = str(serial.get("style") or "cinematic surreal").strip()
     output_value = output_dir or serial.get("output_dir") or generation.get("output_dir") or "output"
@@ -94,6 +101,7 @@ def build_serial_video_argv(
         "--style", style,
         "--output-dir", str(output_path),
         "--discord-review-timeout-seconds", str(timeout),
+        "--serial-story-complexity", complexity,
         "--execute",
     ]
     if episode_index == 0 and prompt.strip():
@@ -126,7 +134,7 @@ def build_serial_video_argv(
 def dispatch_serial_video_request(
     request: CharacterWorkflowRequest,
     *,
-    serial_runner: Callable[[Sequence[str]], None] | None = None,
+    serial_runner: Callable[[Sequence[str]], Any] | None = None,
 ) -> dict[str, Any]:
     if (
         not request.review.publish_after_generate
@@ -146,8 +154,10 @@ def dispatch_serial_video_request(
         raise ValueError("generation.serial_video.episodes_per_run must be positive")
     if serial_runner is None:
         from agentic.app.main import main as serial_runner
+    episodes_started = 0
+    automation_decisions: list[dict[str, Any]] = []
     for episode_index in range(episode_count):
-        serial_runner(
+        run_result = serial_runner(
             build_serial_video_argv(
                 config_path=request.config_path,
                 repo_root=request.repo_root,
@@ -161,10 +171,40 @@ def dispatch_serial_video_request(
                 comfy_host=request.runtime.comfy_host,
                 comfy_port=request.runtime.comfy_port,
                 comfy_root=request.runtime.comfy_root,
+                story_complexity=request.generation.story_complexity,
             )
         )
+        if isinstance(run_result, dict):
+            if run_result.get("workflow_stage") == "serial_onboarding_blocked":
+                return {
+                    "status": "blocked",
+                    "generation_type": "serial_video",
+                    "episodes_started": episodes_started,
+                    "onboarding_stage": str(run_result.get("onboarding_stage") or "unknown"),
+                    "series_id": str(run_result.get("series_id") or ""),
+                    "reason": str(run_result.get("reason") or "Discord review did not complete."),
+                }
+            mode = str(run_result.get("automation_mode") or "").strip()
+            if mode:
+                automation_decisions.append(
+                    {
+                        "mode": mode,
+                        "series_id": str(run_result.get("series_id") or ""),
+                        "episode_number": run_result.get("episode_number"),
+                    }
+                )
+            if str(run_result.get("status") or "").lower() in {"blocked", "failed"}:
+                return {
+                    "status": str(run_result["status"]).lower(),
+                    "generation_type": "serial_video",
+                    "episodes_started": episodes_started,
+                    "automation_decisions": automation_decisions,
+                    "reason": str(run_result.get("reason") or "Serial video execution did not complete."),
+                }
+        episodes_started += 1
     return {
         "status": "success",
         "generation_type": "serial_video",
-        "episodes_started": episode_count,
+        "episodes_started": episodes_started,
+        "automation_decisions": automation_decisions,
     }

@@ -11,7 +11,10 @@ from math import floor, log, sqrt
 from typing import Any
 from urllib.parse import urlparse
 
-from agentic.runtime.news_grounding import is_brand_safe_news_selection
+from agentic.runtime.news_grounding import (
+    is_brand_safe_news_selection,
+    is_usable_news_selection,
+)
 
 
 MAX_EVENT_GAP = timedelta(hours=72)
@@ -167,6 +170,31 @@ def _is_traceable(row: dict[str, Any]) -> bool:
 def is_traceable_news(row: dict[str, Any]) -> bool:
     """Return whether a news row has both a publisher and a usable article URL."""
     return _is_traceable(row)
+
+
+def select_random_news_inspiration(
+    rows: list[dict[str, Any]],
+    *,
+    rng: Any | None = None,
+) -> NewsCandidateDecision:
+    """Choose one safe, usable, traceable article uniformly for creative inspiration."""
+    eligible = [
+        row
+        for row in rows
+        if is_usable_news_selection(str(row.get("title") or ""), str(row.get("keyword") or ""))
+        and is_brand_safe_news_selection(str(row.get("title") or ""), str(row.get("keyword") or ""))
+        and _is_traceable(row)
+    ]
+    if not eligible:
+        raise ValueError("Random story inspiration requires a usable, brand-safe article with a traceable publisher and URL.")
+    chooser = rng or random.SystemRandom()
+    selected = chooser.choice(eligible)
+    return NewsCandidateDecision(
+        selected=selected,
+        reason="random_inspiration",
+        event_title=str(selected.get("title") or "").strip(),
+        evidence={"eligible_article_count": len(eligible)},
+    )
 
 
 def _editorial_fit(row: dict[str, Any]) -> bool:

@@ -62,6 +62,48 @@ def _write_reference(path: Path, content: bytes) -> Path:
     return path
 
 
+def _create_ready_legacy_episode(
+    store: SerialVideoStore, root: Path, series_id: str
+) -> dict[str, object]:
+    identity = _write_reference(root / f"{series_id}-identity.png", b"identity")
+    context = store.prepare_series_context(series_id, "Hero", [identity])
+    episode = store.start_episode(context, "An existing story", topic="A new turn")
+    store.record_plan(
+        episode["episode_id"],
+        segment_count=1,
+        plan_payload={"goal": {"duration_seconds": 10}},
+    )
+    render_id = store.begin_render(
+        episode["episode_id"],
+        1,
+        workflow_name="minimax_h3_ref2va",
+        h3_mode="ref2va",
+        conditioning_paths=[identity],
+    )
+    segment_video = _write_video(root / f"{series_id}-segment.mp4", "red")
+    store.complete_render(render_id, segment_video)
+    store.record_technical_qa(
+        episode["episode_id"], 1, segment_video, True, {"passed": True}
+    )
+    store.record_review(episode["episode_id"], 1, "accepted", segment_video)
+    ending = _write_reference(root / f"{series_id}-ending.png", b"accepted ending")
+    store.record_tail(episode["episode_id"], 1, segment_video, ending, episode_end=True)
+    final_video = _write_video(root / f"{series_id}-final.mp4", "blue")
+    store.complete_episode(episode["episode_id"], "success", final_video)
+    return episode
+
+
+class _FixedRandomSource:
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def random(self) -> float:
+        return self.value
+
+    def choice(self, values):
+        return values[0]
+
+
 class SerialVideoAcceptanceTests(unittest.TestCase):
     def setUp(self) -> None:
         project_root = Path(__file__).resolve().parents[2]
@@ -143,6 +185,218 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_user_given_a_new_series_story_when_the_creator_approves_an_edited_draft_then_mysql_keeps_the_exact_approved_version_before_series_activation(self) -> None:
+        """User Given a complete story draft for a series with no character yet When the creator edits and approves it Then MySQL stores the exact approved text, SHA, source provenance, and review decision without activating a production series."""
+        store = self._new_store()
+        series_id = f"story-first-{uuid.uuid4().hex[:12]}"
+        source = {
+            "title": "Community repairs an old bridge",
+            "source": "Example Daily",
+            "url": "https://news.example.test/bridge",
+            "created_at": "2026-10-24 09:00:00",
+            "selected_at": "2026-10-24T10:00:00+08:00",
+        }
+        draft = store.save_series_story_draft(
+            series_id,
+            "# Draft\n\nThe lighthouse keeper meets a cloud.",
+            user_idea="A lighthouse keeper helps a cloud.",
+            inspiration=source,
+            prompt_sha256="a" * 64,
+            model_id="contract-test-model",
+            artifact_path="output/serial_series/story.md",
+        )
+        reviewed_text = "# Approved\n\nThe keeper guides a cloud home and restores the harbor lights."
+
+        approved = store.record_series_story_decision(
+            draft["story_plan_id"],
+            "accepted",
+            reviewed_treatment=reviewed_text,
+            reviewer="creator",
+            notes="Ending is clear.",
+        )
+
+        self.assertEqual(draft["status"], "pending_review")
+        self.assertEqual(draft["version"], 1)
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(approved["approved_treatment"], reviewed_text)
+        self.assertEqual(approved["approved_sha256"], hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest())
+        self.assertEqual(approved["inspiration"]["url"], source["url"])
+        self.assertEqual(approved["reviewer"], "creator")
+        self.assertEqual(approved["review_notes"], "Ending is clear.")
+        self.assertIsNone(
+            self._mysql_one(store, "SELECT series_id FROM series WHERE series_id = ?", (series_id,))
+        )
+
+        revised = store.save_series_story_draft(
+            series_id,
+            "# New draft\n\nA changed story.",
+            user_idea="A revised idea.",
+            inspiration={"mode": "none"},
+            prompt_sha256="b" * 64,
+            artifact_path="output/serial_series/story-v2.md",
+        )
+        rejected = store.record_series_story_decision(
+            revised["story_plan_id"],
+            "rejected",
+            reviewer="creator",
+            notes="The ending is unresolved.",
+        )
+
+        self.assertEqual(revised["version"], 2)
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertEqual(
+            store.get_latest_approved_series_story(series_id)["story_plan_id"],
+            approved["story_plan_id"],
+        )
+
+    def test_user_given_a_character_proposal_and_selected_reference_when_approved_then_mysql_locks_the_reviewed_card_and_image_hash(self) -> None:
+        """User Given an approved series story and a reviewed character card with one selected image When the creator approves the character Then MySQL stores the card version and exact reference image SHA without creating the production series."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            series_id = f"character-first-{uuid.uuid4().hex[:12]}"
+            story_draft = store.save_series_story_draft(
+                series_id,
+                "A keeper helps a lost cloud return to the sea.",
+            )
+            story = store.record_series_story_decision(
+                story_draft["story_plan_id"],
+                "accepted",
+                reviewed_treatment="A keeper helps a lost cloud return to the sea.",
+            )
+            character_draft = store.save_series_character_card_draft(
+                series_id,
+                story["story_plan_id"],
+                "A blue-gray seal post carrier who is brave but absent-minded.",
+                user_preferences="A young seal post carrier.",
+                artifact_path=str(root / "character.md"),
+            )
+            reviewed_card = "Name: Tide\nAppearance: Blue-gray young seal in a red mail satchel."
+            (root / "character.md").write_text(reviewed_card, encoding="utf-8")
+            reference = _write_reference(root / "reference.png", b"approved character image")
+
+            approved = store.record_series_character_card_decision(
+                character_draft["character_card_id"],
+                "accepted",
+                character_name="Tide",
+                reviewed_card=reviewed_card,
+                reference_paths=[reference],
+                reviewer="creator",
+            )
+
+            self.assertEqual(approved["status"], "approved")
+            self.assertEqual(approved["character_name"], "Tide")
+            self.assertEqual(approved["approved_card"], reviewed_card)
+            self.assertEqual(approved["approved_sha256"], hashlib.sha256(reviewed_card.encode("utf-8")).hexdigest())
+            self.assertEqual(len(approved["reference_assets"]), 1)
+            self.assertEqual(approved["reference_assets"][0]["path"], str(reference.resolve()))
+            self.assertEqual(approved["reference_assets"][0]["sha256"], hashlib.sha256(reference.read_bytes()).hexdigest())
+            self.assertEqual(store.get_latest_approved_character_card(series_id)["character_card_id"], character_draft["character_card_id"])
+            self.assertIsNone(
+                self._mysql_one(store, "SELECT series_id FROM series WHERE series_id = ?", (series_id,))
+            )
+
+    def test_user_given_a_story_draft_that_is_not_approved_when_character_card_creation_is_requested_then_the_store_refuses_the_character_stage(self) -> None:
+        """User Given a pending story treatment When a character card is requested Then the store requires the story approval first."""
+        store = self._new_store()
+        series_id = f"character-needs-story-{uuid.uuid4().hex[:12]}"
+        story = store.save_series_story_draft(series_id, "A story still awaiting review.")
+
+        with self.assertRaisesRegex(ValueError, "approved series story"):
+            store.save_series_character_card_draft(
+                series_id,
+                story["story_plan_id"],
+                "A proposed character card.",
+            )
+
+    def test_user_given_approved_story_and_character_when_an_episode_outline_is_approved_then_the_outline_keeps_both_source_versions_and_waits_before_video(self) -> None:
+        """User Given an approved story and character card When an episode outline is drafted and approved Then MySQL stores the exact readable outline with its source version IDs and hashes before any production episode exists."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            series_id = f"outline-first-{uuid.uuid4().hex[:12]}"
+            story_draft = store.save_series_story_draft(
+                series_id,
+                "A keeper guides a lost cloud home and restores the harbor lights.",
+            )
+            story = store.record_series_story_decision(
+                story_draft["story_plan_id"],
+                "accepted",
+                reviewed_treatment="A keeper guides a lost cloud home and restores the harbor lights.",
+            )
+            card_draft = store.save_series_character_card_draft(
+                series_id,
+                story["story_plan_id"],
+                "Tide is a blue-gray seal post carrier.",
+            )
+            card = store.record_series_character_card_decision(
+                card_draft["character_card_id"],
+                "accepted",
+                character_name="Tide",
+                reviewed_card="Tide is a blue-gray seal post carrier.",
+                reference_paths=[_write_reference(root / "tide.png", b"approved Tide reference")],
+            )
+            draft = store.save_series_episode_outline_draft(
+                series_id,
+                1,
+                "The lighthouse goes dark",
+                "Beat 1: Tide finds salt crystals blocking the lantern.\nShot 1: ...",
+                episode_direction="Show why the harbor signal disappears.",
+            )
+            reviewed = "Episode 1: The lighthouse goes dark\n\nShot 1: Tide finds the salt crystals."
+            outline = store.record_series_episode_outline_decision(
+                draft["outline_id"],
+                "accepted",
+                reviewed_outline=reviewed,
+                reviewer="creator",
+            )
+
+            self.assertEqual(outline["status"], "approved")
+            self.assertEqual(outline["approved_outline"], reviewed)
+            self.assertEqual(outline["approved_sha256"], hashlib.sha256(reviewed.encode("utf-8")).hexdigest())
+            self.assertEqual(outline["story_plan_id"], story["story_plan_id"])
+            self.assertEqual(outline["story_sha256"], story["approved_sha256"])
+            self.assertEqual(outline["character_card_id"], card["character_card_id"])
+            self.assertEqual(outline["character_sha256"], card["approved_sha256"])
+            self.assertEqual(store.get_latest_approved_series_episode_outline(series_id, 1)["outline_id"], draft["outline_id"])
+            self.assertIsNone(
+                self._mysql_one(store, "SELECT series_id FROM series WHERE series_id = ?", (series_id,))
+            )
+
+    def test_user_given_a_story_change_after_an_episode_outline_draft_when_the_outline_is_approved_then_stale_lineage_is_rejected(self) -> None:
+        """User Given an episode outline based on an approved story When a newer story version is approved before outline review Then the old outline cannot become approved."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            series_id = f"stale-outline-{uuid.uuid4().hex[:12]}"
+            first_story = store.save_series_story_draft(series_id, "Original ending.")
+            approved_first = store.record_series_story_decision(
+                first_story["story_plan_id"], "accepted", reviewed_treatment="Original ending."
+            )
+            card_draft = store.save_series_character_card_draft(
+                series_id, approved_first["story_plan_id"], "Tide is a seal."
+            )
+            store.record_series_character_card_decision(
+                card_draft["character_card_id"],
+                "accepted",
+                character_name="Tide",
+                reviewed_card="Tide is a seal.",
+                reference_paths=[_write_reference(root / "tide.png", b"reference")],
+            )
+            outline = store.save_series_episode_outline_draft(
+                series_id, 1, "First episode", "First outline."
+            )
+            revised_story = store.save_series_story_draft(series_id, "A new ending.")
+            store.record_series_story_decision(
+                revised_story["story_plan_id"], "accepted", reviewed_treatment="A new ending."
+            )
+
+            self.assertEqual(store.get_series_episode_outline(outline["outline_id"])["status"], "superseded")
+            with self.assertRaisesRegex(ValueError, "pending episode outline"):
+                store.record_series_episode_outline_decision(
+                    outline["outline_id"], "accepted", reviewed_outline="Reviewed old outline."
+                )
+
     def test_user_given_a_registered_identity_image_when_visual_evidence_roots_are_configured_then_its_parent_is_allowed_without_dropping_existing_roots(self) -> None:
         """User Given an explicitly registered serial identity image When visual evidence roots are configured Then its parent and existing caller roots remain allowed."""
         with TemporaryDirectory() as temporary:
@@ -180,6 +434,66 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         self.assertIsNone(args.series_id)
         self.assertEqual(args.media_type, "long_video")
 
+    def test_user_given_a_story_first_serial_request_without_a_character_when_cli_is_parsed_then_news_is_selected_by_default(self) -> None:
+        """User Given a new series story request with no fixed character When the CLI parses it Then story planning is allowed before character setup and random news inspiration is the default."""
+        args = parse_args(["--serial-story-draft", "--goal", "A lighthouse keeper helps a cloud."])
+
+        self.assertTrue(args.serial_story_draft)
+        self.assertIsNone(args.character)
+        self.assertEqual(args.serial_news_inspiration, "random")
+
+    def test_user_given_a_custom_story_without_news_inspiration_when_cli_is_parsed_then_the_choice_is_explicit(self) -> None:
+        """User Given a creator supplies a custom story and explicitly disables news When the CLI parses it Then the request keeps news inspiration disabled."""
+        args = parse_args(
+            [
+                "--serial-story-draft",
+                "--serial-news-inspiration", "none",
+                "--goal", "A lighthouse keeper helps a cloud.",
+            ]
+        )
+
+        self.assertEqual(args.serial_news_inspiration, "none")
+
+    def test_user_given_an_approved_story_when_cli_parses_character_draft_without_preferences_then_character_creation_is_allowed(self) -> None:
+        """User Given an approved story and no character preference When the creator starts character drafting Then the stage accepts no character image or character name yet."""
+        args = parse_args(["--serial-character-draft", "--series-id", "story-2026-01"])
+
+        self.assertTrue(args.serial_character_draft)
+        self.assertEqual(args.serial_character_preferences, "")
+        self.assertEqual(args.series_id, "story-2026-01")
+
+    def test_user_given_a_character_card_and_image_when_cli_parses_approval_then_the_human_selects_the_name_and_reference(self) -> None:
+        """User Given a pending character card When the creator approves it Then CLI approval requires a name, exact reviewed card file and selected identity image."""
+        args = parse_args(
+            [
+                "--series-id", "story-2026-01",
+                "--serial-character-card-review-id", "a" * 32,
+                "--serial-character-card-review-decision", "accepted",
+                "--serial-character-card-name", "Tide",
+                "--serial-character-card-reviewed-file", "character.md",
+                "--serial-character-reference", "tide.png",
+            ]
+        )
+
+        self.assertEqual(args.serial_character_card_review_id, "a" * 32)
+        self.assertEqual(args.serial_character_references, ["tide.png"])
+
+    def test_user_given_approved_story_and_character_when_cli_parses_episode_outline_draft_then_it_requires_series_episode_and_topic_without_video_mode(self) -> None:
+        """User Given approved story and character stages When an episode outline is drafted Then the CLI accepts episode number and topic without enabling serial video generation."""
+        args = parse_args(
+            [
+                "--serial-episode-plan-draft",
+                "--series-id", "story-2026-01",
+                "--serial-episode-number", "1",
+                "--episode-topic", "The lighthouse goes dark",
+            ]
+        )
+
+        self.assertTrue(args.serial_episode_plan_draft)
+        self.assertFalse(args.serial_mode)
+        self.assertEqual(args.serial_episode_number, 1)
+        self.assertEqual(args.episode_topic, "The lighthouse goes dark")
+
     def test_user_given_auto_next_without_a_series_id_when_cli_is_parsed_then_the_runtime_can_choose_the_series(self) -> None:
         """User Given auto-next mode without a chosen series When the CLI arguments are parsed Then the runtime is responsible for selecting a new or continuing series."""
         args = parse_args(
@@ -194,6 +508,23 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         self.assertTrue(args.serial_auto_next)
         self.assertIsNone(args.series_id)
         self.assertIsNone(args.goal)
+
+    def test_user_given_a_series_with_approved_onboarding_when_cli_parses_video_generation_then_character_and_episode_outline_can_load_from_mysql(self) -> None:
+        """User Given the creator selected an onboarded series When the CLI parses video generation Then it can load the approved character and episode outline from MySQL without resubmitting their text."""
+        args = parse_args(
+            [
+                "--media-type", "long_video",
+                "--serial-mode",
+                "--series-id", "onboarded-series",
+                "--character-config", "configs/characters/kirby.yaml",
+            ]
+        )
+
+        self.assertTrue(args.serial_mode)
+        self.assertEqual(args.series_id, "onboarded-series")
+        self.assertIsNone(args.character)
+        self.assertIsNone(args.goal)
+        self.assertIsNone(args.episode_topic)
 
     def test_user_given_a_blocked_episode_in_a_completed_series_when_auto_next_selects_work_then_it_retries_before_random_selection(self) -> None:
         """User Given a failed episode from a completed series When automatic serial work is prepared Then it resumes that episode before the fresh-or-continuation roll."""
@@ -307,13 +638,213 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(candidates[0]["latest_episode_id"], expected["active-series"])
             self.assertEqual(candidates[0]["latest_episode_number"], 1)
 
-    def test_user_given_a_random_50_50_auto_choice_when_no_active_series_exists_then_the_runtime_starts_new(self) -> None:
-        """User Given the automatic 50/50 decision When its random roll is below the continuation boundary or no eligible series exists Then it continues only with eligible history and otherwise starts new."""
-        choose = SerialVideoStore.choose_auto_next_mode
+    def test_user_given_no_eligible_existing_series_when_auto_next_runs_then_it_starts_a_new_series_regardless_of_weights(self) -> None:
+        """User Given no existing series is eligible to continue When auto-next runs Then it chooses new-series onboarding even when configuration assigns no weight to new series."""
+        store = self._new_store()
 
-        self.assertEqual(choose(0.49, has_continuation_candidates=True), "continue")
-        self.assertEqual(choose(0.50, has_continuation_candidates=True), "new")
-        self.assertEqual(choose(0.10, has_continuation_candidates=False), "new")
+        selected = store.prepare_auto_next_context(
+            "Hero",
+            random_source=_FixedRandomSource(0.99),
+            series_selection_weights={"new": 0, "continue": 1},
+        )
+
+        self.assertEqual(selected["automation_mode"], "new")
+        self.assertTrue(selected["series_id"].startswith("auto-hero-"))
+        self.assertEqual(
+            self._mysql_one(store, "SELECT COUNT(*) AS total FROM series")["total"],
+            0,
+        )
+
+    def test_user_given_an_eligible_series_and_default_weights_when_auto_next_rolls_then_new_and_continue_each_use_half_the_interval(self) -> None:
+        """User Given an eligible existing series and default 0.5/0.5 weights When auto-next rolls below or at the midpoint Then it chooses new onboarding below the midpoint and continuation at the midpoint."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            _create_ready_legacy_episode(store, root, "existing-series")
+
+            new_selection = store.prepare_auto_next_context(
+                "Hero", random_source=_FixedRandomSource(0.49)
+            )
+            continue_selection = store.prepare_auto_next_context(
+                "Hero", random_source=_FixedRandomSource(0.5)
+            )
+
+            self.assertEqual(new_selection["automation_mode"], "new")
+            self.assertEqual(continue_selection["automation_mode"], "continue")
+            self.assertEqual(continue_selection["series_id"], "existing-series")
+
+    def test_user_given_an_eligible_series_and_custom_selection_weights_when_auto_next_rolls_then_it_uses_the_configured_ratio(self) -> None:
+        """User Given an eligible existing series and configured 0.75/0.25 or 0.25/0.75 weights When the same roll is evaluated Then the selected mode follows each configured ratio."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            _create_ready_legacy_episode(store, root, "existing-series")
+
+            new_favored = store.prepare_auto_next_context(
+                "Hero",
+                random_source=_FixedRandomSource(0.6),
+                series_selection_weights={"new": 0.75, "continue": 0.25},
+            )
+            continue_favored = store.prepare_auto_next_context(
+                "Hero",
+                random_source=_FixedRandomSource(0.6),
+                series_selection_weights={"new": 0.25, "continue": 0.75},
+            )
+
+            self.assertEqual(new_favored["automation_mode"], "new")
+            self.assertEqual(continue_favored["automation_mode"], "continue")
+
+    def test_user_given_an_approved_story_character_reference_and_episode_outline_when_a_new_serial_episode_starts_then_the_episode_records_all_approved_lineage(self) -> None:
+        """User Given all onboarding stages are approved When serial generation starts a new series episode Then production is created from the locked character image and the episode records story, character and outline IDs and hashes."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            series_id = f"onboarded-production-{uuid.uuid4().hex[:12]}"
+            story_draft = store.save_series_story_draft(series_id, "A keeper guides a lost cloud home.")
+            story = store.record_series_story_decision(
+                story_draft["story_plan_id"], "accepted", reviewed_treatment="A keeper guides a lost cloud home."
+            )
+            card_draft = store.save_series_character_card_draft(
+                series_id, story["story_plan_id"], "Tide is a blue-gray seal carrier."
+            )
+            reference = _write_reference(root / "tide.png", b"approved Tide identity")
+            character = store.record_series_character_card_decision(
+                card_draft["character_card_id"],
+                "accepted",
+                character_name="Tide",
+                reviewed_card="Tide is a blue-gray seal carrier.",
+                reference_paths=[reference],
+            )
+            outline_draft = store.save_series_episode_outline_draft(
+                series_id, 1, "The harbor signal", "Episode 1 story and approved shot list."
+            )
+            outline = store.record_series_episode_outline_decision(
+                outline_draft["outline_id"],
+                "accepted",
+                reviewed_outline="Episode 1 story and approved shot list.",
+            )
+
+            context = store.prepare_series_context(
+                series_id,
+                "",
+                require_story_first_for_new=True,
+                require_episode_outline=True,
+            )
+            episode = store.start_episode(
+                context,
+                context["onboarding_lineage"]["episode_outline"],
+                topic=context["onboarding_lineage"]["episode_topic"],
+            )
+            lineage = store.get_episode_onboarding_lineage(episode["episode_id"])
+
+            self.assertEqual(context["character"], "Tide")
+            self.assertEqual(context["identity_references"][0]["sha256"], character["reference_assets"][0]["sha256"])
+            self.assertEqual(lineage["story_plan_id"], story["story_plan_id"])
+            self.assertEqual(lineage["story_sha256"], story["approved_sha256"])
+            self.assertEqual(lineage["character_card_id"], character["character_card_id"])
+            self.assertEqual(lineage["character_sha256"], character["approved_sha256"])
+            self.assertEqual(lineage["outline_id"], outline["outline_id"])
+            self.assertEqual(lineage["outline_sha256"], outline["approved_sha256"])
+            self.assertEqual(lineage["reference_assets"][0]["sha256"], character["reference_assets"][0]["sha256"])
+            self.assertTrue(store.production_series_exists(series_id))
+
+    def test_user_given_a_production_series_when_the_creator_approves_a_new_story_then_old_episode_assets_are_staled_and_generation_waits_for_new_character_and_outline_approvals(self) -> None:
+        """User Given a production series with an approved story, character and outline When the creator approves a revised story Then prior episode outputs and identity references become stale until the revised character and episode outline are approved."""
+        with TemporaryDirectory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            series_id = f"story-revision-{uuid.uuid4().hex[:12]}"
+            story_one = store.save_series_story_draft(series_id, "Tide restores the lighthouse signal.")
+            story_one = store.record_series_story_decision(
+                story_one["story_plan_id"], "accepted", reviewed_treatment="Tide restores the lighthouse signal."
+            )
+            card_one = store.save_series_character_card_draft(
+                series_id, story_one["story_plan_id"], "Tide is a blue-gray seal."
+            )
+            ref_one = _write_reference(root / "tide-one.png", b"first Tide image")
+            card_one = store.record_series_character_card_decision(
+                card_one["character_card_id"],
+                "accepted",
+                character_name="Tide",
+                reviewed_card="Tide is a blue-gray seal.",
+                reference_paths=[ref_one],
+            )
+            outline_one = store.save_series_episode_outline_draft(
+                series_id, 1, "The signal returns", "Episode 1: Tide cleans the lighthouse lens."
+            )
+            store.record_series_episode_outline_decision(
+                outline_one["outline_id"],
+                "accepted",
+                reviewed_outline="Episode 1: Tide cleans the lighthouse lens.",
+            )
+            context_one = store.prepare_series_context(
+                series_id, "Tide", require_story_first_for_new=True, require_episode_outline=True
+            )
+            episode_one = store.start_episode(
+                context_one,
+                context_one["onboarding_lineage"]["episode_outline"],
+                topic=context_one["onboarding_lineage"]["episode_topic"],
+            )
+
+            story_two = store.save_series_story_draft(series_id, "Tide discovers a hidden second harbor.")
+            story_two = store.record_series_story_decision(
+                story_two["story_plan_id"],
+                "accepted",
+                reviewed_treatment="Tide discovers a hidden second harbor.",
+            )
+
+            self.assertEqual(store.get_episode(episode_one["episode_id"])["status"], "stale")
+            self.assertEqual(store.get_series_character_card(card_one["character_card_id"])["status"], "superseded")
+            self.assertEqual(store.get_series_episode_outline(outline_one["outline_id"])["status"], "superseded")
+            stale_reference = self._mysql_one(
+                store,
+                "SELECT status FROM reference_assets WHERE series_id = ? AND role = 'character_identity'",
+                (series_id,),
+            )
+            self.assertEqual(stale_reference["status"], "stale")
+
+            with self.assertRaisesRegex(ValueError, "approved character card"):
+                store.prepare_series_context(
+                    series_id, "", require_story_first_for_new=True, require_episode_outline=True
+                )
+
+            card_two = store.save_series_character_card_draft(
+                series_id, story_two["story_plan_id"], "Morrow is a white sea otter who knows hidden currents."
+            )
+            ref_two = _write_reference(root / "morrow.png", b"new Morrow image")
+            card_two = store.record_series_character_card_decision(
+                card_two["character_card_id"],
+                "accepted",
+                character_name="Morrow",
+                reviewed_card="Morrow is a white sea otter who knows hidden currents.",
+                reference_paths=[ref_two],
+            )
+            outline_two = store.save_series_episode_outline_draft(
+                series_id, 1, "The hidden harbor", "Episode 1: Morrow leads Tide to the second harbor."
+            )
+            store.record_series_episode_outline_decision(
+                outline_two["outline_id"],
+                "accepted",
+                reviewed_outline="Episode 1: Morrow leads Tide to the second harbor.",
+            )
+
+            context_two = store.prepare_series_context(
+                series_id, "", require_story_first_for_new=True, require_episode_outline=True
+            )
+            episode_two = store.start_episode(
+                context_two,
+                context_two["onboarding_lineage"]["episode_outline"],
+                topic=context_two["onboarding_lineage"]["episode_topic"],
+            )
+
+            self.assertEqual(context_two["character"], "Morrow")
+            self.assertEqual(store.get_episode(episode_two["episode_id"])["episode_number"], 1)
+            self.assertEqual(store.get_episode(episode_two["episode_id"])["version"], 2)
+            self.assertEqual(store.get_episode_onboarding_lineage(episode_two["episode_id"])["character_card_id"], card_two["character_card_id"])
+            self.assertEqual(
+                self._mysql_one(store, "SELECT character_name FROM series WHERE series_id = ?", (series_id,))["character_name"],
+                "Morrow",
+            )
 
     def test_user_given_an_automatically_generated_episode_idea_when_topic_and_premise_are_validated_then_title_is_traditional_chinese(self) -> None:
         """User Given an automatic episode idea When MediaOverload validates its topic and premise Then it accepts a concise Traditional Chinese topic and rejects an unlabeled foreign-language title."""
@@ -432,6 +963,8 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 {
                     "series", "episodes", "episode_plans", "segments", "render_attempts",
                     "reviews", "reference_assets", "episode_publications",
+                    "series_story_plans", "series_character_cards", "series_episode_outlines",
+                    "episode_onboarding_lineage",
                 },
             )
             self.assertEqual(persisted_episode["episode_topic"], "星花引路，陪迷路火螢回家")
