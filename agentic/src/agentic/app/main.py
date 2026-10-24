@@ -340,7 +340,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--text", help="Text payload for TTS-style workflows")
     parser.add_argument("--character", help="Optional character or subject identity for agentic planning")
     parser.add_argument("--character-config", help="Character YAML that configures serial video and social platforms")
-    parser.add_argument("--episode-topic", help="Required short topic shown in serial episode publication copy")
+    parser.add_argument(
+        "--episode-topic",
+        help="Optional topic for serial story planning; it is not added to public captions",
+    )
     parser.add_argument("--platform", action="append", dest="platforms", help="Target publish platform; repeatable")
     parser.add_argument(
         "--publish-mode",

@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 import run_media_interface
-from agentic.app.main import _serial_publish_configuration
+from agentic.app.main import _serial_publish_configuration, parse_args
 from agentic.app.character_requests import (
     CharacterGenerationOptions,
     CharacterReviewOptions,
@@ -97,6 +97,18 @@ def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defau
     assert "--platform" not in first
     assert "--hashtag" in first
     assert capsys.readouterr().out == ""
+
+
+def test_user_given_a_serial_topic_option_when_main_help_is_requested_then_it_is_described_as_story_planning_input(capsys):
+    """User Given a creator reads serial CLI help When --help is requested Then the episode topic is described as planning input rather than public copy."""
+    with pytest.raises(SystemExit) as help_exit:
+        parse_args(["--help"])
+
+    assert help_exit.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "--episode-topic" in help_text
+    assert "not added to public captions" in help_text
+    assert "shown in serial episode publication copy" not in help_text
 
 
 def test_user_given_serial_video_has_positive_weight_and_is_selected_by_normal_routing_then_serial_runner_starts(tmp_path, capsys):
