@@ -200,6 +200,12 @@ def build_goal_payload_from_character_config(
         asset_root=asset_root,
     )
     config_generation_type = str(routing["generation_type"])
+    if config_generation_type == "serial_video":
+        return {
+            "source_generation_type": config_generation_type,
+            "routing_reason": routing.get("reason", ""),
+            "routing_selection_source": routing.get("selection_source", ""),
+        }
     if motion_graphics_requested and config_generation_type != "text2image2video":
         raise ValueError(
             "--motion-graphics is supported only with the text2image2video generation type"

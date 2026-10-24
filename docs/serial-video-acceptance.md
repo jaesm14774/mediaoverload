@@ -16,21 +16,21 @@ User Given a serial series has run through multiple episodes, When the creator o
 
 User Given the configured MySQL service is available, When serial mode starts, Then it writes all series, episode, plan, segment, render, review, reference, and publication records to the dedicated `mediaoverload_serial` MySQL database and does not create or read a SQLite serial ledger.
 
-### Final episode acceptance dispatches to all enabled social platforms
+### Final episode acceptance dispatches the approved public copy
 
-User Given an episode has passed final video QA and has a title that identifies its episode number and topic, When the creator reviews the final MP4 in Discord and accepts the caption, Then MediaOverload dispatches the video to Instagram, Facebook, and YouTube and stores a receipt or failure outcome for each platform in MySQL.
+User Given an episode has passed final video QA and the creator has reviewed its caption and hashtags in Discord, When the creator accepts the final MP4, Then MediaOverload dispatches that approved copy to the enabled platforms and stores a receipt or failure outcome for each platform in MySQL.
 
 ### Final QA records the ready episode before publication review
 
 User Given every segment has current technical QA, human acceptance, and valid tail lineage, When final video QA passes, Then MySQL stores the assembled MP4 path and SHA and marks the episode ready before Discord publication review begins.
 
-### Editing a serial caption keeps the episode and topic label
+### Approved serial copy stays free of forced episode labels
 
-User Given the creator edits a serial episode's Discord caption and removes its first line, When MediaOverload prepares platform captions, Then it restores the exact `第 N 集｜主題：...` label to every platform caption before dispatch.
+User Given the creator approves a serial episode caption and hashtags in Discord, When MediaOverload prepares platform captions, Then it dispatches the approved copy without adding an episode number, topic heading, or workflow metadata.
 
-### Final publication review identifies the episode, topic, and destinations
+### Final publication review contains only publishable copy
 
-User Given a serial episode is ready for publication, When MediaOverload sends its final review to Discord, Then the review message and every platform caption state the episode number, the episode topic, and the three selected publication destinations before the creator accepts or edits it.
+User Given a serial episode is ready for publication, When MediaOverload sends its final review to Discord, Then the review card contains the caption and hashtags that will be published, with no separate episode, topic, strategy, or workflow description.
 
 ### Episode duration controls segment count and final runtime
 
@@ -40,9 +40,13 @@ User Given the creator requests a total duration longer than ten seconds, When M
 
 User Given the normal daily workflow is invoked without serial mode or a series ID, When MediaOverload builds and runs its plan, Then it uses the existing strategy selection, review policy, and output contract without reading or writing serial state.
 
-### Serial mode is explicit and scoped to one series
+### Serial video can be selected by normal weighted routing
 
-User Given a creator requests serial mode with a series ID, When the CLI validates and builds the goal, Then it routes to the long-video workflow, records that series ID, and never adds a serial strategy to the random selection pool.
+User Given serial video is enabled for the character and has a positive generation weight, When normal strategy routing selects `serial_video`, Then the existing serial runner generates and reviews the episode instead of starting the ordinary media workflow.
+
+### Serial mode remains explicitly selectable
+
+User Given a creator runs `python run_media_interface.py --character kirby --generation-type serial_video`, When the Kirby YAML enables serial video, Then the existing serial runner starts with its configured defaults.
 
 ### A new series records fixed identity references
 

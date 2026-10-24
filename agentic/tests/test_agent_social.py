@@ -4,6 +4,7 @@ import os
 import unittest
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from PIL import Image
@@ -26,6 +27,25 @@ class HardContractPromptEngine:
             "platform_bundle": {},
             "dispatch_ready": True,
         }
+
+
+class RecordingDiscordReview:
+    def __init__(self) -> None:
+        self.request: dict[str, object] = {}
+
+    def review_candidates(self, **request: object):
+        self.request = request
+        return SimpleNamespace(
+            review_mode="discord",
+            status="approved",
+            selected_paths=request["media_paths"],
+            reviewer="creator",
+            session_id="review-1",
+            session_path="",
+            edited_text=request["text"],
+            edit_requested=False,
+            delivery={"status": "sent"},
+        )
 
 
 class AgentSocialSkillTests(unittest.TestCase):
@@ -908,10 +928,10 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.outputs["hashtags"], "#edited #tags")
         self.assertEqual(result.outputs["platform_bundle"]["instagram"]["caption"], "Edited caption body")
 
-    def test_user_given_a_serial_caption_edited_without_its_episode_heading_when_publish_content_is_prepared_then_every_platform_caption_restores_the_heading(self) -> None:
-        """User Given a creator edits a serial caption without its heading When platform-specific captions are prepared Then every platform caption restores the canonical episode and topic heading."""
+    def test_user_given_a_serial_caption_is_approved_when_publish_content_is_prepared_then_no_episode_heading_is_added(self) -> None:
+        """User Given a creator approves serial caption copy When publication content is prepared Then no episode number or topic heading is added to the public copy."""
         skills = AgentSocialSkills(ToolRegistry(), self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
-        prefix = "第 1 集｜主題：星種發芽，守護花園裡的星花"
+        caption = "Kirby plants a fallen star seed and watches a tiny flower glow."
         plan = ExecutionPlan(
             goal=GoalRequest(
                 prompt="Kirby plants a fallen star seed and watches a star flower bloom.",
@@ -921,7 +941,6 @@ class AgentSocialSkillTests(unittest.TestCase):
                     "serial_mode": True,
                     "serial_episode_number": 1,
                     "episode_topic": "星種發芽，守護花園裡的星花",
-                    "caption_prefix": prefix,
                     "platforms": ["instagram_graph", "facebook", "youtube"],
                 },
             ),
@@ -940,8 +959,8 @@ class AgentSocialSkillTests(unittest.TestCase):
             node_outputs={
                 "review-select": {
                     "review_mode": "discord",
-                    "approved_review_text": "Kirby plants a fallen star seed and watches a tiny flower glow.\n\n#Kirby #starflower",
-                    "edited_review_text": "Kirby plants a fallen star seed and watches a tiny flower glow.\n\n#Kirby #starflower",
+                    "approved_review_text": f"{caption}\n\n#Kirby #starflower",
+                    "edited_review_text": f"{caption}\n\n#Kirby #starflower",
                 },
                 "process-media": {"media_paths": ["C:\\selected.mp4"]},
             },
@@ -949,14 +968,61 @@ class AgentSocialSkillTests(unittest.TestCase):
 
         result = skills.prepare_caption(SkillContext(plan=plan, node=node, state=state))
 
-        expected_caption = f"{prefix}\n\nKirby plants a fallen star seed and watches a tiny flower glow."
-        self.assertEqual(result.outputs["caption"], expected_caption)
+        self.assertEqual(result.outputs["caption"], caption)
         self.assertTrue(
-            all(caption == expected_caption for caption in result.outputs["platform_captions"].values())
+            all("第 1 集｜主題：" not in value for value in result.outputs["platform_captions"].values())
         )
         youtube_title = result.outputs["platform_bundle"]["youtube"]["additional_params"]["youtube_title"]
         self.assertTrue(youtube_title)
-        self.assertIn("星種發芽，守護花園裡的星花", youtube_title)
+        self.assertNotIn("第 1 集｜主題：", youtube_title)
+
+    def test_user_given_a_serial_final_video_is_ready_when_discord_review_starts_then_only_public_copy_is_sent(self) -> None:
+        """User Given a serial video is ready for publication When Discord review starts Then the review message contains publishable copy without a separate metadata message."""
+        discord = RecordingDiscordReview()
+        skills = AgentSocialSkills(
+            ToolRegistry(),
+            self.project_root / ".tmp-tests",
+            prompt_engine=HardContractPromptEngine(),
+            discord_review=discord,
+        )
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Kirby guides a lost firefly home.",
+                media_type="long_video",
+                style="watercolor",
+                constraints={
+                    "serial_mode": True,
+                    "serial_episode_number": 2,
+                    "episode_topic": "星花引路",
+                    "platforms": ["instagram_graph", "facebook", "youtube"],
+                    "hashtags": ["#Kirby"],
+                },
+            ),
+            workflow_name="serial_video_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="serial-final-publish-review",
+            skill_name="review.assets.select",
+            depends_on=[],
+            inputs={
+                "media_paths": ["C:\\selected.mp4"],
+                "review_scope": "final_video",
+                "review_phase": "serial_final_publish",
+                "require_human_review": True,
+            },
+        )
+
+        skills.select_best_assets(
+            SkillContext(
+                plan=plan,
+                node=node,
+                state=RunState(goal={}, metadata={}, node_outputs={}),
+            )
+        )
+
+        self.assertEqual(discord.request["text"], "Draft social post\n\n#kirby")
+        self.assertEqual(discord.request["context_text"], "")
 
     def test_prepare_caption_uses_approved_review_text_without_second_llm_gate(self) -> None:
         tool_registry = ToolRegistry()

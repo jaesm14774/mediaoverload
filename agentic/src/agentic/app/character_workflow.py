@@ -91,6 +91,7 @@ def run_character_workflow(
     *,
     runtime_builder: Callable[..., Any] | None = None,
     notification_service: DiscordRunNotificationService | None = None,
+    serial_dispatcher: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     repo_root = request.repo_root
     config_path = request.config_path
@@ -218,6 +219,36 @@ def run_character_workflow(
         ),
         recorder=recorder,
     )
+    if payload.get("source_generation_type") == "serial_video":
+        if serial_dispatcher is None:
+            from agentic.app.serial_video_dispatch import dispatch_serial_video_request
+
+            serial_dispatcher = lambda: dispatch_serial_video_request(request)
+        logger.info(
+            "serial.strategy.selected | routing_source=%s",
+            payload.get("routing_selection_source", ""),
+        )
+        try:
+            serial_result = serial_dispatcher()
+        except BaseException as exc:
+            recorder.finalize(
+                {
+                    "status": "failed",
+                    "source_generation_type": "serial_video",
+                    "failure_reason": f"{type(exc).__name__}: {exc}",
+                    "routing_reason": payload.get("routing_reason", ""),
+                }
+            )
+            raise
+        recorder.finalize(
+            {
+                "status": str(serial_result.get("status") or "success"),
+                "source_generation_type": "serial_video",
+                "serial_dispatch": serial_result,
+                "routing_reason": payload.get("routing_reason", ""),
+            }
+        )
+        return serial_result
     logger.info(
         "routing.selected | strategy=%s | media_type=%s | workflow=%s | prompt_source=%s",
         payload["source_generation_type"],

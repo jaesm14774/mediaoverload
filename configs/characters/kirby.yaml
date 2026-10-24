@@ -7,8 +7,7 @@ character:
 
 generation:
   output_dir: output
-  # Select this explicitly with run_media_interface.py --generation-type serial_video.
-  # It stays out of generation_type_weights so ordinary runs never enter a series by chance.
+  # Weighted selection enters the same serial workflow as the explicit CLI option.
   serial_video:
     enabled: true
     default_duration_seconds: 30
@@ -195,6 +194,7 @@ generation:
     # Keep at least 10 seconds after any configured playback-speed transform.
     max_i2v_frames: 240
   generation_type_weights:
+    serial_video: 40
     text2img: 1
     text2image2video: 1
     text2longvideo: 1

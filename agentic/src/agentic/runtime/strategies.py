@@ -44,6 +44,8 @@ GENERATION_STRATEGIES = {
         (*_IMAGE, "video_workflow_name", "refine_workflow_name"),
         news_grounded=True,
     ),
+    # Strategy selection dispatches this route to the serial application flow.
+    "serial_video": GenerationStrategy("long_video", ()),
     "native_h3_story": GenerationStrategy(
         "native_h3_story",
         ("video_workflow_name", "image_workflow_name"),

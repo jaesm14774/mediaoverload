@@ -396,7 +396,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 episode["episode_id"],
                 platforms=platforms,
                 episode_topic="星花引路，陪迷路火螢回家",
-                caption="第 2 集｜主題：星花引路，陪迷路火螢回家",
+                caption="Kirby guides a lost firefly home with a star flower.",
                 hashtags="#Kirby",
                 media_path=video,
             )

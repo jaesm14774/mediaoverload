@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -40,24 +39,6 @@ class AgentSocialSkills:
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
         self.discord_review = discord_review or DiscordHumanReviewService(output_root=self.output_root)
-
-    @staticmethod
-    def _ensure_serial_episode_heading(
-        caption: str, episode_number: object, episode_topic: object
-    ) -> str:
-        try:
-            number = int(episode_number or 0)
-        except (TypeError, ValueError):
-            number = 0
-        topic = " ".join(str(episode_topic or "").split())
-        body = str(caption or "").strip()
-        if number < 1 or not topic:
-            return body
-        heading = f"第 {number} 集｜主題：{topic}"
-        lines = body.splitlines()
-        if lines and re.match(r"^第\s*\d+\s*集\s*[｜|]\s*主題：", lines[0]):
-            body = "\n".join(lines[1:]).strip()
-        return f"{heading}\n\n{body}" if body else heading
 
     def prepare_caption(self, context: SkillContext) -> SkillResult:
         prefix = str(context.node.inputs.get("prefix", "")).strip()
@@ -112,37 +93,6 @@ class AgentSocialSkills:
                 ),
             )
             bundle = enrich_publish_bundle(bundle, context.plan.goal, platforms, selected_media)
-        if serial_mode:
-            heading_caption = self._ensure_serial_episode_heading(
-                str(bundle.get("caption") or ""),
-                context.plan.goal.constraints.get("serial_episode_number"),
-                context.plan.goal.constraints.get("episode_topic"),
-            )
-            platform_captions = bundle.get("platform_captions")
-            if not isinstance(platform_captions, dict):
-                platform_captions = {}
-            platform_captions = {
-                platform: self._ensure_serial_episode_heading(
-                    str(platform_captions.get(platform) or bundle.get("caption") or ""),
-                    context.plan.goal.constraints.get("serial_episode_number"),
-                    context.plan.goal.constraints.get("episode_topic"),
-                )
-                for platform in platforms
-            }
-            bundle = {
-                **bundle,
-                "caption": heading_caption,
-                "platform_captions": platform_captions,
-                "platform_bundle": build_platform_bundle(
-                    goal=context.plan.goal,
-                    caption=heading_caption,
-                    hashtags=str(bundle.get("hashtags") or ""),
-                    platform_captions=platform_captions,
-                    platforms=platforms,
-                    media_paths=selected_media,
-                    post_strategy=post_strategy,
-                ),
-            }
         return SkillResult(
             status="success",
             outputs={
@@ -426,10 +376,6 @@ class AgentSocialSkills:
                 "Final video review: inspect the rendered video for a clear opening conflict, visible escalation or reversal, "
                 "and a concrete ending. Accept to approve, Edit to update the caption, or Reject to stop publishing."
             )
-        serial_lifecycle_guidance = (
-            "連載選項：Accept 會發布本集並保留續集資格；「完成系列並發布本集」會發布本集並結束系列；"
-            "「廢棄系列」會記錄廢棄並停止本集發布。未選終止按鈕時，系列預設維持可接續。"
-        )
         if final_media_review and not review_notes.strip():
             review_notes = (
                 "Final media review: inspect every attached image or video, choose the media to publish, and verify the "
@@ -506,15 +452,15 @@ class AgentSocialSkills:
                 ),
             )
         review_metadata = self._review_metadata(context)
-        review_context_text = self._build_review_context_text(
-            context=context,
-            strategy=review_metadata["strategy"],
-            workflow=review_metadata["workflow"],
-            review_phase=review_phase,
-            review_scope=review_scope,
-        )
-        if review_phase == "serial_final_publish":
-            review_context_text = f"{review_context_text}\n\n{serial_lifecycle_guidance}".strip()
+        review_context_text = ""
+        if review_phase != "serial_final_publish":
+            review_context_text = self._build_review_context_text(
+                context=context,
+                strategy=review_metadata["strategy"],
+                workflow=review_metadata["workflow"],
+                review_phase=review_phase,
+                review_scope=review_scope,
+            )
         if first_frame_review or last_frame_review or anchor_set_review or reference_review:
             review_text = self._build_stage_review_text(strategy=review_metadata["strategy"])
         elif final_video_review or final_media_review:
@@ -1254,16 +1200,6 @@ def register_agent_social_skills(
                     if part
                 )
             caption, hashtags = skills._split_review_caption_and_hashtags(approved_text)
-            if decision == "accepted":
-                caption = skills._ensure_serial_episode_heading(
-                    caption,
-                    context.plan.goal.constraints.get("serial_episode_number"),
-                    context.plan.goal.constraints.get("episode_topic"),
-                )
-                approved_text = "\n\n".join(
-                    part for part in (caption, hashtags) if part
-                )
-                outputs["approved_review_text"] = approved_text
             serial_store.record_publication_review(
                 str(context.plan.goal.constraints.get("serial_episode_id") or ""),
                 int(publication_attempt["attempt_number"]),

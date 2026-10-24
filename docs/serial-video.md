@@ -4,7 +4,7 @@
 
 ## 目前可操作的流程
 
-新集生成完成且最終影片技術 QA 通過後，MediaOverload 會把「第幾集、主題、發布文案、Instagram／Facebook／YouTube」送到 Discord。只有 Discord 接受後，流程才會 dispatch 到三個平台。每個平台的結果、錯誤與 provider receipt 都記到 episode_publications。拒絕、逾時、Discord 無法審核或發布失敗，都會留下可辨識的狀態；技術 QA 通過不代表影片已發布。
+新集生成完成且最終影片技術 QA 通過後，Discord 最終發布審核只顯示即將發布的文案與標籤。Accept 後才會把審核通過的公開內容送到已啟用的平台；集數、主題與工作流資訊只留在內部故事規劃和 MySQL 紀錄，不放進發布審核內容。各平台的結果、錯誤與 provider receipt 都記到 episode_publications。拒絕、逾時、Discord 無法審核或發布失敗，都會留下可辨識的狀態；技術 QA 通過不代表影片已發布。
 
 連載策略整合在既有 `run_media_interface.py` 入口中，不需要另外執行 PowerShell 腳本，也沒有新增瀏覽器頁面。角色 YAML 的 `generation.serial_video` 控制預設片長、連跑集數、風格、輸出目錄、Discord 審核逾時與固定身份參考圖；啟用的平台和發布設定沿用同一份角色 YAML 的 `social_media.platforms`。
 
@@ -28,7 +28,7 @@ flowchart LR
 
 第 1 段使用前集已接受的集尾影格和固定角色參考圖做 Ref2VA，同集後續段使用已接受片段的尾幀做 I2VA。每段都要經過技術 QA 和 Discord 接受，才能作為下一段的參考或進入最終組裝。
 
-最終發布審核卡會列出集數、主題和三個發布平台，也能先編輯文案再決定。發布前會重新補上「第 N 集｜主題：…」，因此編輯文案不會移除集數識別。一般 Accept 會發布並讓系列繼續；「完成系列並發布本集」會發布本集並把系列標為 completed；「廢棄系列」會標為 discarded，並拒絕發布本集。新集生成後不按終止選項，系列預設仍為 active。
+最終發布審核卡只顯示即將發布的文案與標籤；接受後發布審核中確認的內容，不額外加入集數、主題或工作流說明。一般 Accept 會發布並讓系列繼續；「完成系列並發布本集」會發布本集並把系列標為 completed；「廢棄系列」會標為 discarded，並拒絕發布本集。新集生成後不按終止選項，系列預設仍為 active。
 
 ## MySQL 資料表
 
@@ -113,11 +113,13 @@ python -m agentic.app.main --goal "Kirby guides a lost firefly home with the sta
 
 ## 從既有入口自動產生連載
 
-在角色 YAML 啟用 `generation.serial_video.enabled` 後，直接選擇既有入口的策略：
+在角色 YAML 啟用 `generation.serial_video.enabled` 後，可明確指定連載策略：
 
 ~~~powershell
 python run_media_interface.py --character kirby --generation-type serial_video
 ~~~
+
+不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 40；若抽中連載，會直接交給同一個連載 runner，執行連載點子生成、連續性審核和發布流程。
 
 Kirby 預設每次跑一集、每集 30 秒。想一次連跑五集、每集 60 秒：
 
@@ -146,7 +148,7 @@ serial_video:
 
 ## 產生新集
 
-第一次建立系列要傳固定角色參考圖；後續集數使用相同系列 ID，不必重傳。每次新集都要提供清楚的 --episode-topic，主題會出現在 Discord 發布卡與實際發布文案：
+第一次建立系列要傳固定角色參考圖；後續集數使用相同系列 ID，不必重傳。手動建立新集時用 `--episode-topic` 提供故事規劃主題，或使用 `--serial-auto-next` 讓連載點子生成器產生主題。主題只供故事規劃與連載紀錄使用，不會自動加進公開文案：
 
 ~~~powershell
 $env:PYTHONPATH = "agentic/src"
@@ -163,7 +165,7 @@ python -m agentic.app.main --goal "Kirby finds a fallen star seed in a quiet gar
 python -m agentic.app.main --goal "At night, Kirby follows the star flower's glow and guides a lost firefly across a moonlit stepping-stone path to its home in an old hollow tree." --media-type long_video --serial-mode --series-id kirby-continuity-20261024 --character Kirby --serial-publish-episode-number 2 --output-dir "agentic/output/kirby_continuity_20261024" --execute
 ~~~
 
-Discord 審核卡的文案會以「第 2 集｜主題：星花引路，陪迷路火螢回家」開頭，並列出發布平台。按接受後才呼叫發布工具。發布結果會逐平台寫入 episode_publications；工具回報成功和 provider receipt 是發布證據，但仍不等同於確認所有平台公開可見。
+Discord 審核卡顯示本集的發布文案與標籤。按接受後才呼叫發布工具。發布結果會逐平台寫入 episode_publications；工具回報成功和 provider receipt 是發布證據，但仍不等同於確認所有平台公開可見。
 
 ## 審核逾時後恢復
 

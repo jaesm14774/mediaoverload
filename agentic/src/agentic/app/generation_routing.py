@@ -183,6 +183,18 @@ def _route_generation_from_character_config(
             "Global routing is disabled. LLM routing is required for this workflow."
         )
     routing_runtime_context = _build_h3_reference_runtime_context(repo_root, generation)
+    if not preferred_generation_type:
+        serial_video_config = generation.get("serial_video", {}) or {}
+        if not isinstance(serial_video_config, dict):
+            raise ValueError("generation.serial_video must be a mapping")
+        if not bool(serial_video_config.get("enabled", False)):
+            merged_routing = dict(merged_routing)
+            for candidate_key in ("strategy_candidates", "allowed_generation_types"):
+                candidates = merged_routing.get(candidate_key)
+                if isinstance(candidates, list):
+                    merged_routing[candidate_key] = [
+                        candidate for candidate in candidates if candidate != "serial_video"
+                    ]
     generation_type_candidates = _collect_generation_type_candidates(
         merged_routing,
         preferred_generation_type,
@@ -526,7 +538,9 @@ def _collect_workflow_stage_candidates(
             explicit = {}
 
         inferred: dict[str, list[Any]] = {}
-        if generation_type == "story_card":
+        if generation_type == "serial_video":
+            inferred = {}
+        elif generation_type == "story_card":
             story_card_config = dict(generation.get("story_card", {}) or {})
             page_stage = dict(story_card_config.get("page_stage", {}) or {})
             inferred = {

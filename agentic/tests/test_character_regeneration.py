@@ -178,7 +178,7 @@ def test_user_given_a_serial_final_publish_review_when_completed_or_discarded_is
     async def choose(label):
         view = create_discord_review_view(
             files=[],
-            content="第 3 集｜主題：夜光種子",
+            content="Kirby follows the glow of a night flower.",
             timeout=30,
             allow_asset_selection=False,
             allow_series_lifecycle_choice=True,
