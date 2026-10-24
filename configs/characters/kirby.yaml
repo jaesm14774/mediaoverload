@@ -7,6 +7,15 @@ character:
 
 generation:
   output_dir: output
+  # Weighted selection enters the same serial workflow as the explicit CLI option.
+  serial_video:
+    enabled: true
+    default_duration_seconds: 30
+    episodes_per_run: 1
+    style: watercolor storybook animation
+    output_dir: output
+    discord_review_timeout_seconds: 1800
+    identity_references: []
   # Apply the speed transform after the final video is rendered and before
   # technical QA, Discord review, and social publishing.
   video_speed:
@@ -185,6 +194,7 @@ generation:
     # Keep at least 10 seconds after any configured playback-speed transform.
     max_i2v_frames: 240
   generation_type_weights:
+    serial_video: 40
     text2img: 1
     text2image2video: 1
     text2longvideo: 1

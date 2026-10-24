@@ -15,6 +15,13 @@ from agentic.runtime.planning.common import PlanningContext
 
 
 def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
+    serial_mode = bool(goal.constraints.get("serial_mode", False))
+    serial_series_id = str(goal.constraints.get("series_id") or "").strip()
+    if serial_mode and not serial_series_id:
+        raise ValueError("Serial long-video planning requires an explicit series_id")
+    if serial_mode and not str(goal.constraints.get("character") or "").strip():
+        raise ValueError("Serial long-video planning requires an explicit fixed character")
+
     minimum_h3_segment_count = max(
         1, math.ceil(float(goal.duration_seconds) / (362 / 24))
     )
@@ -52,7 +59,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         str(
             goal.constraints.get("longvideo_review_policy")
             or goal.constraints.get("longvideo_frame_review_policy")
-            or "opening_only"
+            or ("every_segment" if serial_mode else "opening_only")
         )
         .strip()
         .lower()
@@ -61,6 +68,8 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         raise ValueError(
             "longvideo_review_policy must be 'opening_only', 'anchors', or 'every_segment'"
         )
+    if serial_mode and review_policy != "every_segment":
+        raise ValueError("Serial long-video mode requires every-segment human review")
     continuity_mode = (
         str(goal.constraints.get("longvideo_continuity_mode") or "rendered_tail")
         .strip()
@@ -84,18 +93,28 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         capabilities, preferred_workflows=preferred_workflows
     )
     variant_seed = int(goal.constraints.get("edit_variant_seed") or 17)
-    recipe_sequence = production_recipe_sequence(
-        segment_count,
-        candidates,
-        use_reference_bundle=bool(
-            goal.constraints.get("reference_manifest")
-            or goal.constraints.get("native_h3_reference_manifest")
-            or goal.constraints.get("reference_image_paths")
-            or goal.constraints.get("native_h3_reference_image_paths")
-            or goal.constraints.get("reference_video_paths")
-            or goal.constraints.get("native_h3_reference_video_paths")
-        ),
+    configured_references = bool(
+        goal.constraints.get("reference_manifest")
+        or goal.constraints.get("native_h3_reference_manifest")
+        or goal.constraints.get("reference_image_paths")
+        or goal.constraints.get("native_h3_reference_image_paths")
+        or goal.constraints.get("reference_video_paths")
+        or goal.constraints.get("native_h3_reference_video_paths")
     )
+    if serial_mode:
+        if not configured_references:
+            raise ValueError("Serial long-video mode requires a registered Ref2VA identity reference bundle")
+        if not candidates.get("reference_bundle") or not candidates.get("anchor_first"):
+            raise ValueError("Serial long-video mode requires configured H3 Ref2VA and I2VA workflows")
+        if stage_probe_auto_select:
+            raise ValueError("Serial long-video mode cannot auto-select a segment review")
+        recipe_sequence = ["reference_bundle", *(["anchor_first"] * (segment_count - 1))]
+    else:
+        recipe_sequence = production_recipe_sequence(
+            segment_count,
+            candidates,
+            use_reference_bundle=configured_references,
+        )
     selected_capabilities = {
         recipe_name: candidates[recipe_name][0]
         for recipe_name in dict.fromkeys(recipe_sequence)
@@ -163,7 +182,8 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         ),
     )
     require_human_review = bool(
-        goal.constraints.get("require_human_review", False)
+        serial_mode
+        or goal.constraints.get("require_human_review", False)
         or goal.constraints.get("enable_stage_review", False)
         or pre_video_review
     )
@@ -650,7 +670,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             "workflow_name": capability.workflow_name,
             "render_tool": recipe.render_tool,
             "segment_index": index,
-            "video_count": context.longvideo_int(goal, "video_count", 1, 8),
+            "video_count": 1 if serial_mode else context.longvideo_int(goal, "video_count", 1, 8),
             "conditioning_plan": conditioning_plan.to_dict(),
             "anchor_nodes": dict(anchor_nodes),
             "reference_node": reference_node,
@@ -713,6 +733,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     inputs={
                         "duration_seconds": segment_duration_seconds,
                         "output_name": f"longvideo_{prefix}_{suffix}_trimmed.mp4",
+                        "segment_index": index,
                     },
                     depends_on=[video_node],
                     tags=["package", "video", "segment", "duration"],
@@ -726,8 +747,12 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         segment_qa_node: str | None = None
         if continuity_mode == "rendered_tail":
             segment_qa_node = f"{prefix}-qa-{suffix}"
-            segment_duration = max(
-                1.0, float(render_inputs["length"]) / max(segment_frame_rate, 1.0)
+            segment_duration = (
+                segment_duration_seconds
+                if serial_mode
+                else max(
+                    1.0, float(render_inputs["length"]) / max(segment_frame_rate, 1.0)
+                )
             )
             nodes.append(
                 ExecutionNode(
@@ -745,9 +770,10 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                         "frame_count": 8,
                         "columns": 4,
                         "scale_width": 320,
-                        "source_video_node": video_node,
+                        "source_video_node": delivered_video_node if serial_mode else video_node,
+                        "segment_index": index,
                     },
-                    depends_on=[video_node],
+                    depends_on=[delivered_video_node if serial_mode else video_node],
                     tags=["quality", "technical-qa", "segment"]
                     + (["retry"] if retry else []),
                     tool_name="media.video_qa",
@@ -769,6 +795,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                             "review_all_candidates": True,
                             "review_scope": "final_video",
                             "review_phase": "segment_acceptance",
+                            "segment_index": index,
                             "require_human_review": True,
                             "review_notes": (
                                 f"Segment {index + 1} of {segment_count} acceptance: inspect "
@@ -784,7 +811,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                         stage="review",
                     )
                 )
-                segment_review_nodes_by_video[video_node] = segment_review_node
+                segment_review_nodes_by_video[delivered_video_node] = segment_review_node
                 continuation_source_node = segment_review_node
             tail_node = f"{prefix}-tail-{suffix}"
             nodes.append(
@@ -794,6 +821,8 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     inputs={
                         "output_name": f"{prefix}_tail_{suffix}.png",
                         "source_video_node": continuation_source_node,
+                        "segment_index": index,
+                        "episode_end": index == segment_count - 1,
                     },
                     depends_on=[continuation_source_node],
                     tags=["quality", "continuity", "tail", "segment"]
@@ -1311,6 +1340,94 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 stage="package",
             )
         )
+    serial_publish_node = ""
+    if serial_mode:
+        serial_episode_number = int(
+            goal.constraints.get("serial_episode_number")
+            or goal.constraints.get("episode_number")
+            or 0
+        )
+        episode_topic = str(goal.constraints.get("episode_topic") or "").strip()
+        platforms = [str(platform) for platform in (goal.constraints.get("platforms") or [])]
+        serial_publish_node = "serial-publish-dispatch"
+        nodes.extend(
+            [
+                ExecutionNode(
+                    node_id="serial-final-publish-review",
+                    skill_name="review.assets.select",
+                    inputs={
+                        "limit": 1,
+                        "review_scope": "final_video",
+                        "review_phase": "serial_final_publish",
+                        "preferred_video_node": final_video_node,
+                        "platforms": platforms,
+                        "require_human_review": True,
+                    },
+                    depends_on=[collect_node, final_video_node, "longvideo-video-qa"],
+                    tags=["review", "publish", "serial", "episode-final"],
+                    stage="review",
+                ),
+                ExecutionNode(
+                    node_id="serial-publish-process",
+                    skill_name="publish.media.process",
+                    inputs={
+                        "output_dir": goal.constraints.get("output_dir"),
+                        "platforms": platforms,
+                    },
+                    depends_on=["serial-final-publish-review"],
+                    tags=["publish", "media", "serial"],
+                    tool_name="publish.process_media",
+                    stage="package",
+                ),
+                ExecutionNode(
+                    node_id="serial-publish-caption",
+                    skill_name="publish.caption.prepare",
+                    inputs={
+                        "hashtags": goal.constraints.get("hashtags", []),
+                        "platforms": platforms,
+                    },
+                    depends_on=["serial-final-publish-review", "serial-publish-process"],
+                    tags=["publish", "caption", "serial"],
+                    stage="prompting",
+                ),
+                ExecutionNode(
+                    node_id=serial_publish_node,
+                    skill_name="publish.social.dispatch",
+                    inputs={
+                        "platforms": platforms,
+                        "platform_configs": goal.constraints.get("platform_configs", {}),
+                        "additional_params": goal.constraints.get("additional_params", {}),
+                        "publish_mode": goal.constraints.get("publish_mode", "live"),
+                        "dry_run": bool(goal.constraints.get("dry_run", False)),
+                    },
+                    depends_on=[
+                        "serial-publish-process",
+                        "serial-publish-caption",
+                        "serial-final-publish-review",
+                    ],
+                    tags=["publish", "dispatch", "serial"],
+                    tool_name="publish.social",
+                    stage="publish",
+                ),
+                ExecutionNode(
+                    node_id="persist-serial-publication-summary",
+                    skill_name="agent.summary.persist",
+                    inputs={
+                        "summary_name": "serial_publication_summary.json",
+                        "summary_scope": "serial_publication",
+                        "summary_metadata": {
+                            "episode_number": serial_episode_number,
+                            "episode_topic": episode_topic,
+                            "platforms": platforms,
+                            "publication_node": serial_publish_node,
+                        },
+                    },
+                    depends_on=["serial-final-publish-review", serial_publish_node],
+                    tags=["artifact", "summary", "publish", "serial"],
+                    stage="package",
+                ),
+            ]
+        )
     metadata = {
         "segment_count": segment_count,
         "continuity_mode": continuity_mode,
@@ -1349,10 +1466,20 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         "segment_qa_nodes": segment_qa_nodes,
         "segment_tail_nodes": segment_tail_nodes,
         "publish_package_node": publish_package_node,
+        "serial_publish_node": serial_publish_node,
         "video_speed": context.video_speed_config(goal),
         "final_video_node": final_video_node,
         "review_loop_enabled": review_loop_enabled,
         "review_notes": review_notes,
+        **(
+            {
+                "serial_mode": True,
+                "series_id": serial_series_id,
+                "serial_episode_number": int(goal.constraints.get("serial_episode_number") or 0),
+            }
+            if serial_mode
+            else {}
+        ),
         **(
             {"reference_video": context.reference_video_metadata(goal)}
             if reference_node

@@ -38,6 +38,7 @@ def build_publish_review(context: PlanningContext, goal: GoalRequest) -> Executi
     platforms = goal.constraints.get("platforms") or []
     dry_run = bool(goal.constraints.get("dry_run", True))
     selection_limit = int(goal.constraints.get("selection_limit") or 10)
+    serial_publish = bool(goal.constraints.get("serial_mode"))
     nodes = [
         ExecutionNode(
             node_id="ingest-media",
@@ -52,6 +53,16 @@ def build_publish_review(context: PlanningContext, goal: GoalRequest) -> Executi
             inputs={
                 "limit": selection_limit,
                 "review_scope": _infer_publish_review_scope(goal),
+                **(
+                    {
+                        "review_phase": "serial_final_publish",
+                        "media_paths": goal.constraints.get("media_paths", []),
+                        "platforms": list(platforms),
+                        "require_human_review": True,
+                    }
+                    if serial_publish
+                    else {}
+                ),
                 "review_all_candidates": bool(
                     goal.constraints.get("review_all_candidates", False)
                 ),
@@ -73,7 +84,7 @@ def build_publish_review(context: PlanningContext, goal: GoalRequest) -> Executi
             node_id="prepare-caption",
             skill_name="publish.caption.prepare",
             inputs={
-                "prefix": goal.constraints.get("caption_prefix", ""),
+                "prefix": "" if serial_publish else goal.constraints.get("caption_prefix", ""),
                 "hashtags": goal.constraints.get("hashtags", []),
                 "platforms": platforms,
             },
@@ -91,7 +102,7 @@ def build_publish_review(context: PlanningContext, goal: GoalRequest) -> Executi
                 "publish_mode": goal.constraints.get("publish_mode", ""),
                 "dry_run": dry_run,
             },
-            depends_on=["process-media", "prepare-caption"],
+            depends_on=["process-media", "prepare-caption", "review-select"],
             tags=["publish", "dispatch"],
             tool_name="publish.social",
             stage="publish",

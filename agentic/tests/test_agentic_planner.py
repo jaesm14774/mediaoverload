@@ -1290,7 +1290,6 @@ class AgenticPlannerTests(unittest.TestCase):
         review_text = AgentSocialSkills._build_final_publish_review_text(
             draft_caption="Overall story brief",
             draft_hashtags="",
-            platforms=[],
             review_guidance=guidance,
         )
 

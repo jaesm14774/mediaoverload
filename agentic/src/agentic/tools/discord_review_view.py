@@ -19,6 +19,7 @@ def create_discord_review_view(
     selection_required: bool = False,
     selection_limit: int | None = None,
     allow_regenerate: bool = False,
+    allow_series_lifecycle_choice: bool = False,
 ) -> View:
     def split_caption_hashtags(value: str) -> tuple[str, str]:
         content: list[str] = []
@@ -76,6 +77,7 @@ def create_discord_review_view(
             timeout: float,
             *,
             allow_regenerate: bool,
+            allow_series_lifecycle_choice: bool,
         ) -> None:
             super().__init__(timeout=timeout)
             self.result: str | None = None
@@ -84,9 +86,8 @@ def create_discord_review_view(
             self.content = content
             self.selected_files: list[int] = []
             self.message: discord.Message | None = None
-            self.edit_done = asyncio.Event()
-            self.is_editing = False
             self.edit_requested = False
+            self.series_disposition = ""
             self.decision_finalized = False
             self.reviewer_id: str | None = None
             self.state_lock = asyncio.Lock()
@@ -112,6 +113,15 @@ def create_discord_review_view(
                 )
                 if continue_button is not None:
                     self.remove_item(continue_button)
+
+            if not allow_series_lifecycle_choice:
+                for label in ("完成系列並發布本集", "廢棄系列"):
+                    button = next(
+                        (item for item in self.children if getattr(item, "label", "") == label),
+                        None,
+                    )
+                    if button is not None:
+                        self.remove_item(button)
 
             if allow_asset_selection:
                 selectable_files = self.files[:25]
@@ -164,6 +174,19 @@ def create_discord_review_view(
             self.reviewer_id = user_id
             return True
 
+        async def close_controls(self, *, content: str | None = None) -> None:
+            try:
+                if self.message is not None:
+                    changes: dict[str, object] = {
+                        "view": None,
+                        "allowed_mentions": discord.AllowedMentions.none(),
+                    }
+                    if content is not None:
+                        changes["content"] = content
+                    await self.message.edit(**changes)
+            finally:
+                self.stop()
+
         @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
         async def accept(self, interaction: discord.Interaction, button: Button) -> None:
             del button
@@ -191,14 +214,13 @@ def create_discord_review_view(
                         ephemeral=True,
                     )
                     return
+                await interaction.response.defer()
                 self.decision_finalized = True
                 self.result = "accept"
                 self.user_name = str(interaction.user)
                 if not self.selected_files:
                     self.selected_files = list(range(len(self.files)))
-                self.edit_done.set()
-            await interaction.response.defer()
-            self.stop()
+            await self.close_controls()
 
         @discord.ui.button(label="Reject", style=discord.ButtonStyle.red)
         async def reject(self, interaction: discord.Interaction, button: Button) -> None:
@@ -209,14 +231,13 @@ def create_discord_review_view(
                 if self.decision_finalized:
                     await interaction.response.send_message("This review is already complete.", ephemeral=True)
                     return
+                await interaction.response.defer()
                 self.decision_finalized = True
                 self.result = "reject"
                 self.user_name = str(interaction.user)
                 self.content = ""
                 self.selected_files = []
-                self.edit_done.set()
-            await interaction.response.defer()
-            self.stop()
+            await self.close_controls()
 
         @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple)
         async def edit(self, interaction: discord.Interaction, button: Button) -> None:
@@ -227,37 +248,30 @@ def create_discord_review_view(
                 if self.decision_finalized:
                     await interaction.response.send_message("This review is already complete.", ephemeral=True)
                     return
-                self.is_editing = True
             modal = EditModal(self.content)
-            try:
-                await interaction.response.send_modal(modal)
-                await modal.wait()
-                async with self.state_lock:
-                    if self.decision_finalized:
-                        return
-                    caption = str(modal.caption.value).strip()
-                    hashtags = str(modal.hashtags.value).strip()
-                    self.content = "\n\n".join(part for part in (caption[:1500], hashtags[:300]) if part)[:1900]
-                    self.edit_requested = True
-                if self.message is not None:
-                    await self.message.edit(
-                        content=self.content,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-
-                if not allow_asset_selection:
-                    async with self.state_lock:
-                        if not self.decision_finalized:
-                            self.decision_finalized = True
-                            self.result = "edit"
-                            self.user_name = str(interaction.user)
-                    self.stop()
+            await interaction.response.send_modal(modal)
+            timed_out = await modal.wait()
+            if timed_out:
+                return
+            async with self.state_lock:
+                if self.decision_finalized:
                     return
-
-                await self.edit_done.wait()
-            finally:
-                self.is_editing = False
-            self.stop()
+                caption = str(modal.caption.value).strip()
+                hashtags = str(modal.hashtags.value).strip()
+                previous_content = self.content
+                previous_edit_requested = self.edit_requested
+                self.content = "\n\n".join(part for part in (caption[:1500], hashtags[:300]) if part)[:1900]
+                self.edit_requested = True
+                try:
+                    if self.message is not None:
+                        await self.message.edit(
+                            content=self.content,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                except Exception:
+                    self.content = previous_content
+                    self.edit_requested = previous_edit_requested
+                    raise
 
         @discord.ui.button(label="重新生成", style=discord.ButtonStyle.blurple)
         async def regenerate_run(self, interaction: discord.Interaction, button: Button) -> None:
@@ -272,14 +286,50 @@ def create_discord_review_view(
                 self.result = "regenerate"
                 self.user_name = str(interaction.user)
                 self.selected_files = []
-                self.edit_done.set()
-            await interaction.response.defer()
-            self.stop()
-            if self.message is not None:
-                await self.message.edit(
-                    content=f"{self.content[:1750]}\n\n已選擇重新生成，將從頭重新跑完整流程。",
-                    view=None,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await interaction.response.defer()
+            await self.close_controls(
+                content=f"{self.content[:1750]}\n\n已選擇重新生成，將從頭重新跑完整流程。"
+            )
 
-    return ResponseView(files=files, content=content, timeout=timeout, allow_regenerate=allow_regenerate)
+        @discord.ui.button(label="完成系列並發布本集", style=discord.ButtonStyle.blurple)
+        async def complete_series(self, interaction: discord.Interaction, button: Button) -> None:
+            del button
+            if not await self.authorize(interaction):
+                return
+            async with self.state_lock:
+                if self.decision_finalized:
+                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                self.decision_finalized = True
+                self.result = "accept"
+                self.series_disposition = "completed"
+                self.user_name = str(interaction.user)
+                self.selected_files = list(range(len(self.files)))
+            await self.close_controls()
+
+        @discord.ui.button(label="廢棄系列", style=discord.ButtonStyle.red)
+        async def discard_series(self, interaction: discord.Interaction, button: Button) -> None:
+            del button
+            if not await self.authorize(interaction):
+                return
+            async with self.state_lock:
+                if self.decision_finalized:
+                    await interaction.response.send_message("This review is already complete.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                self.decision_finalized = True
+                self.result = "reject"
+                self.series_disposition = "discarded"
+                self.user_name = str(interaction.user)
+                self.content = ""
+                self.selected_files = []
+            await self.close_controls()
+
+    return ResponseView(
+        files=files,
+        content=content,
+        timeout=timeout,
+        allow_regenerate=allow_regenerate,
+        allow_series_lifecycle_choice=allow_series_lifecycle_choice,
+    )

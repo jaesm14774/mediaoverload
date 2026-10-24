@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from agentic.runtime.contracts import DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
 from agentic.runtime.news_grounding import (
     is_brand_safe_news_selection,
     is_usable_news_selection,
@@ -655,8 +656,9 @@ class DiscordHumanReviewService:
         self,
         *,
         text: str,
+        context_text: str = "",
         media_paths: list[str],
-        timeout_seconds: int = 3600,
+        timeout_seconds: int = DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS,
         allow_asset_selection: bool = True,
         allow_text_edit: bool = True,
         selection_mode: str = "multi",
@@ -664,6 +666,7 @@ class DiscordHumanReviewService:
         selection_limit: int | None = None,
         review_scope: str = "",
         allow_regenerate: bool = False,
+        allow_series_lifecycle_choice: bool = False,
     ) -> HumanReviewDecision:
         filtered_media_paths = self._filter_media_paths(media_paths)
         normalized_selection_limit = None
@@ -698,6 +701,7 @@ class DiscordHumanReviewService:
                     token=str(os.getenv("discord_review_bot_token")),
                     channel_id=int(str(os.getenv("discord_review_channel_id"))),
                     text=discord_text,
+                    context_text=_fit_discord_message(context_text, max_length=500),
                     filepaths=filtered_media_paths,
                     timeout=float(timeout_seconds),
                     allow_asset_selection=allow_asset_selection,
@@ -706,6 +710,7 @@ class DiscordHumanReviewService:
                     selection_required=selection_required,
                     selection_limit=normalized_selection_limit,
                     allow_regenerate=allow_regenerate,
+                    allow_series_lifecycle_choice=allow_series_lifecycle_choice,
                 )
             )
         except Exception as exc:
@@ -720,7 +725,7 @@ class DiscordHumanReviewService:
         fallback_reason = ""
         review_mode = "discord"
         normalized_status = "approved"
-        if status in {"accept", "edit"}:
+        if status == "accept":
             if isinstance(selected_indices, list) and selected_indices:
                 selected_paths = [
                     filtered_media_paths[index]
@@ -879,6 +884,7 @@ async def _run_discord_file_feedback_process(
     token: str,
     channel_id: int,
     text: str,
+    context_text: str = "",
     filepaths: list[str],
     timeout: float,
     allow_asset_selection: bool = True,
@@ -887,6 +893,7 @@ async def _run_discord_file_feedback_process(
     selection_required: bool = False,
     selection_limit: int | None = None,
     allow_regenerate: bool = False,
+    allow_series_lifecycle_choice: bool = False,
 ) -> tuple[str | None, str | None, str | None, list[int] | None, dict[str, Any]]:
     import discord
     from discord.ext import commands
@@ -929,7 +936,13 @@ async def _run_discord_file_feedback_process(
                 selection_required=selection_required,
                 selection_limit=selection_limit,
                 allow_regenerate=allow_regenerate,
+                allow_series_lifecycle_choice=allow_series_lifecycle_choice,
             )
+            if context_text.strip():
+                await channel.send(
+                    content=context_text,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             message = await channel.send(
                 content=text or "Review request",
                 files=files,
@@ -945,6 +958,7 @@ async def _run_discord_file_feedback_process(
                 "attachment_count": len(filepaths),
                 "attachment_names": [Path(path).name for path in filepaths],
                 "edit_requested": False,
+                "series_disposition": "",
             }
             _logger().info(
                 "discord.review.delivered | channel_id=%s | message_id=%s | attachment_count=%s",
@@ -965,6 +979,7 @@ async def _run_discord_file_feedback_process(
             else:
                 delivery["status"] = "decision_received" if view.result else "sent_no_decision"
                 delivery["edit_requested"] = bool(view.edit_requested)
+                delivery["series_disposition"] = str(view.series_disposition or "")
                 result = (view.result, view.user_name, view.content, view.selected_files, delivery)
         except Exception:
             _logger().exception("discord.review.on_ready.error")

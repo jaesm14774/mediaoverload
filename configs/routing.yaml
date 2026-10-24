@@ -7,6 +7,7 @@ routing:
     # - text2video
     - text2image2video
     - text2longvideo
+    - serial_video
     - native_h3_story
     - native_h3_t2v_story
     - native_h3_fl2va_story
@@ -616,6 +617,8 @@ routing:
         image_workflow_name: "Krea2 creates the opening image; rendered H3 tails carry identity into later segments."
         video_workflow_name: "Required multi-segment H3 I2V stage; every segment after the opening consumes the previous segment's rendered tail."
         refine_workflow_name: "FLUX Klein edits each planned landing frame from that segment's first anchor, preserving identity while changing the requested story state."
+      serial_video:
+        video_workflow_name: "Weighted selection dispatches to the serial application flow, which owns episode ideas, continuity, review, and publication."
       native_h3_story:
         image_workflow_name: "Krea2 generates the opening keyframe candidates; review selects one first frame for H3 I2VA."
         video_workflow_name: "Native H3 I2VA stage. It receives first_frame and leaves the ending unconstrained."
@@ -640,6 +643,10 @@ routing:
         image_workflow_name: "Required Krea source-image stage for one generated game subject; the output is a single subject on a sprite-safe background, not a storyboard or action sheet."
         video_workflow_name: "Required H3 I2V stage for one continuous generated motion; the clip is sampled into a fixed 4x4 atlas after rendering."
     strategy_preferences:
+      serial_video:
+        - episodic series
+        - recurring episodes
+        - serial video
       sticker_pack:
         - sticker
         - sticker pack
@@ -693,6 +700,15 @@ routing:
         - looping motion
         - dynamic shot
     strategy_descriptions:
+      serial_video:
+        summary: "Persistent episodic video series handled by the serial workflow after strategy selection."
+        best_for:
+          - "When the creator wants recurring episodes with reviewed visual continuity."
+        avoid_when:
+          - "A standalone clip that should use the ordinary media workflow."
+        hard_rules:
+          - "Use serial episode idea generation and its continuity, review, and publication gates."
+          - "Do not add episode numbers or topic headings to public captions."
       motion_comic:
         summary: "LLM 自動規劃三格因果故事，以同一角色和場景生成三張插畫，逐格揭示並保留前格，精確繁中配字後合成直式短片；預設九秒。"
         best_for:

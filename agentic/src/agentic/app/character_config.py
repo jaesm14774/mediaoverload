@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 from agentic.app.style_catalog import StyleLibrary
+from agentic.runtime.contracts import DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.app.character_requests import SUBJECT_MODE_SINGLE
 
@@ -69,6 +70,38 @@ def _normalize_generation_type(
 def load_character_config(config_path: str | Path) -> dict[str, Any]:
     path = Path(config_path).resolve()
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def normalize_discord_review_timeout_seconds(value: object) -> int:
+    if value is None:
+        return DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
+    if isinstance(value, bool):
+        raise ValueError("discord_review_timeout_seconds must be a positive integer")
+    try:
+        timeout_seconds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "discord_review_timeout_seconds must be a positive integer"
+        ) from exc
+    if timeout_seconds < 1 or (
+        isinstance(value, float) and not value.is_integer()
+    ):
+        raise ValueError("discord_review_timeout_seconds must be a positive integer")
+    return timeout_seconds
+
+
+def configured_discord_review_timeout_seconds(
+    generation: dict[str, Any], *, serial_mode: bool = False
+) -> int | None:
+    configured = generation.get("discord_review_timeout_seconds")
+    if configured is None and serial_mode:
+        serial_config = generation.get("serial_video", {})
+        if not isinstance(serial_config, dict):
+            raise ValueError("generation.serial_video must be a mapping")
+        configured = serial_config.get("discord_review_timeout_seconds")
+    if configured is None:
+        return None
+    return normalize_discord_review_timeout_seconds(configured)
 
 
 def load_global_social_config(repo_root: Path) -> dict[str, Any]:

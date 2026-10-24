@@ -3,7 +3,7 @@ import argparse
 import os
 import random
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,10 @@ from agentic.app.character_requests import (
 )
 from agentic.app.character_session import run_character_session
 from agentic.app.character_workflow import dumps_result, run_character_workflow
+from agentic.app.serial_video_dispatch import (
+    build_serial_video_argv,
+    load_serial_video_settings,
+)
 from agentic.tools.social_services import complete_facebook_profile_handoff
 
 
@@ -45,10 +49,74 @@ def _resolve_config_path(args: argparse.Namespace) -> Path:
     raise ValueError("Must provide --config or --character argument")
 
 
+def _serial_video_settings(config_path: Path) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return load_serial_video_settings(config_path)
+
+
+def _serial_video_argv(
+    args: argparse.Namespace,
+    config_path: Path,
+    *,
+    episode_index: int,
+) -> list[str]:
+    return build_serial_video_argv(
+        config_path=config_path,
+        repo_root=REPO_ROOT,
+        episode_index=episode_index,
+        prompt=str(args.prompt or ""),
+        episode_topic=str(args.episode_topic or ""),
+        duration_seconds=args.duration_seconds,
+        output_dir=args.output_dir,
+        publish_platforms=args.publish_platforms or (),
+        publish_mode=args.publish_mode,
+        dry_run_publish=args.dry_run_publish,
+        comfy_host=args.comfy_host,
+        comfy_port=args.comfy_port,
+        comfy_root=args.comfy_root,
+    )
+
+
+def _run_serial_video(
+    args: argparse.Namespace,
+    config_path: Path,
+    *,
+    parser: argparse.ArgumentParser,
+    serial_runner: Callable[[Sequence[str]], None] | None,
+) -> dict[str, Any]:
+    if args.no_publish or args.no_review or args.stage_probe:
+        parser.error(
+            "serial_video requires Discord review and configured publication; "
+            "no-publish, no-review, and stage-probe are unavailable"
+        )
+    _, _, serial, _ = _serial_video_settings(config_path)
+    try:
+        episode_count = int(
+            args.serial_episodes
+            if args.serial_episodes is not None
+            else serial.get("episodes_per_run", 1)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Serial video episode count must be an integer") from exc
+    if episode_count < 1:
+        parser.error(
+            "--serial-episodes and generation.serial_video.episodes_per_run must be positive"
+        )
+    if serial_runner is None:
+        from agentic.app.main import main as serial_runner
+    for episode_index in range(episode_count):
+        serial_runner(_serial_video_argv(args, config_path, episode_index=episode_index))
+    return {
+        "status": "success",
+        "generation_type": "serial_video",
+        "episodes_started": episode_count,
+    }
+
+
 def main(
     argv: list[str] | None = None,
     *,
     workflow_runner: Callable[[CharacterWorkflowRequest], dict[str, Any]] = run_character_workflow,
+    serial_runner: Callable[[Sequence[str]], None] | None = None,
 ) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -58,12 +126,14 @@ def main(
     parser.add_argument("--prompt", type=str, default="", help="Prompt text")
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature parameter")
     parser.add_argument("--seed", type=int, help="Optional deterministic seed passed to the image and video workflows")
-    parser.add_argument("--generation-type", type=str, help="Override generation type, for example text2longvideo")
+    parser.add_argument("--generation-type", type=str, help="Override generation type, for example text2longvideo or serial_video")
     parser.add_argument(
         "--duration-seconds",
         type=int,
         help="Requested clip duration; 5 seconds uses one clear action, 15 seconds uses a compact native H3 story",
     )
+    parser.add_argument("--episode-topic", type=str, help="Optional topic for the first serial episode in this run")
+    parser.add_argument("--serial-episodes", type=int, help="Number of serial episodes to run; defaults to generation.serial_video.episodes_per_run")
     parser.add_argument("--reference-video", type=str, help="Optional local reference video or URL used as structural visual evidence")
     parser.add_argument("--reference-video-depth", choices=("standard", "deep"), default="standard")
     parser.add_argument("--reference-keyframes", type=int, default=12, help="Number of structural reference keyframes (2-20)")
@@ -133,6 +203,17 @@ def main(
         return
 
     config_path = _resolve_config_path(args)
+    if str(args.generation_type or "").strip().lower() == "serial_video":
+        _run_serial_video(
+            args,
+            config_path,
+            parser=parser,
+            serial_runner=serial_runner,
+        )
+        return
+    if args.serial_episodes is not None or args.episode_topic:
+        parser.error("--serial-episodes and --episode-topic require --generation-type serial_video")
+
     # Keep strategy/character routing randomness independent from --seed,
     # which is reserved for reproducible media rendering.
     request = CharacterWorkflowRequest(
@@ -169,7 +250,24 @@ def main(
             comfy_root=args.comfy_root,
         ),
     )
-    result = run_character_session(request, workflow_runner=workflow_runner)
+    selected_workflow_runner = workflow_runner
+    if workflow_runner is run_character_workflow:
+
+        def run_serial_aware_workflow(
+            workflow_request: CharacterWorkflowRequest,
+        ) -> dict[str, Any]:
+            return run_character_workflow(
+                workflow_request,
+                serial_dispatcher=lambda: _run_serial_video(
+                    args,
+                    config_path,
+                    parser=parser,
+                    serial_runner=serial_runner,
+                ),
+            )
+
+        selected_workflow_runner = run_serial_aware_workflow
+    result = run_character_session(request, workflow_runner=selected_workflow_runner)
     print(dumps_result(result))
 
 
