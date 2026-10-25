@@ -19,7 +19,9 @@ from agentic.app.main import (
     _allow_runtime_output_for_visual_evidence,
     _prepare_serial_execution_plan,
 )
+from agentic.assets.registry import AssetRegistry
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext, SkillResult
+from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
 from agentic.runtime.serial_video import SerialVideoStore
@@ -1133,7 +1135,6 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 store,
                 store.get_episode(episode["episode_id"]),
                 discord_review_timeout_seconds=720,
-                execute=False,
             )
 
             self.assertEqual(restored_plan.goal.constraints["platforms"], current_platforms)
