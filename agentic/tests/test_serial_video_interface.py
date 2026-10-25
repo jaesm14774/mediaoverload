@@ -52,6 +52,7 @@ def _write_config(
                     "platforms": {
                         "instagram_graph": {"enabled": True},
                         "facebook": {"enabled": True},
+                        "threads": {"enabled": True},
                         "youtube": {"enabled": True},
                     },
                     "default_hashtags": ["#MediaOverload"],
@@ -267,8 +268,8 @@ def test_user_given_series_selection_weights_in_character_config_when_loaded_the
     assert weights == {"new": 0.7, "continue": 0.3}
 
 
-def test_user_given_the_selected_character_yaml_enables_three_platforms_when_serial_publish_config_is_loaded_then_all_three_are_targets(tmp_path):
-    """User Given the selected character YAML enables Instagram, Facebook, and YouTube When serial publishing configuration is loaded Then all enabled destinations are selected from that same file."""
+def test_user_given_the_selected_character_yaml_enables_four_platforms_when_serial_publish_config_is_loaded_then_all_four_are_targets(tmp_path):
+    """User Given the selected character YAML enables Instagram, Facebook, Threads, and YouTube When serial publishing configuration is loaded Then all enabled destinations are selected from that same file."""
     config_path = _write_config(tmp_path / "kirby.yaml")
 
     platforms, platform_configs = _serial_publish_configuration(
@@ -278,7 +279,7 @@ def test_user_given_the_selected_character_yaml_enables_three_platforms_when_ser
         config_path,
     )
 
-    assert set(platforms) == {"instagram_graph", "facebook", "youtube"}
+    assert set(platforms) == {"instagram_graph", "facebook", "threads", "youtube"}
     assert set(platform_configs) == set(platforms)
 
 

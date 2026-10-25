@@ -237,11 +237,10 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
         width=image_width,
         height=image_height,
     )
-    video_output_node = context.append_video_speed_node(
-        goal,
+    video_output_node = context.append_editorial_pacing_node(
         nodes,
         source_node=video_canvas_node,
-        node_id="video-speed",
+        node_id="video-editorial-pacing",
     )
     motion_graphics_enabled = bool(
         goal.constraints.get("enable_motion_graphics", False)
@@ -396,11 +395,10 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
             height=image_height,
             retry=True,
         )
-        review_video_output_node = context.append_video_speed_node(
-            goal,
+        review_video_output_node = context.append_editorial_pacing_node(
             nodes,
             source_node=review_video_canvas_node,
-            node_id="review-video-speed",
+            node_id="review-video-editorial-pacing",
             retry=True,
         )
         review_final_video_node = review_video_output_node
@@ -471,7 +469,7 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
         ],
         "graph_overview": [node.node_id for node in nodes],
         "review_loop_enabled": review_loop_enabled,
-        "video_speed": context.video_speed_config(goal),
+        "editorial_pacing": "automatic",
         "motion_graphics_enabled": motion_graphics_enabled,
         "review_notes": review_notes,
         "reference_video_source": reference_video_source,
@@ -639,11 +637,10 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             ),
         ]
     )
-    video_output_node = context.append_video_speed_node(
-        goal,
+    video_output_node = context.append_editorial_pacing_node(
         nodes,
         source_node="animate-video",
-        node_id="video-speed",
+        node_id="video-editorial-pacing",
     )
     video_output_node = context.append_nvidia_vfx_postprocess_node(
         goal,
@@ -727,11 +724,10 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 ),
             ]
         )
-        review_video_output_node = context.append_video_speed_node(
-            goal,
+        review_video_output_node = context.append_editorial_pacing_node(
             nodes,
             source_node="review-animate-video",
-            node_id="review-video-speed",
+            node_id="review-video-editorial-pacing",
             retry=True,
         )
         review_video_output_node = context.append_nvidia_vfx_postprocess_node(
@@ -777,7 +773,7 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         ],
         "graph_overview": [node.node_id for node in nodes],
         "review_loop_enabled": review_loop_enabled,
-        "video_speed": context.video_speed_config(goal),
+        "editorial_pacing": "automatic",
         "review_notes": review_notes,
     }
     return ExecutionPlan(

@@ -15,7 +15,11 @@ from agentic.minimax_prompting import (
     format_h3_video_prompt,
     require_h3_prompt,
 )
-from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    SkillContext,
+    SkillResult,
+)
 from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.prompting import include_visual_style_profile
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
@@ -983,11 +987,7 @@ class LongVideoSkills:
         constraints = dict(getattr(context.plan.goal, "constraints", {}) or {})
         native_recipe = dict(constraints.get("native_h3_recipe") or {})
         h3_mode = str(render.get("h3_mode") or constraints.get("native_h3_mode") or "")
-        target_duration = float(
-            context.node.inputs.get("target_duration")
-            or getattr(context.plan.goal, "duration_seconds", 15)
-            or 15
-        )
+        target_duration = context.node.inputs.get("target_duration")
         duration_tolerance = float(context.node.inputs.get("duration_tolerance") or 0.75)
         expected_fps = float(
             context.node.inputs.get("expected_fps")
@@ -1002,6 +1002,9 @@ class LongVideoSkills:
             {
                 "video_path": video_path,
                 "target_duration": target_duration,
+                "minimum_duration": context.node.inputs.get(
+                    "minimum_duration", MIN_VIDEO_DURATION_SECONDS
+                ),
                 "duration_tolerance": duration_tolerance,
                 "warn_if_no_audio": True,
                 "expected_fps": expected_fps,

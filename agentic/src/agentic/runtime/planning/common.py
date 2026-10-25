@@ -186,28 +186,6 @@ class PlanningContext:
         return frames
 
     @staticmethod
-    def video_speed_config(goal: GoalRequest) -> dict[str, object]:
-        raw = goal.constraints.get("video_speed")
-        if raw is None:
-            config: dict[str, object] = {}
-        elif isinstance(raw, dict):
-            config = dict(raw)
-        else:
-            raise ValueError("video_speed must be a mapping")
-        enabled = bool(config.get("enabled", False))
-        try:
-            factor = float(config.get("factor", 2.0))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "video_speed.factor must be a number greater than zero"
-            ) from exc
-        if not math.isfinite(factor) or factor <= 0:
-            raise ValueError(
-                "video_speed.factor must be a finite number greater than zero"
-            )
-        return {"enabled": enabled, "factor": factor}
-
-    @staticmethod
     def nvidia_vfx_postprocess_enabled(goal: GoalRequest) -> bool:
         enabled = goal.constraints.get("enable_nvidia_vfx_postprocess", True)
         if not isinstance(enabled, bool):
@@ -221,31 +199,12 @@ class PlanningContext:
         inputs: dict[str, object],
     ) -> dict[str, object]:
         result = dict(inputs)
-        speed = cls.video_speed_config(goal)
-        target_duration = result.get("target_duration")
-        if target_duration in {None, ""} and goal.duration_seconds > 0:
-            target_duration = goal.duration_seconds
-        if (
-            target_duration not in {None, ""}
-            and str(goal.media_type or "").strip().lower() == "text2img2video"
-        ):
-            source_length = cls.text2img2video_length(goal)
-            frame_rate = max(
-                1.0, float(goal.constraints.get("video_frame_rate") or 24)
-            )
-            if source_length is not None:
-                target_duration = min(
-                    float(target_duration), float(source_length) / frame_rate
-                )
-        if bool(speed["enabled"]):
-            if target_duration not in {None, ""}:
-                target_duration = float(target_duration) / float(speed["factor"])
-        if target_duration not in {None, ""}:
-            result["target_duration"] = float(target_duration)
-        result["minimum_duration"] = (
-            min(MIN_VIDEO_DURATION_SECONDS, float(target_duration))
-            if bool(speed["enabled"]) and target_duration not in {None, ""}
-            else MIN_VIDEO_DURATION_SECONDS
+        result.pop("target_duration", None)
+        result["minimum_duration"] = min(
+            MIN_VIDEO_DURATION_SECONDS,
+            float(goal.duration_seconds)
+            if goal.duration_seconds > 0
+            else MIN_VIDEO_DURATION_SECONDS,
         )
         if cls.nvidia_vfx_postprocess_enabled(goal):
             expected_fps = result.get("expected_fps")
@@ -253,26 +212,23 @@ class PlanningContext:
                 result["expected_fps"] = float(expected_fps) * 2
         return result
 
-    def append_video_speed_node(
+    def append_editorial_pacing_node(
         self,
-        goal: GoalRequest,
         nodes: list[ExecutionNode],
         *,
         source_node: str,
         node_id: str,
         retry: bool = False,
     ) -> str:
-        speed = self.video_speed_config(goal)
-        if not bool(speed["enabled"]):
-            return source_node
         nodes.append(
             ExecutionNode(
                 node_id=node_id,
-                skill_name="media.video.change_speed",
-                inputs={"speed": float(speed["factor"])},
+                skill_name="media.video.editorial_pacing",
+                inputs={"video_node": source_node},
                 depends_on=[source_node],
-                tags=["package", "video", "speed"] + (["retry"] if retry else []),
-                tool_name="media.change_video_speed",
+                tags=["package", "video", "editorial-pacing"]
+                + (["retry"] if retry else []),
+                tool_name="media.apply_editorial_pacing",
                 stage="package",
             )
         )
@@ -450,12 +406,7 @@ class PlanningContext:
         qa_inputs: dict[str, object] | None = None,
     ) -> list[ExecutionNode]:
         nodes: list[ExecutionNode] = []
-        video_node = self.append_video_speed_node(
-            goal,
-            nodes,
-            source_node="native-h3-render",
-            node_id="native-h3-speed",
-        )
+        video_node = "native-h3-render"
         if self.native_h3_needs_canvas_normalization(goal):
             video_node = self.append_native_h3_canvas_node(
                 goal,
@@ -463,6 +414,11 @@ class PlanningContext:
                 source_node=video_node,
                 node_id="native-h3-canvas",
             )
+        video_node = self.append_editorial_pacing_node(
+            nodes,
+            source_node=video_node,
+            node_id="native-h3-editorial-pacing",
+        )
         video_node = self.append_nvidia_vfx_postprocess_node(
             goal,
             nodes,

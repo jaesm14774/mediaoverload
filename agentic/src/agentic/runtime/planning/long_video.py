@@ -412,8 +412,9 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                         f"Segment {index + 1} of {segment_count} acceptance: inspect "
                         "the rendered action and continuity. "
                         "Accept only if this segment is suitable for the next segment to "
-                        "continue from its observed final frame. Reject to stop the sequence "
-                        "before that frame is used."
+                        "continue from its observed final frame. Regenerate to render this "
+                        "segment again while keeping earlier accepted segments. Reject to "
+                        "stop the sequence before this frame is used."
                     ),
                 },
                 depends_on=[delivered_video_node, segment_qa_node],
@@ -465,7 +466,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         ExecutionNode(
             node_id=final_video_node,
             skill_name="media.video.concat",
-            inputs={"method": "demuxer"},
+            inputs={"method": "demuxer", "video_node_ids": list(segment_video_nodes)},
             depends_on=[*segment_video_nodes, *segment_acceptance_nodes],
             tags=["package", "video"],
             tool_name="media.concat_videos",
@@ -474,33 +475,19 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
     )
     preview_dependency = final_video_node
 
-    preview_dependency = context.append_video_speed_node(
-        goal,
-        nodes,
-        source_node=preview_dependency,
-        node_id="video-speed",
-    )
-    final_video_duration = float(goal.duration_seconds)
-    if goal.duration_seconds > 0:
-        scaled_duration = context.scaled_video_qa_inputs(
-            goal,
-            {"target_duration": float(goal.duration_seconds)},
-        ).get("target_duration")
-        if scaled_duration not in {None, ""}:
-            final_video_duration = float(scaled_duration)
-    if goal.duration_seconds > 0:
-        nodes.append(
-            ExecutionNode(
-                node_id="video-trim",
-                skill_name="media.video.trim",
-                inputs={"duration_seconds": final_video_duration},
-                depends_on=[preview_dependency],
-                tags=["package", "video", "duration"],
-                tool_name="media.trim_video",
-                stage="package",
-            )
+    editorial_node = "video-editorial-pacing"
+    nodes.append(
+        ExecutionNode(
+            node_id=editorial_node,
+            skill_name="media.video.editorial_pacing",
+            inputs={"video_node": preview_dependency},
+            depends_on=[preview_dependency],
+            tags=["package", "video", "editorial-pacing"],
+            tool_name="media.apply_editorial_pacing",
+            stage="package",
         )
-        preview_dependency = "video-trim"
+    )
+    preview_dependency = editorial_node
     preview_dependency = context.append_nvidia_vfx_postprocess_node(
         goal,
         nodes,
@@ -513,9 +500,6 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         goal,
         {
             "expected_fps": segment_frame_rate,
-            "target_duration": float(goal.duration_seconds)
-            if goal.duration_seconds > 0
-            else None,
             "duration_tolerance": 0.6,
             "require_audio": False,
             "require_stereo_audio": False,
@@ -525,6 +509,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             "scale_width": 480,
         },
     )
+    longvideo_qa_inputs.pop("target_duration", None)
     nodes.append(
         ExecutionNode(
             node_id="longvideo-video-qa",
@@ -693,7 +678,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         "segment_qa_nodes": segment_qa_nodes,
         "segment_tail_nodes": segment_tail_nodes,
         "serial_publish_node": serial_publish_node,
-        "video_speed": context.video_speed_config(goal),
+        "editorial_pacing": "automatic",
         "final_video_node": final_video_node,
         "serial_mode": True,
         "series_id": serial_series_id,

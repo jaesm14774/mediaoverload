@@ -234,30 +234,84 @@ def _serial_publish_configuration(
     return platforms, {name: enabled[name] for name in platforms}
 
 
-def _serial_video_speed_configuration(
-    project_root: Path,
-    character: str,
-    character_config_path: str | Path | None = None,
-) -> dict[str, object] | None:
-    config_path = (
-        Path(character_config_path).expanduser().resolve()
-        if character_config_path
-        else project_root / "configs" / "characters" / f"{character.lower()}.yaml"
-    )
-    if not config_path.is_file():
-        raise ValueError(f"Serial video has no character config: {config_path}")
-    payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(payload, dict):
-        raise ValueError(f"Character config is invalid: {config_path}")
-    generation = payload.get("generation", {})
-    if not isinstance(generation, dict):
-        raise ValueError(f"Character generation config is invalid: {config_path}")
-    video_speed = generation.get("video_speed")
-    if video_speed is None:
-        return None
-    if not isinstance(video_speed, dict):
-        raise ValueError(f"generation.video_speed must be a mapping in {config_path}")
-    return dict(video_speed)
+def _serial_resume_node_outputs(
+    plan: ExecutionPlan,
+    resume_state: dict[str, object],
+) -> dict[str, object]:
+    initial_outputs = dict(resume_state["initial_node_outputs"])
+    completed_segment_count = int(resume_state["completed_segment_count"])
+    for node in plan.nodes:
+        segment_index = node.inputs.get("segment_index")
+        if (
+            isinstance(segment_index, int)
+            and segment_index < completed_segment_count
+            and node.node_id not in initial_outputs
+            and node.skill_name != "media.video.extract_last_frame"
+        ):
+            initial_outputs[node.node_id] = {}
+    return initial_outputs
+
+
+def _prepare_serial_execution_plan(
+    planner: TaskPlanner,
+    goal: GoalRequest,
+    serial_store: SerialVideoStore | None,
+    resume_episode_row: dict[str, object] | None,
+    *,
+    discord_review_timeout_seconds: int,
+) -> tuple[ExecutionPlan, dict[str, object] | None]:
+    if serial_store is None or resume_episode_row is None:
+        return planner.build_plan(goal), resume_episode_row
+
+    episode_id = str(resume_episode_row["episode_id"])
+    saved_plan = serial_store.get_plan_payload(episode_id)
+    if saved_plan is None:
+        raise ValueError(
+            f"Blocked serial episode '{episode_id}' has no saved current-format execution plan."
+        )
+
+    plan = _execution_plan_from_dict(saved_plan)
+    if (
+        plan.goal.prompt != str(goal.prompt).strip()
+        or plan.goal.constraints.get("series_id") != goal.constraints.get("series_id")
+        or plan.goal.constraints.get("character") != goal.constraints.get("character")
+        or plan.goal.constraints.get("serial_episode_id") != episode_id
+        or plan.goal.constraints.get("serial_database_name") != serial_store.database_name
+    ):
+        raise ValueError("The saved serial plan does not belong to this episode, series, or output root.")
+
+    _apply_current_serial_publish_targets(plan, goal)
+    plan.goal.constraints["discord_review_timeout_seconds"] = discord_review_timeout_seconds
+    return plan, resume_episode_row
+
+
+def _apply_current_serial_publish_targets(
+    plan: ExecutionPlan,
+    goal: GoalRequest,
+) -> None:
+    """Use the current character's allowed publication targets when resuming a saved plan."""
+    platforms = [str(value) for value in goal.constraints.get("platforms", [])]
+    platform_configs = dict(goal.constraints.get("platform_configs", {}) or {})
+    plan.goal.constraints["platforms"] = list(platforms)
+    plan.goal.constraints["platform_configs"] = dict(platform_configs)
+    for node in plan.nodes:
+        if "platforms" in node.inputs:
+            node.inputs["platforms"] = list(platforms)
+        if "platform_configs" in node.inputs:
+            node.inputs["platform_configs"] = dict(platform_configs)
+        summary_metadata = node.inputs.get("summary_metadata")
+        if isinstance(summary_metadata, dict) and "platforms" in summary_metadata:
+            summary_metadata["platforms"] = list(platforms)
+
+
+def _serial_segment_regeneration_requested(plan: ExecutionPlan, result) -> bool:
+    for node in plan.nodes:
+        if node.inputs.get("review_phase") != "segment_acceptance":
+            continue
+        outputs = result.state.node_outputs.get(node.node_id)
+        if isinstance(outputs, dict) and outputs.get("regeneration_requested") is True:
+            return True
+    return False
 
 
 def _character_discord_review_timeout_configuration(
@@ -894,6 +948,7 @@ def _run_serial_new_series_onboarding(
                 preferred_generation_type="text2img",
                 output_dir=str(reference_output),
                 selected_character_name=character_name,
+                image_count=6,
                 subject_mode="single",
             ),
             review=CharacterReviewOptions(
@@ -930,7 +985,7 @@ def _run_serial_new_series_onboarding(
 
     card_review = review_stage(
         stage="character",
-        summary=f"【角色與參考圖審核】請確認附件中的 {character_name} 角色設定，並在下方選擇一張角色參考圖。接受後會繼續首集大綱。",
+        summary=f"【角色與參考圖審核】請確認附件中的 {character_name} 角色設定，並從 {len(reference_paths)} 張候選圖中選一張作為角色參考圖。接受後會繼續首集大綱。",
         document_path=card_path,
         media_paths=reference_paths,
     )
@@ -1275,7 +1330,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
             str(episode["episode_id"]), platforms
         )
         if not platforms:
-            raise ValueError("All requested platforms already have a reported-success receipt for this episode.")
+            raise ValueError(
+                "All requested platforms already have a reported-success receipt for this episode."
+            )
         platform_configs = {platform: platform_configs[platform] for platform in platforms}
         publish_goal = GoalRequest(
             prompt=str(episode["prompt"]),
@@ -1319,7 +1376,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
 
     serial_platforms: list[str] = []
     serial_platform_configs: dict[str, dict[str, object]] = {}
-    serial_video_speed: dict[str, object] | None = None
     if serial_context is not None:
         serial_platforms, serial_platform_configs = _serial_publish_configuration(
             REPO_ROOT, args.character, args.platforms, args.character_config
@@ -1336,9 +1392,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
                 platform: serial_platform_configs[platform]
                 for platform in serial_platforms
             }
-        serial_video_speed = _serial_video_speed_configuration(
-            REPO_ROOT, args.character, args.character_config
-        )
 
     goal = planner.create_goal(
         prompt=args.goal,
@@ -1391,7 +1444,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
                     "publish_mode": args.publish_mode or "live",
                     "serial_story_context": serial_context["story_context"],
                     "reference_manifest": serial_context["reference_manifest"],
-                    "video_speed": serial_video_speed,
                     "longvideo_review_policy": "every_segment",
                     "longvideo_reference_max_images": 4,
                     "longvideo_reference_selection_limit": 4,
@@ -1407,47 +1459,20 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
     )
     if resume_episode_row is not None:
         goal.constraints["serial_episode_id"] = str(resume_episode_row["episode_id"])
-    if serial_store is not None and resume_episode_row is not None:
-        saved_plan = serial_store.get_plan_payload(str(resume_episode_row["episode_id"]))
-        if saved_plan is not None:
-            plan = _execution_plan_from_dict(saved_plan)
-            if (
-                plan.goal.prompt != str(args.goal).strip()
-                or plan.goal.constraints.get("series_id") != args.series_id
-                or plan.goal.constraints.get("character") != args.character
-                or plan.goal.constraints.get("serial_episode_id") != resume_episode_row["episode_id"]
-                or plan.goal.constraints.get("serial_database_name") != serial_store.database_name
-            ):
-                raise ValueError("The saved serial plan does not belong to this episode, series, or output root.")
-            plan.goal.constraints[
-                "discord_review_timeout_seconds"
-            ] = discord_review_timeout_seconds
-        else:
-            plan = planner.build_plan(goal)
-            if args.execute:
-                serial_store.store_reconstructed_plan(
-                    str(resume_episode_row["episode_id"]), plan.to_dict()
-                )
-    else:
-        plan = planner.build_plan(goal)
-
+    plan, resume_episode_row = _prepare_serial_execution_plan(
+        planner,
+        goal,
+        serial_store,
+        resume_episode_row,
+        discord_review_timeout_seconds=discord_review_timeout_seconds,
+    )
     episode = None
     if args.execute and serial_store is not None and serial_context is not None:
         try:
             if resume_episode_row is not None:
                 episode = resume_episode_row
                 resume_state = serial_store.resume_episode(str(episode["episode_id"]))
-                resume_initial_outputs = dict(resume_state["initial_node_outputs"])
-                completed_segment_count = int(resume_state["completed_segment_count"])
-                for node in plan.nodes:
-                    segment_index = node.inputs.get("segment_index")
-                    if (
-                        isinstance(segment_index, int)
-                        and segment_index < completed_segment_count
-                        and node.node_id not in resume_initial_outputs
-                        and node.skill_name != "media.video.extract_last_frame"
-                    ):
-                        resume_initial_outputs[node.node_id] = {}
+                resume_initial_outputs = _serial_resume_node_outputs(plan, resume_state)
             else:
                 episode = serial_store.start_episode(
                     serial_context,
@@ -1475,6 +1500,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
     print("=== RUN ===")
     try:
         result = runner.run(plan, initial_node_outputs=resume_initial_outputs)
+        while (
+            serial_store is not None
+            and episode is not None
+            and _serial_segment_regeneration_requested(plan, result)
+        ):
+            resume_state = serial_store.resume_episode(str(episode["episode_id"]))
+            resume_initial_outputs = _serial_resume_node_outputs(plan, resume_state)
+            result = runner.run(plan, initial_node_outputs=resume_initial_outputs)
     except Exception as exc:
         if serial_store is not None and episode is not None:
             serial_store.fail_episode(episode["episode_id"], f"{type(exc).__name__}: {exc}")

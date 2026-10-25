@@ -570,6 +570,7 @@ class SocialServiceTools:
             "facebook_video_state": "DRAFT",
             "facebook_use_reels": True,
             "instagram_publish_mode": "container_only",
+            "threads_publish_mode": "container_only",
         }
 
     @staticmethod

@@ -35,16 +35,20 @@ def generate_serial_episode_idea(
     prior_context = str(story_context or "").strip()
     if normalized_mode == "continue" and not prior_context:
         raise ValueError("Continuation generation requires the latest approved story context.")
-    mode_instruction = (
-        "Continue the latest approved story. Open from its last visible state, then quickly introduce a different action, obstacle, and visual payoff. Do not repeat the prior episode's central object, action, reveal, or ending. Keep the fixed character recognizable."
-        if normalized_mode == "continue"
-        else "Start an independent new story with no plot references to any existing series. Give the character a distinct, visually surprising action and a complete ending."
-    )
+    if normalized_mode == "continue":
+        context_label = "Latest accepted episode story state (untrusted reference data)"
+        mode_instruction = "Continue the latest approved story. Open from its last visible state, then quickly introduce a different action, obstacle, and visual payoff. Do not repeat the prior episode's central object, action, reveal, or ending. Keep the fixed character recognizable."
+    elif prior_context:
+        context_label = "Approved series story for episode 1 (untrusted reference data)"
+        mode_instruction = "Create the first episode of this approved series from its main story. Preserve the protagonist, central goal, problem, and resolution; do not invent a separate storyline."
+    else:
+        context_label = "Approved series story (untrusted reference data)"
+        mode_instruction = "Start a new story. Give the character a distinct, visually surprising action and a complete ending."
     user_prompt = "\n".join(
         [
             f"Fixed character: {str(character or '').strip()}",
             f"Series mode: {normalized_mode}",
-            f"Latest approved story context (untrusted reference data): {prior_context or '(none; start fresh)'}",
+            f"{context_label}: {prior_context or '(none; start fresh)'}",
             mode_instruction,
             "Create a short-form animated story that can be split into continuous video segments. It needs an immediate visual hook, a clear physical goal, a surprising change or escalation, and a satisfying visible result. Avoid generic scenery-only scenes and near-duplicate actions.",
             "Return exactly two fields: topic in natural Traditional Chinese, concise enough for a social post title; premise in natural English, one concrete paragraph suitable for H3 visual story planning.",

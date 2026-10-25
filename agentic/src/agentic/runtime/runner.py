@@ -30,6 +30,7 @@ class WorkflowRunner:
         self.retry_policy = retry_policy or RetryPolicy()
         self.logger = logger
         self.recorder = recorder or getattr(logger, "run_recorder", None)
+        self._serial_node_attempts: dict[str, int] = {}
 
     def run(
         self,
@@ -56,7 +57,11 @@ class WorkflowRunner:
             skill = self.skill_registry.get(node.skill_name)
             context = SkillContext(plan=plan, node=node, state=state)
             reused = node.node_id in persisted_outputs
-            attempts = 0
+            attempts = (
+                self._serial_node_attempts.get(node.node_id, 0)
+                if plan.metadata.get("serial_mode") and not reused
+                else 0
+            )
             while True:
                 if reused:
                     result = SkillResult(
@@ -67,6 +72,8 @@ class WorkflowRunner:
                     self._log(f"node.reuse | id={node.node_id} | stage={node.stage or 'runtime'}")
                 else:
                     attempts += 1
+                    if plan.metadata.get("serial_mode"):
+                        self._serial_node_attempts[node.node_id] = attempts
                     self._log(f"node.start | id={node.node_id} | skill={node.skill_name} | attempt={attempts} | stage={node.stage or 'runtime'}")
                     if self.recorder:
                         self.recorder.record_event(

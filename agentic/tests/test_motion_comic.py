@@ -521,7 +521,7 @@ def test_user_given_a_motion_comic_weight_when_character_routing_runs_then_the_s
     )
     assert payload["source_generation_type"] == "motion_comic"
     assert payload["duration_seconds"] == 10
-    assert payload["constraints"]["video_speed"] == {"enabled": False, "factor": 1.0}
+    assert "video_speed" not in payload["constraints"]
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
     assert not payload["constraints"]["video_workflow_name"]
     planner, runner = runtime(tmp_path / "runtime")

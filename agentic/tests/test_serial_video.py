@@ -15,10 +15,11 @@ from dotenv import dotenv_values
 from pymysql.cursors import DictCursor
 
 from agentic.app.cli import parse_args
-from agentic.app.main import _allow_runtime_output_for_visual_evidence
-from agentic.assets.registry import AssetRegistry
+from agentic.app.main import (
+    _allow_runtime_output_for_visual_evidence,
+    _prepare_serial_execution_plan,
+)
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext, SkillResult
-from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
 from agentic.runtime.serial_video import SerialVideoStore
@@ -998,8 +999,8 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
             self.assertEqual(store.get_episode_publications(episode["episode_id"]), [])
 
-    def test_user_given_a_partial_publication_when_an_episode_is_retried_then_successful_platforms_are_not_dispatched_again(self) -> None:
-        """User Given one platform has a reported-success receipt and two platforms failed When the episode is retried Then review and dispatch target only the two platforms without successful receipts."""
+    def test_user_given_a_partial_publication_when_an_episode_is_retried_then_only_unpublished_current_destinations_are_retried(self) -> None:
+        """User Given an episode has a successful Instagram receipt and failed Facebook and YouTube receipts When it is retried with the current platform list including Threads Then the retry targets Facebook, Threads, and YouTube without duplicating Instagram."""
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             store = self._new_store()
@@ -1034,29 +1035,117 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 dispatch_status="partial",
             )
 
-            pending = store.platforms_without_successful_receipt(
-                episode["episode_id"], platforms
+            character_platforms = ["instagram_graph", "facebook", "threads", "youtube"]
+            retry_platforms = store.platforms_without_successful_receipt(
+                episode["episode_id"], character_platforms
             )
-
-            self.assertEqual(pending, ["facebook", "youtube"])
-            with self.assertRaises(ValueError):
-                store.begin_publication_attempt(
-                    episode["episode_id"],
-                    platforms=["instagram_graph"],
-                    episode_topic="守護星花",
-                    caption="A tiny flower shines.",
-                    hashtags="#Hero",
-                    media_path=final_video,
-                )
             retry_attempt = store.begin_publication_attempt(
                 episode["episode_id"],
-                platforms=pending,
+                platforms=retry_platforms,
                 episode_topic="守護星花",
                 caption="A tiny flower shines.",
                 hashtags="#Hero",
                 media_path=final_video,
             )
-            self.assertEqual(retry_attempt["platforms"], pending)
+            self.assertEqual(
+                retry_attempt["platforms"], ["facebook", "threads", "youtube"]
+            )
+
+    def test_user_given_a_resumed_episode_with_a_saved_platform_list_when_character_targets_change_then_publish_nodes_use_the_current_character_targets(self) -> None:
+        """User Given a resumed episode has a persisted platform list from an earlier run When the selected character currently allows another platform set Then the restored review and dispatch plan uses the current character targets and configs."""
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("resume-platforms", "Hero", [identity])
+            episode = store.start_episode(context, "A hero protects a glowing flower", topic="守護星花")
+            old_platforms = ["instagram_graph", "facebook", "youtube"]
+            old_configs = {platform: {"enabled": True} for platform in old_platforms}
+            saved_plan = {
+                "goal": {
+                    "prompt": "A hero protects a glowing flower",
+                    "media_type": "long_video",
+                    "duration_seconds": 30,
+                    "style": "watercolor storybook animation",
+                    "constraints": {
+                        "series_id": "resume-platforms",
+                        "character": "Hero",
+                        "serial_episode_id": episode["episode_id"],
+                        "serial_database_name": store.database_name,
+                        "platforms": old_platforms,
+                        "platform_configs": old_configs,
+                    },
+                },
+                "workflow_name": "long_video",
+                "nodes": [
+                    {
+                        "node_id": "serial-final-publish-review",
+                        "skill_name": "review.assets.select",
+                        "inputs": {"platforms": old_platforms},
+                    },
+                    {
+                        "node_id": "serial-publish-process",
+                        "skill_name": "publish.media.process",
+                        "inputs": {"platforms": old_platforms},
+                    },
+                    {
+                        "node_id": "serial-publish-caption",
+                        "skill_name": "publish.caption.prepare",
+                        "inputs": {"platforms": old_platforms},
+                    },
+                    {
+                        "node_id": "serial-publish-dispatch",
+                        "skill_name": "publish.social.dispatch",
+                        "inputs": {
+                            "platforms": old_platforms,
+                            "platform_configs": old_configs,
+                        },
+                    },
+                    {
+                        "node_id": "persist-serial-publication-summary",
+                        "skill_name": "agent.summary.persist",
+                        "inputs": {"summary_metadata": {"platforms": old_platforms}},
+                    },
+                ],
+                "metadata": {"serial_mode": True},
+            }
+            store.record_plan(episode["episode_id"], segment_count=1, plan_payload=saved_plan)
+            current_platforms = ["threads"]
+            current_configs = {"threads": {"enabled": True, "config_folder_path": "threads"}}
+            goal = GoalRequest(
+                prompt="A hero protects a glowing flower",
+                media_type="long_video",
+                duration_seconds=30,
+                style="watercolor storybook animation",
+                constraints={
+                    "series_id": "resume-platforms",
+                    "character": "Hero",
+                    "serial_episode_id": episode["episode_id"],
+                    "serial_database_name": store.database_name,
+                    "platforms": current_platforms,
+                    "platform_configs": current_configs,
+                },
+            )
+
+            restored_plan, _ = _prepare_serial_execution_plan(
+                None,
+                goal,
+                store,
+                store.get_episode(episode["episode_id"]),
+                discord_review_timeout_seconds=720,
+                execute=False,
+            )
+
+            self.assertEqual(restored_plan.goal.constraints["platforms"], current_platforms)
+            self.assertEqual(restored_plan.goal.constraints["platform_configs"], current_configs)
+            for node in restored_plan.nodes:
+                if "platforms" in node.inputs:
+                    self.assertEqual(node.inputs["platforms"], current_platforms)
+                if "platform_configs" in node.inputs:
+                    self.assertEqual(node.inputs["platform_configs"], current_configs)
+                summary_metadata = node.inputs.get("summary_metadata")
+                if isinstance(summary_metadata, dict) and "platforms" in summary_metadata:
+                    self.assertEqual(summary_metadata["platforms"], current_platforms)
 
     def test_user_given_an_approved_final_video_when_its_bytes_change_before_dispatch_then_the_publication_media_check_blocks_it(self) -> None:
         """User Given Discord approved a serial episode MP4 When its bytes change before social dispatch Then the publication media contract rejects those changed bytes."""

@@ -1796,31 +1796,6 @@ class SerialVideoStore:
                 raise ValueError("The persisted serial plan is not an object.")
             return payload
 
-    def store_reconstructed_plan(self, episode_id: str, plan_payload: dict[str, Any]) -> str:
-        """Bind a rebuilt plan only when it exactly matches the episode's original checksum."""
-        plan_sha = hashlib.sha256(_json(plan_payload).encode("utf-8")).hexdigest()
-        now = _now()
-        with self._connection(write=True) as connection:
-            episode = connection.execute(
-                "SELECT plan_sha256 FROM episodes WHERE episode_id = ? AND is_current = 1",
-                (episode_id,),
-            ).fetchone()
-            if episode is None or episode["plan_sha256"] != plan_sha:
-                raise ValueError("The rebuilt plan differs from the blocked episode's persisted plan checksum.")
-            existing = connection.execute(
-                "SELECT plan_sha256, plan_json FROM episode_plans WHERE episode_id = ?",
-                (episode_id,),
-            ).fetchone()
-            if existing is not None:
-                if existing["plan_sha256"] != plan_sha or existing["plan_json"] != _json(plan_payload):
-                    raise ValueError("A different plan payload is already bound to this episode.")
-                return plan_sha
-            connection.execute(
-                "INSERT INTO episode_plans(episode_id, plan_sha256, plan_json, created_at) VALUES (?, ?, ?, ?)",
-                (episode_id, plan_sha, _json(plan_payload), now),
-            )
-        return plan_sha
-
     def begin_publication_attempt(
         self,
         episode_id: str,

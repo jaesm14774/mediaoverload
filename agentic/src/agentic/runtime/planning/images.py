@@ -182,6 +182,11 @@ def build_comfy_primitive(context: PlanningContext, goal: GoalRequest) -> Execut
                 tags=["render", "video"],
             ),
         ]
+        context.append_editorial_pacing_node(
+            nodes,
+            source_node="i2v-render",
+            node_id="i2v-editorial-pacing",
+        )
 
     metadata = {
         "selected_workflow": workflow_manifest.name,
@@ -191,6 +196,8 @@ def build_comfy_primitive(context: PlanningContext, goal: GoalRequest) -> Execut
         "graph_overview": [node.node_id for node in nodes],
         "input_image_path": input_image_path,
     }
+    if goal.media_type == "image_to_video":
+        metadata["editorial_pacing"] = "automatic"
     description = (
         f"Workflow '{workflow_manifest.name}' for media_type '{goal.media_type}'"
     )

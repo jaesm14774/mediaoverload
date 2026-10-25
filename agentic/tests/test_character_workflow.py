@@ -47,6 +47,37 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             self.repo_root / "output" / "kirby",
         )
 
+    def test_user_given_threads_enabled_in_character_config_when_building_publish_payload_then_threads_is_an_available_target(self) -> None:
+        """User Given Threads is enabled in a character profile When building a publish request Then Threads is retained as a configured target."""
+        config = load_character_config(self.kirby_config)
+        social_media = dict(config.get("social_media", {}) or {})
+        social_media["platforms"] = {
+            "threads": {
+                "config_folder_path": "configs/social_media/credentials/kirby",
+                "enabled": True,
+            }
+        }
+        config["social_media"] = social_media
+
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_config = Path(directory) / "kirby.yaml"
+            temporary_config.write_text(
+                yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+            payload = build_goal_payload_from_character_config(
+                make_character_workflow_request(
+                    self.repo_root,
+                    temporary_config,
+                    prompt="Kirby finds a glowing star",
+                    publish_platforms=["threads"],
+                    publish_after_generate=False,
+                )
+            )
+
+        self.assertEqual(payload["constraints"]["platforms"], ["threads"])
+        self.assertIn("threads", payload["constraints"]["platform_configs"])
+
     def test_user_given_kirby_config_when_requesting_story_cards_then_selected_style_replaces_fixed_visual_overrides(self) -> None:
         """User Given the Kirby config When requesting story cards Then the shared selected style is available without a fixed scene style or invented supporting cast."""
         payload = build_goal_payload_from_character_config(
@@ -97,8 +128,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertTrue(native["constraints"]["native_h3_storyboard_path"].endswith("native_h3_15s.yaml"))
         self.assertEqual(native["constraints"]["duration_profile"], "compact_story")
 
-        self.assertEqual(native["constraints"]["video_speed"], {"enabled": True, "factor": 2.0})
-
         fl2va = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
@@ -106,7 +135,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             preferred_generation_type="native_h3_fl2va_story",
             publish_after_generate=False,
         ))
-        self.assertEqual(fl2va["constraints"]["video_speed"], {"enabled": False, "factor": 1.0})
+        self.assertNotIn("video_speed", native["constraints"])
+        self.assertNotIn("video_speed", fl2va["constraints"])
 
         default_short = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
@@ -163,21 +193,27 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(selection["selected_character"], "Kirby")
         self.assertEqual(selection["selection_source"], "fixed_config_role")
 
-    def test_collect_media_paths_prefers_the_last_speed_artifact_for_publish(self) -> None:
+    def test_collect_media_paths_prefers_the_last_editorial_output_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(
             {
                 "state": {
                     "node_outputs": {
                         "animate-video": {"video_path": r"C:\raw.mp4"},
-                        "video-speed": {"video_path": r"C:\raw_2x.mp4", "speed": 2.0},
+                        "video-editorial-pacing": {
+                            "video_path": r"C:\paced.mp4",
+                            "final_video_path": r"C:\paced.mp4",
+                        },
                         "review-animate-video": {"video_path": r"C:\retry.mp4"},
-                        "review-video-speed": {"video_path": r"C:\retry_2x.mp4", "speed": 2.0},
+                        "review-video-editorial-pacing": {
+                            "video_path": r"C:\retry-paced.mp4",
+                            "final_video_path": r"C:\retry-paced.mp4",
+                        },
                     }
                 }
             }
         )
 
-        self.assertEqual(paths, [r"C:\retry_2x.mp4"])
+        self.assertEqual(paths, [r"C:\retry-paced.mp4"])
 
     def test_publish_review_keeps_all_story_card_pages_as_one_carousel(self) -> None:
         page_paths = [rf"C:\runs\story_card_{index:02d}.png" for index in range(1, 6)]

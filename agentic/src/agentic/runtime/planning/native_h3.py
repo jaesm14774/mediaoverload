@@ -524,9 +524,8 @@ def build_native_h3_l2va_story(
     )
     render_config = context.native_h3_render_config(goal, video_manifest)
     # L2VA uses the configured 15-second H3 workflow in production. Do
-    # not silently downgrade it to the 124-frame low-VRAM preview; the
-    # post-render speed node is responsible for the requested 2x timing
-    # transform after the full source clip has been rendered.
+    # not silently downgrade it to the 124-frame low-VRAM preview; keeping
+    # the full source clip preserves the intended render and story continuity.
     width = render_config["width"]
     height = render_config["height"]
     length = max(

@@ -56,10 +56,15 @@ def build_motion_comic(context: PlanningContext, goal: GoalRequest) -> Execution
             stage="package",
         ),
     ]
+    editorial_node = context.append_editorial_pacing_node(
+        nodes,
+        source_node="motion-comic-compose",
+        node_id="motion-comic-editorial-pacing",
+    )
     final_video_node = context.append_nvidia_vfx_postprocess_node(
         goal,
         nodes,
-        source_node="motion-comic-compose",
+        source_node=editorial_node,
         node_id="motion-comic-nvidia-vfx",
     )
     nodes.append(

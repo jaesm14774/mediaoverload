@@ -15,6 +15,7 @@ YOUTUBE_TITLE_MAX = 100
 YOUTUBE_DESCRIPTION_MAX = 5000
 FACEBOOK_CAPTION_MAX = 600
 FACEBOOK_HASHTAG_MAX = 3
+THREADS_TEXT_MAX = 500
 YOUTUBE_TAG_MAX = 12
 
 _STOP_WORDS = {
@@ -86,6 +87,15 @@ def build_platform_bundle(
             entry.update(
                 _build_facebook_package(
                     goal=goal,
+                    caption=source_caption,
+                    hashtags=safe_hashtags,
+                    media_paths=selected_media,
+                    post_strategy=effective_post_strategy,
+                )
+            )
+        elif normalized_name == "threads":
+            entry.update(
+                _build_threads_package(
                     caption=source_caption,
                     hashtags=safe_hashtags,
                     media_paths=selected_media,
@@ -285,6 +295,69 @@ def _build_facebook_package(
             "warnings": warnings,
             "caption_character_count": len(facebook_caption),
             "hashtag_count": len(_hashtag_tokens(facebook_hashtags)),
+        },
+    }
+
+
+def _build_threads_package(
+    *,
+    caption: str,
+    hashtags: str,
+    media_paths: list[str],
+    post_strategy: dict[str, Any],
+) -> dict[str, Any]:
+    video_paths = _paths_with_extensions(media_paths, VIDEO_EXTENSIONS)
+    image_paths = _paths_with_extensions(media_paths, IMAGE_EXTENSIONS)
+    supported_paths = [*video_paths, *image_paths]
+    format_name = (
+        "video"
+        if len(media_paths) == 1 and video_paths
+        else "image"
+        if len(media_paths) == 1 and image_paths
+        else "unsupported_media"
+    )
+    text = "\n".join(part for part in (caption, hashtags) if part)
+    issues: list[str] = []
+    if not caption:
+        issues.append("caption_required")
+    if not media_paths:
+        issues.append("caption_and_media_required")
+    elif len(media_paths) != 1:
+        issues.append("threads_requires_single_media_item")
+    elif not supported_paths:
+        issues.append("threads_media_format_unsupported")
+    if len(text) > THREADS_TEXT_MAX:
+        issues.append("threads_text_exceeds_500_characters")
+    platform_eligible = len(media_paths) == 1 and len(supported_paths) == 1
+    platform_ready = bool(caption) and platform_eligible and len(text) <= THREADS_TEXT_MAX
+    return {
+        "format": format_name,
+        "metadata_source": "derived",
+        "caption": caption,
+        "hashtags": hashtags,
+        "character_count": len(text),
+        "content_strategy": {
+            "strategy_version": PLATFORM_STRATEGY_VERSION,
+            "platform": "threads",
+            "format": format_name,
+            "post_strategy_version": str(post_strategy.get("strategy_version") or ""),
+            "variant_id": str(post_strategy.get("variant_id") or ""),
+            "variation_key": str(post_strategy.get("variation_key") or ""),
+            "editorial_question": str(post_strategy.get("editorial_question") or ""),
+            "hook": str(post_strategy.get("hook_mode") or ""),
+            "payoff": str(post_strategy.get("payoff_mode") or ""),
+            "cta_policy": str(post_strategy.get("cta_policy") or ""),
+            "hashtag_policy": str(post_strategy.get("hashtag_policy") or ""),
+        },
+        "validation": {
+            "has_caption": bool(caption),
+            "has_media": bool(media_paths),
+            "is_platform_eligible": platform_eligible,
+            "is_platform_publish_ready": platform_ready,
+            "is_publish_ready": bool(caption) and bool(media_paths),
+            "issues": issues,
+            "warnings": [],
+            "caption_character_count": len(text),
         },
     }
 

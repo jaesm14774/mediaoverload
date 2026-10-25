@@ -27,7 +27,7 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             if Path(path).suffix.lower() in MEDIA_EXTENSIONS and path not in collected:
                 collected.append(path)
 
-    # Optional post-speed motion graphics produce the authoritative final
+    # Optional post-edit motion graphics produce the authoritative final
     # video; the last candidate represents the final render/retry branch.
     motion_graphics_candidates: list[str] = []
     for outputs in node_outputs.values():
@@ -46,21 +46,6 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
         )
     if motion_graphics_candidates:
         return [motion_graphics_candidates[-1]]
-
-    speed_candidates: list[str] = []
-    for outputs in node_outputs.values():
-        if not isinstance(outputs, dict) or outputs.get("speed") in {None, ""}:
-            continue
-        candidates = outputs.get("video_path") or outputs.get("saved_files") or []
-        if isinstance(candidates, str):
-            candidates = [candidates]
-        speed_candidates.extend(
-            path
-            for path in candidates
-            if isinstance(path, str) and Path(path).suffix.lower() in VIDEO_EXTENSIONS
-        )
-    if speed_candidates:
-        return [speed_candidates[-1]]
 
     # A final transform node is authoritative even when the route has no
     # package node. This prevents raw and normalized copies from both reaching

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any
 import yaml
@@ -16,6 +15,7 @@ SUPPORTED_PUBLISH_PLATFORMS = {
     "twitter",
     "facebook",
     "instagram_graph",
+    "threads",
     "youtube",
     FACEBOOK_PROFILE_HANDOFF_PLATFORM,
 }
@@ -37,27 +37,6 @@ MEDIA_EXTENSIONS = {
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
-
-
-def _normalize_video_speed_config(value: object) -> dict[str, object]:
-    if value is None:
-        raw: dict[str, object] = {}
-    elif isinstance(value, dict):
-        raw = dict(value)
-    else:
-        raise ValueError("generation.video_speed must be a mapping")
-    enabled = bool(raw.get("enabled", False))
-    try:
-        factor = float(raw.get("factor", 2.0))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "generation.video_speed.factor must be a number greater than zero"
-        ) from exc
-    if not math.isfinite(factor) or factor <= 0:
-        raise ValueError(
-            "generation.video_speed.factor must be a finite number greater than zero"
-        )
-    return {"enabled": enabled, "factor": factor}
 
 
 def _normalize_generation_type(

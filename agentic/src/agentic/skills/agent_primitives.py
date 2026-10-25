@@ -5,7 +5,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from agentic.runtime.contracts import SkillContext, SkillResult
+from agentic.runtime.contracts import MIN_VIDEO_DURATION_SECONDS, SkillContext, SkillResult
 from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.reference_video import format_reference_video_directive
@@ -877,41 +877,113 @@ class AgentMediaSkills:
         run_dir = self._build_run_dir(context.plan.goal.prompt, "concat")
         video_dir = run_dir / "video"
         video_dir.mkdir(parents=True, exist_ok=True)
+        video_node_ids = context.node.inputs.get("video_node_ids")
+        if not isinstance(video_node_ids, list) or not video_node_ids:
+            raise RuntimeError("Video concatenation requires its ordered video_node_ids")
+        video_paths: list[str] = []
+        for node_id in video_node_ids:
+            output = context.state.node_outputs.get(str(node_id))
+            if not isinstance(output, dict):
+                raise RuntimeError(f"Video concatenation has no output for node '{node_id}'")
+            path_value = (
+                output.get("video_path")
+                or output.get("final_video_path")
+                or output.get("saved_files")
+            )
+            if isinstance(path_value, list):
+                path_value = next((value for value in path_value if value), "")
+            path = str(path_value or "").strip()
+            if not path:
+                raise RuntimeError(f"Video concatenation has no video path for node '{node_id}'")
+            video_paths.append(path)
         result = self.tools.call(
             "media.concat_videos",
             {
-                "video_paths": context.node.inputs.get("video_paths") or self._resolve_many(context, ("video_path", "saved_files")),
+                "video_paths": video_paths,
                 "output_path": str(video_dir / "merged.mp4"),
                 "method": str(context.node.inputs.get("method", "demuxer")),
             },
         )
         return SkillResult(status="success", outputs=result, logs=["Concatenated videos for an agent step."])
 
-    def change_video_speed(self, context: SkillContext) -> SkillResult:
-        video_path = str(
-            context.node.inputs.get("video_path")
-            or self._resolve_first(context, ("video_path", "saved_files", "media_paths"))
-            or ""
+    def apply_editorial_pacing(self, context: SkillContext) -> SkillResult:
+        video_node = str(context.node.inputs.get("video_node") or "").strip()
+        video_output = context.state.node_outputs.get(video_node)
+        if not isinstance(video_output, dict):
+            raise RuntimeError("Editorial pacing requires the assembled video output")
+        video_path_value = (
+            video_output.get("video_path")
+            or video_output.get("final_video_path")
+            or video_output.get("saved_files")
         )
+        if isinstance(video_path_value, list):
+            video_path_value = next((value for value in video_path_value if value), "")
+        video_path = str(video_path_value or "").strip()
         if not video_path:
-            raise RuntimeError(f"No video path available for node '{context.node.node_id}'")
-        run_dir = self._build_run_dir("speed", "video_speed")
+            raise RuntimeError("The source video has no output path")
+
+        pacing_plan = self.tools.call(
+            "media.analyze_editorial_pacing", {"video_path": video_path}
+        )
+        segments = pacing_plan.get("segments") if isinstance(pacing_plan, dict) else None
+        if not isinstance(segments, list) or not segments:
+            raise RuntimeError("Automatic editorial pacing returned no timeline")
+        segments = [dict(segment) for segment in segments if isinstance(segment, dict)]
+        if not segments:
+            raise RuntimeError("Automatic editorial pacing returned no usable timeline")
+        method = str(pacing_plan.get("method") or "relative_motion")
+
+        source_duration = sum(
+            float(segment["end_seconds"]) - float(segment["start_seconds"])
+            for segment in segments
+        )
+        planned_duration = sum(
+            (float(segment["end_seconds"]) - float(segment["start_seconds"]))
+            / float(segment["speed_factor"])
+            for segment in segments
+        )
+        minimum_duration = min(
+            MIN_VIDEO_DURATION_SECONDS,
+            float(context.plan.goal.duration_seconds)
+            if context.plan.goal.duration_seconds > 0
+            else MIN_VIDEO_DURATION_SECONDS,
+        )
+        if planned_duration < minimum_duration and planned_duration > 0:
+            speed_scale = max(0.5, planned_duration / minimum_duration)
+            for segment in segments:
+                segment["speed_factor"] = max(
+                    0.5, float(segment["speed_factor"]) * speed_scale
+                )
+
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "editorial_pacing")
         video_dir = run_dir / "video"
         video_dir.mkdir(parents=True, exist_ok=True)
-        speed = float(context.node.inputs.get("speed", 1.0))
         result = self.tools.call(
-            "media.change_video_speed",
+            "media.apply_editorial_pacing",
             {
                 "video_path": video_path,
-                "output_path": str(video_dir / f"{Path(video_path).stem}_{speed:g}x.mp4"),
-                "speed": speed,
+                "output_path": str(video_dir / "editorial.mp4"),
+                "segments": segments,
             },
         )
+        result["pacing_method"] = method
+        result["pacing_segments"] = segments
+        result["final_video_path"] = result.get("video_path", "")
+        actual_speed_factors = [float(segment["speed_factor"]) for segment in segments]
         return SkillResult(
             status="success",
             outputs=result,
-            metrics={"speed": speed},
-            logs=[f"Rendered final video at {speed:g}x playback speed."],
+            metrics={
+                "segment_count": len(segments),
+                "speed_factors": actual_speed_factors,
+                "source_duration": source_duration,
+                "minimum_duration": minimum_duration,
+            },
+            logs=[
+                f"Rendered automatic editorial pacing using {method}: "
+                + ", ".join(f"{speed:g}x" for speed in actual_speed_factors)
+                + "; slowed motion uses interpolation and audio stays synchronized."
+            ],
         )
 
     def nvidia_vfx_postprocess(self, context: SkillContext) -> SkillResult:
@@ -1123,6 +1195,9 @@ class AgentMediaSkills:
         payload = {
             "video_path": video_path,
             "target_duration": context.node.inputs.get("target_duration"),
+            "minimum_duration": context.node.inputs.get(
+                "minimum_duration", MIN_VIDEO_DURATION_SECONDS
+            ),
             "duration_tolerance": float(context.node.inputs.get("duration_tolerance", 0.6)),
             "expected_fps": context.node.inputs.get("expected_fps"),
             "require_audio": bool(context.node.inputs.get("require_audio", False)),
@@ -1419,9 +1494,21 @@ class AgentMediaSkills:
         )
 
     def package_animated_sticker_outputs(self, context: SkillContext) -> SkillResult:
-        rendered = context.state[context.node.depends_on[0]]
-        gif_preview = context.state[context.node.depends_on[1]]
+        video_node = str(
+            context.node.inputs.get("video_node") or context.node.depends_on[0]
+        )
+        gif_node = str(
+            context.node.inputs.get("gif_preview_node") or context.node.depends_on[1]
+        )
+        rendered = context.state[video_node]
+        gif_preview = context.state[gif_node]
         saved_files = list(rendered.get("saved_files", []))
+        video_path = str(
+            rendered.get("video_path")
+            or rendered.get("final_video_path")
+            or (saved_files[0] if saved_files else "")
+        )
+        gif_path = str(gif_preview.get("gif_path", ""))
         run_dir = self._build_run_dir(context.plan.goal.prompt, "animated_sticker_package")
         run_dir.mkdir(parents=True, exist_ok=True)
         summary_path = run_dir / "animated_sticker_summary.json"
@@ -1429,9 +1516,9 @@ class AgentMediaSkills:
             "goal": context.plan.goal.prompt,
             "media_type": context.plan.goal.media_type,
             "style": context.plan.goal.style,
-            "video_path": rendered.get("video_path") or (saved_files[0] if saved_files else ""),
-            "gif_path": gif_preview.get("gif_path", ""),
-            "saved_files": [item for item in (gif_preview.get("gif_path", ""), *saved_files) if item],
+            "video_path": video_path,
+            "gif_path": gif_path,
+            "saved_files": [item for item in (gif_path, video_path, *saved_files) if item],
             "prompt_lineage": self._collect_prompt_lineage(context),
             "node_prompt_modes": self._collect_node_prompt_modes(context),
         }
@@ -1582,7 +1669,7 @@ def register_agent_primitive_skills(
     skill_registry.register("media.audio.narrate", media.narrate_text, "Generate narration audio as an agent media primitive")
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")
-    skill_registry.register("media.video.change_speed", media.change_video_speed, "Change final video playback speed")
+    skill_registry.register("media.video.editorial_pacing", media.apply_editorial_pacing, "Analyze and render automatic per-segment editorial pacing")
     skill_registry.register("media.video.nvidia_vfx_postprocess", media.nvidia_vfx_postprocess, "Upscale and interpolate a final video with NVIDIA VFX")
     skill_registry.register("media.video.normalize_canvas", media.normalize_video_canvas, "Normalize a final video to the requested canvas")
     skill_registry.register("media.video.trim", media.trim_video, "Trim final video to the requested duration")

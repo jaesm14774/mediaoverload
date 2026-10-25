@@ -12,9 +12,13 @@ from typing import Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+from agentic.tools.threads_oauth import (
+    ThreadsOAuthError,
+    refresh_token_if_due,
+)
 
 
 @dataclass(slots=True)
@@ -57,7 +61,7 @@ class SocialMediaManager:
             receipt = getattr(platform, "last_publish_receipt", None)
             if isinstance(receipt, dict):
                 self.publish_receipts[platform_name] = dict(receipt)
-            if platform_name.lower() in {"facebook", "youtube"}:
+            if platform_name.lower() in {"facebook", "threads", "youtube"}:
                 if not result:
                     raise RuntimeError(f"{platform_name} publisher returned false")
                 if not isinstance(receipt, dict) or not receipt.get("verified"):
@@ -1064,6 +1068,297 @@ class InstagramGraphPlatform(BaseConfigPlatform):
         self.temp_files = []
 
 
+class ThreadsPlatform(BaseConfigPlatform):
+    GRAPH_API_BASE = "https://graph.threads.net"
+    GRAPH_API_VERSION = "v1.0"
+    CAPTION_MAX = 500
+    CONTAINER_POLL_SECONDS = 2
+    CONTAINER_TIMEOUT_SECONDS = 300
+    VIDEO_EXTENSIONS = {".mp4"}
+    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+    def __init__(self, config_folder_path: str, prefix: str = "") -> None:
+        super().__init__(config_folder_path, prefix)
+        self.user_id: str | None = None
+        self.username: str | None = None
+        self.access_token: str | None = None
+        self.media_base_url: str | None = None
+        self.cloudinary = CloudinaryUploadService()
+        self._url_cache: dict[str, str] = {}
+        self.last_container_status: dict[str, Any] = {}
+        self.load_config()
+        self.authenticate()
+
+    def load_config(self) -> None:
+        self.credentials_path = self._config_path() / "threads.env"
+        self.credentials = dotenv_values(self.credentials_path)
+        self.media_base_url = (
+            str(
+                self.credentials.get("THREADS_MEDIA_BASE_URL")
+                or os.getenv("THREADS_MEDIA_BASE_URL")
+                or ""
+            )
+            .rstrip("/")
+            or None
+        )
+
+    def authenticate(self) -> None:
+        self.access_token = str(
+            self.credentials.get("THREADS_ACCESS_TOKEN")
+            or os.getenv("THREADS_ACCESS_TOKEN")
+            or ""
+        ).strip()
+        configured_user_id = str(
+            self.credentials.get("THREADS_USER_ID")
+            or os.getenv("THREADS_USER_ID")
+            or ""
+        ).strip()
+        if not self.access_token:
+            raise ValueError("Missing THREADS_ACCESS_TOKEN")
+        raw_expiry = self.credentials.get("THREADS_ACCESS_TOKEN_EXPIRES_AT") or os.getenv(
+            "THREADS_ACCESS_TOKEN_EXPIRES_AT"
+        )
+        if raw_expiry:
+            try:
+                expires_at = int(str(raw_expiry))
+            except ValueError:
+                raise ValueError(
+                    "THREADS_ACCESS_TOKEN_EXPIRES_AT must be a Unix timestamp"
+                ) from None
+            try:
+                self.access_token, refreshed_expiry, refreshed = refresh_token_if_due(
+                    self.access_token,
+                    expires_at,
+                    self.credentials_path,
+                    api_base=self.GRAPH_API_BASE,
+                )
+            except ThreadsOAuthError as exc:
+                raise RuntimeError(str(exc)) from exc
+            if refreshed:
+                self.credentials["THREADS_ACCESS_TOKEN"] = self.access_token
+                self.credentials["THREADS_ACCESS_TOKEN_EXPIRES_AT"] = str(
+                    refreshed_expiry
+                )
+        profile = self._fetch_threads_profile()
+        fetched_user_id = str(profile.get("id") or "").strip()
+        self.username = str(profile.get("username") or "").strip() or None
+        if configured_user_id and fetched_user_id and str(configured_user_id) != fetched_user_id:
+            raise RuntimeError(
+                "Threads token belongs to unexpected user: "
+                f"expected={configured_user_id} actual={fetched_user_id}"
+            )
+        self.user_id = fetched_user_id or str(configured_user_id or "").strip() or None
+        if not self.user_id:
+            raise ValueError("Threads account lookup did not return a user id")
+
+    def upload_post(self, post: MediaPost) -> bool:
+        caption = post.caption or ""
+        if post.hashtags:
+            caption = f"{caption}\n{post.hashtags}" if caption else str(post.hashtags)
+        if len(caption) > self.CAPTION_MAX:
+            raise ValueError(
+                f"Threads post text exceeds {self.CAPTION_MAX} characters: {len(caption)}"
+            )
+        publish_mode = str(
+            (post.additional_params or {}).get("threads_publish_mode") or "publish"
+        ).strip().lower()
+        if publish_mode not in {"publish", "container_only"}:
+            raise ValueError(f"Unsupported Threads publish mode: {publish_mode}")
+
+        valid_paths = [path for path in post.media_paths if Path(path).is_file()]
+        if not valid_paths:
+            if post.media_paths:
+                raise ValueError("Threads publishing requires an existing local media file")
+            if not caption.strip():
+                raise ValueError("Threads text-only posts require text")
+            media_type = "TEXT"
+            media_field = None
+            media_url = None
+        else:
+            if len(valid_paths) != 1:
+                raise ValueError("Threads publishing currently requires exactly one local media file")
+            media_path = valid_paths[0]
+            extension = Path(media_path).suffix.lower()
+            if extension in self.VIDEO_EXTENSIONS:
+                media_type = "VIDEO"
+                media_field = "video_url"
+            elif extension in self.IMAGE_EXTENSIONS:
+                media_type = "IMAGE"
+                media_field = "image_url"
+            else:
+                raise ValueError(
+                    "Threads publishing supports one MP4 video or JPG, JPEG, or PNG image"
+                )
+            media_url = self._require_media_url(media_path)
+
+        container_id = self._create_media_container(
+            media_type=media_type,
+            media_field=media_field,
+            media_url=media_url,
+            caption=caption,
+        )
+        if not self._wait_container_ready(container_id):
+            self._record_publish_receipt(
+                platform="threads",
+                external_id=container_id,
+                status="container_not_ready",
+                verified=False,
+                visibility="container_only",
+                details={"container_status": dict(self.last_container_status)},
+            )
+            raise RuntimeError(
+                f"Threads media container was not ready: {container_id} "
+                f"({self._container_status_summary()})"
+            )
+        if publish_mode == "container_only":
+            self._record_publish_receipt(
+                platform="threads",
+                external_id=container_id,
+                status="container_ready",
+                verified=True,
+                visibility="container_only",
+                details={"container_id": container_id},
+            )
+            return True
+
+        media_id = self._publish_container(container_id)
+        self._record_publish_receipt(
+            platform="threads",
+            external_id=media_id,
+            status="published_unverified",
+            verified=False,
+            visibility=None,
+            details={"container_id": container_id},
+        )
+        permalink = self._fetch_published_permalink(media_id)
+        if not permalink:
+            raise RuntimeError(f"Threads did not return a permalink for published post {media_id}")
+        self._record_publish_receipt(
+            platform="threads",
+            external_id=media_id,
+            status="published",
+            verified=True,
+            visibility="public",
+            details={"container_id": container_id, "permalink": permalink},
+        )
+        return True
+
+    def _fetch_threads_profile(self) -> dict[str, Any]:
+        response = requests.get(
+            f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me",
+            params={"fields": "id,username"},
+            headers={"Authorization": f"Bearer {self.access_token}"},
+            timeout=30,
+        )
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise RuntimeError(
+                f"Threads account lookup failed: {_describe_publish_exception(exc)}"
+            ) from exc
+        body = response.json()
+        return body if isinstance(body, dict) else {}
+
+    def _require_media_url(self, local_path: str) -> str:
+        cached = self._url_cache.get(local_path)
+        if cached:
+            return cached
+        uploaded = self.cloudinary.upload(local_path)
+        if uploaded:
+            self._url_cache[local_path] = uploaded
+            return uploaded
+        if self.media_base_url:
+            resolved = f"{self.media_base_url}/{Path(local_path).name}"
+            self._url_cache[local_path] = resolved
+            return resolved
+        raise RuntimeError(
+            f"Threads requires a public media URL for {Path(local_path).name}; "
+            "configure Cloudinary or THREADS_MEDIA_BASE_URL"
+        )
+
+    def _create_media_container(
+        self,
+        *,
+        media_type: str,
+        media_field: str | None,
+        media_url: str | None,
+        caption: str,
+    ) -> str:
+        data = {"media_type": media_type}
+        if media_field and media_url:
+            data[media_field] = media_url
+        if caption:
+            data["text"] = caption
+        response = requests.post(
+            f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.user_id}/threads",
+            data=data,
+            headers={"Authorization": f"Bearer {self.access_token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        container_id = str(response.json().get("id") or "").strip()
+        if not container_id:
+            raise RuntimeError("Threads media container creation did not return an id")
+        return container_id
+
+    def _wait_container_ready(self, container_id: str) -> bool:
+        started_at = time.monotonic()
+        self.last_container_status = {}
+        while time.monotonic() - started_at < self.CONTAINER_TIMEOUT_SECONDS:
+            response = requests.get(
+                f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{container_id}",
+                params={"fields": "id,status,error_message"},
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                timeout=30,
+            )
+            response.raise_for_status()
+            body = response.json()
+            self.last_container_status = dict(body) if isinstance(body, dict) else {}
+            status = str(self.last_container_status.get("status") or "").upper()
+            if status == "FINISHED":
+                return True
+            if status in {"ERROR", "EXPIRED"}:
+                return False
+            time.sleep(self.CONTAINER_POLL_SECONDS)
+        return False
+
+    def _publish_container(self, container_id: str) -> str:
+        response = requests.post(
+            f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.user_id}/threads_publish",
+            data={"creation_id": container_id},
+            headers={"Authorization": f"Bearer {self.access_token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        media_id = str(response.json().get("id") or "").strip()
+        if not media_id:
+            raise RuntimeError("Threads publish request did not return a post id")
+        return media_id
+
+    def _fetch_published_permalink(self, media_id: str) -> str | None:
+        response = requests.get(
+            f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{media_id}",
+            params={"fields": "id,permalink"},
+            headers={"Authorization": f"Bearer {self.access_token}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, dict) or str(body.get("id") or "") != media_id:
+            return None
+        permalink = str(body.get("permalink") or "").strip()
+        return permalink or None
+
+    def _container_status_summary(self) -> str:
+        status = self.last_container_status
+        if not status:
+            return "status=unknown"
+        name = str(status.get("status") or "unknown").replace("\n", " ").strip()
+        detail = str(status.get("error_message") or "").replace("\n", " ").strip()
+        summary = f"status={name}"
+        return f"{summary} error={detail[:300]}" if detail else summary
+
+
 class YouTubePlatform(BaseConfigPlatform):
     TOKEN_URI = "https://oauth2.googleapis.com/token"
     UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
@@ -1474,6 +1769,8 @@ class PublishingService:
             platform = FacebookPlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
         elif normalized == "instagram_graph":
             platform = InstagramGraphPlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
+        elif normalized == "threads":
+            platform = ThreadsPlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
         elif normalized == "youtube":
             platform = YouTubePlatform(platform_config["config_folder_path"], platform_config.get("prefix", ""))
         else:

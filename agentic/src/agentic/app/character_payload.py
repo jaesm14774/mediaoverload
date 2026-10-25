@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import os
 import random
 from pathlib import Path
@@ -46,7 +45,6 @@ from agentic.app.character_config import (
     SUPPORTED_PUBLISH_PLATFORMS,
     _merge_social_media_config,
     _normalize_platform_configs,
-    _normalize_video_speed_config,
     configured_discord_review_timeout_seconds,
     _resolve_output_dir,
     _summarize_character_config,
@@ -92,6 +90,7 @@ def build_goal_payload_from_character_config(
     ).strip()
     rng = generation.rng
     requested_seed = generation.seed
+    requested_image_count = generation.image_count
     requested_reference_video_source = str(
         generation.reference_video_source or ""
     ).strip()
@@ -122,8 +121,6 @@ def build_goal_payload_from_character_config(
         dict(load_global_social_config(repo_root).get("social_media", {}) or {}),
         dict(config.get("social_media", {}) or {}),
     )
-    video_speed = _normalize_video_speed_config(generation.get("video_speed"))
-
     configured_character_name = str(character.get("name") or "").strip()
     configured_group_name = str(character.get("group_name") or "").strip()
     configured_prompt_identity = configured_character_name or configured_group_name
@@ -198,6 +195,11 @@ def build_goal_payload_from_character_config(
         rng=rng,
         asset_root=asset_root,
     )
+    if requested_image_count is not None:
+        image_count = int(requested_image_count)
+        if image_count < 1:
+            raise ValueError("image_count must be a positive integer")
+        routing.setdefault("count_plan", {})["image_count"] = image_count
     config_generation_type = str(routing["generation_type"])
     if config_generation_type == "serial_video":
         return {
@@ -350,14 +352,6 @@ def build_goal_payload_from_character_config(
         raise ValueError(
             "reference_video_max_keyframes must be an integer between 2 and 20"
         )
-    if config_generation_type == "text2image2video" and reference_video_source:
-        # Reference-driven action clips already encode their intended rhythm in
-        # the prompt. Do not compress the generated payoff with a speed pass.
-        video_speed = {"enabled": False, "factor": 1.0}
-    if config_generation_type == "motion_comic":
-        # Captions have deliberate reading time; the character-wide speed
-        # transform must not compress the comic after it has been composed.
-        video_speed = {"enabled": False, "factor": 1.0}
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
         social_media.get("platforms"),
@@ -389,12 +383,6 @@ def build_goal_payload_from_character_config(
         platform_configs.pop("youtube", None)
         skipped_platforms.append("youtube:image_only_route")
     hashtags = [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag]
-    if config_generation_type == "native_h3_fl2va_story":
-        # FL2VA's native workflow already owns the requested 15-second timing;
-        # applying the character-wide 2x post-process would turn it into a
-        # short preview before QA and review.
-        video_speed = {"enabled": False, "factor": 1.0}
-
     native_keyframe_candidate_count = max(
         1, int(native_recipe.get("keyframe_candidate_count") or 1)
     )
@@ -501,7 +489,6 @@ def build_goal_payload_from_character_config(
         "visual_style_profile": style_profile,
         "seed": int(requested_seed) if requested_seed is not None else None,
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
-        "video_speed": video_speed,
         "story_card_page_count": str(
             story_card_config.get("page_count", STORY_CARD_PAGE_COUNT_DEFAULT)
         ).strip()
