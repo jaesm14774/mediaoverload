@@ -161,16 +161,8 @@ def _summarize_character_config(
     character_selection: dict[str, Any],
     generation: dict[str, Any],
     social_media: dict[str, Any],
-    strategies: dict[str, Any],
     platform_configs: dict[str, dict[str, Any]],
-    effective_longvideo_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    longvideo = dict(strategies.get("text2longvideo", {}) or {})
-    longvideo_config = dict(
-        effective_longvideo_config
-        if effective_longvideo_config is not None
-        else longvideo.get("longvideo_config", {}) or {}
-    )
     return {
         "config_path": str(path),
         "character_name": str(
@@ -213,17 +205,6 @@ def _summarize_character_config(
         "platform_config_folders": {
             name: str(config.get("config_folder_path", ""))
             for name, config in platform_configs.items()
-        },
-        "longvideo": {
-            "segment_count": int(longvideo_config.get("segment_count", 0) or 0),
-            "segment_duration": int(longvideo_config.get("segment_duration", 0) or 0),
-            "default_duration_seconds": int(
-                longvideo_config.get("default_duration_seconds", 0) or 0
-            ),
-            "production_profile": str(longvideo_config.get("production_profile") or ""),
-            "continuity_mode": str(longvideo_config.get("continuity_mode") or ""),
-            "use_tts": bool(longvideo_config.get("use_tts", False)),
-            "tts_voice": str(longvideo_config.get("tts_voice", "")),
         },
     }
 

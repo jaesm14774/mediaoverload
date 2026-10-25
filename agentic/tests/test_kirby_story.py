@@ -37,7 +37,7 @@ class StoryboardContractTests(unittest.TestCase):
         )
 
         brief = "current news-derived delivery brief"
-        segments = build_story_segments(goal, brief, 6, "curious", "text2longvideo")
+        segments = build_story_segments(goal, brief, 6, "curious")
 
         self.assertEqual(len(segments), 6)
         self.assertEqual(segments[0]["visual"], brief)

@@ -9,7 +9,6 @@ from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest,
 from agentic.runtime.video_conditioning import (
     capabilities_from_manifests,
     recipe_candidates,
-    production_recipe_sequence,
 )
 from agentic.runtime.registry import ToolRegistry
 from agentic.skills.longvideo import LongVideoSkills
@@ -41,40 +40,6 @@ class VideoConditioningTests(unittest.TestCase):
         self.assertFalse(recipe.requires_last)
         self.assertFalse(recipe.requires_references)
         self.assertEqual(recipe.render_tool, "comfy.render_h3")
-
-    def test_production_sequence_is_deterministic_and_reserves_fl2va_for_state_changes(self) -> None:
-        capabilities = capabilities_from_manifests(self.registry.all_manifests())
-        eligible = recipe_candidates(
-            capabilities,
-            preferred_workflows=[
-                "minimax_h3_i2va",
-                "minimax_h3_fl2va",
-            ],
-        )
-
-        sequence = production_recipe_sequence(6, eligible)
-
-        self.assertEqual(
-            sequence,
-            [
-                "anchor_first",
-                "anchor_first",
-                "anchor_first_last",
-                "anchor_first",
-                "anchor_first_last",
-                "anchor_first_last",
-            ],
-        )
-        self.assertEqual(production_recipe_sequence(6, eligible), sequence)
-
-    def test_production_sequence_uses_ref2va_only_for_supplied_opening_references(self) -> None:
-        capabilities = capabilities_from_manifests(self.registry.all_manifests())
-        eligible = recipe_candidates(capabilities)
-
-        sequence = production_recipe_sequence(4, eligible, use_reference_bundle=True)
-
-        self.assertEqual(sequence[0], "reference_bundle")
-        self.assertTrue(all(item in {"reference_bundle", "anchor_first", "anchor_first_last"} for item in sequence))
 
     def test_last_frame_recipe_binds_only_last_anchor_to_h3_renderer(self) -> None:
         captured: dict[str, object] = {}

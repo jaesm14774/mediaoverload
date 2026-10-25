@@ -25,6 +25,7 @@ from agentic.app.serial_video_dispatch import (
     build_serial_video_argv,
     load_serial_video_settings,
 )
+from agentic.app.serial_video_execution import run_serial_episodes
 from agentic.tools.social_services import complete_facebook_profile_handoff
 
 
@@ -104,60 +105,15 @@ def _run_serial_video(
         )
     if serial_runner is None:
         from agentic.app.main import main as serial_runner
-    episodes_started = 0
-    automation_decisions: list[dict[str, Any]] = []
-    for episode_index in range(episode_count):
-        run_result = serial_runner(
-            _serial_video_argv(args, config_path, episode_index=episode_index)
-        )
-        if not isinstance(run_result, dict):
-            return {
-                "status": "failed",
-                "generation_type": "serial_video",
-                "episodes_started": episodes_started,
-                "reason": "The serial runner ended without a completion status.",
-            }
-        if run_result.get("workflow_stage") == "serial_onboarding_blocked":
-            return {
-                "status": "blocked",
-                "generation_type": "serial_video",
-                "episodes_started": episodes_started,
-                "onboarding_stage": str(run_result.get("onboarding_stage") or "unknown"),
-                "series_id": str(run_result.get("series_id") or ""),
-                "reason": str(run_result.get("reason") or "Discord review did not complete."),
-            }
-        status = str(run_result.get("status") or "").strip().lower()
-        if status in {"blocked", "failed"}:
-            return {
-                "status": status,
-                "generation_type": "serial_video",
-                "episodes_started": episodes_started,
-                "automation_decisions": automation_decisions,
-                "reason": str(run_result.get("reason") or "Serial video execution did not complete."),
-            }
-        if status != "success":
-            return {
-                "status": "failed",
-                "generation_type": "serial_video",
-                "episodes_started": episodes_started,
-                "reason": "The serial runner returned an unknown completion status.",
-            }
-        mode = str(run_result.get("automation_mode") or "").strip()
-        if mode:
-            automation_decisions.append(
-                {
-                    "mode": mode,
-                    "series_id": str(run_result.get("series_id") or ""),
-                    "episode_number": run_result.get("episode_number"),
-                }
-            )
-        episodes_started += 1
-    return {
-        "status": "success",
-        "generation_type": "serial_video",
-        "episodes_started": episodes_started,
-        "automation_decisions": automation_decisions,
-    }
+    return run_serial_episodes(
+        episode_count=episode_count,
+        arguments_for_episode=lambda episode_index: _serial_video_argv(
+            args,
+            config_path,
+            episode_index=episode_index,
+        ),
+        serial_runner=serial_runner,
+    )
 
 
 def main(
@@ -174,7 +130,7 @@ def main(
     parser.add_argument("--prompt", type=str, default="", help="Prompt text")
     parser.add_argument("--temperature", type=float, default=1.0, help="Temperature parameter")
     parser.add_argument("--seed", type=int, help="Optional deterministic seed passed to the image and video workflows")
-    parser.add_argument("--generation-type", type=str, help="Override generation type, for example text2longvideo or serial_video")
+    parser.add_argument("--generation-type", type=str, help="Override generation type, for example serial_video or text2image2video")
     parser.add_argument(
         "--duration-seconds",
         type=int,

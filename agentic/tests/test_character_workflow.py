@@ -118,34 +118,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(default_short["duration_seconds"], 10)
         self.assertEqual(default_short["constraints"]["max_i2v_frames"], 240)
 
-        long_video = build_goal_payload_from_character_config(make_character_workflow_request(
-            self.repo_root,
-            self.kirby_config,
-            prompt="Kirby crosses a windy meadow, protects a glowing seed from a storm, and reaches a warm clearing",
-            preferred_generation_type="text2longvideo",
-            publish_after_generate=False,
-        ))
-        self.assertEqual(long_video["duration_seconds"], 30)
-        self.assertEqual(long_video["constraints"]["segment_count"], 3)
-        self.assertGreaterEqual(long_video["constraints"]["longvideo_segment_duration"], 10)
-        self.assertNotIn("storyboard_path", long_video["constraints"])
-        self.assertEqual(long_video["character_config_summary"]["longvideo"]["default_duration_seconds"], 30)
-        self.assertEqual(long_video["constraints"]["video_workflow_name"], "minimax_h3_i2va")
-
-        production_long_video = build_goal_payload_from_character_config(make_character_workflow_request(
-            self.repo_root,
-            self.kirby_config,
-            prompt="Kirby follows a seed through a storm and plants it beside a glowing pond",
-            duration_seconds=30,
-            preferred_generation_type="text2longvideo",
-            publish_after_generate=False,
-        ))
-        self.assertEqual(production_long_video["source_generation_type"], "text2longvideo")
-        self.assertEqual(production_long_video["media_type"], "long_video")
-        self.assertEqual(production_long_video["constraints"]["longvideo_production_profile"], "text2longvideo")
-        self.assertEqual(production_long_video["constraints"]["segment_count"], 3)
-        self.assertEqual(production_long_video["constraints"]["longvideo_continuity_mode"], "rendered_tail")
-        self.assertEqual(production_long_video["constraints"]["video_speed"], {"enabled": False, "factor": 1.0})
 
     def test_explicit_subject_mode_override_keeps_benchmark_subject_count_stable(self) -> None:
         request = make_character_workflow_request(
@@ -1108,7 +1080,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
 
     def test_weighted_news_run_selects_strategy_before_news_content_generation(self) -> None:
-        """User Given a news request with only long-video weight When routing runs Then the selected strategy receives the news context before content generation."""
+        """User Given a news request with only native H3 weight When routing runs Then that route owns story generation from the selected news context."""
         news = NewsSelection(
             title="Taipei panda steals zongzi",
             keyword="panda",
@@ -1117,20 +1089,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, patch(
             "agentic.tools.context_services.NewsContextService.select_news",
             return_value=news,
-        ), patch(
-            "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt",
-            return_value={
-                "prompt": "Kirby turns the panda news into a playful multi-scene story",
-                "source": "autonomous_llm",
-                "prompt_mode": "llm",
-                "creative_seed": news.title,
-                "news_context": news.to_dict(),
-            },
-        ) as generate_prompt:
+        ):
             # Candidate additions must not change what this news-boundary
             # scenario exercises through an incidental seeded random pick.
             config = yaml.safe_load(self.kirby_config.read_text(encoding="utf-8"))
-            config["generation"]["generation_type_weights"] = {"text2longvideo": 1}
+            config["generation"]["generation_type_weights"] = {"native_h3_story": 1}
             weighted_config = Path(temp_dir) / "kirby.yaml"
             weighted_config.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
             payload = build_goal_payload_from_character_config(make_character_workflow_request(
@@ -1143,10 +1106,10 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 publish_after_generate=False,
             ))
 
-        self.assertEqual(payload["source_generation_type"], "text2longvideo")
+        self.assertEqual(payload["source_generation_type"], "native_h3_story")
         self.assertEqual(payload["constraints"]["routing_selection_source"], "weighted_random")
-        self.assertEqual(payload["prompt"], "Kirby turns the panda news into a playful multi-scene story")
-        self.assertEqual(generate_prompt.call_args.kwargs["news_context"]["title"], news.title)
+        self.assertEqual(payload["prompt"], "")
+        self.assertEqual(payload["constraints"]["news_context"]["title"], news.title)
 
     def test_build_goal_payload_merges_global_social_config_and_surfaces_summary(self) -> None:
         with tempfile.TemporaryDirectory(), patch(

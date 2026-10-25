@@ -14,7 +14,8 @@ import pymysql
 from dotenv import dotenv_values
 from pymysql.cursors import DictCursor
 
-from agentic.app.main import _allow_runtime_output_for_visual_evidence, parse_args
+from agentic.app.cli import parse_args
+from agentic.app.main import _allow_runtime_output_for_visual_evidence
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext, SkillResult
 from agentic.runtime.planner import TaskPlanner
@@ -62,7 +63,7 @@ def _write_reference(path: Path, content: bytes) -> Path:
     return path
 
 
-def _create_ready_legacy_episode(
+def _seed_accepted_existing_episode(
     store: SerialVideoStore, root: Path, series_id: str
 ) -> dict[str, object]:
     identity = _write_reference(root / f"{series_id}-identity.png", b"identity")
@@ -432,7 +433,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
         self.assertFalse(args.serial_mode)
         self.assertIsNone(args.series_id)
-        self.assertEqual(args.media_type, "long_video")
+        self.assertEqual(args.media_type, "image")
 
     def test_user_given_a_story_first_serial_request_without_a_character_when_cli_is_parsed_then_news_is_selected_by_default(self) -> None:
         """User Given a new series story request with no fixed character When the CLI parses it Then story planning is allowed before character setup and random news inspiration is the default."""
@@ -660,7 +661,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             store = self._new_store()
             root = Path(temporary)
-            _create_ready_legacy_episode(store, root, "existing-series")
+            _seed_accepted_existing_episode(store, root, "existing-series")
 
             new_selection = store.prepare_auto_next_context(
                 "Hero", random_source=_FixedRandomSource(0.49)
@@ -678,7 +679,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             store = self._new_store()
             root = Path(temporary)
-            _create_ready_legacy_episode(store, root, "existing-series")
+            _seed_accepted_existing_episode(store, root, "existing-series")
 
             new_favored = store.prepare_auto_next_context(
                 "Hero",
@@ -1808,6 +1809,57 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(dispatch.inputs["platforms"], platforms)
             self.assertEqual(dispatch.inputs["publish_mode"], "live")
             self.assertIsNotNone(final_qa)
+
+    def test_user_given_an_upgraded_serial_video_when_final_qa_runs_then_its_dimensions_do_not_block_review(self) -> None:
+        """User Given a valid serial video at improved resolution When final QA runs Then its dimensions do not block review."""
+        project_root = Path(__file__).resolve().parents[1]
+        planner = TaskPlanner(AssetRegistry(project_root, asset_root=project_root))
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            identity = _write_reference(root / "identity.png", b"identity")
+            goal = GoalRequest(
+                prompt="Kirby follows a firefly home",
+                media_type="long_video",
+                duration_seconds=15,
+                style="watercolor storybook animation",
+                constraints={
+                    "serial_mode": True,
+                    "series_id": "garden",
+                    "character": "Kirby",
+                    "reference_manifest": [{"path": str(identity), "type": "image", "role": "identity"}],
+                },
+            )
+
+            plan = planner.build_plan(goal)
+            by_id = {node.node_id: node for node in plan.nodes}
+            render = by_id["segment-video-01"]
+            final_qa = by_id["longvideo-video-qa"]
+            upgraded_width = render.inputs["width"] * 9 // 4
+            upgraded_height = render.inputs["height"] * 9 // 4
+            video_path = root / "upgraded.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                    f"color=c=blue:s={upgraded_width}x{upgraded_height}:r={int(final_qa.inputs['expected_fps'])}:d=15",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                    str(video_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            tools = ToolRegistry()
+            register_media_service_tools(tools, root / "media-output")
+            result = tools.call(
+                "media.video_qa",
+                {
+                    **final_qa.inputs,
+                    "video_path": str(video_path),
+                    "contact_sheet_path": str(root / "contact.jpg"),
+                },
+            )
+
+        self.assertTrue(result["passed"], result["errors"])
+        self.assertTrue(result["checks"]["dimensions"])
 
     def test_user_given_a_segment_trim_when_serial_plan_is_built_then_the_delivered_clip_is_reviewed_and_assembled(self) -> None:
         """User Given an H3 clip longer than its planned segment When the serial plan inserts duration trimming Then QA, review, tail extraction, and assembly use the delivered clip."""

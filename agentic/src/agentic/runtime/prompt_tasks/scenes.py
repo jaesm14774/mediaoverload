@@ -536,17 +536,13 @@ def segment_story(
     segment_count: int,
     tone: str,
     reference_analysis: dict[str, Any] | None = None,
-    *,
-    production_profile: str = "",
 ) -> list[dict[str, Any]]:
     fallback = build_story_segments(
         goal,
         creative_brief,
         segment_count,
         tone,
-        production_profile=production_profile,
     )
-    production_mode = str(production_profile or "").strip().lower() == "text2longvideo"
     raw_news_context = goal.constraints.get("news_context")
     news_context = dict(raw_news_context) if isinstance(raw_news_context, dict) else {}
     has_news_source = any(
@@ -556,7 +552,7 @@ def segment_story(
     try:
         manager = client.require_manager()
     except Exception:
-        if production_mode:
+        if bool(goal.constraints.get("serial_mode")):
             return validate_story_segments(fallback, segment_count)
         raise
     reference_directive = format_reference_video_directive(

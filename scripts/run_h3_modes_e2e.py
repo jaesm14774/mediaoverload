@@ -124,8 +124,6 @@ def _qa_video(tools: ToolRegistry, *, video_path: str, run_dir: Path, duration: 
             "video_path": video_path,
             "target_duration": duration,
             "duration_tolerance": 0.9,
-            "expected_width": CANVAS["width"],
-            "expected_height": CANVAS["height"],
             "expected_fps": CANVAS["frame_rate"],
             "require_audio": True,
             "require_stereo_audio": True,

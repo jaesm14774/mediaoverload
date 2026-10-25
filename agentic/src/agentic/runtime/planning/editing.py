@@ -204,8 +204,6 @@ def build_image_sequence_edit(
             inputs={
                 "target_duration": qa_target_duration,
                 "duration_tolerance": 0.35,
-                "expected_width": compose_inputs["output_width"],
-                "expected_height": compose_inputs["output_height"],
                 "expected_fps": compose_inputs["fps"],
                 "require_audio": bool(goal.constraints.get("edit_require_audio", False))
                 or effective_profile != "baseline_concat",

@@ -11,7 +11,6 @@ from agentic.runtime.news_selection import (
     select_random_news_inspiration,
 )
 from agentic.tools.context_services import NewsContextService
-from scripts.run_longvideo_production_e2e import parse_args
 
 
 def _news(title, source, created_at, slug, keyword="薔琵颱風"):
@@ -30,11 +29,6 @@ def test_user_given_the_normal_news_entry_when_no_pool_limit_is_overridden_then_
 
     assert parameters["limit"].default == 5000
     assert parameters["lookback_days"].default == 7
-
-
-def test_user_given_the_longvideo_news_entry_when_no_limit_is_supplied_then_it_uses_the_same_candidate_default():
-    """User Given the production long-video CLI When its news limit is not overridden Then it requests the same latest 5000 candidates as normal news selection."""
-    assert parse_args([]).news_limit == 5000
 
 
 def test_user_given_a_rising_taiwan_event_with_distinct_action_angles_when_selecting_then_it_returns_a_traceable_hot_story():

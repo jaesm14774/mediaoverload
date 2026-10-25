@@ -39,11 +39,6 @@ GENERATION_STRATEGIES = {
     "text2image2image": GenerationStrategy(
         "text2img2img", (*_IMAGE, "refine_workflow_name")
     ),
-    "text2longvideo": GenerationStrategy(
-        "long_video",
-        (*_IMAGE, "video_workflow_name", "refine_workflow_name"),
-        news_grounded=True,
-    ),
     # Strategy selection dispatches this route to the serial application flow.
     "serial_video": GenerationStrategy("long_video", ()),
     "native_h3_story": GenerationStrategy(
@@ -128,8 +123,6 @@ def active_count_keys(
         and generation_type != "sticker_pack"
     ):
         active.add("video_count")
-    if generation_type == "text2longvideo":
-        active.add("segment_count")
     if generation_type == "sticker_pack":
         active.update({"sticker_expression_count", "images_per_prompt"})
     return active

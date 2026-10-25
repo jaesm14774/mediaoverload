@@ -332,26 +332,5 @@ class CreativeProfileTests(unittest.TestCase):
         self.assertEqual(canvas.depends_on, ["native-h3-render"])
         self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
 
-    def test_long_video_segments_and_qa_use_shared_canvas(self) -> None:
-        goal = GoalRequest(
-            prompt="Kirby crosses a layered storm landscape",
-            media_type="long_video",
-            duration_seconds=10,
-            style="painterly atmospheric adventure",
-            constraints={
-                "canvas_width": 512,
-                "canvas_height": 640,
-                "segment_count": 2,
-            },
-        )
-
-        plan = self.planner.build_plan(goal)
-        segment = next(node for node in plan.nodes if node.node_id == "segment-video-01")
-        qa = next(node for node in plan.nodes if node.node_id == "segment-qa-01")
-
-        self.assertEqual((segment.inputs["width"], segment.inputs["height"]), (512, 640))
-        self.assertEqual((qa.inputs["expected_width"], qa.inputs["expected_height"]), (512, 640))
-
-
 if __name__ == "__main__":
     unittest.main()

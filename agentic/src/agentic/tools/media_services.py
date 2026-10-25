@@ -128,19 +128,6 @@ class MediaServiceTools:
             errors.append(
                 f"duration {duration:.3f}s is below the {minimum_duration:.3f}s minimum"
             )
-        expected_width = payload.get("expected_width")
-        expected_height = payload.get("expected_height")
-        if expected_width not in {None, ""} or expected_height not in {None, ""}:
-            checks["expected_dimensions"] = (
-                expected_width in {None, ""} or int(probe.get("width") or 0) == int(expected_width)
-            ) and (
-                expected_height in {None, ""} or int(probe.get("height") or 0) == int(expected_height)
-            )
-            if not checks["expected_dimensions"]:
-                errors.append(
-                    f"dimensions {int(probe.get('width') or 0)}x{int(probe.get('height') or 0)} do not match "
-                    f"expected {expected_width}x{expected_height}"
-                )
         expected_fps = payload.get("expected_fps")
         if expected_fps not in {None, ""}:
             observed_fps = float(probe.get("frame_rate") or 0.0)

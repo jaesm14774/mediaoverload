@@ -102,7 +102,6 @@ class AgentPlanningSkills:
             segment_count,
             tone,
             reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
-            production_profile=str(context.node.inputs.get("production_profile") or ""),
         )
         validate_story_segments(segments, segment_count)
         serial_store = store_from_constraints(context.plan.goal.constraints)
@@ -1125,8 +1124,6 @@ class AgentMediaSkills:
             "video_path": video_path,
             "target_duration": context.node.inputs.get("target_duration"),
             "duration_tolerance": float(context.node.inputs.get("duration_tolerance", 0.6)),
-            "expected_width": context.node.inputs.get("expected_width"),
-            "expected_height": context.node.inputs.get("expected_height"),
             "expected_fps": context.node.inputs.get("expected_fps"),
             "require_audio": bool(context.node.inputs.get("require_audio", False)),
             "require_stereo_audio": bool(context.node.inputs.get("require_stereo_audio", False)),

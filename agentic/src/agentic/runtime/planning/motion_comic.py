@@ -70,8 +70,6 @@ def build_motion_comic(context: PlanningContext, goal: GoalRequest) -> Execution
                 goal,
                 {
                     "target_duration": config["duration_seconds"],
-                    "expected_width": config["width"],
-                    "expected_height": config["height"],
                     "expected_fps": config["fps"],
                     "frame_count": 3,
                     "columns": 3,

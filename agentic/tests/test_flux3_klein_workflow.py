@@ -54,9 +54,7 @@ def test_user_given_a_story_or_edit_route_when_workflows_are_selected_then_krea_
 
     routing = yaml.safe_load((REPO / "configs" / "routing.yaml").read_text(encoding="utf-8"))["routing"]
     stages = routing["workflow_stage_candidates"]
-    for route in ("text2image2image", "text2longvideo", "native_h3_fl2va_story", "native_h3_l2va_story"):
+    for route in ("text2image2image", "native_h3_fl2va_story", "native_h3_l2va_story"):
         assert stages[route]["refine_workflow_name"] == [WORKFLOW_NAME]
-    assert "krea2_turbo" in stages["text2longvideo"]["image_workflow_name"]
-    assert stages["text2longvideo"]["video_workflow_name"] == ["minimax_h3_i2va"]
     assert stages["native_h3_fl2va_story"]["video_workflow_name"] == ["minimax_h3_fl2va"]
     assert stages["native_h3_l2va_story"]["video_workflow_name"] == ["minimax_h3_l2va"]

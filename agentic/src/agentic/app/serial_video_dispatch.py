@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import random
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,54 @@ from agentic.app.character_config import (
     normalize_discord_review_timeout_seconds,
 )
 from agentic.app.character_requests import CharacterWorkflowRequest
+from agentic.app.serial_video_execution import run_serial_episodes
+
+
+_SERIAL_STORY_COMPLEXITIES = ("simple", "cinematic")
+
+
+def _resolve_story_complexity(
+    serial_settings: dict[str, Any],
+    override: str | None = None,
+) -> str:
+    configured = str(
+        override or serial_settings.get("story_complexity") or "simple"
+    ).strip().lower()
+    if configured in _SERIAL_STORY_COMPLEXITIES:
+        return configured
+    if configured != "random":
+        raise ValueError(
+            "generation.serial_video.story_complexity must be simple, cinematic, or random"
+        )
+
+    raw_weights = serial_settings.get("story_complexity_weights")
+    if not isinstance(raw_weights, dict) or set(raw_weights) != set(
+        _SERIAL_STORY_COMPLEXITIES
+    ):
+        raise ValueError(
+            "generation.serial_video.story_complexity_weights must define simple and cinematic"
+        )
+    weights: list[float] = []
+    for complexity in _SERIAL_STORY_COMPLEXITIES:
+        value = raw_weights[complexity]
+        if isinstance(value, bool):
+            raise ValueError("Story complexity weights must be finite non-negative numbers")
+        try:
+            weight = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "Story complexity weights must be finite non-negative numbers"
+            ) from exc
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError("Story complexity weights must be finite non-negative numbers")
+        weights.append(weight)
+    try:
+        total_weight = math.fsum(weights)
+    except OverflowError:
+        total_weight = math.inf
+    if not math.isfinite(total_weight) or total_weight <= 0:
+        raise ValueError("Story complexity weights must have a finite positive total")
+    return random.choices(_SERIAL_STORY_COMPLEXITIES, weights=weights, k=1)[0]
 
 
 def load_serial_video_settings(
@@ -67,11 +117,7 @@ def build_serial_video_argv(
     if duration < 1 or timeout < 1:
         raise ValueError("Serial video duration and Discord review timeout must be positive")
 
-    complexity = str(
-        story_complexity or serial.get("story_complexity") or "simple"
-    ).strip().lower()
-    if complexity not in {"simple", "cinematic"}:
-        raise ValueError("generation.serial_video.story_complexity must be simple or cinematic")
+    complexity = _resolve_story_complexity(serial, story_complexity)
 
     style = str(serial.get("style") or "cinematic surreal").strip()
     output_value = output_dir or serial.get("output_dir") or generation.get("output_dir") or "output"
@@ -154,11 +200,9 @@ def dispatch_serial_video_request(
         raise ValueError("generation.serial_video.episodes_per_run must be positive")
     if serial_runner is None:
         from agentic.app.main import main as serial_runner
-    episodes_started = 0
-    automation_decisions: list[dict[str, Any]] = []
-    for episode_index in range(episode_count):
-        run_result = serial_runner(
-            build_serial_video_argv(
+    return run_serial_episodes(
+        episode_count=episode_count,
+        arguments_for_episode=lambda episode_index: build_serial_video_argv(
                 config_path=request.config_path,
                 repo_root=request.repo_root,
                 episode_index=episode_index,
@@ -172,39 +216,6 @@ def dispatch_serial_video_request(
                 comfy_port=request.runtime.comfy_port,
                 comfy_root=request.runtime.comfy_root,
                 story_complexity=request.generation.story_complexity,
-            )
-        )
-        if isinstance(run_result, dict):
-            if run_result.get("workflow_stage") == "serial_onboarding_blocked":
-                return {
-                    "status": "blocked",
-                    "generation_type": "serial_video",
-                    "episodes_started": episodes_started,
-                    "onboarding_stage": str(run_result.get("onboarding_stage") or "unknown"),
-                    "series_id": str(run_result.get("series_id") or ""),
-                    "reason": str(run_result.get("reason") or "Discord review did not complete."),
-                }
-            mode = str(run_result.get("automation_mode") or "").strip()
-            if mode:
-                automation_decisions.append(
-                    {
-                        "mode": mode,
-                        "series_id": str(run_result.get("series_id") or ""),
-                        "episode_number": run_result.get("episode_number"),
-                    }
-                )
-            if str(run_result.get("status") or "").lower() in {"blocked", "failed"}:
-                return {
-                    "status": str(run_result["status"]).lower(),
-                    "generation_type": "serial_video",
-                    "episodes_started": episodes_started,
-                    "automation_decisions": automation_decisions,
-                    "reason": str(run_result.get("reason") or "Serial video execution did not complete."),
-                }
-        episodes_started += 1
-    return {
-        "status": "success",
-        "generation_type": "serial_video",
-        "episodes_started": episodes_started,
-        "automation_decisions": automation_decisions,
-    }
+        ),
+        serial_runner=serial_runner,
+    )

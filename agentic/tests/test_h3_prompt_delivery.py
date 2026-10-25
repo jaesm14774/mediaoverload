@@ -46,7 +46,7 @@ class CapturingVideoRenderer:
 def segment_context(prompt: object) -> SkillContext:
     goal = GoalRequest(
         prompt="A paper boat reaches the harbor.", media_type="long_video", style="watercolor",
-        constraints={"longvideo_production_profile": "text2longvideo"},
+        constraints={},
     )
     segment = {
         "segment_id": "segment-1", "visual": "Earlier planning text.",

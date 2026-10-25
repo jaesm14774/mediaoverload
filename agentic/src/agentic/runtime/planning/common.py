@@ -150,10 +150,6 @@ class PlanningContext:
                 MIN_VIDEO_DURATION_SECONDS, float(target_duration)
             )
         return {
-            "expected_width": goal.constraints.get("canvas_width")
-            or defaults.get("width"),
-            "expected_height": goal.constraints.get("canvas_height")
-            or defaults.get("height"),
             "expected_fps": fps,
             "target_duration": target_duration,
             "duration_tolerance": 0.6,
@@ -252,10 +248,6 @@ class PlanningContext:
             else MIN_VIDEO_DURATION_SECONDS
         )
         if cls.nvidia_vfx_postprocess_enabled(goal):
-            for key in ("expected_width", "expected_height"):
-                value = result.get(key)
-                if value not in {None, ""}:
-                    result[key] = int(value) * 2
             expected_fps = result.get("expected_fps")
             if expected_fps not in {None, ""}:
                 result["expected_fps"] = float(expected_fps) * 2
@@ -483,9 +475,6 @@ class PlanningContext:
             "analyze_audio": True,
             **(qa_inputs or {}),
         }
-        expected_width, expected_height = self.native_h3_canvas_dimensions(goal)
-        final_qa_inputs.setdefault("expected_width", expected_width)
-        final_qa_inputs.setdefault("expected_height", expected_height)
         if final_qa_inputs.get("expected_fps") in {None, ""}:
             final_qa_inputs["expected_fps"] = float(
                 goal.constraints.get("native_h3_frame_rate") or 24

@@ -79,13 +79,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         if use_last_frame
         else None
     )
-    experiment_seed = goal.constraints.get("native_h3_experiment_seed")
-    if experiment_seed is not None:
-        experiment_seed = int(experiment_seed)
-        if experiment_seed < 0 or experiment_seed > (2**64) - 3:
-            raise ValueError(
-                "native_h3_experiment_seed must allow three non-negative 64-bit seeds"
-            )
     if (
         keyframe_candidate_count > 1
         and not require_human_review
@@ -115,8 +108,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         "image_count": keyframe_candidate_count,
         "suffix": "native_h3_opening",
     }
-    if experiment_seed is not None:
-        opening_inputs["seed"] = experiment_seed
     nodes = [
         *([reference_node] if reference_node else []),
         ExecutionNode(
@@ -221,8 +212,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             "image_count": keyframe_candidate_count,
             "suffix": "native_h3_ending",
         }
-        if experiment_seed is not None:
-            ending_inputs["seed"] = experiment_seed + 1
         nodes.append(
             ExecutionNode(
                 node_id="native-ending-keyframe",
@@ -282,8 +271,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         "use_last_frame": use_last_frame,
         "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
     }
-    if experiment_seed is not None:
-        render_inputs["seed"] = experiment_seed + 2
     nodes.extend(
         [
             ExecutionNode(
@@ -315,8 +302,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
                     {
                         "target_duration": length
                         / float(goal.constraints.get("native_h3_frame_rate") or 24),
-                        "expected_width": width,
-                        "expected_height": height,
                         "expected_fps": float(
                             goal.constraints.get("native_h3_frame_rate") or 24
                         ),
@@ -352,7 +337,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             "use_last_frame": use_last_frame,
             "frame_pair_strategy": "krea2_to_flux3_reference_refine" if use_last_frame else "",
             "landing_frame_workflow": refine_manifest.name if refine_manifest else "",
-            "experiment_seed": experiment_seed,
             "backend": "comfyui",
         },
         **(
@@ -465,8 +449,6 @@ def build_native_h3_t2v_story(
             include_keyframe_source_check=False,
             qa_inputs={
                 "target_duration": render_duration,
-                "expected_width": width,
-                "expected_height": height,
                 "expected_fps": frame_rate,
             },
         ),
@@ -726,8 +708,6 @@ def build_native_h3_l2va_story(
                     {
                         "target_duration": length
                         / float(goal.constraints.get("native_h3_frame_rate") or 24),
-                        "expected_width": width,
-                        "expected_height": height,
                         "expected_fps": float(
                             goal.constraints.get("native_h3_frame_rate") or 24
                         ),
@@ -1065,8 +1045,6 @@ def build_native_h3_ref2va(
             include_keyframe_source_check=False,
             qa_inputs={
                 "target_duration": length / 24,
-                "expected_width": width,
-                "expected_height": height,
                 "expected_fps": 24,
                 "frame_count": 12,
                 "columns": 4,
