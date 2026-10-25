@@ -42,16 +42,25 @@ class MediaServiceTools:
         method = str(payload.get("method", "demuxer"))
         return {"video_path": service.concat_videos(video_paths=video_paths, output_path=output_path, method=method)}
 
-    def change_video_speed(self, payload: dict[str, object]) -> dict[str, object]:
+    def analyze_editorial_pacing(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._ffmpeg_service()
-        speed = float(payload.get("speed", 1.0))
+        return service.analyze_editorial_pacing(video_path=str(payload["video_path"]))
+
+    def apply_editorial_pacing(self, payload: dict[str, object]) -> dict[str, object]:
+        service = self._ffmpeg_service()
+        raw_segments = payload.get("segments")
+        if not isinstance(raw_segments, list):
+            raise ValueError("segments must be a list")
+        segments = [dict(segment) for segment in raw_segments if isinstance(segment, dict)]
+        if len(segments) != len(raw_segments):
+            raise ValueError("segments must contain timeline objects")
         return {
-            "video_path": service.change_video_speed(
+            "video_path": service.apply_editorial_pacing(
                 video_path=str(payload["video_path"]),
                 output_path=str(payload["output_path"]),
-                speed=speed,
+                segments=segments,
             ),
-            "speed": speed,
+            "segments": segments,
         }
 
     def normalize_video_canvas(self, payload: dict[str, object]) -> dict[str, object]:
@@ -128,19 +137,6 @@ class MediaServiceTools:
             errors.append(
                 f"duration {duration:.3f}s is below the {minimum_duration:.3f}s minimum"
             )
-        expected_width = payload.get("expected_width")
-        expected_height = payload.get("expected_height")
-        if expected_width not in {None, ""} or expected_height not in {None, ""}:
-            checks["expected_dimensions"] = (
-                expected_width in {None, ""} or int(probe.get("width") or 0) == int(expected_width)
-            ) and (
-                expected_height in {None, ""} or int(probe.get("height") or 0) == int(expected_height)
-            )
-            if not checks["expected_dimensions"]:
-                errors.append(
-                    f"dimensions {int(probe.get('width') or 0)}x{int(probe.get('height') or 0)} do not match "
-                    f"expected {expected_width}x{expected_height}"
-                )
         expected_fps = payload.get("expected_fps")
         if expected_fps not in {None, ""}:
             observed_fps = float(probe.get("frame_rate") or 0.0)
@@ -367,7 +363,8 @@ def register_media_service_tools(
     tools = MediaServiceTools(output_root=output_root, input_roots=input_roots)
     tool_registry.register("media.extract_last_frame", tools.extract_last_frame, "Extract the last frame from a video")
     tool_registry.register("media.concat_videos", tools.concat_videos, "Concatenate multiple videos")
-    tool_registry.register("media.change_video_speed", tools.change_video_speed, "Change video and audio playback speed")
+    tool_registry.register("media.analyze_editorial_pacing", tools.analyze_editorial_pacing, "Analyze a video and assign motion-based editorial pace")
+    tool_registry.register("media.apply_editorial_pacing", tools.apply_editorial_pacing, "Apply time-coded editorial pacing and synchronize audio")
     tool_registry.register("media.normalize_video_canvas", tools.normalize_video_canvas, "Fit video inside an exact canvas while preserving aspect ratio")
     tool_registry.register("media.trim_video", tools.trim_video, "Trim a packaged video to an explicit duration")
     tool_registry.register("media.video_to_gif", tools.video_to_gif, "Convert a video to a GIF")

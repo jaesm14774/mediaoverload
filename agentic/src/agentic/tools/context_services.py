@@ -703,6 +703,7 @@ class DiscordHumanReviewService:
         selection_limit: int | None = None,
         review_scope: str = "",
         allow_regenerate: bool = False,
+        regenerate_current_segment: bool = False,
         allow_series_lifecycle_choice: bool = False,
     ) -> HumanReviewDecision:
         filtered_media_paths = self._filter_media_paths(media_paths)
@@ -753,6 +754,7 @@ class DiscordHumanReviewService:
                 "selection_required": selection_required,
                 "selection_limit": normalized_selection_limit,
                 "allow_regenerate": allow_regenerate,
+                "regenerate_current_segment": regenerate_current_segment,
                 "allow_series_lifecycle_choice": allow_series_lifecycle_choice,
             }
             if filtered_document_paths:
@@ -940,6 +942,7 @@ async def _run_discord_file_feedback_process(
     selection_required: bool = False,
     selection_limit: int | None = None,
     allow_regenerate: bool = False,
+    regenerate_current_segment: bool = False,
     allow_series_lifecycle_choice: bool = False,
 ) -> tuple[str | None, str | None, str | None, list[int] | None, dict[str, Any]]:
     import discord
@@ -984,6 +987,7 @@ async def _run_discord_file_feedback_process(
                 selection_required=selection_required,
                 selection_limit=selection_limit,
                 allow_regenerate=allow_regenerate,
+                regenerate_current_segment=regenerate_current_segment,
                 allow_series_lifecycle_choice=allow_series_lifecycle_choice,
             )
             if context_text.strip() or documents:

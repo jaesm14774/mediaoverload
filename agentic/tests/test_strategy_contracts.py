@@ -35,7 +35,7 @@ def test_user_given_an_unknown_generation_strategy_when_resolving_its_media_type
 @pytest.mark.parametrize(
     ("generation_type", "expected_media_type"),
     [
-        ("text2longvideo", "long_video"),
+        ("serial_video", "long_video"),
         ("native_h3_story", "native_h3_story"),
         ("text2image2video", "text2img2video"),
     ],

@@ -153,6 +153,65 @@ def test_user_given_video_clips_when_concatenating_then_a_playable_copy_or_seque
         assert source.read_bytes() == output.read_bytes()
 
 
+def test_user_given_resumed_segment_reviews_repeat_a_video_path_when_concatenating_then_each_segment_is_included_once(
+    source_factory,
+    tmp_path,
+):
+    """User Given a serial concat whose resumed review repeats a segment video path When concatenating the planned video nodes Then each accepted segment is included once and in order."""
+    from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
+    from agentic.runtime.registry import ToolRegistry
+    from agentic.skills.agent_primitives import AgentMediaSkills
+    from agentic.tools.media_services import register_media_service_tools
+
+    source = source_factory(duration=2)
+    node = ExecutionNode(
+        node_id="concat-final-video",
+        skill_name="media.video.concat",
+        inputs={"video_node_ids": ["segment-video-01", "segment-video-02"], "method": "demuxer"},
+        depends_on=[
+            "segment-video-01",
+            "segment-video-02",
+            "segment-review-01",
+            "segment-review-02",
+        ],
+    )
+    plan = ExecutionPlan(
+        goal=GoalRequest(
+            prompt="A serial story",
+            media_type="long_video",
+            duration_seconds=4,
+            style="animation",
+        ),
+        workflow_name="longvideo_real_v2",
+        nodes=[node],
+    )
+    state = RunState(
+        goal={},
+        metadata={},
+        node_outputs={
+            "segment-video-01": {"video_path": str(source), "saved_files": [str(source)]},
+            "segment-video-02": {"video_path": str(source), "saved_files": [str(source)]},
+            "segment-review-01": {
+                "human_decision": "accepted",
+                "video_path": str(source),
+                "media_paths": [str(source)],
+                "selected_assets": [str(source)],
+            },
+            "segment-review-02": {"media_paths": [str(source)], "selected_assets": [str(source)]},
+        },
+    )
+    tools = ToolRegistry()
+    register_media_service_tools(tools, tmp_path / "media-output")
+
+    result = AgentMediaSkills(tools, tmp_path / "media-output").concat_videos(
+        SkillContext(plan=plan, node=node, state=state)
+    )
+
+    media = FFmpegAdapter().probe_media(result.outputs["video_path"])
+    assert media["has_video"] and media["has_audio"]
+    assert media["video_duration"] == pytest.approx(4, abs=1 / 24)
+
+
 def test_user_given_a_changing_video_when_creating_a_preview_then_the_gif_is_decodable_and_animated(
     source_factory,
     tmp_path,
@@ -169,26 +228,6 @@ def test_user_given_a_changing_video_when_creating_a_preview_then_the_gif_is_dec
         first = preview.convert("RGB").tobytes()
         preview.seek(preview.n_frames - 1)
         assert first != preview.convert("RGB").tobytes()
-
-
-@pytest.mark.parametrize("speed,audio", [(0.5, True), (2.0, True), (2.0, False)])
-def test_user_given_a_video_when_changing_playback_speed_then_duration_and_optional_audio_remain_synchronized(
-    source_factory,
-    tmp_path,
-    speed,
-    audio,
-):
-    """User Given a video with or without audio When changing playback speed Then its duration changes accordingly and any audio stays synchronized."""
-    source = source_factory(audio=audio)
-    output = tmp_path / "speed.mp4"
-    adapter = FFmpegAdapter()
-    adapter.change_video_speed(str(source), str(output), speed)
-    media = adapter.probe_media(str(output))
-    assert abs(media["duration"] - 2 / speed) < 0.2
-    assert media["frame_rate"] == pytest.approx(24)
-    assert media["has_audio"] is audio
-    if audio:
-        assert abs(media["audio_duration"] - media["video_duration"]) < 0.2
 
 
 def test_user_given_a_landscape_video_when_fitting_a_canvas_then_the_picture_is_uncropped_and_audio_is_preserved(
@@ -232,33 +271,276 @@ def test_user_given_a_landscape_video_when_fitting_a_canvas_then_the_picture_is_
         assert abs((bounds[2] - bounds[0]) / (bounds[3] - bounds[1]) - 160 / 96) < 0.05
 
 
-def test_user_given_a_speed_adjusted_aac_video_when_normalizing_canvas_then_streams_stay_aligned(
+@pytest.mark.parametrize("audio", [True, False])
+def test_user_given_action_setup_and_payoff_segments_when_applying_editorial_pacing_then_only_the_action_is_compressed_and_optional_audio_stays_aligned(
+    source_factory,
+    tmp_path,
+    audio,
+):
+    """User Given three equal story segments with optional audio When action, setup, and payoff receive 1.5x, 1.0x, and 0.8x Then the assembled video follows those durations and any audio stays aligned."""
+    source = source_factory(audio=audio, duration=6)
+    output = tmp_path / "editorial.mp4"
+
+    FFmpegAdapter().apply_editorial_pacing(
+        str(source),
+        str(output),
+        segments=[
+            {"start_seconds": 0, "end_seconds": 2, "speed_factor": 1.5},
+            {"start_seconds": 2, "end_seconds": 4, "speed_factor": 1.0},
+            {"start_seconds": 4, "end_seconds": 6, "speed_factor": 0.8},
+        ],
+    )
+
+    media = FFmpegAdapter().probe_media(str(output))
+    expected_duration = 2 / 1.5 + 2 / 1.0 + 2 / 0.8
+    assert media["has_video"]
+    assert media["has_audio"] is audio
+    assert media["frame_rate"] == pytest.approx(24)
+    assert media["video_duration"] == pytest.approx(expected_duration, abs=1 / 24)
+    if audio:
+        assert abs(media["audio_duration"] - media["video_duration"]) <= 1 / 24
+
+
+def test_user_given_a_three_segment_aac_source_with_32ms_input_drift_when_applying_editorial_pacing_then_output_drift_stays_within_32ms(
     source_factory,
     tmp_path,
 ):
-    """User Given a speed-adjusted AAC video with packet-boundary timing When normalizing its canvas Then normalization preserves the video duration and audio stays within one source frame."""
-    source = source_factory(duration=15.083333)
-    speed_path = tmp_path / "speed.mp4"
-    canvas_path = tmp_path / "canvas.mp4"
+    """User Given three concatenated 24 FPS AAC segments with 32 ms input drift When applying editorial pacing Then output audio and video durations differ by no more than 32 ms."""
+    segment = source_factory(duration=10)
     adapter = FFmpegAdapter()
-    adapter.change_video_speed(str(source), str(speed_path), speed=2)
-    speed_media = adapter.probe_media(str(speed_path))
+    source = tmp_path / "three-segment-source.mp4"
+    adapter.concat_videos([str(segment)] * 3, str(source))
+    source_media = adapter.probe_media(str(source))
+    assert abs(source_media["audio_duration"] - source_media["video_duration"]) == pytest.approx(
+        0.032, abs=1e-6
+    )
+    output = tmp_path / "editorial-aligned.mp4"
 
-    adapter.normalize_video_canvas(
-        str(speed_path),
-        str(canvas_path),
-        target_width=640,
-        target_height=360,
+    adapter.apply_editorial_pacing(
+        str(source),
+        str(output),
+        segments=[
+            {"start_seconds": 0, "end_seconds": 10, "speed_factor": 1.0},
+            {"start_seconds": 10, "end_seconds": 20, "speed_factor": 1.5},
+            {"start_seconds": 20, "end_seconds": 30, "speed_factor": 0.8},
+        ],
     )
-    canvas_media = adapter.probe_media(str(canvas_path))
 
-    assert canvas_media["audio_codec"] == speed_media["audio_codec"] == "aac"
-    assert canvas_media["video_duration"] == pytest.approx(
-        speed_media["video_duration"], abs=0.001
+    media = adapter.probe_media(str(output))
+    assert media["has_video"] and media["has_audio"]
+    assert abs(media["audio_duration"] - media["video_duration"]) <= 0.032
+
+
+@pytest.mark.parametrize(
+    "segments",
+    [
+        [],
+        [{"start_seconds": 0, "end_seconds": 1, "speed_factor": 0}],
+        [{"start_seconds": 0, "end_seconds": 1, "speed_factor": 2}],
+        [{"start_seconds": 0, "end_seconds": 1, "speed_factor": float("nan")}],
+        [
+            {"start_seconds": 0, "end_seconds": 1, "speed_factor": 1},
+            {"start_seconds": 1.5, "end_seconds": 2, "speed_factor": 1},
+        ],
+        [{"start_seconds": 1, "end_seconds": 2, "speed_factor": 1}],
+    ],
+)
+def test_user_given_an_invalid_editorial_timeline_when_rendering_then_the_request_is_rejected(
+    tmp_path,
+    segments,
+):
+    """User Given an incomplete, overlapping, or invalid editorial timeline When rendering Then FFmpeg rejects it before reading the source video."""
+    with pytest.raises(ValueError, match="segments"):
+        FFmpegAdapter().apply_editorial_pacing(
+            "unused.mp4", str(tmp_path / "invalid.mp4"), segments
+        )
+
+
+def test_user_given_quiet_action_and_quiet_beats_when_analyzing_a_video_then_each_beat_receives_a_motion_based_rate(
+    tmp_path,
+):
+    """User Given a video with a calm opening, a moving action, and a calm ending When editorial pacing is analyzed Then action and quiet intervals receive different rates on a complete timeline."""
+    source = tmp_path / "motion-beats.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=black:size=160x96:rate=24:duration=2",
+            "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=24:duration=2",
+            "-f", "lavfi", "-i", "color=c=black:size=160x96:rate=24:duration=2",
+            "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]",
+            "-map", "[v]",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
     )
-    assert abs(canvas_media["audio_duration"] - canvas_media["video_duration"]) <= (
-        1 / canvas_media["frame_rate"]
+
+    plan = FFmpegAdapter().analyze_editorial_pacing(str(source))
+    segments = plan["segments"]
+
+    assert segments[0]["start_seconds"] == pytest.approx(0)
+    assert segments[-1]["end_seconds"] == pytest.approx(6, abs=1 / 24)
+    assert all(
+        left["end_seconds"] == pytest.approx(right["start_seconds"], abs=1 / 24)
+        for left, right in zip(segments, segments[1:])
     )
+    assert any(
+        segment["speed_factor"] > 1
+        and segment["start_seconds"] < 4
+        and segment["end_seconds"] > 2
+        for segment in segments
+    )
+    assert any(
+        segment["speed_factor"] < 1
+        and (segment["end_seconds"] <= 2 or segment["start_seconds"] >= 4)
+        for segment in segments
+    )
+
+
+def test_user_given_a_static_video_when_analyzing_editorial_pacing_then_the_original_timing_is_preserved(
+    tmp_path,
+):
+    """User Given a visually static video When editorial pacing is analyzed Then every interval stays at normal speed."""
+    source = tmp_path / "static.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=black:size=160x96:rate=24:duration=4",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    plan = FFmpegAdapter().analyze_editorial_pacing(str(source))
+
+    assert plan["segments"]
+    assert {segment["speed_factor"] for segment in plan["segments"]} == {1.0}
+
+
+def test_user_given_a_uniform_pacing_timeline_when_rendering_then_the_source_is_preserved_without_reencoding(
+    source_factory,
+    tmp_path,
+):
+    """User Given a video whose analyzed rates are all normal When editorial pacing renders it Then its source bytes are preserved."""
+    source = source_factory(duration=2)
+    output = tmp_path / "unchanged.mp4"
+
+    FFmpegAdapter().apply_editorial_pacing(
+        str(source),
+        str(output),
+        segments=[{"start_seconds": 0, "end_seconds": 2, "speed_factor": 1.0}],
+    )
+
+    assert output.read_bytes() == source.read_bytes()
+
+
+def test_user_given_a_serial_final_video_when_the_editorial_stage_runs_then_it_analyzes_and_renders_the_same_visual_timeline(
+    source_factory,
+    tmp_path,
+):
+    """User Given a serial episode's assembled video When the shared editorial stage runs Then real FFmpeg analysis determines and renders its per-interval pacing."""
+    from agentic.runtime.contracts import (
+        ExecutionNode,
+        ExecutionPlan,
+        GoalRequest,
+        RunState,
+        SkillContext,
+    )
+    from agentic.runtime.registry import ToolRegistry
+    from agentic.skills.agent_primitives import AgentMediaSkills
+    from agentic.tools.media_services import register_media_service_tools
+
+    source = source_factory(audio=False, changing=True)
+    node = ExecutionNode(
+        node_id="video-editorial-pacing",
+        skill_name="media.video.editorial_pacing",
+        inputs={"video_node": "concat-final-video"},
+        depends_on=["concat-final-video"],
+    )
+    plan = ExecutionPlan(
+        goal=GoalRequest(
+            prompt="A serial story with a moving action",
+            media_type="long_video",
+            duration_seconds=2,
+            style="animation",
+            constraints={"serial_mode": True},
+        ),
+        workflow_name="longvideo_real_v2",
+        nodes=[node],
+    )
+    state = RunState(
+        goal={},
+        metadata={},
+        node_outputs={
+            "concat-final-video": {"video_path": str(source)},
+        },
+    )
+    tools = ToolRegistry()
+    register_media_service_tools(tools, tmp_path / "media-output")
+
+    result = AgentMediaSkills(tools, tmp_path / "media-output").apply_editorial_pacing(
+        SkillContext(plan=plan, node=node, state=state)
+    )
+
+    output = Path(result.outputs["video_path"])
+    media = FFmpegAdapter().probe_media(str(output))
+    assert result.status == "success"
+    assert result.outputs["pacing_method"] == "relative_motion"
+    assert result.outputs["final_video_path"] == str(output)
+    assert result.metrics["segment_count"] >= 1
+    assert media["has_video"]
+    assert output != source
+
+
+def test_user_given_a_variable_paced_video_when_technical_qa_runs_then_it_checks_a_minimum_instead_of_an_exact_duration(
+    source_factory,
+    tmp_path,
+):
+    """User Given a retimed video When technical QA runs Then it receives and checks the minimum duration without requiring an exact target."""
+    from agentic.runtime.contracts import (
+        ExecutionNode,
+        ExecutionPlan,
+        GoalRequest,
+        RunState,
+        SkillContext,
+    )
+    from agentic.runtime.registry import ToolRegistry
+    from agentic.skills.agent_primitives import AgentMediaSkills
+    from agentic.tools.media_services import register_media_service_tools
+
+    source = source_factory(audio=False, duration=2)
+    node = ExecutionNode(
+        node_id="video-qa",
+        skill_name="media.video.inspect",
+        inputs={
+            "video_path": str(source),
+            "minimum_duration": 3.0,
+            "expected_fps": 24,
+        },
+    )
+    plan = ExecutionPlan(
+        goal=GoalRequest(
+            prompt="A two-second action clip",
+            media_type="text2video",
+            duration_seconds=5,
+            style="animation",
+        ),
+        workflow_name="text2video_v1",
+        nodes=[node],
+    )
+    tools = ToolRegistry()
+    register_media_service_tools(tools, tmp_path / "media-output")
+
+    result = AgentMediaSkills(tools, tmp_path / "media-output").qa_video(
+        SkillContext(plan=plan, node=node, state=RunState(goal={}, metadata={}))
+    )
+
+    assert result.status == "success"
+    assert result.outputs["target_duration"] is None
+    assert result.outputs["checks"]["minimum_duration"] is False
 
 
 def test_user_given_a_video_when_preparing_a_platform_canvas_then_the_delivered_streams_match_the_platform_contract(

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mediaoverload-agentic"
-version = "0.4.2"
+version = "0.5.0"
 description = "Media generation, review and publishing runtime for MediaOverload."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,7 @@ dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.8"]
 [project.scripts]
 agentic = "agentic.app.main:main"
 agentic-edit = "agentic.tools.editing_cli:main"
+threads-token = "agentic.tools.threads_oauth:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

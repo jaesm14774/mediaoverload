@@ -48,8 +48,33 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(
             skill_names,
-            ["media.audio.narrate", "media.video.merge_audio", "media.video.gif_preview"],
+            [
+                "media.audio.narrate",
+                "media.video.merge_audio",
+                "media.video.editorial_pacing",
+                "media.video.gif_preview",
+            ],
         )
+
+    def test_user_given_an_image_to_video_request_when_planned_then_its_clip_uses_the_shared_pacing_stage(self) -> None:
+        """User Given an image-to-video request When its workflow is planned Then the generated clip is analyzed by the shared automatic pacing stage."""
+        goal = self.planner.create_goal(
+            prompt="A paper boat crosses a quiet stream",
+            media_type="image_to_video",
+            duration_seconds=10,
+            style="storybook animation",
+            constraints={"input_image_path": "C:\\boat.png"},
+        )
+
+        plan = self.planner.build_plan(goal)
+        by_id = {node.node_id: node for node in plan.nodes}
+
+        self.assertEqual(
+            by_id["i2v-editorial-pacing"].skill_name,
+            "media.video.editorial_pacing",
+        )
+        self.assertEqual(by_id["i2v-editorial-pacing"].depends_on, ["i2v-render"])
+        self.assertEqual(plan.metadata["editorial_pacing"], "automatic")
 
     def test_image_sequence_edit_is_a_first_class_agent_plan(self) -> None:
         goal = self.planner.create_goal(
@@ -129,10 +154,9 @@ class AgenticPlannerTests(unittest.TestCase):
         qa = plan.nodes[1]
 
         self.assertEqual(compose.inputs["edit_plan"]["output_width"], 720)
-        self.assertEqual(qa.inputs["expected_width"], 720)
-        self.assertEqual(qa.inputs["expected_height"], 1280)
         self.assertEqual(qa.inputs["expected_fps"], 30.0)
-        self.assertEqual(qa.inputs["target_duration"], 4.0)
+        self.assertNotIn("target_duration", qa.inputs)
+        self.assertEqual(qa.inputs["minimum_duration"], 4.0)
         self.assertTrue(qa.inputs["require_audio"])
         self.assertTrue(qa.inputs["require_stereo_audio"])
 
@@ -193,7 +217,9 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(compose.inputs["drama_plan"]["plan_id"], "episode-001")
         self.assertEqual(compose.inputs["output_width"], 576)
         self.assertEqual(compose.inputs["output_height"], 1024)
-        self.assertEqual(plan.nodes[1].inputs["target_duration"], 4.0)
+        qa = next(node for node in plan.nodes if node.node_id == "edit-video-qa")
+        self.assertNotIn("target_duration", qa.inputs)
+        self.assertEqual(qa.inputs["minimum_duration"], 4.0)
 
     def test_text2video_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
@@ -359,37 +385,6 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(refine.inputs["workflow_name"], "flux3_image_klein_img2img")
         self.assertIn("render-image", refine.depends_on)
 
-    def test_user_given_a_long_story_with_transition_beats_when_planned_then_flux_edits_each_landing_from_its_krea_or_rendered_tail_anchor(self) -> None:
-        """User Given a multi-segment H3 story with distinct landing beats When transition segments are planned Then FLUX uses the current first anchor and segment prompt while later starts continue from rendered H3 tails."""
-        goal = self.planner.create_goal(
-            prompt="Kirby carries a closed seed pod through a storm, opens it, and plants the glowing flower in a clearing.",
-            media_type="long_video",
-            duration_seconds=60,
-            style="hand-drawn paper storybook animation",
-            constraints={
-                "longvideo_production_profile": "text2longvideo",
-                "segment_count": 6,
-                "longvideo_workflow_names": ["minimax_h3_i2va", "minimax_h3_fl2va"],
-                "image_workflow_name": "krea2_turbo",
-                "refine_workflow_name": "flux3_image_klein_img2img",
-                "require_human_review": False,
-                "pre_video_review_enabled": False,
-            },
-        )
-
-        plan = self.planner.build_plan(goal)
-        nodes = {node.node_id: node for node in plan.nodes}
-        landing = nodes["segment-anchor-last-candidates-03"]
-
-        self.assertEqual(landing.inputs["workflow_name"], "krea2_turbo")
-        self.assertEqual(landing.inputs["identity_refine_workflow_name"], "flux3_image_klein_img2img")
-        self.assertTrue(landing.inputs["use_prior_frame"])
-        self.assertIn("segment-tail-02", landing.depends_on)
-        self.assertIn("segment-prompt-03", landing.depends_on)
-        self.assertEqual(landing.tool_name, "comfy.workflow.image_to_image")
-        self.assertEqual(nodes["segment-video-04"].inputs["anchor_nodes"]["first"], "segment-tail-03")
-        self.assertEqual(plan.metadata["keyframe_workflow"], "krea2_turbo")
-        self.assertEqual(plan.metadata["landing_frame_workflow"], "flux3_image_klein_img2img")
 
     def test_stage_probe_image_plan_keeps_candidates_and_auto_selects_one(self) -> None:
         goal = self.planner.create_goal(
@@ -494,7 +489,17 @@ class AgenticPlannerTests(unittest.TestCase):
                 "media.image.animate",
                 "media.video.gif_preview",
                 "agent.sticker.animate.package",
+                "media.video.editorial_pacing",
             ],
+        )
+        by_id = {node.node_id: node for node in plan.nodes}
+        self.assertEqual(
+            by_id["sticker-editorial-pacing"].depends_on,
+            ["animate-sticker"],
+        )
+        self.assertEqual(
+            by_id["gif-preview"].depends_on,
+            ["sticker-editorial-pacing"],
         )
 
     def test_animated_sticker_review_loop_adds_retry_branch(self) -> None:
@@ -515,97 +520,43 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("review-select", node_ids)
         self.assertIn("review-refine-prompt", node_ids)
         self.assertIn("review-animate-sticker", node_ids)
+        self.assertIn("review-sticker-editorial-pacing", node_ids)
         self.assertIn("review-final-select", node_ids)
+        self.assertEqual(
+            next(node for node in plan.nodes if node.node_id == "review-gif-preview").depends_on,
+            ["review-sticker-editorial-pacing"],
+        )
         self.assertTrue(plan.metadata["review_loop_enabled"])
 
-    def test_long_video_uses_registered_agentic_skills(self) -> None:
+    def test_user_given_a_game_sprite_request_when_its_motion_video_is_planned_then_it_uses_automatic_pacing(self) -> None:
+        """User Given a game-sprite request When its motion video is planned Then that video uses the shared automatic pacing stage before sprite extraction."""
         goal = self.planner.create_goal(
-            prompt="kirby explores a rainy cyberpunk alley",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={"use_tts": True},
-        )
-        plan = self.planner.build_plan(goal)
-        skill_names = {node.skill_name for node in plan.nodes}
-
-        self.assertIn("agent.goal.expand", skill_names)
-        self.assertIn("agent.story.segment", skill_names)
-        self.assertIn("agent.segment.prepare", skill_names)
-        self.assertIn("media.image.generate_keyframe", skill_names)
-        self.assertIn("longvideo.render_segment_video", skill_names)
-        self.assertIn("media.video.extract_last_frame", skill_names)
-        self.assertIn("media.audio.narrate", skill_names)
-        self.assertIn("media.video.concat", skill_names)
-        self.assertIn("media.audio.concat", skill_names)
-        self.assertIn("media.video.merge_audio", skill_names)
-        self.assertIn("media.video.gif_preview", skill_names)
-
-    def test_long_video_can_opt_into_timeline_editing_without_tts(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="kirby explores a rainy cyberpunk alley",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "use_tts": False,
-                "longvideo_edit_profile": "xfade_clean_v1",
-            },
+            prompt="A tiny fox hops over a puddle",
+            media_type="game_sprite",
+            duration_seconds=10,
+            style="pixel art",
+            constraints={},
         )
 
         plan = self.planner.build_plan(goal)
-        editor = next(node for node in plan.nodes if node.node_id == "edit-segment-timeline")
+        by_id = {node.node_id: node for node in plan.nodes}
 
-        self.assertEqual(editor.skill_name, "media.video.compose_timeline")
-        self.assertEqual(editor.inputs["profile"], "xfade_clean_v1")
-        self.assertNotIn("media.video.concat", {node.skill_name for node in plan.nodes})
-        self.assertEqual(plan.metadata["longvideo_edit_profile"], "xfade_clean_v1")
-
-    def test_long_video_review_retry_reuses_timeline_editor(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="kirby explores a rainy cyberpunk alley",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "use_tts": False,
-                "longvideo_edit_profile": "xfade_clean_v1",
-                "enable_review_loop": True,
-            },
+        self.assertEqual(
+            by_id["sprite-motion-editorial-pacing"].depends_on,
+            ["sprite-motion-video"],
+        )
+        self.assertIn(
+            "sprite-motion-editorial-pacing",
+            by_id["sprite-motion-nvidia-vfx"].depends_on,
+        )
+        self.assertEqual(
+            by_id["sprite-package"].inputs["video_node"],
+            "sprite-motion-nvidia-vfx",
         )
 
-        plan = self.planner.build_plan(goal)
-        retry_editor = next(node for node in plan.nodes if node.node_id == "review-edit-segment-timeline")
 
-        self.assertEqual(retry_editor.skill_name, "media.video.compose_timeline")
-        self.assertNotIn("review-concat-final-video", [node.node_id for node in plan.nodes])
 
-    def test_long_video_review_loop_adds_regeneration_path(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="kirby explores a rainy cyberpunk alley",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "use_tts": False,
-                "enable_review_loop": True,
-                "video_speed": {"enabled": True, "factor": 2},
-                "review_notes": "second pass should push stronger action and cleaner framing",
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        node_ids = [node.node_id for node in plan.nodes]
 
-        self.assertIn("review-select", node_ids)
-        self.assertIn("review-refine-prompt", node_ids)
-        self.assertIn("review-segment-prompt-01", node_ids)
-        self.assertIn("review-concat-final-video", node_ids)
-        retry_speed = next(node for node in plan.nodes if node.node_id == "review-video-speed")
-        retry_trim = next(node for node in plan.nodes if node.node_id == "review-video-trim")
-        self.assertEqual(retry_speed.depends_on, ["review-concat-final-video"])
-        self.assertEqual(retry_trim.depends_on, ["review-video-speed"])
-        self.assertIn("review-final-select", node_ids)
-        self.assertIn("persist-longvideo-summary", node_ids)
 
     def test_carousel_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
@@ -727,24 +678,97 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(goal.constraints["duration_override_seconds"], 10)
         self.assertGreaterEqual(animate.inputs["length"] / 24, 10)
 
-    def test_user_given_default_i2v_when_speed_is_2x_then_source_is_10_seconds_and_final_target_is_5(self) -> None:
-        """User Given the default I2V route When speed is 2x Then it renders 10s before speed and targets 5s after."""
+    def test_user_given_an_i2v_video_when_its_plan_is_built_then_the_shared_editorial_stage_replaces_fixed_speed(self) -> None:
+        """User Given an I2V request When its plan is built Then the final video passes through automatic editorial pacing without a character speed setting."""
         goal = self.planner.create_goal(
             prompt="Kirby deflects one runaway toy scooter with a broom",
             media_type="text2img2video",
             duration_seconds=10,
             style="anime key visual",
-            constraints={"video_speed": {"enabled": True, "factor": 2}},
+            constraints={},
         )
 
         plan = self.planner.build_plan(goal)
 
-        animate = next(node for node in plan.nodes if node.node_id == "animate-video")
-        speed = next(node for node in plan.nodes if node.node_id == "video-speed")
+        by_id = {node.node_id: node for node in plan.nodes}
         qa = next(node for node in plan.nodes if node.node_id == "video-qa")
-        self.assertEqual(animate.inputs["length"], 240)
-        self.assertEqual(speed.inputs["speed"], 2.0)
-        self.assertEqual(qa.inputs["target_duration"], 5.0)
+        pacing = by_id["video-editorial-pacing"]
+        self.assertEqual(pacing.skill_name, "media.video.editorial_pacing")
+        self.assertIn("video-canvas", pacing.depends_on)
+        self.assertNotIn("video-speed", by_id)
+        self.assertNotIn("video_speed", plan.metadata)
+        self.assertNotIn("video_speed", goal.constraints)
+        self.assertNotIn("target_duration", qa.inputs)
+        self.assertEqual(qa.inputs["minimum_duration"], 10.0)
+        self.assertIn("video-editorial-pacing", by_id["video-nvidia-vfx"].depends_on)
+        self.assertIn("video-nvidia-vfx", qa.depends_on)
+
+    def test_user_given_a_serial_episode_when_its_final_edit_is_planned_then_the_same_visual_analyzer_sets_its_pacing(self) -> None:
+        """User Given a serial episode When its final edit is planned Then it uses the same frame-analysis pacing stage as every other video."""
+        with TemporaryDirectory() as temporary:
+            identity = Path(temporary) / "identity.png"
+            identity.write_bytes(b"identity")
+            goal = GoalRequest(
+                prompt="A hero carries a moon seed to a quiet garden",
+                media_type="long_video",
+                duration_seconds=30,
+                style="cinematic animation",
+                constraints={
+                    "serial_mode": True,
+                    "series_id": "garden",
+                    "character": "Hero",
+                    "reference_manifest": [
+                        {"path": str(identity), "type": "image", "role": "subject"}
+                    ],
+                    "longvideo_review_policy": "every_segment",
+                    "require_human_review": True,
+                    "segment_count": 3,
+                },
+            )
+
+            plan = self.planner.build_plan(goal)
+
+            by_id = {node.node_id: node for node in plan.nodes}
+            self.assertEqual(plan.metadata["editorial_pacing"], "automatic")
+            self.assertIn("video-editorial-pacing", by_id)
+            self.assertEqual(
+                by_id["video-editorial-pacing"].depends_on,
+                ["concat-final-video"],
+            )
+            self.assertNotIn("video-speed", by_id)
+            self.assertNotIn("video-trim", by_id)
+            self.assertNotIn("target_duration", by_id["longvideo-video-qa"].inputs)
+            concat = by_id["concat-final-video"]
+            review_nodes = {
+                node_id for node_id in by_id if node_id.startswith("segment-review-")
+            }
+            planned_video_nodes = [by_id[node_id].depends_on[0] for node_id in sorted(review_nodes)]
+            self.assertEqual(concat.inputs["video_node_ids"], planned_video_nodes)
+            self.assertTrue(
+                review_nodes.issubset(concat.depends_on)
+            )
+
+    def test_user_given_a_native_h3_video_when_its_plan_is_built_then_it_uses_the_shared_editorial_stage(self) -> None:
+        """User Given a Native H3 story When its plan is built Then the shared editorial stage runs before final QA and review."""
+        goal = self.planner.create_goal(
+            prompt="Kirby blocks a falling lantern and catches it safely",
+            media_type="native_h3_story",
+            duration_seconds=15,
+            style="anime key visual",
+            constraints={"native_h3_storyboard_path": "configs/storyboards/native_h3_15s.yaml"},
+        )
+
+        plan = self.planner.build_plan(goal)
+        by_id = {node.node_id: node for node in plan.nodes}
+
+        self.assertIn("native-h3-editorial-pacing", by_id)
+        self.assertEqual(
+            by_id["native-h3-editorial-pacing"].skill_name,
+            "media.video.editorial_pacing",
+        )
+        self.assertNotIn("native-h3-speed", by_id)
+        self.assertIn("native-h3-editorial-pacing", by_id["native-h3-nvidia-vfx"].depends_on)
+        self.assertEqual(by_id["native-h3-qa"].depends_on, ["native-h3-nvidia-vfx"])
 
     def test_native_h3_story_prompt_declares_first_frame_i2v(self) -> None:
         goal = self.planner.create_goal(
@@ -863,52 +887,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(animate.inputs["workflow_name"], "minimax_h3_t2va")
         self.assertNotIn("stage-review-select", animate.depends_on)
 
-    def test_pre_video_gate_only_expands_first_long_video_segment(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="Kirby crosses a stormy meadow",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "pre_video_review_enabled": True,
-                "pre_video_candidate_count": 6,
-                "pre_video_review_require_human": True,
-                "segment_count": 2,
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        first_frame = next(node for node in plan.nodes if node.node_id == "segment-frame-01")
-        review = next(node for node in plan.nodes if node.node_id == "stage-review-01")
-        first_video = next(node for node in plan.nodes if node.node_id == "segment-video-01")
-        second_video = next(node for node in plan.nodes if node.node_id == "segment-video-02")
 
-        self.assertEqual(first_frame.inputs["image_count"], 6)
-        self.assertEqual(review.inputs["limit"], 1)
-        self.assertTrue(review.inputs["require_human_review"])
-        self.assertIn("stage-review-01", first_video.depends_on)
-        self.assertEqual(second_video.inputs["conditioning_plan"]["anchors"]["first"], "segment-tail-01")
-        self.assertIn("segment-tail-01", second_video.depends_on)
-
-    def test_long_video_stage_review_gates_first_segment_video(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="kirby explores a rainy cyberpunk alley",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "enable_stage_review": True,
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        stage_review = next(node for node in plan.nodes if node.node_id == "stage-review-01")
-        first_segment_video = next(node for node in plan.nodes if node.node_id == "segment-video-01")
-
-        self.assertEqual(stage_review.depends_on, ["segment-frame-01"])
-        self.assertEqual(stage_review.inputs["review_scope"], "first_frame")
-        self.assertEqual(stage_review.inputs["review_phase"], "opening_frame")
-        self.assertEqual(stage_review.inputs["limit"], 1)
-        self.assertTrue(stage_review.inputs["review_all_candidates"])
-        self.assertIn("stage-review-01", first_segment_video.depends_on)
 
     def test_text2img2video_plan_respects_stage_workflows_and_image_count(self) -> None:
         goal = self.planner.create_goal(
@@ -1004,236 +983,14 @@ class AgenticPlannerTests(unittest.TestCase):
         render_node = next(node for node in plan.nodes if node.node_id == "render-image")
         self.assertIn("idea-brief", render_node.depends_on)
 
-    def test_user_given_more_short_segments_than_fit_the_minimum_when_planned_then_segments_remain_valid_and_review_limit_is_kept(self) -> None:
-        """User Given a twenty-second H3 video requesting four segments When its plan is built Then no segment falls below ten seconds and the review selection limit is preserved."""
-        goal = self.planner.create_goal(
-            prompt="kirby explores a rainy cyberpunk alley",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "segment_count": 4,
-                "review_selection_limit": 5,
-                "review_notes": "stronger motion and cleaner framing",
-                "video_workflow_name": "minimax_h3_i2va",
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        script_plan = next(node for node in plan.nodes if node.node_id == "script-plan")
-        review_select = next(node for node in plan.nodes if node.node_id == "review-select")
-        segment_video = next(node for node in plan.nodes if node.node_id == "segment-video-01")
-
-        self.assertEqual(script_plan.inputs["segment_count"], plan.metadata["segment_count"])
-        self.assertLessEqual(script_plan.inputs["segment_count"], 2)
-        self.assertEqual(review_select.inputs["limit"], 5)
-        self.assertEqual(segment_video.inputs["workflow_name"], "minimax_h3_i2va")
-        self.assertGreaterEqual(segment_video.inputs["length"] / 24, 10)
 
 
-    def test_user_given_a_long_video_when_packaging_then_trim_and_vfx_finish_before_quality_review(self) -> None:
-        """User Given a long-video plan When the final duration is packaged Then trim precedes VFX and QA reviews the final post-processed output."""
-        goal = self.planner.create_goal(
-            prompt="kirby reaches a glowing seed in a windy meadow",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "segment_count": 4,
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        trim = next(node for node in plan.nodes if node.node_id == "video-trim")
-        vfx = next(node for node in plan.nodes if node.node_id == "video-nvidia-vfx")
-        qa = next(node for node in plan.nodes if node.node_id == "longvideo-video-qa")
-        self.assertEqual(trim.depends_on, ["concat-final-video"])
-        self.assertEqual(trim.inputs["duration_seconds"], 20.0)
-        self.assertEqual(vfx.depends_on, ["video-trim"])
-        self.assertIn("video-nvidia-vfx", qa.depends_on)
-        self.assertEqual(plan.metadata["final_video_node"], "video-nvidia-vfx")
 
-    def test_long_video_speed_scales_final_trim_and_qa_duration(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="kirby reaches a glowing seed in a windy meadow",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "segment_count": 4,
-                "video_speed": {"enabled": True, "factor": 2},
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        trim = next(node for node in plan.nodes if node.node_id == "video-trim")
-        qa = next(node for node in plan.nodes if node.node_id == "longvideo-video-qa")
-        self.assertEqual(trim.inputs["duration_seconds"], 10.0)
-        self.assertEqual(qa.inputs["target_duration"], 10.0)
 
-    def test_user_given_a_reviewed_long_video_when_the_retry_is_packaged_then_metadata_points_to_the_final_postprocessed_output(self) -> None:
-        """User Given a reviewed long-video retry When its output is packaged Then final-output metadata identifies the post-processed video."""
-        goal = self.planner.create_goal(
-            prompt="kirby reaches a glowing seed in a windy meadow",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "segment_count": 2,
-                "enable_review_loop": True,
-            },
-        )
-        plan = self.planner.build_plan(goal)
-        self.assertEqual(plan.metadata["final_video_node"], "review-video-nvidia-vfx")
 
-    def test_long_video_render_inputs_reject_unbounded_work(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="kirby reaches a glowing seed in a windy meadow",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={
-                "segment_count": 4,
-                "longvideo_length": 1001,
-            },
-        )
-        with self.assertRaisesRegex(ValueError, "longvideo_length"):
-            self.planner.build_plan(goal)
 
-    def test_user_given_a_twenty_second_long_video_when_planned_then_i2v_segments_continue_from_their_rendered_tails_without_landing_frame_assets(self) -> None:
-        """User Given a two-segment long-video request without a planned landing transition When its plan is built Then H3 segments meet the duration minimum and continue from rendered tails without requiring FLUX assets."""
-        goal = self.planner.create_goal(
-            prompt="Kirby crosses a windy meadow and reaches a glowing seed",
-            media_type="long_video",
-            duration_seconds=20,
-            style="anime cinematic travel film",
-            constraints={},
-        )
-        plan = self.planner.build_plan(goal)
-        videos = [node for node in plan.nodes if node.node_id.startswith("segment-video-")]
 
-        self.assertEqual(plan.metadata["segment_count"], len(videos))
-        self.assertEqual(len(videos), 2)
-        self.assertTrue(all(node.inputs["length"] / 24 >= 10 for node in videos))
-        self.assertTrue(all(node.inputs["conditioning_plan"]["anchors"] for node in videos))
-        self.assertTrue(any(node.node_id == "image-asset-check" for node in plan.nodes))
-        self.assertFalse(any(node.node_id == "refine-asset-check" for node in plan.nodes))
-        tails = [node for node in plan.nodes if node.node_id.startswith("segment-tail-")]
-        self.assertEqual(len(tails), len(videos))
-        self.assertEqual(videos[1].inputs["conditioning_plan"]["continuation_node"], "segment-tail-01")
-        self.assertIn("segment-tail-01", videos[1].depends_on)
 
-    def test_publishable_long_video_uses_rich_beats_rendered_tail_and_segment_qa(self) -> None:
-        """User Given a publishable H3 long video, When the plan is built, Then each conditioned render waits for a vision-written prompt based on its actual anchor images."""
-        goal = self.planner.create_goal(
-            prompt="Kirby carries a glowing seed through a windy meadow and plants it in a warm clearing",
-            media_type="long_video",
-            duration_seconds=30,
-            style="polished 2D anime cinematic",
-            constraints={
-                "longvideo_production_profile": "text2longvideo",
-                "segment_count": 6,
-                "longvideo_width": 608,
-                "longvideo_height": 352,
-                "longvideo_length": 120,
-                "longvideo_steps": 16,
-                "edit_variant_seed": 17,
-                "require_human_review": False,
-                "pre_video_review_enabled": False,
-            },
-        )
-
-        plan = self.planner.build_plan(goal)
-        videos = [node for node in plan.nodes if node.node_id.startswith("segment-video-")]
-        tails = [node for node in plan.nodes if node.node_id.startswith("segment-tail-")]
-        segment_qas = [node for node in plan.nodes if node.node_id.startswith("segment-qa-")]
-        second_video = next(node for node in videos if node.node_id == "segment-video-02")
-        first_h3_prompt = next(node for node in plan.nodes if node.node_id == "segment-h3-prompt-01")
-        second_h3_prompt = next(node for node in plan.nodes if node.node_id == "segment-h3-prompt-02")
-        publish_package = next(node for node in plan.nodes if node.node_id == "persist-publish-ready-longvideo")
-        script_plan = next(node for node in plan.nodes if node.node_id == "script-plan")
-
-        self.assertEqual(script_plan.inputs["production_profile"], "text2longvideo")
-        self.assertEqual(len(videos), plan.metadata["segment_count"])
-        self.assertEqual(len(tails), len(videos))
-        self.assertEqual(len(segment_qas), len(videos))
-        self.assertTrue(all(node.inputs["length"] / 24 >= 10 for node in videos))
-        self.assertEqual(second_video.inputs["anchor_nodes"]["first"], "segment-tail-01")
-        self.assertEqual(second_video.inputs["conditioning_plan"]["continuation_node"], "segment-tail-01")
-        self.assertIn("segment-frame-01", first_h3_prompt.depends_on)
-        self.assertIn("segment-tail-01", second_h3_prompt.depends_on)
-        self.assertEqual(second_video.inputs["h3_prompt_node"], second_h3_prompt.node_id)
-        self.assertIn(second_h3_prompt.node_id, second_video.depends_on)
-        self.assertIn("segment-qa-01", plan.metadata["segment_qa_nodes"])
-        self.assertEqual(plan.metadata["publish_package_node"], "persist-publish-ready-longvideo")
-        self.assertEqual(publish_package.inputs["summary_scope"], "publish_ready_longvideo")
-        self.assertTrue(publish_package.inputs["summary_metadata"]["publish_contract"]["human_review_required"])
-
-    def test_user_given_every_segment_review_when_long_video_is_planned_then_only_accepted_video_can_supply_the_next_tail(self) -> None:
-        """User Given every-segment human review is required, When a long video plan chains rendered tails, Then each segment waits for acceptance before its tail can condition the next segment."""
-        goal = self.planner.create_goal(
-            prompt="Kirby carries a glowing seed through a windy meadow and plants it in a warm clearing",
-            media_type="long_video",
-            duration_seconds=30,
-            style="polished 2D anime cinematic",
-            constraints={
-                "longvideo_production_profile": "text2longvideo",
-                "longvideo_review_policy": "every_segment",
-                "require_human_review": True,
-                "pre_video_review_enabled": False,
-                "segment_count": 3,
-                "longvideo_width": 608,
-                "longvideo_height": 352,
-                "longvideo_length": 120,
-                "longvideo_steps": 16,
-            },
-        )
-
-        plan = self.planner.build_plan(goal)
-        final_assembly = next(
-            node for node in plan.nodes if node.node_id == "concat-final-video"
-        )
-        self.assertTrue(
-            all(
-                f"segment-review-{index:02d}" in final_assembly.depends_on
-                for index in range(1, 4)
-            )
-        )
-        for index in range(1, 4):
-            suffix = f"{index:02d}"
-            segment_review = next(
-                node
-                for node in plan.nodes
-                if node.node_id == f"segment-review-{suffix}"
-            )
-            segment_video = next(
-                node
-                for node in plan.nodes
-                if node.node_id == f"segment-video-{suffix}"
-            )
-            segment_qa = next(
-                node
-                for node in plan.nodes
-                if node.node_id == f"segment-qa-{suffix}"
-            )
-            segment_tail = next(
-                node
-                for node in plan.nodes
-                if node.node_id == f"segment-tail-{suffix}"
-            )
-
-            self.assertEqual(segment_review.skill_name, "review.assets.select")
-            self.assertEqual(segment_review.inputs["review_scope"], "final_video")
-            self.assertEqual(segment_review.inputs["review_phase"], "segment_acceptance")
-            self.assertTrue(segment_review.inputs["require_human_review"])
-            self.assertIn(segment_video.node_id, segment_review.depends_on)
-            self.assertIn(segment_qa.node_id, segment_review.depends_on)
-            self.assertEqual(segment_tail.inputs["source_video_node"], segment_review.node_id)
-            self.assertEqual(segment_tail.depends_on, [segment_review.node_id])
-            if index < 3:
-                next_video = next(
-                    node
-                    for node in plan.nodes
-                    if node.node_id == f"segment-video-{index + 1:02d}"
-                )
-                self.assertIn(segment_tail.node_id, next_video.depends_on)
 
     def test_user_given_an_accepted_segment_review_when_its_tail_is_extracted_then_the_accepted_video_is_used(self) -> None:
         """User Given Discord accepted a segment and exposed its media path, When the tail frame is extracted, Then the accepted video is sent to the media extraction tool."""

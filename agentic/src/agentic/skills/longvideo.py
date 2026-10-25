@@ -15,20 +15,17 @@ from agentic.minimax_prompting import (
     format_h3_video_prompt,
     require_h3_prompt,
 )
-from agentic.runtime.contracts import SkillContext, SkillResult
-from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
-from agentic.runtime.reference_video import format_reference_video_directive
-from agentic.runtime.prompting import (
-    build_story_segments,
-    include_role_description,
-    include_visual_style_profile,
-    validate_story_segments,
+from agentic.runtime.contracts import (
+    MIN_VIDEO_DURATION_SECONDS,
+    SkillContext,
+    SkillResult,
 )
-from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.reference_video import format_reference_video_directive
+from agentic.runtime.prompting import include_visual_style_profile
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
 from agentic.runtime.serial_video import store_from_constraints
-from agentic.skills.shared import asset_check_result, build_run_dir, resolve_dependency_value, slug_path_component
+from agentic.skills.shared import build_run_dir, resolve_dependency_value, slug_path_component
 from agentic.storyboard import (
     format_native_h3_keyframe_prompt,
     format_native_h3_prompt,
@@ -179,7 +176,6 @@ class LongVideoSkills:
         tools: ToolRegistry,
         output_root: Path,
         story_service: NativeH3StoryService | None = None,
-        prompt_engine: LLMPromptEngine | None = None,
     ) -> None:
         self.tools = tools
         self.output_root = output_root
@@ -187,70 +183,9 @@ class LongVideoSkills:
         # The application composition root injects shared services; defaults
         # keep this skill usable in focused unit tests.
         self.story_service = story_service or NativeH3StoryService()
-        self.prompt_engine = prompt_engine or LLMPromptEngine(mode="template")
 
-    def expand_idea(self, context: SkillContext) -> SkillResult:
-        prompt = str(context.node.inputs["prompt"])
-        style = str(context.node.inputs["style"])
-        idea_variants = list(context.node.inputs.get("idea_variants", []))
-        selected_variant = idea_variants[0] if idea_variants else {"style": style}
-        selected_style = str(selected_variant.get("style", style))
-        expanded_prompt = "\n".join(part for part in (prompt, f"Style: {selected_style}" if selected_style else "") if part)
-        return SkillResult(
-            status="success",
-            outputs={
-                "creative_brief": prompt,
-                "tone": "",
-                "idea_variants": idea_variants,
-                "prompt": expanded_prompt,
-                "negative_prompt": "",
-            },
-            logs=["Expanded goal into a creative brief."],
-        )
 
-    def segment_story(self, context: SkillContext) -> SkillResult:
-        segment_count = int(context.node.inputs["segment_count"])
-        brief = str(context.state["idea-brief"]["creative_brief"])
-        constraints = context.plan.goal.constraints
-        serial_context = str(constraints.get("serial_story_context") or "").strip()
-        if bool(constraints.get("serial_mode")) and serial_context:
-            brief = (
-                "Series continuity from the last approved episode:\n"
-                f"{serial_context}\n\nCurrent episode request:\n{brief}"
-            )
-        segments = build_story_segments(
-            context.plan.goal,
-            brief,
-            segment_count,
-            "playful cinematic escalation",
-            production_profile=str(
-                context.node.inputs.get("production_profile")
-                or context.plan.goal.constraints.get("longvideo_production_profile")
-                or ""
-            ),
-        )
-        validate_story_segments(segments, segment_count)
-        serial_store = store_from_constraints(constraints)
-        if serial_store is not None:
-            episode_id = str(constraints.get("serial_episode_id") or "").strip()
-            if not episode_id:
-                raise RuntimeError("Serial story planning requires a persisted episode ID")
-            serial_store.record_story(episode_id, segments)
-        return SkillResult(
-            status="success",
-            outputs={"segments": segments, "segment_count": segment_count},
-            metrics={"segment_count": segment_count},
-            logs=[f"Planned {segment_count} story segments."],
-        )
 
-    def ensure_workflow(self, context: SkillContext) -> SkillResult:
-        result = self.tools.call(
-            "asset.ensure_workflow_ready",
-            {
-                "workflow_name": context.node.inputs["workflow_name"],
-            },
-        )
-        return asset_check_result(result, "Checked workflow assets.")
 
     def prepare_native_h3_story(self, context: SkillContext) -> SkillResult:
         storyboard_path = str(
@@ -361,38 +296,6 @@ class LongVideoSkills:
             ],
         )
 
-    def render_initial_frame(self, context: SkillContext) -> SkillResult:
-        segment = self._segment(context)
-        run_dir = self._build_run_dir(context.plan.goal.prompt, f"{segment['segment_id']}_image")
-        workflow_name = str(
-            context.plan.goal.constraints.get("keyframe_workflow_name")
-            or context.node.inputs["workflow_name"]
-        )
-        prompt = "\n".join(
-            part
-            for part in (str(segment.get("visual") or ""), str(context.plan.goal.style or ""))
-            if part
-        )
-        prompt = include_role_description(prompt, context.plan.goal)
-        result = self.tools.call(
-            "comfy.render_image",
-            {
-                "workflow_name": workflow_name,
-                "run_dir": str(run_dir),
-                "prompt": include_visual_style_profile(
-                    apply_paper_storybook_art_direction(prompt), context.plan.goal
-                ),
-                "negative_prompt": str(context.state["idea-brief"].get("negative_prompt") or ""),
-                "width": context.node.inputs.get("width", 1024),
-                "height": context.node.inputs.get("height", 1024),
-            },
-        )
-        return SkillResult(
-            status="success",
-            outputs=result,
-            metrics={"image_count": len(result.get("saved_files", []))},
-            logs=[f"Rendered initial keyframe for {segment['segment_id']}."],
-        )
 
     def render_segment_video(self, context: SkillContext) -> SkillResult:
         segment = self._segment(context)
@@ -1084,24 +987,8 @@ class LongVideoSkills:
         constraints = dict(getattr(context.plan.goal, "constraints", {}) or {})
         native_recipe = dict(constraints.get("native_h3_recipe") or {})
         h3_mode = str(render.get("h3_mode") or constraints.get("native_h3_mode") or "")
-        target_duration = float(
-            context.node.inputs.get("target_duration")
-            or getattr(context.plan.goal, "duration_seconds", 15)
-            or 15
-        )
+        target_duration = context.node.inputs.get("target_duration")
         duration_tolerance = float(context.node.inputs.get("duration_tolerance") or 0.75)
-        expected_width = int(
-            context.node.inputs.get("expected_width")
-            or constraints.get("canvas_width")
-            or native_recipe.get("width")
-            or 608
-        )
-        expected_height = int(
-            context.node.inputs.get("expected_height")
-            or constraints.get("canvas_height")
-            or native_recipe.get("height")
-            or 352
-        )
         expected_fps = float(
             context.node.inputs.get("expected_fps")
             or constraints.get("native_h3_frame_rate")
@@ -1115,10 +1002,11 @@ class LongVideoSkills:
             {
                 "video_path": video_path,
                 "target_duration": target_duration,
+                "minimum_duration": context.node.inputs.get(
+                    "minimum_duration", MIN_VIDEO_DURATION_SECONDS
+                ),
                 "duration_tolerance": duration_tolerance,
                 "warn_if_no_audio": True,
-                "expected_width": expected_width,
-                "expected_height": expected_height,
                 "expected_fps": expected_fps,
                 "require_audio": bool(
                     context.node.inputs.get("require_audio", native_recipe.get("require_audio", False))
@@ -1195,43 +1083,7 @@ class LongVideoSkills:
             logs=["Packaged native H3 video, GIF preview, and manual-review metadata."],
         )
 
-    def generate_segment_tts(self, context: SkillContext) -> SkillResult:
-        segment = self._segment(context)
-        run_dir = self._build_run_dir(context.plan.goal.prompt, f"{segment['segment_id']}_tts")
-        audio_dir = run_dir / "audio"
-        audio_dir.mkdir(parents=True, exist_ok=True)
-        result = self.tools.call(
-            "audio.generate_tts_real",
-            {
-                "text": segment["narration"],
-                "output_path": str(audio_dir / f"{segment['segment_id']}.mp3"),
-                "voice": context.node.inputs.get("voice", "en-US-AriaNeural"),
-                "rate": context.node.inputs.get("rate", "+0%"),
-            },
-        )
-        return SkillResult(status="success", outputs=result, logs=[f"Generated TTS for {segment['segment_id']}."])
 
-    def package_outputs(self, context: SkillContext) -> SkillResult:
-        final_node = str(context.node.inputs["final_video_node"])
-        preview_node = str(context.node.inputs["preview_node"])
-        segment_videos = []
-        for dependency in context.node.depends_on:
-            if dependency.startswith("segment-video-"):
-                saved_files = context.state[dependency].get("saved_files", [])
-                if saved_files:
-                    segment_videos.append(str(saved_files[0]))
-
-        return SkillResult(
-            status="success",
-            outputs={
-                "video_path": str(context.state[final_node]["video_path"]),
-                "preview_gif_path": str(context.state[preview_node]["gif_path"]),
-                "segment_videos": segment_videos,
-                "segment_count": len(segment_videos),
-            },
-            metrics={"segment_count": len(segment_videos)},
-            logs=["Packaged final long-video artifacts."],
-        )
 
     def _segment(self, context: SkillContext) -> dict[str, object]:
         segment_index = int(context.node.inputs["segment_index"])
@@ -1250,19 +1102,13 @@ def register_longvideo_skills(
     tool_registry: ToolRegistry,
     output_root: Path,
     story_service: NativeH3StoryService | None = None,
-    prompt_engine: LLMPromptEngine | None = None,
 ) -> None:
     skills = LongVideoSkills(
         tool_registry,
         output_root,
         story_service=story_service,
-        prompt_engine=prompt_engine,
     )
-    skill_registry.register("idea.expand", skills.expand_idea, "Expand the goal into a creative brief")
-    skill_registry.register("script.segment_story", skills.segment_story, "Create long-video story segments")
-    skill_registry.register("asset.ensure_workflow", skills.ensure_workflow, "Verify workflow assets")
     skill_registry.register("longvideo.prepare_native_h3_story", skills.prepare_native_h3_story, "Prepare a native H3 prompt from the selected story source")
-    skill_registry.register("longvideo.render_initial_frame", skills.render_initial_frame, "Render the opening seed frame")
     skill_registry.register("longvideo.render_segment_video", skills.render_segment_video, "Render one long-video segment")
     skill_registry.register("longvideo.validate_references", skills.validate_references, "Validate a typed long-video reference bundle")
     skill_registry.register("longvideo.render_native_h3", skills.render_native_h3, "Render one continuous native H3 story clip")
@@ -1272,5 +1118,3 @@ def register_longvideo_skills(
     skill_registry.register("longvideo.render_native_h3_ref2va", skills.render_native_h3_ref2va, "Render one continuous native H3 reference-image/video story clip")
     skill_registry.register("longvideo.qa_native_h3", skills.qa_native_h3, "Run shared technical and semantic native H3 media QA")
     skill_registry.register("longvideo.package_native_h3", skills.package_native_h3, "Package native H3 artifacts and QA evidence")
-    skill_registry.register("longvideo.generate_segment_tts", skills.generate_segment_tts, "Generate one narration segment")
-    skill_registry.register("longvideo.package_outputs", skills.package_outputs, "Package long-video outputs")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from agentic.runtime.contracts import GoalRequest
-from agentic.runtime.platform_content import enrich_publish_bundle
+from agentic.runtime.platform_content import build_platform_bundle, enrich_publish_bundle
 from agentic.runtime.llm_engine import LLMPromptEngine
 
 
@@ -23,6 +23,34 @@ class _FakeManager:
 class PublishContentTests(unittest.TestCase):
 
 
+
+    def test_user_given_threads_caption_at_or_over_the_limit_when_preparing_publication_then_only_valid_copy_is_ready(self) -> None:
+        """User Given a Threads caption near its limit When preparing publication Then copy up to 500 characters is eligible and longer copy is blocked."""
+        goal = GoalRequest(prompt="publish a short clip", media_type="publish_review", style="social promo")
+
+        accepted = build_platform_bundle(
+            goal=goal,
+            caption="a" * 500,
+            hashtags="",
+            platform_captions={},
+            platforms=["threads"],
+            media_paths=["clip.mp4"],
+            post_strategy={"strategy_version": "test"},
+        )["threads"]
+        rejected = build_platform_bundle(
+            goal=goal,
+            caption="a" * 501,
+            hashtags="",
+            platform_captions={},
+            platforms=["threads"],
+            media_paths=["clip.mp4"],
+            post_strategy={"strategy_version": "test"},
+        )["threads"]
+
+        self.assertEqual(accepted["format"], "video")
+        self.assertTrue(accepted["validation"]["is_platform_publish_ready"])
+        self.assertFalse(rejected["validation"]["is_platform_publish_ready"])
+        self.assertIn("threads_text_exceeds_500_characters", rejected["validation"]["issues"])
 
     def test_user_given_generated_copy_when_preparing_publication_then_each_platform_receives_eligible_content(self) -> None:
         """User Given generated copy and image media When preparing publication Then platform captions, eligibility and dispatch readiness are preserved."""

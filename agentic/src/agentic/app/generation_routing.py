@@ -57,7 +57,7 @@ def _weighted_choice(weights: dict[str, Any], rng: random.Random | None = None) 
         if float(weight) > 0
     ]
     if not filtered:
-        return "text2longvideo"
+        raise ValueError("Routing requires at least one positive strategy weight")
     chooser = rng or random
     total = sum(weight for _, weight in filtered)
     threshold = chooser.uniform(0, total)
@@ -276,7 +276,6 @@ def _route_generation_from_character_config(
             "count_policies": count_policies,
             "routing_runtime_context": routing_runtime_context,
             "pre_video_review": dict(merged_routing.get("pre_video_review", {}) or {}),
-            "longvideo_config": dict(merged_routing.get("longvideo_config", {}) or {}),
             "strategy_context": _strategy_context_for_route(
                 merged_routing, selected_generation_type
             ),
@@ -357,7 +356,6 @@ def _route_generation_from_character_config(
         "count_policies": count_policies,
         "routing_runtime_context": routing_runtime_context,
         "pre_video_review": dict(merged_routing.get("pre_video_review", {}) or {}),
-        "longvideo_config": dict(merged_routing.get("longvideo_config", {}) or {}),
         "strategy_context": _strategy_context_for_route(
             merged_routing, selected_generation_type
         ),
@@ -604,16 +602,6 @@ def _collect_workflow_stage_candidates(
                     _nested_get(strategy, "second_stage", "workflow_name"),
                     _nested_get(strategy, "second_stage", "workflow_path"),
                 ],
-            }
-        elif generation_type == "text2longvideo":
-            longvideo_config = dict(routing_config.get("longvideo_config", {}) or {})
-            workflow_names = [
-                str(name).strip()
-                for name in list(longvideo_config.get("workflow_names", []) or [])
-                if str(name).strip()
-            ]
-            inferred = {
-                "video_workflow_name": workflow_names[:1],
             }
         elif generation_type == "native_h3_story":
             native_recipe = dict(generation.get("native_h3_story", {}) or {})
@@ -862,11 +850,8 @@ def _nested_get(data: dict[str, Any], *keys: str) -> Any:
 
 def _resolve_duration_seconds(
     config_generation_type: str,
-    strategies: dict[str, Any],
     generation: dict[str, Any] | None = None,
-    routed_segment_count: Any | None = None,
     requested_duration_seconds: int | None = None,
-    longvideo_config: dict[str, Any] | None = None,
 ) -> int:
     requested = (
         max(1, int(requested_duration_seconds))
@@ -899,33 +884,9 @@ def _resolve_duration_seconds(
             MIN_VIDEO_DURATION_SECONDS,
             requested or int(comic_config.get("duration_seconds", 10)),
         )
-    if config_generation_type != "text2longvideo":
-        return normalize_video_duration(
-            media_type_for_generation(config_generation_type), requested or 30
-        )
-    configured_longvideo = dict(longvideo_config or {})
-    if not configured_longvideo:
-        longvideo = dict(strategies.get("text2longvideo", {}) or {})
-        configured_longvideo = dict(longvideo.get("longvideo_config", {}) or {})
-    if (
-        str(configured_longvideo.get("production_profile") or "").strip().lower()
-        == "text2longvideo"
-        and requested is not None
-    ):
-        # Production duration is an explicit user contract. Do not replace
-        # The requested total duration must not be multiplied by the segment count.
-        return requested
-    default_duration = configured_longvideo.get("default_duration_seconds")
-    if default_duration not in (None, ""):
-        return max(10, int(default_duration))
-    segment_count = int(
-        routed_segment_count or configured_longvideo.get("segment_count", 3)
+    return normalize_video_duration(
+        media_type_for_generation(config_generation_type), requested or 30
     )
-    segment_duration = max(
-        MIN_VIDEO_DURATION_SECONDS,
-        int(configured_longvideo.get("segment_duration", MIN_VIDEO_DURATION_SECONDS)),
-    )
-    return max(MIN_VIDEO_DURATION_SECONDS, segment_count * segment_duration)
 
 
 def _duration_strategy_override(

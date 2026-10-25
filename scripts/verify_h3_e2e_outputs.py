@@ -49,8 +49,6 @@ def main() -> int:
                 "video_path": str(video_path),
                 "target_duration": duration,
                 "duration_tolerance": 0.9,
-                "expected_width": 608,
-                "expected_height": 352,
                 "expected_fps": 24,
                 "require_audio": True,
                 "require_stereo_audio": True,

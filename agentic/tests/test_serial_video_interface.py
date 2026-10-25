@@ -1,6 +1,7 @@
 """Acceptance tests for serial-video selection in the existing MediaOverload CLI."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,8 @@ import run_media_interface
 from agentic.app.main import (
     _serial_publish_configuration,
     _serial_series_selection_weights_configuration,
-    parse_args,
 )
+from agentic.app.cli import parse_args
 from agentic.app.character_requests import (
     CharacterGenerationOptions,
     CharacterReviewOptions,
@@ -51,6 +52,7 @@ def _write_config(
                     "platforms": {
                         "instagram_graph": {"enabled": True},
                         "facebook": {"enabled": True},
+                        "threads": {"enabled": True},
                         "youtube": {"enabled": True},
                     },
                     "default_hashtags": ["#MediaOverload"],
@@ -75,7 +77,7 @@ class SerialRunnerBoundary:
     ) -> None:
         self.calls: list[list[str]] = []
         self.fail_on_call = fail_on_call
-        self.result = result
+        self.result = result if result is not None else {"status": "success"}
 
     def __call__(self, argv: list[str]) -> dict[str, object] | None:
         self.calls.append(argv)
@@ -107,7 +109,36 @@ def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defau
     assert first[first.index("--character-config") + 1] == str(config_path.resolve())
     assert "--platform" not in first
     assert "--hashtag" in first
-    assert capsys.readouterr().out == ""
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "success"
+    assert result["episodes_started"] == 2
+
+
+def test_user_given_new_series_reaches_story_review_when_direct_serial_cli_runs_then_no_episode_starts(tmp_path, capsys):
+    """User Given auto-next chooses a new series When the direct serial CLI reaches story review Then it returns the onboarding draft and does not start another episode."""
+    config_path = _write_config(tmp_path / "kirby.yaml", episodes_per_run=2)
+    serial = SerialRunnerBoundary(
+        result={
+            "status": "success",
+            "workflow_stage": "story_onboarding",
+            "onboarding_stage": "story_draft",
+            "automation_mode": "new",
+            "series_id": "auto-kirby-123456789abc",
+            "story_plan_id": "a" * 32,
+        }
+    )
+
+    run_media_interface.main(
+        ["--config", str(config_path), "--generation-type", "serial_video"],
+        serial_runner=serial,
+    )
+
+    result = json.loads(capsys.readouterr().out)
+    assert len(serial.calls) == 1
+    assert result["episodes_started"] == 0
+    assert result["onboarding_stage"] == "story_draft"
+    assert result["onboarding_series_id"] == "auto-kirby-123456789abc"
+    assert result["story_plan_id"] == "a" * 32
 
 
 def test_user_given_a_serial_topic_option_when_main_help_is_requested_then_it_is_described_as_story_planning_input(capsys):
@@ -237,8 +268,8 @@ def test_user_given_series_selection_weights_in_character_config_when_loaded_the
     assert weights == {"new": 0.7, "continue": 0.3}
 
 
-def test_user_given_the_selected_character_yaml_enables_three_platforms_when_serial_publish_config_is_loaded_then_all_three_are_targets(tmp_path):
-    """User Given the selected character YAML enables Instagram, Facebook, and YouTube When serial publishing configuration is loaded Then all enabled destinations are selected from that same file."""
+def test_user_given_the_selected_character_yaml_enables_four_platforms_when_serial_publish_config_is_loaded_then_all_four_are_targets(tmp_path):
+    """User Given the selected character YAML enables Instagram, Facebook, Threads, and YouTube When serial publishing configuration is loaded Then all enabled destinations are selected from that same file."""
     config_path = _write_config(tmp_path / "kirby.yaml")
 
     platforms, platform_configs = _serial_publish_configuration(
@@ -248,7 +279,7 @@ def test_user_given_the_selected_character_yaml_enables_three_platforms_when_ser
         config_path,
     )
 
-    assert set(platforms) == {"instagram_graph", "facebook", "youtube"}
+    assert set(platforms) == {"instagram_graph", "facebook", "threads", "youtube"}
     assert set(platform_configs) == set(platforms)
 
 

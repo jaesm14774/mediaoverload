@@ -15,6 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from agentic.app.cli import parse_args
+
 from agentic.assets.registry import AssetRegistry
 from agentic.memory import PortfolioMemory, RunMemory
 from agentic.runtime.contracts import (
@@ -129,7 +131,6 @@ def build_runtime(
         skill_registry,
         tool_registry,
         resolved_output_root,
-        prompt_engine=llm_engine,
         story_service=NativeH3StoryService(
             llm_engine=llm_engine,
             news_service=NewsContextService(),
@@ -233,30 +234,84 @@ def _serial_publish_configuration(
     return platforms, {name: enabled[name] for name in platforms}
 
 
-def _serial_video_speed_configuration(
-    project_root: Path,
-    character: str,
-    character_config_path: str | Path | None = None,
-) -> dict[str, object] | None:
-    config_path = (
-        Path(character_config_path).expanduser().resolve()
-        if character_config_path
-        else project_root / "configs" / "characters" / f"{character.lower()}.yaml"
-    )
-    if not config_path.is_file():
-        raise ValueError(f"Serial video has no character config: {config_path}")
-    payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(payload, dict):
-        raise ValueError(f"Character config is invalid: {config_path}")
-    generation = payload.get("generation", {})
-    if not isinstance(generation, dict):
-        raise ValueError(f"Character generation config is invalid: {config_path}")
-    video_speed = generation.get("video_speed")
-    if video_speed is None:
-        return None
-    if not isinstance(video_speed, dict):
-        raise ValueError(f"generation.video_speed must be a mapping in {config_path}")
-    return dict(video_speed)
+def _serial_resume_node_outputs(
+    plan: ExecutionPlan,
+    resume_state: dict[str, object],
+) -> dict[str, object]:
+    initial_outputs = dict(resume_state["initial_node_outputs"])
+    completed_segment_count = int(resume_state["completed_segment_count"])
+    for node in plan.nodes:
+        segment_index = node.inputs.get("segment_index")
+        if (
+            isinstance(segment_index, int)
+            and segment_index < completed_segment_count
+            and node.node_id not in initial_outputs
+            and node.skill_name != "media.video.extract_last_frame"
+        ):
+            initial_outputs[node.node_id] = {}
+    return initial_outputs
+
+
+def _prepare_serial_execution_plan(
+    planner: TaskPlanner,
+    goal: GoalRequest,
+    serial_store: SerialVideoStore | None,
+    resume_episode_row: dict[str, object] | None,
+    *,
+    discord_review_timeout_seconds: int,
+) -> tuple[ExecutionPlan, dict[str, object] | None]:
+    if serial_store is None or resume_episode_row is None:
+        return planner.build_plan(goal), resume_episode_row
+
+    episode_id = str(resume_episode_row["episode_id"])
+    saved_plan = serial_store.get_plan_payload(episode_id)
+    if saved_plan is None:
+        raise ValueError(
+            f"Blocked serial episode '{episode_id}' has no saved current-format execution plan."
+        )
+
+    plan = _execution_plan_from_dict(saved_plan)
+    if (
+        plan.goal.prompt != str(goal.prompt).strip()
+        or plan.goal.constraints.get("series_id") != goal.constraints.get("series_id")
+        or plan.goal.constraints.get("character") != goal.constraints.get("character")
+        or plan.goal.constraints.get("serial_episode_id") != episode_id
+        or plan.goal.constraints.get("serial_database_name") != serial_store.database_name
+    ):
+        raise ValueError("The saved serial plan does not belong to this episode, series, or output root.")
+
+    _apply_current_serial_publish_targets(plan, goal)
+    plan.goal.constraints["discord_review_timeout_seconds"] = discord_review_timeout_seconds
+    return plan, resume_episode_row
+
+
+def _apply_current_serial_publish_targets(
+    plan: ExecutionPlan,
+    goal: GoalRequest,
+) -> None:
+    """Use the current character's allowed publication targets when resuming a saved plan."""
+    platforms = [str(value) for value in goal.constraints.get("platforms", [])]
+    platform_configs = dict(goal.constraints.get("platform_configs", {}) or {})
+    plan.goal.constraints["platforms"] = list(platforms)
+    plan.goal.constraints["platform_configs"] = dict(platform_configs)
+    for node in plan.nodes:
+        if "platforms" in node.inputs:
+            node.inputs["platforms"] = list(platforms)
+        if "platform_configs" in node.inputs:
+            node.inputs["platform_configs"] = dict(platform_configs)
+        summary_metadata = node.inputs.get("summary_metadata")
+        if isinstance(summary_metadata, dict) and "platforms" in summary_metadata:
+            summary_metadata["platforms"] = list(platforms)
+
+
+def _serial_segment_regeneration_requested(plan: ExecutionPlan, result) -> bool:
+    for node in plan.nodes:
+        if node.inputs.get("review_phase") != "segment_acceptance":
+            continue
+        outputs = result.state.node_outputs.get(node.node_id)
+        if isinstance(outputs, dict) and outputs.get("regeneration_requested") is True:
+            return True
+    return False
 
 
 def _character_discord_review_timeout_configuration(
@@ -328,418 +383,6 @@ def _serial_series_selection_weights_configuration(
             f"generation.serial_video.series_selection_weights must be a mapping in {config_path}"
         )
     return dict(weights)
-
-
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the agentic media runtime")
-    parser.add_argument("--goal", help="High-level goal for the runtime")
-    parser.add_argument("--media-type", default="long_video", help="Target media type")
-    parser.add_argument("--duration-seconds", type=int, default=30, help="Target duration")
-    parser.add_argument("--style", default="cinematic surreal", help="Preferred visual style")
-    parser.add_argument("--execute", action="store_true", help="Execute the generated plan")
-    parser.add_argument("--output-dir", help="Optional output directory for artifact-producing workflows")
-    parser.add_argument("--width", type=int, help="Output video width in pixels for image-to-video workflows")
-    parser.add_argument("--height", type=int, help="Output video height in pixels for image-to-video workflows")
-    parser.add_argument("--longvideo-steps", type=int, help="Sampling steps for long-video H3 workflows")
-    parser.add_argument("--comfy-host", help="Override ComfyUI host")
-    parser.add_argument("--comfy-port", type=int, help="Override ComfyUI port")
-    parser.add_argument(
-        "--comfy-root",
-        default=os.environ.get("COMFYUI_ROOT", r"D:\ComfyUI_windows_portable"),
-        help="ComfyUI root for asset checks (default: COMFYUI_ROOT or D:\\ComfyUI_windows_portable)",
-    )
-    parser.add_argument("--input-image", help="Input image path for img2img/i2v/upscale workflows")
-    parser.add_argument("--input-video", help="Input video path for frame extraction workflows")
-    parser.add_argument(
-        "--reference-video",
-        help="Reference video path or URL used to extract pacing, shot, and motion evidence for remix planning",
-    )
-    parser.add_argument(
-        "--reference-video-depth",
-        choices=("standard", "deep"),
-        default="standard",
-        help="Reference-video analysis depth (both modes currently use local structural evidence; deep is reserved for richer analysis)",
-    )
-    parser.add_argument(
-        "--reference-keyframes",
-        type=int,
-        default=12,
-        help="Number of evenly spaced reference keyframes to extract (2-20)",
-    )
-    parser.add_argument("--input-dir", help="Input directory for publish/review workflows")
-    parser.add_argument("--media-path", action="append", dest="media_paths", help="Explicit media path for publish/review workflows; repeatable")
-    parser.add_argument("--edit-input", action="append", dest="edit_input_paths", help="Ordered image/video input for image_sequence_edit; repeatable")
-    parser.add_argument("--edit-input-root", action="append", dest="edit_input_roots", help="Approved root for image_sequence_edit inputs; repeatable")
-    parser.add_argument("--drama-plan", help="JSON DramaPlan file for image_sequence_edit; compiles scenes into the deterministic timeline editor")
-    parser.add_argument(
-        "--edit-profile",
-        choices=("baseline_concat", "motion_cut_v1", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
-        help="Timeline profile for image_sequence_edit",
-    )
-    parser.add_argument("--edit-transition-duration", type=float, help="Transition overlap in seconds for timeline editing")
-    parser.add_argument("--edit-variant-seed", type=int, help="Deterministic variation seed for timeline editing")
-    parser.add_argument("--edit-require-audio", action="store_true", help="Require an audio stream in image_sequence_edit QA")
-    parser.add_argument("--edit-analyze-audio", action="store_true", help="Run loudness/silence analysis in image_sequence_edit QA")
-    parser.add_argument(
-        "--longvideo-edit-profile",
-        choices=("baseline_concat", "xfade_clean_v1", "chapter_dip_v1", "editorial_kinetic_v1"),
-        help="Use the agent timeline editor to merge non-TTS long-video segments",
-    )
-    parser.add_argument(
-        "--longvideo-production-profile",
-        choices=("text2longvideo",),
-        help="Use deterministic multi-beat H3 story assembly with rendered-tail continuity and a publish package",
-    )
-    parser.add_argument("--text", help="Text payload for TTS-style workflows")
-    parser.add_argument("--character", help="Optional character or subject identity for agentic planning")
-    parser.add_argument("--character-config", help="YAML production profile for serial review, video speed and social platforms; the approved card supplies the actual character identity")
-    parser.add_argument(
-        "--episode-topic",
-        help="Optional topic for serial story planning; it is not added to public captions",
-    )
-    parser.add_argument("--platform", action="append", dest="platforms", help="Target publish platform; repeatable")
-    parser.add_argument(
-        "--publish-mode",
-        choices=("live", "safe_poc"),
-        default="",
-        help="Publishing policy: live or safe_poc (YouTube private, Facebook draft, Instagram container-only)",
-    )
-    parser.add_argument("--hashtag", action="append", dest="hashtags", help="Hashtag for publish captions; repeatable")
-    parser.add_argument("--caption-prefix", help="Optional caption prefix for publish workflows")
-    parser.add_argument("--selection-limit", type=int, help="Review selection cap for publish/review workflows")
-    parser.add_argument("--review-notes", help="Optional review feedback used to trigger refine/regenerate branches")
-    parser.add_argument("--enable-review-loop", action="store_true", help="Force planner retry/review branches where supported")
-    parser.add_argument("--dry-run-publish", action="store_true", help="Keep publish/review dispatch in dry-run mode")
-    parser.add_argument("--use-tts", action="store_true", help="Enable TTS generation for long-video workflows")
-    parser.add_argument("--serial-mode", action="store_true", help="Generate or continue a story-first approved series with per-segment human gates")
-    parser.add_argument("--serial-auto-next", action="store_true", help="Resume blocked work first; otherwise continue an eligible existing series with an approved episode outline")
-    parser.add_argument("--serial-require-delivery-receipts", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--series-id", help="Stable ID for an explicit serial video series")
-    parser.add_argument(
-        "--serial-story-draft",
-        action="store_true",
-        help="Create a full series story treatment before choosing a character",
-    )
-    parser.add_argument(
-        "--serial-news-inspiration",
-        choices=("random", "none"),
-        default="random",
-        help="Use one random traceable local news item as fictional inspiration, or explicitly disable news",
-    )
-    parser.add_argument(
-        "--serial-story-complexity",
-        choices=("simple", "cinematic"),
-        default="simple",
-        help="Keep serial animation simple and clear by default, or opt into cinematic complexity",
-    )
-    parser.add_argument(
-        "--serial-story-review-plan-id",
-        help="Story plan ID to accept or reject after reviewing its Markdown file",
-    )
-    parser.add_argument(
-        "--serial-story-review-decision",
-        choices=("accepted", "rejected"),
-        help="Human decision for a pending series story treatment",
-    )
-    parser.add_argument(
-        "--serial-story-reviewed-file",
-        help="Exact story file reviewed by the creator; required when accepting",
-    )
-    parser.add_argument(
-        "--serial-story-review-notes",
-        default="",
-        help="Optional creator notes for the story decision",
-    )
-    parser.add_argument(
-        "--serial-character-draft",
-        action="store_true",
-        help="Create a character identity card from the latest approved series story",
-    )
-    parser.add_argument(
-        "--serial-character-preferences",
-        default="",
-        help="Optional creator preferences for the character; omit to let the model invent one",
-    )
-    parser.add_argument(
-        "--serial-character-card-review-id",
-        help="Character card ID to accept or reject after reviewing its Markdown file",
-    )
-    parser.add_argument(
-        "--serial-character-card-review-decision",
-        choices=("accepted", "rejected"),
-        help="Human decision for a pending character identity card",
-    )
-    parser.add_argument(
-        "--serial-character-card-name",
-        help="Final character name to lock when approving a card",
-    )
-    parser.add_argument(
-        "--serial-character-card-reviewed-file",
-        help="Exact character card file reviewed by the creator",
-    )
-    parser.add_argument(
-        "--serial-character-card-review-notes",
-        default="",
-        help="Optional creator notes for the character card decision",
-    )
-    parser.add_argument(
-        "--serial-episode-plan-draft",
-        action="store_true",
-        help="Draft and review an episode story, scene and shot outline from the approved series materials",
-    )
-    parser.add_argument(
-        "--serial-episode-plan-review-id",
-        help="Episode outline ID to accept or reject after reviewing its Markdown file",
-    )
-    parser.add_argument(
-        "--serial-episode-plan-review-decision",
-        choices=("accepted", "rejected"),
-        help="Human decision for a pending episode outline",
-    )
-    parser.add_argument(
-        "--serial-episode-plan-reviewed-file",
-        help="Exact episode outline file reviewed by the creator",
-    )
-    parser.add_argument(
-        "--serial-episode-plan-review-notes",
-        default="",
-        help="Optional creator notes for the episode outline decision",
-    )
-    parser.add_argument(
-        "--serial-character-reference",
-        action="append",
-        dest="serial_character_references",
-        default=[],
-        help="Reference image to lock when approving a character card; serial generation uses the approved paths and hashes",
-    )
-    parser.add_argument("--serial-episode-number", type=int, help="Episode to create or re-render; defaults to the next ready episode")
-    parser.add_argument("--serial-publish-episode-number", type=int, help="Run final Discord approval and social dispatch for an already-ready episode")
-    parser.add_argument("--serial-resume-episode-number", type=int, help="Resume the current blocked episode after its accepted segments are reviewed")
-    parser.add_argument("--serial-review-episode-number", type=int, help="Current episode whose timed-out segment review is being recorded")
-    parser.add_argument("--serial-review-segment-number", type=int, help="Segment reviewed by the creator")
-    parser.add_argument("--serial-review-decision", choices=("accepted", "rejected"), help="Creator's decision for one QA-passed serial MP4")
-    parser.add_argument("--serial-reviewed-video", help="Exact MP4 path inspected by the creator")
-    parser.add_argument(
-        "--discord-review-timeout-seconds",
-        type=int,
-        help="Maximum seconds to wait for a required Discord human review",
-    )
-    args = parser.parse_args(argv)
-    story_review_mode = bool(args.serial_story_review_plan_id)
-    character_review_mode = bool(args.serial_character_card_review_id)
-    character_workflow_mode = bool(args.serial_character_draft or character_review_mode)
-    episode_outline_review_mode = bool(args.serial_episode_plan_review_id)
-    episode_outline_workflow_mode = bool(args.serial_episode_plan_draft or episode_outline_review_mode)
-    story_workflow_mode = bool(args.serial_story_draft or story_review_mode)
-    onboarding_workflow_mode = (
-        story_workflow_mode or character_workflow_mode or episode_outline_workflow_mode
-    )
-    has_story_review_fields = any(
-        value is not None
-        for value in (
-            args.serial_story_review_decision,
-            args.serial_story_reviewed_file,
-        )
-    ) or bool(args.serial_story_review_notes)
-    has_character_review_fields = any(
-        value is not None
-        for value in (
-            args.serial_character_card_review_decision,
-            args.serial_character_card_name,
-            args.serial_character_card_reviewed_file,
-        )
-    ) or bool(args.serial_character_references)
-    has_character_review_fields = has_character_review_fields or bool(
-        args.serial_character_card_review_notes
-    )
-    has_episode_outline_review_fields = any(
-        value is not None
-        for value in (
-            args.serial_episode_plan_review_decision,
-            args.serial_episode_plan_reviewed_file,
-        )
-    ) or bool(args.serial_episode_plan_review_notes)
-    if (
-        not args.goal
-        and not args.serial_auto_next
-        and not onboarding_workflow_mode
-        and not (args.serial_mode and args.series_id)
-    ):
-        parser.error("--goal is required unless --serial-auto-next is selected")
-    if sum((
-        bool(args.serial_story_draft),
-        story_review_mode,
-        bool(args.serial_character_draft),
-        character_review_mode,
-        bool(args.serial_episode_plan_draft),
-        episode_outline_review_mode,
-    )) > 1:
-        parser.error("Run one story-first onboarding stage at a time")
-    if onboarding_workflow_mode and args.serial_mode:
-        parser.error("Story-first onboarding stages are separate from video generation; omit --serial-mode")
-    if character_workflow_mode and not str(args.series_id or "").strip():
-        parser.error("Character card stages require --series-id from the approved story")
-    if args.serial_character_draft and (has_character_review_fields or args.serial_character_card_review_decision):
-        parser.error("Create a character card draft or review a saved card, not both")
-    if character_review_mode and args.serial_character_card_review_decision is None:
-        parser.error("Character card review requires --serial-character-card-review-decision accepted|rejected")
-    if has_character_review_fields and not character_review_mode:
-        parser.error("Character card decision, name, file, and references require --serial-character-card-review-id")
-    if (
-        character_review_mode
-        and args.serial_character_card_review_decision == "accepted"
-        and not str(args.serial_character_card_reviewed_file or "").strip()
-    ):
-        parser.error("Approving a character card requires --serial-character-card-reviewed-file")
-    if (
-        character_review_mode
-        and args.serial_character_card_review_decision == "accepted"
-        and not str(args.serial_character_card_name or "").strip()
-    ):
-        parser.error("Approving a character card requires --serial-character-card-name")
-    if (
-        character_review_mode
-        and args.serial_character_card_review_decision == "accepted"
-        and not args.serial_character_references
-    ):
-        parser.error("Approving a character card requires at least one --serial-character-reference image")
-    if episode_outline_workflow_mode and not str(args.series_id or "").strip():
-        parser.error("Episode outline stages require --series-id from the approved story")
-    if args.serial_episode_plan_draft and args.serial_episode_number is None:
-        parser.error("Episode outline drafting requires --serial-episode-number")
-    if args.serial_episode_plan_draft and args.serial_episode_number is not None and args.serial_episode_number < 1:
-        parser.error("--serial-episode-number must be positive")
-    if args.serial_episode_plan_draft and not str(args.episode_topic or "").strip():
-        parser.error("Episode outline drafting requires --episode-topic")
-    if episode_outline_review_mode and args.serial_episode_plan_review_decision is None:
-        parser.error("Episode outline review requires --serial-episode-plan-review-decision accepted|rejected")
-    if has_episode_outline_review_fields and not episode_outline_review_mode:
-        parser.error("Episode outline decision, file, and notes require --serial-episode-plan-review-id")
-    if (
-        episode_outline_review_mode
-        and args.serial_episode_plan_review_decision == "accepted"
-        and not str(args.serial_episode_plan_reviewed_file or "").strip()
-    ):
-        parser.error("Approving an episode outline requires --serial-episode-plan-reviewed-file")
-    if args.serial_story_draft and args.serial_news_inspiration == "none" and not str(args.goal or "").strip():
-        parser.error("--serial-news-inspiration none requires a creator story idea in --goal")
-    if story_review_mode and args.serial_story_review_decision is None:
-        parser.error("Story review requires --serial-story-review-decision accepted|rejected")
-    if has_story_review_fields and not story_review_mode:
-        parser.error("Story review decision, file, and notes require --serial-story-review-plan-id")
-    if (
-        story_review_mode
-        and args.serial_story_review_decision == "accepted"
-        and not str(args.serial_story_reviewed_file or "").strip()
-    ):
-        parser.error("Accepting a story requires --serial-story-reviewed-file")
-    if onboarding_workflow_mode and any(
-        value is not None
-        for value in (
-            args.serial_episode_number if not args.serial_episode_plan_draft else None,
-            args.serial_publish_episode_number,
-            args.serial_resume_episode_number,
-            args.serial_review_episode_number,
-        )
-    ):
-        parser.error("Story planning and episode lifecycle options cannot be combined")
-    if args.serial_mode:
-        if not args.series_id and not args.serial_auto_next:
-            parser.error("--serial-mode requires --series-id")
-        if args.series_id and args.serial_auto_next:
-            parser.error("--serial-auto-next selects the series; omit --series-id")
-        if args.media_type.strip().lower() != "long_video":
-            parser.error("--serial-mode requires --media-type long_video")
-        if not (args.character or args.series_id):
-            parser.error("--serial-mode requires --character for auto-next or --series-id for a saved series")
-        if args.serial_episode_number is not None and args.serial_episode_number < 1:
-            parser.error("--serial-episode-number must be positive")
-        if args.serial_publish_episode_number is not None and args.serial_publish_episode_number < 1:
-            parser.error("--serial-publish-episode-number must be positive")
-        if args.serial_resume_episode_number is not None and args.serial_resume_episode_number < 1:
-            parser.error("--serial-resume-episode-number must be positive")
-        if args.serial_review_episode_number is not None and args.serial_review_episode_number < 1:
-            parser.error("--serial-review-episode-number must be positive")
-        if args.serial_review_segment_number is not None and args.serial_review_segment_number < 1:
-            parser.error("--serial-review-segment-number must be positive")
-        lifecycle_modes = sum(
-            value is not None
-            for value in (
-                args.serial_episode_number,
-                args.serial_publish_episode_number,
-                args.serial_resume_episode_number,
-                args.serial_review_episode_number,
-            )
-        )
-        if lifecycle_modes > 1:
-            parser.error("Rerender, resume, and manual review episode options are mutually exclusive")
-        if (
-            args.serial_publish_episode_number is None
-            and args.serial_resume_episode_number is None
-            and args.serial_review_episode_number is None
-            and not str(args.episode_topic or "").strip()
-            and not args.series_id
-        ):
-            if not args.serial_auto_next:
-                parser.error("New serial episodes require --episode-topic")
-        if args.serial_auto_next and any(
-            value is not None
-            for value in (
-                args.serial_episode_number,
-                args.serial_publish_episode_number,
-                args.serial_resume_episode_number,
-                args.serial_review_episode_number,
-            )
-        ):
-            parser.error("--serial-auto-next cannot be combined with episode-specific lifecycle options")
-        has_review_inputs = any(
-            value is not None
-            for value in (
-                args.serial_review_segment_number,
-                args.serial_review_decision,
-                args.serial_reviewed_video,
-            )
-        )
-        if (has_review_inputs or args.serial_review_episode_number is not None) and not all(
-            value is not None
-            for value in (
-                args.serial_review_episode_number,
-                args.serial_review_segment_number,
-                args.serial_review_decision,
-                args.serial_reviewed_video,
-            )
-        ):
-            parser.error("Manual serial review requires an episode, segment, decision, and exact reviewed MP4 path")
-        if args.serial_review_episode_number is not None and args.execute:
-            parser.error("Manual serial review records one decision; do not combine it with --execute")
-    elif not onboarding_workflow_mode and (
-        (args.series_id and not onboarding_workflow_mode)
-        or (args.serial_news_inspiration != "random" and not args.serial_story_draft)
-        or (args.serial_character_references and not character_review_mode)
-        or args.serial_character_preferences
-        or args.serial_character_card_name
-        or args.serial_character_card_reviewed_file
-        or args.serial_character_card_review_decision is not None
-        or args.serial_character_card_review_notes
-        or args.serial_episode_plan_draft
-        or args.serial_episode_plan_review_id
-        or args.serial_episode_plan_review_decision is not None
-        or args.serial_episode_plan_reviewed_file
-        or args.serial_episode_plan_review_notes
-        or (args.serial_episode_number is not None and not episode_outline_workflow_mode)
-        or args.serial_publish_episode_number is not None
-        or args.serial_resume_episode_number is not None
-        or args.serial_review_episode_number is not None
-        or args.serial_auto_next
-        or args.serial_review_segment_number is not None
-        or args.serial_review_decision is not None
-        or args.serial_reviewed_video is not None
-    ):
-        parser.error("Serial series options require --serial-mode")
-    if args.discord_review_timeout_seconds is not None and args.discord_review_timeout_seconds < 1:
-        parser.error("--discord-review-timeout-seconds must be positive")
-    return args
-
 
 def _execution_plan_from_dict(payload: dict[str, object]) -> ExecutionPlan:
     goal_payload = payload.get("goal")
@@ -1305,6 +948,7 @@ def _run_serial_new_series_onboarding(
                 preferred_generation_type="text2img",
                 output_dir=str(reference_output),
                 selected_character_name=character_name,
+                image_count=6,
                 subject_mode="single",
             ),
             review=CharacterReviewOptions(
@@ -1341,7 +985,7 @@ def _run_serial_new_series_onboarding(
 
     card_review = review_stage(
         stage="character",
-        summary=f"【角色與參考圖審核】請確認附件中的 {character_name} 角色設定，並在下方選擇一張角色參考圖。接受後會繼續首集大綱。",
+        summary=f"【角色與參考圖審核】請確認附件中的 {character_name} 角色設定，並從 {len(reference_paths)} 張候選圖中選一張作為角色參考圖。接受後會繼續首集大綱。",
         document_path=card_path,
         media_paths=reference_paths,
     )
@@ -1686,7 +1330,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
             str(episode["episode_id"]), platforms
         )
         if not platforms:
-            raise ValueError("All requested platforms already have a reported-success receipt for this episode.")
+            raise ValueError(
+                "All requested platforms already have a reported-success receipt for this episode."
+            )
         platform_configs = {platform: platform_configs[platform] for platform in platforms}
         publish_goal = GoalRequest(
             prompt=str(episode["prompt"]),
@@ -1730,7 +1376,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
 
     serial_platforms: list[str] = []
     serial_platform_configs: dict[str, dict[str, object]] = {}
-    serial_video_speed: dict[str, object] | None = None
     if serial_context is not None:
         serial_platforms, serial_platform_configs = _serial_publish_configuration(
             REPO_ROOT, args.character, args.platforms, args.character_config
@@ -1747,9 +1392,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
                 platform: serial_platform_configs[platform]
                 for platform in serial_platforms
             }
-        serial_video_speed = _serial_video_speed_configuration(
-            REPO_ROOT, args.character, args.character_config
-        )
 
     goal = planner.create_goal(
         prompt=args.goal,
@@ -1771,8 +1413,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
             "edit_variant_seed": args.edit_variant_seed,
             "edit_require_audio": args.edit_require_audio,
             "edit_analyze_audio": args.edit_analyze_audio,
-            "longvideo_edit_profile": args.longvideo_edit_profile,
-            "longvideo_production_profile": args.longvideo_production_profile,
             "longvideo_steps": args.longvideo_steps,
             "text": args.text,
             "character": args.character,
@@ -1788,7 +1428,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
             "output_dir": str(output_root) if output_root else None,
             "width": args.width,
             "height": args.height,
-            "use_tts": args.use_tts,
             "discord_review_timeout_seconds": discord_review_timeout_seconds,
             **(
                 {
@@ -1805,7 +1444,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
                     "publish_mode": args.publish_mode or "live",
                     "serial_story_context": serial_context["story_context"],
                     "reference_manifest": serial_context["reference_manifest"],
-                    "video_speed": serial_video_speed,
                     "longvideo_review_policy": "every_segment",
                     "longvideo_reference_max_images": 4,
                     "longvideo_reference_selection_limit": 4,
@@ -1821,47 +1459,20 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
     )
     if resume_episode_row is not None:
         goal.constraints["serial_episode_id"] = str(resume_episode_row["episode_id"])
-    if serial_store is not None and resume_episode_row is not None:
-        saved_plan = serial_store.get_plan_payload(str(resume_episode_row["episode_id"]))
-        if saved_plan is not None:
-            plan = _execution_plan_from_dict(saved_plan)
-            if (
-                plan.goal.prompt != str(args.goal).strip()
-                or plan.goal.constraints.get("series_id") != args.series_id
-                or plan.goal.constraints.get("character") != args.character
-                or plan.goal.constraints.get("serial_episode_id") != resume_episode_row["episode_id"]
-                or plan.goal.constraints.get("serial_database_name") != serial_store.database_name
-            ):
-                raise ValueError("The saved serial plan does not belong to this episode, series, or output root.")
-            plan.goal.constraints[
-                "discord_review_timeout_seconds"
-            ] = discord_review_timeout_seconds
-        else:
-            plan = planner.build_plan(goal)
-            if args.execute:
-                serial_store.store_reconstructed_plan(
-                    str(resume_episode_row["episode_id"]), plan.to_dict()
-                )
-    else:
-        plan = planner.build_plan(goal)
-
+    plan, resume_episode_row = _prepare_serial_execution_plan(
+        planner,
+        goal,
+        serial_store,
+        resume_episode_row,
+        discord_review_timeout_seconds=discord_review_timeout_seconds,
+    )
     episode = None
     if args.execute and serial_store is not None and serial_context is not None:
         try:
             if resume_episode_row is not None:
                 episode = resume_episode_row
                 resume_state = serial_store.resume_episode(str(episode["episode_id"]))
-                resume_initial_outputs = dict(resume_state["initial_node_outputs"])
-                completed_segment_count = int(resume_state["completed_segment_count"])
-                for node in plan.nodes:
-                    segment_index = node.inputs.get("segment_index")
-                    if (
-                        isinstance(segment_index, int)
-                        and segment_index < completed_segment_count
-                        and node.node_id not in resume_initial_outputs
-                        and node.skill_name != "media.video.extract_last_frame"
-                    ):
-                        resume_initial_outputs[node.node_id] = {}
+                resume_initial_outputs = _serial_resume_node_outputs(plan, resume_state)
             else:
                 episode = serial_store.start_episode(
                     serial_context,
@@ -1889,6 +1500,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
     print("=== RUN ===")
     try:
         result = runner.run(plan, initial_node_outputs=resume_initial_outputs)
+        while (
+            serial_store is not None
+            and episode is not None
+            and _serial_segment_regeneration_requested(plan, result)
+        ):
+            resume_state = serial_store.resume_episode(str(episode["episode_id"]))
+            resume_initial_outputs = _serial_resume_node_outputs(plan, resume_state)
+            result = runner.run(plan, initial_node_outputs=resume_initial_outputs)
     except Exception as exc:
         if serial_store is not None and episode is not None:
             serial_store.fail_episode(episode["episode_id"], f"{type(exc).__name__}: {exc}")

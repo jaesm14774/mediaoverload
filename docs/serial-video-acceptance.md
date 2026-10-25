@@ -16,6 +16,14 @@
 
 ### User Given no complexity is specified When the series story and episode outline are drafted Then the result is a simple short drama with one clear goal, one main obstacle, a small cast, and an easy-to-follow resolution
 
+### User Given a simple serial story has one goal, problem, and resolution When its treatment is generated Then the prompt does not request extra follow-up shorts or unrelated episode ideas
+
+### User Given a serial episode has accepted all rendered segments When its final edit is assembled Then the same FFmpeg motion analyzer used by every video assigns per-interval rates and keeps audio synchronized without story-plan speed instructions
+
+### User Given a blocked serial episode has no saved current-format execution plan When the creator resumes it Then the workflow reports the missing plan instead of rebuilding it from historical episode data
+
+### User Given a saved serial plan lacks explicit ordered segment video inputs When the creator resumes it Then the workflow rejects the plan instead of inferring order from legacy dependencies
+
 ### User Given the creator selects cinematic story complexity When the series story and episode outline are drafted Then the model may use layered stakes and character arcs while keeping the same selected protagonist
 
 ### User Given Discord review is unavailable or times out When serial onboarding reaches a review gate Then the run blocks without accepting the draft or starting video generation
@@ -139,6 +147,10 @@ User Given the creator selects `serial_video` in `run_media_interface.py` and th
 ### A failed episode resumes before selecting another automatic episode
 
 User Given automatic serial generation has a current blocked episode with a persisted plan and segments, When the creator starts the serial strategy again, Then MediaOverload resumes that same episode before applying the 50/50 fresh-or-continuation choice and reuses its accepted segment prefix.
+
+### Serial final edits use the same automatic visual pacing as every video
+
+User Given a serial episode has assembled all accepted segments, When FFmpeg prepares the final edit, Then it analyzes the assembled frames, assigns a rate to each motion interval, keeps audio synchronized, and does not read speed instructions from the story plan or character YAML.
 
 ### A first-segment failure can restart from the first segment
 

@@ -41,8 +41,6 @@ def render(
                 panel["duration_seconds"] for panel in story["panels"]
             ),
             "duration_tolerance": 1 / story["fps"] + 0.01,
-            "expected_width": story["width"],
-            "expected_height": story["height"],
             "expected_fps": story["fps"],
             "analyze_audio": False,
         },

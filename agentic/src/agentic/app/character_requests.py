@@ -24,6 +24,7 @@ class CharacterGenerationOptions:
     reference_video_depth: str | None = None
     reference_video_max_keyframes: int | None = None
     seed: int | None = None
+    image_count: int | None = None
     subject_mode: str | None = None
     motion_graphics: bool = False
     story_complexity: str | None = None

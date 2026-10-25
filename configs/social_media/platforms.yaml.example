@@ -13,6 +13,12 @@ social_media:
       prefix: ""
       enabled: true
 
+    threads:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      # The token exchange command stores a long-lived token and expiry here.
+      enabled: true
+
     youtube:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""

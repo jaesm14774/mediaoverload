@@ -10,8 +10,11 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
+from agentic.editorial_pacing import EDITORIAL_PACING_SPEEDS, motion_pacing_labels
+
 
 FFMPEG_COMMAND_TIMEOUT_SECONDS = 600
+MAX_EDITORIAL_AUDIO_VIDEO_DRIFT_SECONDS = 0.032
 
 
 class FFmpegAdapter:
@@ -266,13 +269,118 @@ class FFmpegAdapter:
             return self._concat_filter(video_paths, output_path)
         raise ValueError(f"Unknown method: {method}")
 
-    def change_video_speed(self, video_path: str, output_path: str, speed: float) -> str:
-        """Render a final video at a different playback speed, keeping audio synced."""
+    def analyze_editorial_pacing(self, video_path: str) -> dict[str, object]:
+        """Infer per-beat pace from changes in the rendered frames."""
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"Input video does not exist: {video_path}")
+        self._ensure_binaries()
+        probe = self.probe_media(video_path)
+        duration = float(probe.get("video_duration") or probe.get("duration") or 0.0)
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("input video duration must be available and greater than zero")
+
+        sample_fps = 4
+        width, height = 64, 36
+        command = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", video_path,
+            "-vf", f"fps={sample_fps},scale={width}:{height}:flags=area,format=gray",
+            "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1",
+        ]
+        try:
+            sampled = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                timeout=FFMPEG_COMMAND_TIMEOUT_SECONDS,
+            )
+        except subprocess.CalledProcessError as exc:
+            error = exc.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"FFmpeg motion sampling failed: {error}") from exc
+        frame_size = width * height
+        if len(sampled.stdout) % frame_size:
+            raise RuntimeError("FFmpeg motion sampling returned a partial grayscale frame")
+        frames = [
+            sampled.stdout[offset:offset + frame_size]
+            for offset in range(0, len(sampled.stdout), frame_size)
+        ]
+        window_count = min(8, max(2, math.ceil(duration / 1.5)))
+        window_count = min(window_count, max(1, len(frames) - 1))
+        if window_count == 0:
+            window_count = 1
+        motion_totals = [0.0] * window_count
+        motion_counts = [0] * window_count
+        for index, (previous, current) in enumerate(zip(frames, frames[1:]), start=1):
+            timestamp = (index - 0.5) / sample_fps
+            window = min(window_count - 1, int(timestamp / duration * window_count))
+            difference = sum(abs(left - right) for left, right in zip(previous, current))
+            motion_totals[window] += difference / (frame_size * 255)
+            motion_counts[window] += 1
+        motion_scores = [
+            total / count if count else 0.0
+            for total, count in zip(motion_totals, motion_counts)
+        ]
+        labels = motion_pacing_labels(motion_scores)
+        raw_segments = []
+        for index, label in enumerate(labels):
+            start = duration * index / window_count
+            end = duration if index == window_count - 1 else duration * (index + 1) / window_count
+            segment = {
+                "start_seconds": start,
+                "end_seconds": end,
+                "pacing": label,
+                "speed_factor": EDITORIAL_PACING_SPEEDS[label],
+                "motion_score": motion_scores[index],
+            }
+            if raw_segments and raw_segments[-1]["pacing"] == label:
+                raw_segments[-1]["end_seconds"] = end
+                raw_segments[-1]["motion_score"] = (
+                    float(raw_segments[-1]["motion_score"]) + motion_scores[index]
+                ) / 2
+            else:
+                raw_segments.append(segment)
+        return {
+            "method": "relative_motion",
+            "source_duration": duration,
+            "segments": raw_segments,
+        }
+
+    def apply_editorial_pacing(
+        self,
+        video_path: str,
+        output_path: str,
+        segments: list[dict[str, object]],
+    ) -> str:
+        """Retiming a complete, time-coded editorial plan and keeping audio aligned."""
+        if not isinstance(segments, list) or not segments:
+            raise ValueError("segments must contain a complete editorial timeline")
+        parsed: list[dict[str, float]] = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                raise ValueError("segments must contain timeline objects")
+            try:
+                start = float(segment["start_seconds"])
+                end = float(segment["end_seconds"])
+                speed = float(segment["speed_factor"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("segments must define start, end, and speed_factor") from exc
+            if (
+                not math.isfinite(start)
+                or not math.isfinite(end)
+                or not math.isfinite(speed)
+                or start < 0
+                or end <= start
+                or not 0.5 <= speed <= 1.5
+            ):
+                raise ValueError("segments must define finite, ordered times and a 0.5-1.5 speed_factor")
+            parsed.append({"start_seconds": start, "end_seconds": end, "speed_factor": speed})
+        if abs(parsed[0]["start_seconds"]) > 1e-6 or any(
+            abs(left["end_seconds"] - right["start_seconds"]) > 1e-6
+            for left, right in zip(parsed, parsed[1:])
+        ):
+            raise ValueError("segments must cover the source timeline without gaps or overlaps")
 
         self._ensure_binaries()
-        speed_value = float(speed)
-        if not math.isfinite(speed_value) or speed_value <= 0:
-            raise ValueError("speed must be a finite number greater than zero")
         if not Path(video_path).is_file():
             raise FileNotFoundError(f"Input video does not exist: {video_path}")
         self._ensure_parent(output_path)
@@ -280,42 +388,114 @@ class FFmpegAdapter:
             raise ValueError("output_path must be different from video_path")
 
         probe = self.probe_media(video_path)
-        video_pts = 1.0 / speed_value
-        source_fps = float(probe.get("frame_rate") or 0.0)
-        if not math.isfinite(source_fps) or source_fps <= 0:
+        duration = float(probe.get("video_duration") or probe.get("duration") or 0.0)
+        frame_rate = float(probe.get("frame_rate") or 0.0)
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("input video duration must be available and greater than zero")
+        if not math.isfinite(frame_rate) or frame_rate <= 0:
             raise ValueError("input video frame rate must be available and greater than zero")
-        video_filter = f"setpts={video_pts:.12g}*PTS,fps={source_fps:.12g}"
-        command = ["ffmpeg", "-i", video_path]
-        if bool(probe.get("has_audio")):
-            audio_filter = ",".join(self._atempo_filters(speed_value))
-            command.extend(
-                [
-                    "-filter_complex",
-                    f"[0:v]{video_filter}[v];[0:a]{audio_filter}[a]",
-                    "-map",
-                    "[v]",
-                    "-map",
-                    "[a]",
-                ]
-            )
-        else:
-            command.extend(["-vf", video_filter, "-map", "0:v:0", "-an"])
-        command.extend(
-            [
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-movflags",
-                "+faststart",
-                "-shortest",
-                "-y",
-                output_path,
-            ]
+        frame_tolerance = 1 / frame_rate
+        cursor = 0.0
+        for index, segment in enumerate(parsed):
+            if abs(segment["start_seconds"] - cursor) > frame_tolerance:
+                raise ValueError("segments must cover the source timeline without gaps or overlaps")
+            segment["start_seconds"] = cursor
+            cursor = segment["end_seconds"]
+            if cursor > duration + frame_tolerance:
+                raise ValueError("segments must end at the source video duration")
+        if abs(cursor - duration) > frame_tolerance:
+            raise ValueError("segments must cover the source timeline through its duration")
+        parsed[-1]["end_seconds"] = duration
+        if all(abs(segment["speed_factor"] - 1.0) < 1e-9 for segment in parsed):
+            shutil.copy2(video_path, output_path)
+            return output_path
+
+        filters: list[str] = []
+        video_labels: list[str] = []
+        audio_labels: list[str] = []
+        video_sources = [f"vsrc{index}" for index in range(len(parsed))]
+        filters.append(
+            f"[0:v:0]split={len(parsed)}"
+            + "".join(f"[{label}]" for label in video_sources)
         )
-        self._run(command)
+        has_audio = bool(probe.get("has_audio"))
+        audio_sources: list[str] = []
+        if has_audio:
+            audio_sources = [f"asrc{index}" for index in range(len(parsed))]
+            filters.append(
+                f"[0:a:0]asplit={len(parsed)}"
+                + "".join(f"[{label}]" for label in audio_sources)
+            )
+        for index, segment in enumerate(parsed):
+            start = segment["start_seconds"]
+            end = segment["end_seconds"]
+            speed = segment["speed_factor"]
+            video_label = f"v{index}"
+            video_chain = (
+                f"trim=start={start:.9f}:end={end:.9f},setpts=PTS-STARTPTS"
+            )
+            if speed < 1.0:
+                video_chain += f",minterpolate=fps={frame_rate / speed:.12g}:mi_mode=mci"
+            video_chain += f",setpts=(PTS-STARTPTS)/{speed:.12g},fps={frame_rate:.12g}"
+            filters.append(f"[{video_sources[index]}]{video_chain}[{video_label}]")
+            video_labels.append(f"[{video_label}]")
+            if has_audio:
+                audio_label = f"a{index}"
+                filters.append(
+                    f"[{audio_sources[index]}]atrim=start={start:.9f}:end={end:.9f},"
+                    f"asetpts=PTS-STARTPTS,{','.join(self._atempo_filters(speed))},"
+                    f"asetpts=PTS-STARTPTS[{audio_label}]"
+                )
+                audio_labels.append(f"[{audio_label}]")
+
+        if has_audio:
+            filters.append(
+                f"{''.join(label for pair in zip(video_labels, audio_labels) for label in pair)}"
+                f"concat=n={len(parsed)}:v=1:a=1[v][a]"
+            )
+            command = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", video_path,
+                "-filter_complex", ";".join(filters), "-map", "[v]", "-map", "[a]",
+            ]
+        else:
+            filters.append(f"{''.join(video_labels)}concat=n={len(parsed)}:v=1:a=0[v]")
+            command = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", video_path,
+                "-filter_complex", ";".join(filters), "-map", "[v]", "-an",
+            ]
+        command.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        if has_audio:
+            with tempfile.TemporaryDirectory(
+                prefix="editorial-pacing-", dir=str(Path(output_path).parent)
+            ) as temporary:
+                intermediate = Path(temporary) / "paced.mov"
+                command.extend(["-c:a", "pcm_s16le", "-y", str(intermediate)])
+                self._run(command)
+                paced_media = self.probe_media(str(intermediate))
+                target_duration = float(paced_media.get("video_duration") or 0.0)
+                if not math.isfinite(target_duration) or target_duration <= 0:
+                    raise RuntimeError("Editorial pacing produced a video without a valid duration")
+                candidate = Path(temporary) / "aligned.mp4"
+                normalize_audio = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(intermediate),
+                    "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy",
+                    "-af", f"apad,atrim=duration={target_duration:.9f},asetpts=PTS-STARTPTS",
+                    "-c:a", "aac", "-movflags", "+faststart", "-y", str(candidate),
+                ]
+                self._run(normalize_audio)
+                final_media = self.probe_media(str(candidate))
+                audio_duration = float(final_media.get("audio_duration") or 0.0)
+                video_duration = float(final_media.get("video_duration") or 0.0)
+                drift = abs(audio_duration - video_duration)
+                if drift > MAX_EDITORIAL_AUDIO_VIDEO_DRIFT_SECONDS:
+                    raise RuntimeError(
+                        "Editorial pacing could not align audio and video within 32 ms "
+                        f"(measured {drift * 1000:.3f} ms)"
+                    )
+                os.replace(candidate, output_path)
+        else:
+            command.extend(["-movflags", "+faststart", "-y", output_path])
+            self._run(command)
         return output_path
 
     def normalize_video_canvas(

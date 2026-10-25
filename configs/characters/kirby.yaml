@@ -10,7 +10,10 @@ generation:
   # Weighted selection enters the same serial workflow as the explicit CLI option.
   serial_video:
     enabled: true
-    story_complexity: simple
+    story_complexity: random
+    story_complexity_weights:
+      simple: 9
+      cinematic: 1
     series_selection_weights:
       new: 0.5
       continue: 0.5
@@ -20,11 +23,6 @@ generation:
     output_dir: output
     discord_review_timeout_seconds: 1800
     identity_references: []
-  # Apply the speed transform after the final video is rendered and before
-  # technical QA, Discord review, and social publishing.
-  video_speed:
-    enabled: true
-    factor: 2.0
   # Use single, two_character_interaction, or random. random requires
   # subject_mode_weights with positive weights for the concrete modes.
   subject_mode: random
@@ -195,13 +193,12 @@ generation:
     length: 240
     frame_rate: 24
     steps: 20
-    # Keep at least 10 seconds after any configured playback-speed transform.
+    # Keep image-to-video renders within this workflow's frame limit.
     max_i2v_frames: 240
   generation_type_weights:
     serial_video: 40
     text2img: 1
     text2image2video: 1
-    text2longvideo: 1
     native_h3_story: 1
     native_h3_t2v_story: 1
     native_h3_fl2va_story: 1
@@ -225,6 +222,11 @@ social_media:
       enabled: true
 
     facebook:
+      config_folder_path: /app/configs/social_media/credentials/kirby
+      prefix: ""
+      enabled: true
+
+    threads:
       config_folder_path: /app/configs/social_media/credentials/kirby
       prefix: ""
       enabled: true

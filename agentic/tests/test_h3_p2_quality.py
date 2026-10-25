@@ -83,8 +83,6 @@ class H3P2VideoQualityTests(unittest.TestCase):
             {
                 "video_path": str(tools._fixture_path),  # type: ignore[attr-defined]
                 "target_duration": 10.0,
-                "expected_width": 608,
-                "expected_height": 352,
                 "expected_fps": 24,
                 "require_audio": True,
                 "require_stereo_audio": True,

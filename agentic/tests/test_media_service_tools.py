@@ -6,8 +6,11 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import Mock, patch
 
 import requests
@@ -18,6 +21,8 @@ from agentic.tools.social_native import (
     FacebookPlatform,
     InstagramGraphPlatform,
     MediaPost,
+    SocialMediaManager,
+    ThreadsPlatform,
     YouTubePlatform,
 )
 from agentic.tools.social_services import (
@@ -996,6 +1001,329 @@ class InstagramGraphPlatformTests(unittest.TestCase):
             self.assertEqual(len(captured["caption"]), platform.CAPTION_MAX)
 
 
+class ThreadsPlatformTests(unittest.TestCase):
+    def test_user_given_text_only_test_post_when_publishing_to_threads_then_public_permalink_is_verified(self) -> None:
+        """User Given a text-only test post When publishing through Threads Then the public permalink is verified."""
+        requests_seen: list[dict[str, object]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+            def _write_json(self, body: dict[str, str]) -> None:
+                encoded = json.dumps(body).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def do_GET(self) -> None:
+                parsed = urlsplit(self.path)
+                requests_seen.append({"method": "GET", "path": parsed.path})
+                if parsed.path.endswith("/me"):
+                    self._write_json({"id": "threads-user-1", "username": "kirby"})
+                elif parsed.path.endswith("/container-1"):
+                    self._write_json({"id": "container-1", "status": "FINISHED"})
+                elif parsed.path.endswith("/post-1"):
+                    self._write_json(
+                        {
+                            "id": "post-1",
+                            "permalink": "https://www.threads.net/@kirby/post/test123",
+                        }
+                    )
+                else:
+                    self.send_error(404)
+
+            def do_POST(self) -> None:
+                parsed = urlsplit(self.path)
+                body_length = int(self.headers.get("Content-Length", "0"))
+                fields = parse_qs(self.rfile.read(body_length).decode("utf-8"))
+                requests_seen.append(
+                    {"method": "POST", "path": parsed.path, "form": fields}
+                )
+                if parsed.path.endswith("/threads"):
+                    self._write_json({"id": "container-1"})
+                elif parsed.path.endswith("/threads_publish"):
+                    self._write_json({"id": "post-1"})
+                else:
+                    self.send_error(404)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+            class LocalThreadsPlatform(ThreadsPlatform):
+                GRAPH_API_BASE = base_url
+                CONTAINER_POLL_SECONDS = 0
+
+            with tempfile.TemporaryDirectory() as directory:
+                with patch.dict(os.environ, {"THREADS_ACCESS_TOKEN": "test-access-token"}):
+                    platform = LocalThreadsPlatform(directory)
+                result = platform.upload_post(
+                    MediaPost(media_paths=[], caption="Threads API test post")
+                )
+
+            self.assertTrue(result)
+            receipt = platform.last_publish_receipt or {}
+            self.assertEqual(receipt["status"], "published")
+            self.assertEqual(receipt["visibility"], "public")
+            self.assertTrue(receipt["verified"])
+            self.assertEqual(
+                receipt["details"]["permalink"],
+                "https://www.threads.net/@kirby/post/test123",
+            )
+            create_request = next(
+                request
+                for request in requests_seen
+                if request["method"] == "POST"
+                and str(request["path"]).endswith("/threads")
+            )
+            self.assertEqual(create_request["form"]["media_type"], ["TEXT"])
+            self.assertEqual(create_request["form"]["text"], ["Threads API test post"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+
+    def test_user_given_threads_credentials_without_expiry_when_authenticating_then_profile_lookup_decides_token_validity(self) -> None:
+        """User Given a Threads token without expiry metadata When the publisher authenticates Then the profile response decides whether the token is usable."""
+        requests_seen: list[dict[str, str]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                requests_seen.append(
+                    {
+                        "path": self.path,
+                        "authorization": self.headers.get("Authorization", ""),
+                    }
+                )
+                encoded = json.dumps(
+                    {"id": "threads-user-1", "username": "kirby"}
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+            class LocalThreadsPlatform(ThreadsPlatform):
+                GRAPH_API_BASE = base_url
+
+            with tempfile.TemporaryDirectory() as directory:
+                Path(directory, "threads.env").write_text(
+                    "THREADS_ACCESS_TOKEN=test-access-token\n",
+                    encoding="utf-8",
+                )
+                platform = LocalThreadsPlatform(directory)
+
+            self.assertEqual(platform.user_id, "threads-user-1")
+            self.assertEqual(platform.username, "kirby")
+            self.assertEqual(requests_seen[0]["path"], "/v1.0/me?fields=id%2Cusername")
+            self.assertEqual(
+                requests_seen[0]["authorization"], "Bearer test-access-token"
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+
+    def test_user_given_safe_poc_when_threads_container_is_ready_then_post_is_staged_without_publication(self) -> None:
+        """User Given safe_poc mode and a ready Threads container When uploading media Then the result stays staged and no public post is created."""
+
+        class ContainerOnlyThreadsPlatform(ThreadsPlatform):
+            def __init__(self) -> None:
+                self.user_id = "threads-user-1"
+                self.access_token = "test-access-token"
+                self.last_container_status = {"status": "FINISHED"}
+                self.last_publish_receipt = None
+
+            def _require_media_url(self, _local_path: str) -> str:
+                return "https://cdn.example/clip.mp4"
+
+            def _create_media_container(
+                self,
+                *,
+                media_type: str,
+                media_field: str,
+                media_url: str,
+                caption: str,
+            ) -> str:
+                del media_type, media_field, media_url, caption
+                return "container-1"
+
+            def _wait_container_ready(self, _container_id: str) -> bool:
+                return True
+
+            def _publish_container(self, _container_id: str) -> str:
+                raise AssertionError("safe_poc must not publish the Threads container")
+
+        with tempfile.TemporaryDirectory() as directory:
+            video_path = str(Path(directory) / "clip.mp4")
+            Path(video_path).write_bytes(b"video fixture")
+            platform = ContainerOnlyThreadsPlatform()
+            result = platform.upload_post(
+                MediaPost(
+                    media_paths=[video_path],
+                    caption="safe POC",
+                    additional_params={"threads_publish_mode": "container_only"},
+                )
+            )
+
+        self.assertTrue(result)
+        receipt = platform.last_publish_receipt or {}
+        self.assertEqual(receipt["status"], "container_ready")
+        self.assertEqual(receipt["visibility"], "container_only")
+        self.assertTrue(receipt["verified"])
+
+    def test_user_given_threads_upload_without_verified_receipt_when_dispatching_then_result_is_not_accepted(self) -> None:
+        """User Given a Threads provider without a verified post receipt When dispatching Then the upload is rejected as unverified."""
+
+        class UnverifiedThreadsProvider:
+            last_publish_receipt = {"status": "uploading", "verified": False}
+
+            def authenticate(self) -> None:
+                return
+
+            def upload_post(self, _post: MediaPost) -> bool:
+                return True
+
+        manager = SocialMediaManager()
+        manager.register_platform("threads", UnverifiedThreadsProvider())
+
+        with self.assertRaisesRegex(RuntimeError, "verified external artifact"):
+            manager.upload_to_platform("threads", MediaPost(media_paths=["clip.mp4"], caption="caption"))
+
+    def test_user_given_threads_token_and_video_when_publishing_then_meta_publishes_and_returns_a_verified_permalink(self) -> None:
+        """User Given a Threads token and public video URL When publishing Then the completed post is verified by permalink."""
+        requests_seen: list[dict[str, object]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+            def _write_json(self, body: dict[str, str]) -> None:
+                encoded = json.dumps(body).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def do_GET(self) -> None:
+                parsed = urlsplit(self.path)
+                requests_seen.append(
+                    {
+                        "method": "GET",
+                        "path": parsed.path,
+                        "query": parse_qs(parsed.query),
+                        "authorization": self.headers.get("Authorization", ""),
+                    }
+                )
+                if parsed.path.endswith("/me"):
+                    self._write_json({"id": "threads-user-1", "username": "kirby"})
+                elif parsed.path.endswith("/container-1"):
+                    self._write_json({"id": "container-1", "status": "FINISHED"})
+                elif parsed.path.endswith("/post-1"):
+                    self._write_json(
+                        {
+                            "id": "post-1",
+                            "permalink": "https://www.threads.net/@kirby/post/abc123",
+                        }
+                    )
+                else:
+                    self.send_error(404)
+
+            def do_POST(self) -> None:
+                parsed = urlsplit(self.path)
+                body_length = int(self.headers.get("Content-Length", "0"))
+                fields = parse_qs(self.rfile.read(body_length).decode("utf-8"))
+                requests_seen.append(
+                    {
+                        "method": "POST",
+                        "path": parsed.path,
+                        "form": fields,
+                        "authorization": self.headers.get("Authorization", ""),
+                    }
+                )
+                if parsed.path.endswith("/threads"):
+                    self._write_json({"id": "container-1"})
+                elif parsed.path.endswith("/threads_publish"):
+                    self._write_json({"id": "post-1"})
+                else:
+                    self.send_error(404)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+            class LocalThreadsPlatform(ThreadsPlatform):
+                GRAPH_API_BASE = base_url
+
+            with tempfile.TemporaryDirectory() as directory:
+                video_path = str(Path(directory) / "clip.mp4")
+                Path(video_path).write_bytes(b"video fixture")
+                environment = {
+                    "THREADS_ACCESS_TOKEN": "test-access-token",
+                    "THREADS_MEDIA_BASE_URL": f"{base_url}/media",
+                }
+                with patch.dict(os.environ, environment):
+                    platform = LocalThreadsPlatform(directory)
+
+                class NoCloudinaryUpload:
+                    def upload(self, _path: str) -> None:
+                        return None
+
+                platform.cloudinary = NoCloudinaryUpload()
+                result = platform.upload_post(
+                    MediaPost(
+                        media_paths=[video_path],
+                        caption="A small adventure",
+                        hashtags="#kirby",
+                    )
+                )
+
+            self.assertTrue(result)
+            self.assertIsNotNone(platform.last_publish_receipt)
+            receipt = platform.last_publish_receipt or {}
+            self.assertEqual(receipt["external_id"], "post-1")
+            self.assertEqual(receipt["status"], "published")
+            self.assertEqual(receipt["visibility"], "public")
+            self.assertTrue(receipt["verified"])
+            self.assertEqual(
+                receipt["details"]["permalink"],
+                "https://www.threads.net/@kirby/post/abc123",
+            )
+            self.assertEqual(
+                [request["path"].rsplit("/", 1)[-1] for request in requests_seen],
+                ["me", "threads", "container-1", "threads_publish", "post-1"],
+            )
+            create_request = requests_seen[1]
+            self.assertEqual(create_request["form"]["media_type"], ["VIDEO"])
+            self.assertEqual(create_request["form"]["video_url"], [f"{base_url}/media/clip.mp4"])
+            self.assertEqual(create_request["form"]["text"], ["A small adventure\n#kirby"])
+            self.assertTrue(
+                all(request["authorization"] == "Bearer test-access-token" for request in requests_seen)
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+
+
 class SocialServiceToolsYouTubeTests(unittest.TestCase):
     def test_publish_social_passes_platform_bundle_additional_params_to_youtube(self) -> None:
         tools = SocialServiceTools(Path.cwd())
@@ -1143,7 +1471,8 @@ class SocialServiceToolsYouTubeTests(unittest.TestCase):
             yt_post.additional_params.get("youtube_contains_synthetic_media")  # type: ignore[union-attr]
         )
 
-    def test_safe_poc_overrides_platform_metadata_and_does_not_enable_x(self) -> None:
+    def test_user_given_safe_poc_mode_when_dispatching_threads_then_container_only_is_forced(self) -> None:
+        """User Given safe_poc mode When dispatching to Threads Then container-only mode is forced alongside existing platform safeguards."""
         tools = SocialServiceTools(Path.cwd())
         captured_posts: dict[str, object] = {}
 
@@ -1164,11 +1493,12 @@ class SocialServiceToolsYouTubeTests(unittest.TestCase):
             {
                 "media_paths": ["clip.mp4"],
                 "caption": "safe POC",
-                "platforms": ["youtube", "facebook", "instagram_graph"],
+                "platforms": ["youtube", "facebook", "instagram_graph", "threads"],
                 "platform_configs": {
                     "youtube": {"config_folder_path": "configs/yt"},
                     "facebook": {"config_folder_path": "configs/fb"},
                     "instagram_graph": {"config_folder_path": "configs/ig"},
+                    "threads": {"config_folder_path": "configs/threads"},
                 },
                 "publish_mode": "safe_poc",
                 "platform_bundle": {
@@ -1183,6 +1513,7 @@ class SocialServiceToolsYouTubeTests(unittest.TestCase):
         self.assertEqual(captured_posts["facebook"].additional_params["facebook_video_state"], "DRAFT")  # type: ignore[union-attr]
         self.assertTrue(captured_posts["facebook"].additional_params["facebook_use_reels"])  # type: ignore[union-attr]
         self.assertEqual(captured_posts["instagram_graph"].additional_params["instagram_publish_mode"], "container_only")  # type: ignore[union-attr]
+        self.assertEqual(captured_posts["threads"].additional_params["threads_publish_mode"], "container_only")  # type: ignore[union-attr]
 
 
 class FacebookPlatformTests(unittest.TestCase):

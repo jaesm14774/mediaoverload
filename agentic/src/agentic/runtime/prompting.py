@@ -216,7 +216,6 @@ def build_story_segments(
     creative_brief: str,
     segment_count: int,
     tone: str,
-    production_profile: str = "",
 ) -> list[dict[str, Any]]:
     visual = str(creative_brief or goal.prompt or "").strip()
     segments = [

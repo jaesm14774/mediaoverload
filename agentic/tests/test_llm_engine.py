@@ -359,7 +359,6 @@ class LLMEngineTests(unittest.TestCase):
             "brief",
             1,
             "cinematic escalation",
-            production_profile="text2longvideo",
         )
 
         self.assertNotIn("shots", segments[0])
@@ -405,7 +404,6 @@ class LLMEngineTests(unittest.TestCase):
             "brief",
             1,
             "cinematic escalation",
-            production_profile="text2longvideo",
         )
 
         self.assertNotIn("shots", segments[0])
@@ -419,7 +417,7 @@ class LLMEngineTests(unittest.TestCase):
             media_type="long_video",
             duration_seconds=30,
             style="cinematic animation",
-            constraints={},
+            constraints={"serial_mode": True},
         )
 
         segments = engine.segment_story(
@@ -427,13 +425,12 @@ class LLMEngineTests(unittest.TestCase):
             "current brief",
             6,
             "playful cinematic escalation",
-            production_profile="text2longvideo",
         )
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
         self.assertEqual(len(segments), 6)
         self.assertIn("current brief", user_prompt)
-        self.assertNotIn("text2longvideo_story.yaml", user_prompt)
+        self.assertNotIn("storyboard_path", user_prompt)
 
     def test_compose_prompt_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(

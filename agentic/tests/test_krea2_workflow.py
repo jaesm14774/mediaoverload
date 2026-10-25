@@ -42,7 +42,6 @@ class Krea2WorkflowContractTests(unittest.TestCase):
         image_stages = {
             "text2video",
             "text2image2video",
-            "text2longvideo",
             "native_h3_story",
             "native_h3_fl2va_story",
             "native_h3_l2va_story",

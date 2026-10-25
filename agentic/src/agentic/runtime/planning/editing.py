@@ -37,16 +37,23 @@ def build_video_narrate(context: PlanningContext, goal: GoalRequest) -> Executio
             tool_name="media.merge_audio_video",
             stage="package",
         ),
+    ]
+    editorial_node = context.append_editorial_pacing_node(
+        nodes,
+        source_node="mux-video",
+        node_id="video-editorial-pacing",
+    )
+    nodes.append(
         ExecutionNode(
             node_id="gif-preview",
             skill_name="media.video.gif_preview",
             inputs={"fps": 12, "scale_width": 512},
-            depends_on=["mux-video"],
+            depends_on=[editorial_node],
             tags=["preview", "gif"],
             tool_name="media.video_to_gif",
             stage="package",
         ),
-    ]
+    )
     metadata = {
         "input_video_path": input_video_path,
         "graph_overview": [node.node_id for node in nodes],
@@ -204,8 +211,6 @@ def build_image_sequence_edit(
             inputs={
                 "target_duration": qa_target_duration,
                 "duration_tolerance": 0.35,
-                "expected_width": compose_inputs["output_width"],
-                "expected_height": compose_inputs["output_height"],
                 "expected_fps": compose_inputs["fps"],
                 "require_audio": bool(goal.constraints.get("edit_require_audio", False))
                 or effective_profile != "baseline_concat",
@@ -262,6 +267,24 @@ def build_image_sequence_edit(
             stage="package",
         ),
     ]
+    editorial_node = context.append_editorial_pacing_node(
+        nodes,
+        source_node="compose-edit",
+        node_id="edit-editorial-pacing",
+    )
+    qa_node = next(node for node in nodes if node.node_id == "edit-video-qa")
+    qa_node.inputs = context.scaled_video_qa_inputs(goal, qa_node.inputs)
+    qa_node.inputs["expected_fps"] = compose_inputs["fps"]
+    if qa_target_duration is not None:
+        qa_node.inputs["minimum_duration"] = min(
+            float(qa_node.inputs["minimum_duration"]),
+            float(qa_target_duration),
+        )
+    qa_node.depends_on = [editorial_node]
+    preview_node = next(node for node in nodes if node.node_id == "edit-preview-gif")
+    preview_node.depends_on = [editorial_node, "edit-video-qa"]
+    collect_node = next(node for node in nodes if node.node_id == "collect-edit-outputs")
+    collect_node.depends_on = [editorial_node, "edit-video-qa", "edit-preview-gif"]
     return ExecutionPlan(
         goal=goal,
         workflow_name="image_sequence_edit_v1",

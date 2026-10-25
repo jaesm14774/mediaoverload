@@ -56,13 +56,8 @@ class RoutingContractTests(unittest.TestCase):
             self.routing["workflow_stage_candidates"]["text2image2video"]["video_workflow_name"][0],
             "minimax_h3_i2va",
         )
-        self.assertEqual(
-            self.routing["workflow_stage_candidates"]["text2longvideo"]["video_workflow_name"][0],
-            "minimax_h3_i2va",
-        )
-
         stage_contracts = self.hints["workflow_stage_contracts"]
-        self.assertIn("previous segment's rendered tail", stage_contracts["text2longvideo"]["video_workflow_name"])
+        self.assertIn("episode ideas", stage_contracts["serial_video"]["video_workflow_name"])
         for strategy in self.routing["strategy_candidates"]:
             self.assertIn(strategy, stage_contracts)
         self.assertIn("not connected as video conditioning", stage_contracts["text2video"]["image_workflow_name"])
@@ -70,12 +65,6 @@ class RoutingContractTests(unittest.TestCase):
         self.assertIn("T2V", stage_contracts["native_h3_t2v_story"]["video_workflow_name"])
         self.assertIn("last_frame", stage_contracts["native_h3_fl2va_story"]["video_workflow_name"])
         self.assertIn("reference images/videos", stage_contracts["native_h3_ref2va"]["video_workflow_name"])
-        self.assertIn("segment", stage_contracts["text2longvideo"]["video_workflow_name"])
-        self.assertNotIn("segment_count", self.routing["count_policies"]["text2longvideo"])
-        longvideo_config = self.routing["longvideo_config"]
-        self.assertEqual(longvideo_config["default_duration_seconds"], 30)
-        self.assertGreaterEqual(longvideo_config["segment_duration"], 10)
-        self.assertNotIn("storyboard_path", longvideo_config)
         auto_contract = stage_contracts["text2image2native_h3_ref2va"]
         self.assertIn("six", auto_contract["image_workflow_name"])
         self.assertIn("explicitly selected", auto_contract["video_workflow_name"])
@@ -89,7 +78,6 @@ class RoutingContractTests(unittest.TestCase):
         for strategy in (
             "text2video",
             "text2image2video",
-            "text2longvideo",
             "native_h3_story",
             "native_h3_t2v_story",
             "native_h3_fl2va_story",

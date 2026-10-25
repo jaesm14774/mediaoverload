@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any
 import yaml
@@ -16,6 +15,7 @@ SUPPORTED_PUBLISH_PLATFORMS = {
     "twitter",
     "facebook",
     "instagram_graph",
+    "threads",
     "youtube",
     FACEBOOK_PROFILE_HANDOFF_PLATFORM,
 }
@@ -37,27 +37,6 @@ MEDIA_EXTENSIONS = {
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
-
-
-def _normalize_video_speed_config(value: object) -> dict[str, object]:
-    if value is None:
-        raw: dict[str, object] = {}
-    elif isinstance(value, dict):
-        raw = dict(value)
-    else:
-        raise ValueError("generation.video_speed must be a mapping")
-    enabled = bool(raw.get("enabled", False))
-    try:
-        factor = float(raw.get("factor", 2.0))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "generation.video_speed.factor must be a number greater than zero"
-        ) from exc
-    if not math.isfinite(factor) or factor <= 0:
-        raise ValueError(
-            "generation.video_speed.factor must be a finite number greater than zero"
-        )
-    return {"enabled": enabled, "factor": factor}
 
 
 def _normalize_generation_type(
@@ -161,16 +140,8 @@ def _summarize_character_config(
     character_selection: dict[str, Any],
     generation: dict[str, Any],
     social_media: dict[str, Any],
-    strategies: dict[str, Any],
     platform_configs: dict[str, dict[str, Any]],
-    effective_longvideo_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    longvideo = dict(strategies.get("text2longvideo", {}) or {})
-    longvideo_config = dict(
-        effective_longvideo_config
-        if effective_longvideo_config is not None
-        else longvideo.get("longvideo_config", {}) or {}
-    )
     return {
         "config_path": str(path),
         "character_name": str(
@@ -213,17 +184,6 @@ def _summarize_character_config(
         "platform_config_folders": {
             name: str(config.get("config_folder_path", ""))
             for name, config in platform_configs.items()
-        },
-        "longvideo": {
-            "segment_count": int(longvideo_config.get("segment_count", 0) or 0),
-            "segment_duration": int(longvideo_config.get("segment_duration", 0) or 0),
-            "default_duration_seconds": int(
-                longvideo_config.get("default_duration_seconds", 0) or 0
-            ),
-            "production_profile": str(longvideo_config.get("production_profile") or ""),
-            "continuity_mode": str(longvideo_config.get("continuity_mode") or ""),
-            "use_tts": bool(longvideo_config.get("use_tts", False)),
-            "tts_voice": str(longvideo_config.get("tts_voice", "")),
         },
     }
 

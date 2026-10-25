@@ -166,7 +166,6 @@ class MotionGraphicsTests(unittest.TestCase):
                 style="playful",
                 constraints={
                     "enable_motion_graphics": True,
-                    "video_speed": {"enabled": True, "factor": 2.0},
                 },
             )
         )
@@ -176,7 +175,7 @@ class MotionGraphicsTests(unittest.TestCase):
         vfx = next(node for node in enabled_plan.nodes if node.node_id == "video-nvidia-vfx")
         qa = next(node for node in enabled_plan.nodes if node.node_id == "video-qa")
         preview = next(node for node in enabled_plan.nodes if node.node_id == "gif-preview")
-        self.assertEqual(motion.depends_on, ["video-speed"])
+        self.assertEqual(motion.depends_on, ["video-editorial-pacing"])
         self.assertEqual(vfx.depends_on, ["motion-graphics-review"])
         self.assertIn("video-nvidia-vfx", qa.depends_on)
         self.assertEqual(preview.depends_on, ["video-nvidia-vfx"])
@@ -229,14 +228,14 @@ class MotionGraphicsTests(unittest.TestCase):
             node = ExecutionNode(
                 node_id="motion-graphics-review",
                 skill_name="media.video.motion_graphics",
-                depends_on=["video-speed"],
+                depends_on=["video-editorial-pacing"],
             )
             plan = ExecutionPlan(
                 goal=GoalRequest(prompt="Kirby hits one target", media_type="text2img2video", duration_seconds=2),
                 workflow_name="text2img2video_v1",
                 nodes=[node],
             )
-            state = RunState(goal={}, metadata={}, node_outputs={"video-speed": {"video_path": str(source)}})
+            state = RunState(goal={}, metadata={}, node_outputs={"video-editorial-pacing": {"video_path": str(source)}})
 
             result = skills.compose_and_review(SkillContext(plan, node, state))
             manifest = json.loads(Path(result.outputs["manifest_path"]).read_text(encoding="utf-8"))
@@ -252,12 +251,12 @@ class MotionGraphicsTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), original_digest)
             self.assertEqual(result.outputs["video_path"], manifest["final_video_path"])
 
-    def test_user_given_overlay_and_speed_outputs_when_media_is_collected_then_only_hybrid_video_reaches_discord(self) -> None:
-        """User Given both the source and overlay outputs When final media is collected Then only the hybrid video reaches Discord."""
+    def test_user_given_paced_source_and_overlay_outputs_when_media_is_collected_then_only_hybrid_video_reaches_discord(self) -> None:
+        """User Given both the paced source and overlay outputs When final media is collected Then only the hybrid video reaches Discord."""
         run_result = {
             "state": {
                 "node_outputs": {
-                    "video-speed": {"video_path": "C:/output/source.mp4", "speed": 2.0},
+                    "video-editorial-pacing": {"video_path": "C:/output/source.mp4"},
                     "motion-graphics-review": {
                         "video_path": "C:/output/hybrid.mp4",
                         "motion_graphics_applied": True,

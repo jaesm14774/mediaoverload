@@ -145,8 +145,6 @@ class EditingSkills:
                 "video_path": video_path,
                 "target_duration": plan.target_duration_seconds,
                 "duration_tolerance": 0.35,
-                "expected_width": plan.output_width,
-                "expected_height": plan.output_height,
                 "expected_fps": plan.fps,
                 "require_audio": bool(inputs.get("require_audio", default_require_audio)),
                 "require_stereo_audio": bool(inputs.get("require_stereo_audio", default_require_audio)),

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import os
 import random
 from pathlib import Path
@@ -46,7 +45,6 @@ from agentic.app.character_config import (
     SUPPORTED_PUBLISH_PLATFORMS,
     _merge_social_media_config,
     _normalize_platform_configs,
-    _normalize_video_speed_config,
     configured_discord_review_timeout_seconds,
     _resolve_output_dir,
     _summarize_character_config,
@@ -92,6 +90,7 @@ def build_goal_payload_from_character_config(
     ).strip()
     rng = generation.rng
     requested_seed = generation.seed
+    requested_image_count = generation.image_count
     requested_reference_video_source = str(
         generation.reference_video_source or ""
     ).strip()
@@ -115,7 +114,6 @@ def build_goal_payload_from_character_config(
     character = dict(config.get("character", {}) or {})
     generation = dict(config.get("generation", {}) or {})
     additional_params = dict(config.get("additional_params", {}) or {})
-    strategies = dict(additional_params.get("strategies", {}) or {})
     requested_duration_seconds = duration_seconds
     if requested_duration_seconds is not None and int(requested_duration_seconds) <= 0:
         raise ValueError("duration_seconds must be a positive integer")
@@ -123,8 +121,6 @@ def build_goal_payload_from_character_config(
         dict(load_global_social_config(repo_root).get("social_media", {}) or {}),
         dict(config.get("social_media", {}) or {}),
     )
-    video_speed = _normalize_video_speed_config(generation.get("video_speed"))
-
     configured_character_name = str(character.get("name") or "").strip()
     configured_group_name = str(character.get("group_name") or "").strip()
     configured_prompt_identity = configured_character_name or configured_group_name
@@ -199,6 +195,11 @@ def build_goal_payload_from_character_config(
         rng=rng,
         asset_root=asset_root,
     )
+    if requested_image_count is not None:
+        image_count = int(requested_image_count)
+        if image_count < 1:
+            raise ValueError("image_count must be a positive integer")
+        routing.setdefault("count_plan", {})["image_count"] = image_count
     config_generation_type = str(routing["generation_type"])
     if config_generation_type == "serial_video":
         return {
@@ -210,13 +211,6 @@ def build_goal_payload_from_character_config(
         raise ValueError(
             "--motion-graphics is supported only with the text2image2video generation type"
         )
-    longvideo_config = dict(routing.get("longvideo_config", {}) or {})
-    longvideo_config.update(
-        dict(
-            dict(strategies.get("text2longvideo", {}) or {}).get("longvideo_config", {})
-            or {}
-        )
-    )
     effective_news_driven = bool(
         news_driven
         or (
@@ -333,11 +327,8 @@ def build_goal_payload_from_character_config(
     )
     duration_seconds = _resolve_duration_seconds(
         config_generation_type,
-        strategies,
         generation=generation,
-        routed_segment_count=routing.get("count_plan", {}).get("segment_count"),
         requested_duration_seconds=requested_duration_seconds,
-        longvideo_config=longvideo_config,
     )
     duration_seconds = normalize_video_duration(
         agentic_media_type, duration_seconds
@@ -361,14 +352,6 @@ def build_goal_payload_from_character_config(
         raise ValueError(
             "reference_video_max_keyframes must be an integer between 2 and 20"
         )
-    if config_generation_type == "text2image2video" and reference_video_source:
-        # Reference-driven action clips already encode their intended rhythm in
-        # the prompt. Do not compress the generated payoff with a speed pass.
-        video_speed = {"enabled": False, "factor": 1.0}
-    if config_generation_type == "motion_comic":
-        # Captions have deliberate reading time; the character-wide speed
-        # transform must not compress the comic after it has been composed.
-        video_speed = {"enabled": False, "factor": 1.0}
     platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
         repo_root,
         social_media.get("platforms"),
@@ -400,22 +383,6 @@ def build_goal_payload_from_character_config(
         platform_configs.pop("youtube", None)
         skipped_platforms.append("youtube:image_only_route")
     hashtags = [str(tag) for tag in (social_media.get("default_hashtags") or []) if tag]
-    use_tts = bool(longvideo_config.get("use_tts", False))
-    if (
-        agentic_media_type == "long_video"
-        and str(longvideo_config.get("production_profile") or "").strip().lower()
-        == "text2longvideo"
-    ):
-        # A publishable 30/45-second story must retain its requested runtime;
-        # Kirby's short-form 2x playback transform would otherwise compress it
-        # to half length before the publish review.
-        video_speed = {"enabled": False, "factor": 1.0}
-    if config_generation_type == "native_h3_fl2va_story":
-        # FL2VA's native workflow already owns the requested 15-second timing;
-        # applying the character-wide 2x post-process would turn it into a
-        # short preview before QA and review.
-        video_speed = {"enabled": False, "factor": 1.0}
-
     native_keyframe_candidate_count = max(
         1, int(native_recipe.get("keyframe_candidate_count") or 1)
     )
@@ -522,7 +489,6 @@ def build_goal_payload_from_character_config(
         "visual_style_profile": style_profile,
         "seed": int(requested_seed) if requested_seed is not None else None,
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
-        "video_speed": video_speed,
         "story_card_page_count": str(
             story_card_config.get("page_count", STORY_CARD_PAGE_COUNT_DEFAULT)
         ).strip()
@@ -658,7 +624,6 @@ def build_goal_payload_from_character_config(
         "reference_video_source": reference_video_source,
         "reference_video_depth": reference_video_depth,
         "reference_video_max_keyframes": reference_video_max_keyframes,
-        "use_tts": use_tts if agentic_media_type == "long_video" else False,
         "source_temperature": temperature,
         "source_config_path": str(path),
         "source_generation_type": config_generation_type,
@@ -737,7 +702,6 @@ def build_goal_payload_from_character_config(
             in {
                 "text2video",
                 "text2image2video",
-                "text2longvideo",
                 "native_h3_story",
                 "native_h3_fl2va_story",
                 "native_h3_l2va_story",
@@ -833,54 +797,6 @@ def build_goal_payload_from_character_config(
             ),
         }
     )
-    if agentic_media_type == "long_video":
-        # Keep long-video policy in the shared strategy config. The planner
-        # consumes provider-neutral recipe names.
-        longvideo_config_keys = {
-            "production_profile": "longvideo_production_profile",
-            "default_duration_seconds": "longvideo_default_duration_seconds",
-            "segment_duration": "longvideo_segment_duration",
-            "review_policy": "longvideo_review_policy",
-            "continuity_mode": "longvideo_continuity_mode",
-            "workflow_names": "longvideo_workflow_names",
-            "frame_candidate_count": "longvideo_frame_candidate_count",
-            "reference_candidate_count": "longvideo_reference_candidate_count",
-            "reference_selection_limit": "longvideo_reference_selection_limit",
-            "width": "longvideo_width",
-            "height": "longvideo_height",
-            "length": "longvideo_length",
-            "steps": "longvideo_steps",
-            "model_profile": "longvideo_model_profile",
-            "reference_manifest": "reference_manifest",
-            "reference_image_paths": "reference_image_paths",
-            "reference_video_paths": "reference_video_paths",
-            "reference_max_images": "longvideo_reference_max_images",
-            "reference_max_videos": "longvideo_reference_max_videos",
-        }
-        for source_key, target_key in longvideo_config_keys.items():
-            value = longvideo_config.get(source_key)
-            if value not in (None, "", []):
-                constraints[target_key] = (
-                    dict(value)
-                    if isinstance(value, dict)
-                    else list(value)
-                    if isinstance(value, list)
-                    else value
-                )
-        if (
-            str(constraints.get("longvideo_production_profile") or "").strip().lower()
-            == "text2longvideo"
-        ):
-            # The routing count policy is intentionally conservative for LLM
-            # schema generation. Production duration, however, must determine
-            # a viable count of H3 clips that each run for at least ten seconds.
-            if requested_duration_seconds is not None:
-                duration_seconds = max(
-                    MIN_VIDEO_DURATION_SECONDS, int(requested_duration_seconds)
-                )
-            constraints["segment_count"] = max(
-                1, int(duration_seconds) // MIN_VIDEO_DURATION_SECONDS
-            )
     character_config_summary = _summarize_character_config(
         path=path,
         character=character,
@@ -888,9 +804,7 @@ def build_goal_payload_from_character_config(
         character_selection=character_selection,
         generation=generation,
         social_media=social_media,
-        strategies=strategies,
         platform_configs=platform_configs,
-        effective_longvideo_config=longvideo_config,
     )
     character_config_summary["subject_context"] = subject_context
     character_config_summary["creative_profile"] = creative_profile

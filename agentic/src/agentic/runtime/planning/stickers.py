@@ -208,10 +208,15 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
             stage="render",
         ),
     ]
+    sprite_video_node = context.append_editorial_pacing_node(
+        nodes,
+        source_node="sprite-motion-video",
+        node_id="sprite-motion-editorial-pacing",
+    )
     sprite_video_node = context.append_nvidia_vfx_postprocess_node(
         goal,
         nodes,
-        source_node="sprite-motion-video",
+        source_node=sprite_video_node,
         node_id="sprite-motion-nvidia-vfx",
     )
     nodes.append(
@@ -374,6 +379,22 @@ def build_animated_sticker(
             stage="package",
         ),
     ]
+    editorial_node = context.append_editorial_pacing_node(
+        nodes,
+        source_node="animate-sticker",
+        node_id="sticker-editorial-pacing",
+    )
+    gif_node = next(node for node in nodes if node.node_id == "gif-preview")
+    gif_node.depends_on = [editorial_node]
+    package_node = next(
+        node for node in nodes if node.node_id == "package-animated-sticker"
+    )
+    package_node.inputs = {
+        "video_node": editorial_node,
+        "gif_preview_node": "gif-preview",
+    }
+    package_node.depends_on = [editorial_node, "gif-preview"]
+
     if review_loop_enabled:
         nodes.extend(
             [
@@ -443,6 +464,29 @@ def build_animated_sticker(
                 ),
             ]
         )
+        review_editorial_node = context.append_editorial_pacing_node(
+            nodes,
+            source_node="review-animate-sticker",
+            node_id="review-sticker-editorial-pacing",
+            retry=True,
+        )
+        review_gif_node = next(
+            node for node in nodes if node.node_id == "review-gif-preview"
+        )
+        review_gif_node.depends_on = [review_editorial_node]
+        review_package_node = next(
+            node
+            for node in nodes
+            if node.node_id == "review-package-animated-sticker"
+        )
+        review_package_node.inputs = {
+            "video_node": review_editorial_node,
+            "gif_preview_node": "review-gif-preview",
+        }
+        review_package_node.depends_on = [
+            review_editorial_node,
+            "review-gif-preview",
+        ]
     metadata = {
         "selected_workflows": [image_manifest.name, video_manifest.name],
         "required_assets": [

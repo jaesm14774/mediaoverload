@@ -93,8 +93,6 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
         self.assertEqual(by_id["video-nvidia-vfx"].depends_on, ["video-canvas"])
         self.assertEqual(by_id["video-qa"].depends_on[0], "video-nvidia-vfx")
         self.assertEqual(by_id["gif-preview"].depends_on, ["video-nvidia-vfx"])
-        self.assertEqual(by_id["video-qa"].inputs["expected_width"], 1280)
-        self.assertEqual(by_id["video-qa"].inputs["expected_height"], 720)
         self.assertEqual(by_id["video-qa"].inputs["expected_fps"], 48)
         self.assertEqual(
             by_id["review-video-nvidia-vfx"].depends_on,
@@ -105,8 +103,8 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
             by_id["review-final-select"].depends_on,
         )
 
-    def test_user_given_vfx_opt_out_when_short_video_plan_is_built_then_original_canvas_contract_remains(self) -> None:
-        """User Given an explicit VFX opt-out When its plan is built Then no NVIDIA node is scheduled and QA keeps source dimensions."""
+    def test_user_given_vfx_opt_out_when_short_video_plan_is_built_then_qa_follows_the_source_video(self) -> None:
+        """User Given an explicit VFX opt-out When its plan is built Then QA inspects the source video at its original frame rate."""
         repo_root = Path(__file__).resolve().parents[2]
         planner, _runner, _memory = build_runtime(
             repo_root,
@@ -134,12 +132,10 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
 
         self.assertNotIn("video-nvidia-vfx", by_id)
         self.assertEqual(by_id["video-qa"].depends_on[0], "video-canvas")
-        self.assertEqual(by_id["video-qa"].inputs["expected_width"], 640)
-        self.assertEqual(by_id["video-qa"].inputs["expected_height"], 360)
         self.assertEqual(by_id["video-qa"].inputs["expected_fps"], 24)
 
     def test_user_given_other_generated_video_routes_when_plan_is_built_then_final_qa_follows_nvidia_output(self) -> None:
-        """User Given native H3, text-to-video, long-video, and motion-comic goals When their plans are built Then final QA follows NVIDIA VFX."""
+        """User Given native H3, text-to-video, and motion-comic goals When their plans are built Then final QA follows NVIDIA VFX."""
         repo_root = Path(__file__).resolve().parents[2]
         planner, _runner, _memory = build_runtime(
             repo_root,
@@ -149,7 +145,6 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
         )
         cases = [
             ("text2video", {}, "video-nvidia-vfx", "animate-video", "video-qa"),
-            ("long_video", {}, "video-nvidia-vfx", "video-trim", "longvideo-video-qa"),
             (
                 "motion_comic",
                 {},

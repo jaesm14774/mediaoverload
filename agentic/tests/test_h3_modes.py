@@ -59,10 +59,11 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(render.inputs["length"], 362)
         self.assertEqual(render.inputs["model_profile"], "q4")
         self.assertEqual(plan.metadata["native_h3"]["backend"], "comfyui")
-        speed = next(node for node in plan.nodes if node.node_id == "native-h3-speed")
-        self.assertEqual(speed.inputs["speed"], 2.0)
+        pacing = next(node for node in plan.nodes if node.node_id == "native-h3-editorial-pacing")
+        self.assertEqual(pacing.skill_name, "media.video.editorial_pacing")
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
-        self.assertAlmostEqual(qa.inputs["target_duration"], 362 / 24 / 2)
+        self.assertNotIn("target_duration", qa.inputs)
+        self.assertEqual(qa.inputs["minimum_duration"], 10.0)
 
     def test_fl2va_plan_is_first_and_last_frame_workflow(self) -> None:
         """User Given FL2VA without editorial review When the plan is built Then Krea2 creates the opening and FLUX refines it into the ending anchor."""
@@ -94,7 +95,7 @@ class H3ModePlanTests(unittest.TestCase):
         plan = self._plan("native_h3_fl2va_story")
         ending = next(node for node in plan.nodes if node.node_id == "native-ending-keyframe")
         ending_review = next(node for node in plan.nodes if node.node_id == "native-ending-review")
-        speed_nodes = [node for node in plan.nodes if node.node_id == "native-h3-speed"]
+        pacing_nodes = [node for node in plan.nodes if node.node_id == "native-h3-editorial-pacing"]
 
         self.assertEqual(ending.inputs["image_count"], 6)
         self.assertTrue(ending.inputs["use_prior_frame"])
@@ -106,12 +107,12 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(ending.inputs["prompt_key"], "ending_keyframe_prompt")
         self.assertTrue(ending_review.inputs["review_all_candidates"])
         self.assertEqual(ending_review.inputs["review_scope"], "last_frame")
-        self.assertEqual(speed_nodes, [])
+        self.assertEqual(len(pacing_nodes), 1)
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
         canvas_nodes = [node for node in plan.nodes if node.node_id == "native-h3-canvas"]
         self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
         self.assertTrue(canvas_nodes)
-        self.assertEqual(qa.inputs["target_duration"], 362 / 24)
+        self.assertNotIn("target_duration", qa.inputs)
 
     def test_ref2va_plan_records_manifest_and_disables_reference_audio(self) -> None:
         plan = self._plan("native_h3_ref2va")

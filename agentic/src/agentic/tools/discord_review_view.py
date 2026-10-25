@@ -19,6 +19,7 @@ def create_discord_review_view(
     selection_required: bool = False,
     selection_limit: int | None = None,
     allow_regenerate: bool = False,
+    regenerate_current_segment: bool = False,
     allow_series_lifecycle_choice: bool = False,
 ) -> View:
     def split_caption_hashtags(value: str) -> tuple[str, str]:
@@ -77,6 +78,7 @@ def create_discord_review_view(
             timeout: float,
             *,
             allow_regenerate: bool,
+            regenerate_current_segment: bool,
             allow_series_lifecycle_choice: bool,
         ) -> None:
             super().__init__(timeout=timeout)
@@ -113,6 +115,13 @@ def create_discord_review_view(
                 )
                 if continue_button is not None:
                     self.remove_item(continue_button)
+            elif regenerate_current_segment:
+                continue_button = next(
+                    (item for item in self.children if getattr(item, "label", "") == "重新生成"),
+                    None,
+                )
+                if continue_button is not None:
+                    continue_button.label = "重新生成本段"
 
             if not allow_series_lifecycle_choice:
                 for label in ("完成系列並發布本集", "廢棄系列"):
@@ -288,7 +297,11 @@ def create_discord_review_view(
                 self.selected_files = []
                 await interaction.response.defer()
             await self.close_controls(
-                content=f"{self.content[:1750]}\n\n已選擇重新生成，將從頭重新跑完整流程。"
+                content=(
+                    f"{self.content[:1700]}\n\n已選擇重新生成本段；前面已接受的分段會保留，生成後會重新審核本段。"
+                    if regenerate_current_segment
+                    else f"{self.content[:1750]}\n\n已選擇重新生成，將從頭重新跑完整流程。"
+                )
             )
 
         @discord.ui.button(label="完成系列並發布本集", style=discord.ButtonStyle.blurple)
@@ -331,5 +344,6 @@ def create_discord_review_view(
         content=content,
         timeout=timeout,
         allow_regenerate=allow_regenerate,
+        regenerate_current_segment=regenerate_current_segment,
         allow_series_lifecycle_choice=allow_series_lifecycle_choice,
     )

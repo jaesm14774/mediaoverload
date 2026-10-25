@@ -508,7 +508,11 @@ class AgentSocialSkills:
                 selection_required=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
                 selection_limit=(1 if (first_frame_review or last_frame_review) else (limit if (anchor_set_review or reference_review) else None)),
                 review_scope=review_scope,
-                allow_regenerate=bool(context.plan.goal.constraints.get("allow_regenerate_review", False)),
+                allow_regenerate=(
+                    segment_acceptance_review
+                    or bool(context.plan.goal.constraints.get("allow_regenerate_review", False))
+                ),
+                regenerate_current_segment=segment_acceptance_review,
                 allow_series_lifecycle_choice=review_phase == "serial_final_publish",
             )
         if require_human_review and (decision is None or getattr(decision, "review_mode", "") != "discord"):
@@ -538,7 +542,11 @@ class AgentSocialSkills:
                         "selected_count": 0,
                         "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
                         "rejected_assets": ranked,
-                        "selection_rationale": "Human reviewer requested a full end-to-end rerun in Discord.",
+                        "selection_rationale": (
+                            "Human reviewer requested regeneration of this serial segment."
+                            if segment_acceptance_review
+                            else "Human reviewer requested a full end-to-end rerun in Discord."
+                        ),
                         "review_decision": "regenerate",
                         "regeneration_requested": True,
                         "review_mode": decision.review_mode,
@@ -547,7 +555,11 @@ class AgentSocialSkills:
                         "review_session_id": decision.session_id,
                         "review_session_path": decision.session_path,
                     },
-                    logs=["Stopped the current workflow because Discord requested a fresh end-to-end run."],
+                    logs=[
+                        "Stopped the current workflow to regenerate this serial segment."
+                        if segment_acceptance_review
+                        else "Stopped the current workflow because Discord requested a fresh end-to-end run."
+                    ],
                 )
             if decision.status == "rejected":
                 return SkillResult(

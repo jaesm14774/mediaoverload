@@ -126,14 +126,14 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native-opening-review",
             "native-keyframe-source-check",
             "native-h3-render",
-            "native-h3-speed",
+            "native-h3-editorial-pacing",
             "native-h3-nvidia-vfx",
             "native-h3-qa",
             "native-h3-preview",
             "native-h3-package",
         ]
         if "native-h3-canvas" in node_ids:
-            expected_node_ids.insert(8, "native-h3-canvas")
+            expected_node_ids.insert(7, "native-h3-canvas")
         self.assertEqual(
             node_ids,
             expected_node_ids,
@@ -163,7 +163,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(story_prompt.inputs["render_mode"], "image_to_video")
         self.assertEqual(qa.inputs["mode"], "discord_review_evidence_only")
         self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
-        self.assertAlmostEqual(qa.inputs["target_duration"], render.inputs["length"] / 24 / 2)
+        self.assertNotIn("target_duration", qa.inputs)
+        self.assertEqual(qa.inputs["minimum_duration"], 10.0)
         self.assertEqual(qa.inputs["expected_fps"], 48.0)
         self.assertIsNone(qa.tool_name)
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
@@ -171,7 +172,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("native_h3", plan.metadata)
 
     def test_user_gets_a_distinct_flux_refined_ending_for_fl2va(self) -> None:
-        """User Given a FL2VA story and a reproducible seed When the planner prepares both anchors Then Krea2 creates the opening and FLUX edits that image into the prompted ending state."""
+        """User Given a FL2VA story When the planner prepares both anchors Then Krea2 creates the opening and FLUX edits that image into the prompted ending state."""
         planner, _runner, _memory = build_runtime(
             self.repo_root,
             output_root=self.repo_root / ".tmp-tests" / "native-h3-paired-anchor-plan",
@@ -188,7 +189,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "storyboard_path": "configs/storyboards/native_h3_15s.yaml",
             "require_human_review": False,
             "enable_review_loop": False,
-            "native_h3_experiment_seed": 730927,
         }
 
         goal = planner.create_goal(
@@ -207,9 +207,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(ending.tool_name, "comfy.workflow.image_to_image")
         self.assertIn("native-opening-keyframe", ending.depends_on)
         self.assertIn("native-refine-asset-check", ending.depends_on)
-        self.assertEqual(ending.inputs["seed"], 730928)
-        self.assertEqual(nodes["native-opening-keyframe"].inputs["seed"], 730927)
-        self.assertEqual(nodes["native-h3-render"].inputs["seed"], 730929)
         self.assertTrue(nodes["native-h3-render"].inputs["use_last_frame"])
         self.assertEqual(plan.metadata["native_h3"]["frame_pair_strategy"], "krea2_to_flux3_reference_refine")
 

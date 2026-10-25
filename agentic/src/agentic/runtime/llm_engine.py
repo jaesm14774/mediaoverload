@@ -120,8 +120,6 @@ class LLMPromptEngine:
         segment_count: int,
         tone: str,
         reference_analysis: dict[str, Any] | None = None,
-        *,
-        production_profile: str = "",
     ) -> list[dict[str, Any]]:
         return scenes.segment_story(
             self.client,
@@ -130,7 +128,6 @@ class LLMPromptEngine:
             segment_count,
             tone,
             reference_analysis,
-            production_profile=production_profile,
         )
 
     def prepare_segment(

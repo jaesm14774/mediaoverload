@@ -37,14 +37,30 @@ class StoryboardContractTests(unittest.TestCase):
         )
 
         brief = "current news-derived delivery brief"
-        segments = build_story_segments(goal, brief, 6, "curious", "text2longvideo")
+        segments = build_story_segments(goal, brief, 6, "curious")
 
         self.assertEqual(len(segments), 6)
         self.assertEqual(segments[0]["visual"], brief)
+        self.assertTrue(all("edit_pacing" not in segment for segment in segments))
         self.assertNotIn("shots", segments[0])
         self.assertEqual(segments[-1]["segment_id"], "segment-6")
         self.assertNotIn("cause", segments[0])
         self.assertNotIn("action", segments[0])
+
+    def test_user_given_a_serial_story_when_story_beats_are_generated_then_no_manual_pacing_rate_is_added(self) -> None:
+        """User Given serial story beats When the story plan is generated Then speed is left for the shared FFmpeg visual analyzer."""
+        goal = GoalRequest(
+            prompt="Kirby returns a lost star to the quiet garden",
+            media_type="long_video",
+            duration_seconds=30,
+            style="cinematic animation",
+            constraints={"serial_mode": True},
+        )
+
+        segments = build_story_segments(goal, "A star finds its way home", 3, "gentle")
+
+        self.assertEqual(len(segments), 3)
+        self.assertTrue(all("edit_pacing" not in segment for segment in segments))
 
     def test_five_second_brief_is_not_rewritten_into_a_fixed_action_contract(self) -> None:
         goal = GoalRequest(

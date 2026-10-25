@@ -13,7 +13,7 @@ def select_weighted_route(
     """Select a candidate randomly in proportion to its configured weight."""
     normalized_candidates = [str(candidate).strip() for candidate in candidates if str(candidate).strip()]
     if not normalized_candidates:
-        return "text2longvideo"
+        raise ValueError("Routing requires at least one generation strategy")
 
     normalized_weights: dict[str, float] = {}
     for candidate in normalized_candidates:

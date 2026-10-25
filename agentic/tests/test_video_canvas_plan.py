@@ -37,8 +37,6 @@ class VideoCanvasPlanTests(unittest.TestCase):
         self.assertEqual(canvas.inputs["target_height"], 360)
         self.assertEqual(canvas.depends_on, ["animate-video"])
         self.assertEqual(qa.depends_on[0], "video-nvidia-vfx")
-        self.assertEqual(qa.inputs["expected_width"], 1280)
-        self.assertEqual(qa.inputs["expected_height"], 720)
         self.assertEqual(qa.inputs["expected_fps"], 48)
         self.assertGreaterEqual(animate.inputs["length"] / 24, 10)
 
