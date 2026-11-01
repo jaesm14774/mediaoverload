@@ -154,6 +154,8 @@ class RunRecorder:
         parsed_payload: Any = None,
         error: str = "",
         model_id: str | None = None,
+        chat_completion_elapsed_seconds: float | None = None,
+        provider_attempts: list[dict[str, Any]] | None = None,
     ) -> None:
         record = json.loads(call_path.read_text(encoding="utf-8"))
         record.update(
@@ -166,10 +168,23 @@ class RunRecorder:
         )
         if model_id is not None:
             record["model_id"] = str(model_id or "")
+        if chat_completion_elapsed_seconds is not None:
+            record["chat_completion_elapsed_seconds"] = max(
+                0.0, float(chat_completion_elapsed_seconds)
+            )
+        if provider_attempts is not None:
+            record["provider_attempts"] = _json_safe(provider_attempts)
         call_path.write_text(
             json.dumps(_json_safe(record), indent=2, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
+        event_metrics: dict[str, Any] = {}
+        if chat_completion_elapsed_seconds is not None:
+            event_metrics["chat_completion_elapsed_seconds"] = max(
+                0.0, float(chat_completion_elapsed_seconds)
+            )
+        if provider_attempts is not None:
+            event_metrics["provider_attempts_count"] = len(provider_attempts)
         self.record_event(
             "llm.call.completed",
             call_id=record.get("call_id", ""),
@@ -178,6 +193,7 @@ class RunRecorder:
             status=record.get("status", ""),
             path=str(call_path),
             error=str(error or ""),
+            **event_metrics,
         )
 
     def record_node(

@@ -54,7 +54,6 @@ class WorkflowRunner:
         persisted_outputs = dict(initial_node_outputs or {})
 
         for node in ordered_nodes:
-            skill = self.skill_registry.get(node.skill_name)
             context = SkillContext(plan=plan, node=node, state=state)
             reused = node.node_id in persisted_outputs
             attempts = (
@@ -84,6 +83,7 @@ class WorkflowRunner:
                             stage=node.stage or "runtime",
                         )
                     try:
+                        skill = self.skill_registry.get(node.skill_name)
                         result = skill.handler(context)
                     except Exception as exc:
                         result = SkillResult(

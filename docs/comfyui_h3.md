@@ -16,7 +16,7 @@ Krea 生圖、修圖與 H3 影片共用同一個 ComfyUI HTTP 服務。應用程
 
 設定 `COMFYUI_HOST`、`COMFYUI_PORT` 與 `COMFYUI_ROOT`，或從既有入口傳入對應參數。`COMFYUI_ROOT` 必須是實際安裝目錄或容器內掛載位置；工作流只記錄模型檔名，不綁定磁碟機代號。
 
-ComfyUI 需要原生 H3 conditioning／audio-video 節點及新版 ComfyUI-GGUF 的 `UnetLoaderGGUFDynamicVRAM`、`CLIPLoaderGGUFDynamicVRAM`。執行時會查詢 `/object_info`，缺少節點時直接回報，不切換其他 loader 或模型。
+ComfyUI 需要原生 H3 conditioning／audio-video 節點及新版 ComfyUI-GGUF 的 `UnetLoaderGGUFDynamicVRAM`、`CLIPLoaderGGUFDynamicVRAM`。執行前只查詢本次 workflow graph 使用的節點型別；缺少節點時直接回報，不切換其他 loader 或模型。
 
 FL2VA Q4 diffusion 用於 T2VA、I2VA、FL2VA 與 L2VA；Ref2VA 使用其專用 Q4 diffusion。既有 `q4`／`q2` profile 指定 Qwen3-VL 32B text encoder 的量化版本，diffusion 仍為 Q4。video VAE 使用 FP16、audio VAE 使用 ComfyUI 的 fused FP32 權重。資產大小與相對目錄由 `agentic/assets/minimax_h3.py` 宣告。
 

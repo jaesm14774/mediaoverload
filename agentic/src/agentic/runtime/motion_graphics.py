@@ -5,7 +5,7 @@ import re
 import textwrap
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Iterator, Literal
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -110,26 +110,66 @@ def render_motion_graphics_frames(
     fps: float,
     frame_count: int,
 ) -> list[Path]:
-    if width <= 0 or height <= 0 or not math.isfinite(fps) or fps <= 0 or frame_count <= 0:
-        raise ValueError("motion graphics rendering requires positive canvas, frame rate, and frame count")
+    _validate_motion_graphics_frame_request(width, height, fps, frame_count)
     output_dir.mkdir(parents=True, exist_ok=True)
-    cue_fonts = [
-        _font(max(14, round(height * 0.066 * cue.size)))
-        for cue in plan.cues
-    ]
     paths: list[Path] = []
-    for frame_index in range(frame_count):
-        timestamp = frame_index / fps
-        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(layer, "RGBA")
-        for cue_index, cue in enumerate(plan.cues):
-            if cue.start_seconds <= timestamp < cue.end_seconds:
-                progress = (timestamp - cue.start_seconds) / (cue.end_seconds - cue.start_seconds)
-                _draw_cue(draw, cue, progress, width, height, cue_fonts[cue_index])
+    for frame_index, rgba in enumerate(
+        iter_motion_graphics_rgba_frames(
+            plan,
+            width=width,
+            height=height,
+            fps=fps,
+            frame_count=frame_count,
+        )
+    ):
+        layer = Image.frombytes("RGBA", (width, height), rgba)
         path = output_dir / f"frame_{frame_index:06d}.png"
         layer.save(path, format="PNG", optimize=True)
         paths.append(path)
     return paths
+
+
+def iter_motion_graphics_rgba_frames(
+    plan: MotionGraphicsPlan,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+    frame_count: int,
+) -> Iterator[bytes]:
+    """Yield transparent RGBA overlay frames without writing intermediate files."""
+    _validate_motion_graphics_frame_request(width, height, fps, frame_count)
+    cue_fonts = [
+        _font(max(14, round(height * 0.066 * cue.size)))
+        for cue in plan.cues
+    ]
+    transparent_frame = bytes(width * height * 4)
+    for frame_index in range(frame_count):
+        timestamp = frame_index / fps
+        active_cues = [
+            (cue, cue_fonts[cue_index])
+            for cue_index, cue in enumerate(plan.cues)
+            if cue.start_seconds <= timestamp < cue.end_seconds
+        ]
+        if not active_cues:
+            yield transparent_frame
+            continue
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer, "RGBA")
+        for cue, font in active_cues:
+            progress = (timestamp - cue.start_seconds) / (cue.end_seconds - cue.start_seconds)
+            _draw_cue(draw, cue, progress, width, height, font)
+        yield layer.tobytes()
+
+
+def _validate_motion_graphics_frame_request(
+    width: int,
+    height: int,
+    fps: float,
+    frame_count: int,
+) -> None:
+    if width <= 0 or height <= 0 or not math.isfinite(fps) or fps <= 0 or frame_count <= 0:
+        raise ValueError("motion graphics rendering requires positive canvas, frame rate, and frame count")
 
 
 def motion_graphics_plan_json_schema() -> dict[str, object]:

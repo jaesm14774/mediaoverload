@@ -9,12 +9,33 @@ Given a finished SDR MP4 with a constant frame rate and width and height divisib
 When the video enters final post-processing
 Then each source frame is upscaled 2x with NVIDIA ULTRA before 2x MEDIUM frame generation, the output is 2x the width and height and frame rate, the final endpoint is held for one output frame so the source duration is retained, and the original audio stream is preserved.
 
-### Long clips fit the configured GPU memory
+### Final output contains every expected frame
 
 User
-Given a finished video longer than one processing chunk
+Given ComfyUI has returned each VFX chunk and the chunks are joined
+When final video validation completes
+Then one full audio/video decode reports exactly `source frame count × frame-rate multiplier` frames, the output retains the source duration and audio, and has no missing or repeated chunk boundary frame.
+
+### The final endpoint adds exactly one output frame
+
+User
+Given the joined NVIDIA VFX chunks contain `(source frame count - 1) × frame-rate multiplier + 1` frames
+When final assembly holds the last frame for exactly one output frame
+Then the output has `source frame count × frame-rate multiplier` frames and passes final frame-count validation.
+
+### Silent source videos remain valid
+
+User
+Given a valid video-only MP4 without an audio stream
+When source validation counts decoded frames
+Then it fully decodes the video, reports the exact frame count, and does not require an audio stream.
+
+### Long clips use larger overlapping batches
+
+User
+Given a finished video longer than 128 source frames and an RTX GPU with enough memory for its input dimensions
 When the NVIDIA VFX post-process runs
-Then it processes overlapping chunks of at most 32 source frames, joins each shared endpoint once, and produces one continuous video with no repeated boundary frame.
+Then it processes overlapping chunks of at most 128 source frames, joins each shared endpoint once, and produces one continuous video with no repeated boundary frame.
 
 ### AAC packet timing does not block final processing
 

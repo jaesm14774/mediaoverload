@@ -130,6 +130,7 @@ def chat_json(request: JsonChatRequest) -> Any:
         if isinstance(recorder, RunRecorder)
         else None
     )
+    completion_started_at = time.monotonic()
     try:
         completion_options = {
             "_response_validator": parse_response,
@@ -137,9 +138,11 @@ def chat_json(request: JsonChatRequest) -> Any:
         }
         if use_response_format:
             completion_options["response_format"] = response_format
+        completion_started_at = time.monotonic()
         response = chat_model.chat_completion(
             messages=messages, images=images, **completion_options
         )
+        completion_elapsed_seconds = max(0.0, time.monotonic() - completion_started_at)
         parsed = parse_response(response)
         if isinstance(recorder, RunRecorder) and call_path is not None:
             recorder.complete_llm_call(
@@ -147,6 +150,8 @@ def chat_json(request: JsonChatRequest) -> Any:
                 response=response,
                 parsed_payload=parsed,
                 model_id=model_id(chat_model),
+                chat_completion_elapsed_seconds=completion_elapsed_seconds,
+                provider_attempts=getattr(chat_model, "last_attempts", None),
             )
         return parsed
     except Exception as exc:
@@ -157,6 +162,10 @@ def chat_json(request: JsonChatRequest) -> Any:
                 response=response,
                 error=f"{type(exc).__name__}: {exc}",
                 model_id=model_id(chat_model),
+                chat_completion_elapsed_seconds=max(
+                    0.0, time.monotonic() - completion_started_at
+                ),
+                provider_attempts=getattr(chat_model, "last_attempts", None),
             )
 
     repair_errors: list[Exception] = []
@@ -210,12 +219,16 @@ def chat_json(request: JsonChatRequest) -> Any:
             if isinstance(recorder, RunRecorder)
             else None
         )
+        completion_started_at = time.monotonic()
         try:
             repaired_response = chat_model.chat_completion(
                 messages=repair_messages,
                 images=images,
                 _response_validator=parse_response,
                 **chat_options,
+            )
+            completion_elapsed_seconds = max(
+                0.0, time.monotonic() - completion_started_at
             )
             parsed = parse_response(repaired_response)
             if isinstance(recorder, RunRecorder) and repair_call_path is not None:
@@ -224,6 +237,8 @@ def chat_json(request: JsonChatRequest) -> Any:
                     response=repaired_response,
                     parsed_payload=parsed,
                     model_id=model_id(chat_model),
+                    chat_completion_elapsed_seconds=completion_elapsed_seconds,
+                    provider_attempts=getattr(chat_model, "last_attempts", None),
                 )
             return parsed
         except Exception as repair_error:
@@ -234,6 +249,10 @@ def chat_json(request: JsonChatRequest) -> Any:
                     response=repaired_response,
                     error=f"{type(repair_error).__name__}: {repair_error}",
                     model_id=model_id(chat_model),
+                    chat_completion_elapsed_seconds=max(
+                        0.0, time.monotonic() - completion_started_at
+                    ),
+                    provider_attempts=getattr(chat_model, "last_attempts", None),
                 )
 
     for repair_error in repair_errors:
@@ -284,6 +303,7 @@ def chat_text(request: TextChatRequest) -> str:
         else None
     )
     response: Any = None
+    completion_started_at = time.monotonic()
     try:
         response = chat_model.chat_completion(
             messages=messages,
@@ -291,6 +311,7 @@ def chat_text(request: TextChatRequest) -> str:
             request_timeout=max(1.0, float(timeout)),
             _deadline=time.monotonic() + total_timeout,
         )
+        completion_elapsed_seconds = max(0.0, time.monotonic() - completion_started_at)
         result = str(response or "").strip()
         if not result:
             raise ValueError("The text model returned an empty response.")
@@ -300,6 +321,8 @@ def chat_text(request: TextChatRequest) -> str:
                 response=response,
                 parsed_payload=result,
                 model_id=model_id(chat_model),
+                chat_completion_elapsed_seconds=completion_elapsed_seconds,
+                provider_attempts=getattr(chat_model, "last_attempts", None),
             )
         return result
     except Exception as exc:
@@ -309,6 +332,10 @@ def chat_text(request: TextChatRequest) -> str:
                 response=response,
                 error=f"{type(exc).__name__}: {exc}",
                 model_id=model_id(chat_model),
+                chat_completion_elapsed_seconds=max(
+                    0.0, time.monotonic() - completion_started_at
+                ),
+                provider_attempts=getattr(chat_model, "last_attempts", None),
             )
         raise
 

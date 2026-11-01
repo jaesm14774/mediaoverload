@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image, ImageChops
+
 from agentic.assets.registry import AssetRegistry
 from agentic.app.character_payload import build_goal_payload_from_character_config
 from agentic.app.character_publishing import collect_media_paths_from_run_result
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
-from agentic.runtime.motion_graphics import MotionGraphicsPlan
+from agentic.runtime.motion_graphics import MotionGraphicsPlan, render_motion_graphics_frames
 from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import ToolRegistry
 from agentic.skills.motion_graphics import MotionGraphicsSkills
@@ -24,6 +27,7 @@ class ScriptedMotionGraphicsPlanner:
 
     def __init__(self) -> None:
         self.review_count = 0
+        self.reviewed_plans: list[dict[str, object]] = []
 
     def build_motion_graphics_plan(self, goal, *, duration_seconds: float, fps: float) -> dict[str, object]:
         return MotionGraphicsPlan.from_dict(
@@ -49,6 +53,7 @@ class ScriptedMotionGraphicsPlanner:
         if not Path(contact_sheet_path).is_file():
             raise FileNotFoundError("visual review requires the renderer's sampled contact sheet")
         self.review_count += 1
+        self.reviewed_plans.append(json.loads(json.dumps(plan)))
         revised_plan = MotionGraphicsPlan.from_dict(plan).to_dict()
         if self.review_count == 1:
             revised_plan["cues"][0]["color"] = "#00D9FF"
@@ -57,6 +62,99 @@ class ScriptedMotionGraphicsPlanner:
 
 
 class MotionGraphicsTests(unittest.TestCase):
+    def test_user_given_a_time_bounded_caption_when_overlay_frames_are_rendered_then_active_frames_show_it_and_inactive_frames_remain_transparent(self) -> None:
+        """User Given a time-bounded caption When overlay frames are rendered Then only active frames contain visible graphics on a transparent canvas."""
+        plan = MotionGraphicsPlan.from_dict(
+            {
+                "duration_seconds": 0.5,
+                "cues": [
+                    {
+                        "kind": "caption",
+                        "start_seconds": 0.2,
+                        "end_seconds": 0.5,
+                        "x": 0.5,
+                        "y": 0.72,
+                        "text": "Ready",
+                    }
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            frames = render_motion_graphics_frames(
+                plan,
+                Path(temp),
+                width=320,
+                height=240,
+                fps=24,
+                frame_count=12,
+            )
+
+            with Image.open(frames[0]) as inactive:
+                self.assertEqual(inactive.mode, "RGBA")
+                self.assertEqual(inactive.size, (320, 240))
+                self.assertEqual(inactive.getchannel("A").getbbox(), None)
+            with Image.open(frames[6]) as active:
+                self.assertEqual(active.mode, "RGBA")
+                self.assertIsNotNone(active.getchannel("A").getbbox())
+
+    def test_user_given_caption_defaults_and_lowercase_color_when_parsed_then_values_are_normalized(self) -> None:
+        """User Given an incomplete optional caption with lowercase hex color When parsed Then defaults and text/color normalization are preserved."""
+        plan = MotionGraphicsPlan.from_dict(
+            {
+                "duration_seconds": 3.5,
+                "cues": [
+                    {
+                        "kind": "caption",
+                        "start_seconds": 0.25,
+                        "end_seconds": 2.75,
+                        "x": 0.5,
+                        "y": 0.72,
+                        "text": "  Ready  ",
+                        "color": "#aabbcc",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            plan.to_dict(),
+            {
+                "duration_seconds": 3.5,
+                "cues": [
+                    {
+                        "kind": "caption",
+                        "start_seconds": 0.25,
+                        "end_seconds": 2.75,
+                        "x": 0.5,
+                        "y": 0.72,
+                        "text": "Ready",
+                        "color": "#AABBCC",
+                        "accent": "#FF5D8F",
+                        "size": 1.0,
+                    }
+                ],
+            },
+        )
+
+    def test_user_given_a_nonfinite_cue_time_when_parsed_then_the_plan_is_rejected(self) -> None:
+        """User Given a cue with a nonfinite time When parsed Then the plan is rejected as invalid numeric input."""
+        with self.assertRaisesRegex(ValueError, "numeric fields must be finite"):
+            MotionGraphicsPlan.from_dict(
+                {
+                    "duration_seconds": 2.0,
+                    "cues": [
+                        {
+                            "kind": "burst",
+                            "start_seconds": float("nan"),
+                            "end_seconds": 1.5,
+                            "x": 0.5,
+                            "y": 0.5,
+                        }
+                    ],
+                }
+            )
+
     @staticmethod
     def _make_source(path: Path) -> None:
         subprocess.run(
@@ -71,8 +169,21 @@ class MotionGraphicsTests(unittest.TestCase):
             capture_output=True,
         )
 
+    @staticmethod
+    def _decode_frame(path: Path, timestamp: float) -> Image.Image:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(timestamp),
+                "-i", str(path), "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        with Image.open(io.BytesIO(result.stdout)) as frame:
+            return frame.convert("RGB")
+
     def test_user_given_h3_source_when_motion_graphics_are_composed_then_video_contract_and_audio_are_preserved(self) -> None:
-        """User Given a completed H3 clip When program synthesis is enabled Then its motion, timing, canvas, and audio remain intact."""
+        """User Given a completed H3 clip with timed graphics When it is composed Then active cues are visible and the source timing, canvas, and audio remain intact."""
         from agentic.tools.motion_graphics_adapter import MotionGraphicsAdapter
 
         with tempfile.TemporaryDirectory() as temp:
@@ -114,7 +225,6 @@ class MotionGraphicsTests(unittest.TestCase):
                 video_path=str(source),
                 output_path=str(output),
                 plan=plan,
-                work_dir=root / "frames",
             )
 
             source_probe = MotionGraphicsAdapter().ffmpeg.probe_media(str(source))
@@ -126,8 +236,73 @@ class MotionGraphicsTests(unittest.TestCase):
             self.assertAlmostEqual(final_probe["frame_rate"], source_probe["frame_rate"], delta=0.15)
             self.assertAlmostEqual(final_probe["duration"], source_probe["duration"], delta=1 / 24)
             self.assertEqual(final_probe["audio_codec"], source_probe["audio_codec"])
+            self.assertEqual(
+                MotionGraphicsAdapter().ffmpeg.count_video_frames(str(output)),
+                MotionGraphicsAdapter().ffmpeg.count_video_frames(str(source)),
+            )
             self.assertNotEqual(Path(result["video_path"]).resolve(), source.resolve())
             self.assertTrue(Path(result["contact_sheet_path"]).is_file())
+            inactive_source = self._decode_frame(source, 0.1)
+            inactive_output = self._decode_frame(output, 0.1)
+            active_source = self._decode_frame(source, 0.9)
+            active_output = self._decode_frame(output, 0.9)
+            inactive_change = sum(
+                ImageChops.difference(inactive_source, inactive_output).convert("L").getdata()
+            )
+            active_change = sum(
+                ImageChops.difference(active_source, active_output).convert("L").getdata()
+            )
+            self.assertGreater(active_change, inactive_change)
+
+    def test_user_given_incomplete_rgba_overlay_when_ffmpeg_finishes_then_partial_output_is_removed(self) -> None:
+        """User Given fewer streamed overlay frames than declared When FFmpeg finishes Then composition fails without leaving a partial video."""
+        from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.mp4"
+            output = root / "incomplete.mp4"
+            self._make_source(source)
+
+            with self.assertRaisesRegex(RuntimeError, "RGBA frame"):
+                FFmpegAdapter().overlay_rgba_frames(
+                    video_path=str(source),
+                    frames=[bytes(320 * 240 * 4)],
+                    output_path=str(output),
+                    width=320,
+                    height=240,
+                    fps=24,
+                    frame_count=2,
+                )
+
+            self.assertFalse(output.exists())
+
+    def test_user_given_an_existing_output_when_rgba_frame_stream_is_incomplete_then_existing_output_and_source_are_preserved(self) -> None:
+        """User Given an existing output and source video When the RGBA frame stream is incomplete Then rendering fails while preserving both files."""
+        from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.mp4"
+            output = root / "existing-output.mp4"
+            self._make_source(source)
+            source_bytes = source.read_bytes()
+            existing_output = b"existing motion graphics result"
+            output.write_bytes(existing_output)
+
+            with self.assertRaisesRegex(RuntimeError, "RGBA frame"):
+                FFmpegAdapter().overlay_rgba_frames(
+                    video_path=str(source),
+                    frames=[bytes(320 * 240 * 4)],
+                    output_path=str(output),
+                    width=320,
+                    height=240,
+                    fps=24,
+                    frame_count=2,
+                )
+
+            self.assertEqual(output.read_bytes(), existing_output)
+            self.assertEqual(source.read_bytes(), source_bytes)
 
     def test_user_given_validated_motion_plan_when_coordinates_leave_safe_area_then_plan_is_rejected(self) -> None:
         """User Given a declarative motion plan When a text cue leaves the subtitle-safe area Then validation rejects it."""
@@ -243,6 +418,14 @@ class MotionGraphicsTests(unittest.TestCase):
             self.assertEqual(result.status, "success")
             self.assertEqual(planner.review_count, 2)
             self.assertEqual(len(manifest["rounds"]), 2)
+            round_plans = []
+            for round_record in manifest["rounds"]:
+                persisted_plan = json.loads(
+                    Path(round_record["plan_path"]).read_text(encoding="utf-8")
+                )
+                self.assertEqual(persisted_plan, round_record["plan"])
+                round_plans.append(round_record["plan"])
+            self.assertEqual(planner.reviewed_plans, round_plans)
             self.assertTrue(all(item["source_video_path"] == str(source) for item in manifest["rounds"]))
             self.assertNotEqual(
                 manifest["rounds"][0]["plan"]["cues"][0]["color"],

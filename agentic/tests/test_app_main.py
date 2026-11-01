@@ -1,11 +1,46 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from agentic.app.main import _build_prompt_summary
 
 
 class AppMainTests(unittest.TestCase):
+    def test_user_given_the_cli_entrypoint_when_review_commands_are_loaded_then_generation_backends_stay_unloaded(self) -> None:
+        """User Given a CLI process needs to load review commands When its entrypoint module is imported Then LLM, Comfy workflow, and media service backends remain unloaded."""
+        project_root = Path(__file__).resolve().parents[2]
+        source_root = project_root / "agentic" / "src"
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_root), env.get("PYTHONPATH", "")]
+        ).rstrip(os.pathsep)
+        script = (
+            "import json, sys; import agentic.app.main; "
+            "heavy = ('agentic.runtime.llm_engine', 'agentic.runtime.llm_client', "
+            "'agentic.runtime.model_backends', 'agentic.tools.media_services', "
+            "'agentic.skills.longvideo', 'agentic.tools.comfy_h3', "
+            "'agentic.app.character_config', 'agentic.tools.publishing_adapter', "
+            "'agentic.tools.social_native', 'requests', "
+            "'agentic.runtime.serial_video', 'pymysql', 'cryptography'); "
+            "print(json.dumps([name for name in heavy if name in sys.modules]))"
+        )
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=project_root,
+            env=env,
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+
+        self.assertEqual(json.loads(completed.stdout), [])
+
     def test_build_prompt_summary_returns_prompt_metadata_only(self) -> None:
         summary = _build_prompt_summary(
             {

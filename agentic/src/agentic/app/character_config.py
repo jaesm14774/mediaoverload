@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import yaml
 from agentic.app.style_catalog import StyleLibrary
 from agentic.runtime.contracts import DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
+from agentic.runtime.yaml_config import safe_yaml_load
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.app.character_requests import SUBJECT_MODE_SINGLE
 
@@ -48,7 +48,7 @@ def _normalize_generation_type(
 
 def load_character_config(config_path: str | Path) -> dict[str, Any]:
     path = Path(config_path).resolve()
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return safe_yaml_load(path.read_text(encoding="utf-8")) or {}
 
 
 def normalize_discord_review_timeout_seconds(value: object) -> int:
@@ -87,7 +87,7 @@ def load_global_social_config(repo_root: Path) -> dict[str, Any]:
     path = repo_root / "configs" / "social_media" / "platforms.yaml"
     if not path.exists():
         return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = safe_yaml_load(path.read_text(encoding="utf-8")) or {}
     return dict(data) if isinstance(data, dict) else {}
 
 
@@ -141,6 +141,7 @@ def _summarize_character_config(
     generation: dict[str, Any],
     social_media: dict[str, Any],
     platform_configs: dict[str, dict[str, Any]],
+    style_library: StyleLibrary | None = None,
 ) -> dict[str, Any]:
     return {
         "config_path": str(path),
@@ -166,7 +167,7 @@ def _summarize_character_config(
         "generation_type_weights": dict(
             generation.get("generation_type_weights", {}) or {}
         ),
-        "style_count": len(StyleLibrary().profiles()) if (
+        "style_count": len((style_library or StyleLibrary()).profiles()) if (
             dict(dict(generation.get("creative_profile", {}) or {}).get("style", {}) or {})
             .get("catalog") == "krea2"
         ) else len(

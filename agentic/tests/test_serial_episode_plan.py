@@ -28,6 +28,7 @@ def test_user_given_an_approved_story_and_character_when_planning_an_episode_the
         episode_topic="The broken lighthouse signal",
         episode_direction="Tide discovers the lantern is being blocked by salt crystals.",
         previous_episode_summaries=["Episode 1: Tide finds the cloud and learns the harbor has gone dark."],
+        complexity="cinematic",
     )
 
     assert "returns a lost cloud" in prompt

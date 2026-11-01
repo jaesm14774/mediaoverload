@@ -116,12 +116,20 @@ def _run_serial_video(
     )
 
 
+def _is_failed_serial_result(result: Any) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("generation_type") == "serial_video"
+        and result.get("status") == "failed"
+    )
+
+
 def main(
     argv: list[str] | None = None,
     *,
     workflow_runner: Callable[[CharacterWorkflowRequest], dict[str, Any]] = run_character_workflow,
     serial_runner: Callable[[Sequence[str]], Any] | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Character media interface backed by agentic runtime")
@@ -217,7 +225,7 @@ def main(
             args, config_path, parser=parser, serial_runner=serial_runner
         )
         print(dumps_result(result))
-        return
+        return result
     if args.serial_episodes is not None or args.episode_topic:
         parser.error("--serial-episodes and --episode-topic require --generation-type serial_video")
 
@@ -277,7 +285,10 @@ def main(
         selected_workflow_runner = run_serial_aware_workflow
     result = run_character_session(request, workflow_runner=selected_workflow_runner)
     print(dumps_result(result))
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    completion = main()
+    if _is_failed_serial_result(completion):
+        raise SystemExit(2)

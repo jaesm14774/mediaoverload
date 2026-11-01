@@ -114,27 +114,46 @@ class PostStrategyTests(unittest.TestCase):
 
         self.assertEqual(bundle["youtube"]["additional_params"]["youtube_tags"], [])
 
-    def test_caption_model_may_choose_no_hashtags(self) -> None:
+    def test_user_given_clear_article_topics_when_preparing_publish_copy_then_five_relevant_hashtags_are_preserved(self) -> None:
+        """User Given a source article supports several discovery terms When preparing publish copy Then five relevant hashtags can reach the platform bundle."""
         engine = LLMPromptEngine(
             mode="llm",
             manager=_FakeManager(
-                '{"caption":"A quiet blue crystal catches the light.","hashtags":"","platform_captions":{"instagram":"A quiet blue crystal catches the light."}}'
+                '{"caption":"這則消息真正值得留意的，是道路安全如何影響每天通勤的人。","hashtags":"#交通安全 #道路事故 #國道一號 #行車安全 #通勤生活","platform_captions":{"instagram_graph":"塞車畫面不只是在說車流變慢，也提醒我們事故會把用路人的時間一起卡住。"}}'
             ),
         )
 
         result = engine.prepare_publish_caption(
-            GoalRequest(prompt="publish a quiet crystal scene", media_type="publish_review"),
+            GoalRequest(
+                prompt="publish a visual story about traffic safety",
+                media_type="publish_review",
+                constraints={
+                    "news_grounding_required": True,
+                    "news_context": {
+                        "title": "國道交通事故與通勤安全",
+                        "topic": "道路安全",
+                        "content": "新聞來源提供事故與通勤影響的背景。",
+                    },
+                },
+            ),
             prefix="",
-            hashtags=["crystal", "art"],
-            platforms=["instagram"],
-            media_paths=["crystal.png"],
+            hashtags=["交通安全", "道路事故", "國道一號", "行車安全", "通勤生活"],
+            platforms=["instagram_graph"],
+            media_paths=["road-safety.png"],
         )
 
-        self.assertEqual(result["hashtags"], "")
         self.assertEqual(
-            normalize_hashtag_text("", required_hashtags=["crystal"]),
+            result["hashtags"],
+            "#交通安全 #道路事故 #國道一號 #行車安全 #通勤生活",
+        )
+        self.assertEqual(
+            normalize_hashtag_text("", required_hashtags=["交通安全"]),
             "",
         )
+
+    def test_user_given_no_supported_discovery_terms_when_preparing_publish_copy_then_empty_hashtags_remain_valid(self) -> None:
+        """User Given the media has no supported discovery terms When preparing publish copy Then irrelevant hashtags are not invented to meet a quota."""
+        self.assertEqual(normalize_hashtag_text(""), "")
 
     def test_generic_reach_bait_is_not_a_content_hashtag(self) -> None:
         self.assertEqual(

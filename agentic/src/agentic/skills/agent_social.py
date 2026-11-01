@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,101 @@ VIDEO_REVIEW_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_REVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
+@dataclass(frozen=True)
+class _AssetReviewPolicy:
+    review_scope: str
+    review_phase: str
+    limit: int
+    auto_select_for_probe: bool
+    review_all_candidates: bool
+    require_human_review: bool
+    human_review_enabled: bool
+    allow_regenerate_review: bool
+
+    @property
+    def segment_acceptance_review(self) -> bool:
+        return self.review_phase == "segment_acceptance"
+
+    @property
+    def first_frame_review(self) -> bool:
+        return self.review_scope == "first_frame" or self.review_phase == "opening_frame"
+
+    @property
+    def last_frame_review(self) -> bool:
+        return self.review_scope == "last_frame"
+
+    @property
+    def anchor_set_review(self) -> bool:
+        return self.review_scope in {"anchor_set", "anchors"} or self.review_phase == "anchor_set"
+
+    @property
+    def reference_review(self) -> bool:
+        return self.review_scope == "reference" or self.review_phase == "reference_selection"
+
+    @property
+    def stage_asset_review(self) -> bool:
+        return (
+            self.first_frame_review
+            or self.last_frame_review
+            or self.anchor_set_review
+            or self.reference_review
+        )
+
+    @property
+    def final_video_review(self) -> bool:
+        return self.review_scope == "final_video"
+
+    @property
+    def final_media_review(self) -> bool:
+        return self.review_scope == "final_media"
+
+    @property
+    def allow_asset_selection(self) -> bool:
+        return self.stage_asset_review or self.final_media_review
+
+    @property
+    def allow_text_edit(self) -> bool:
+        return not (self.stage_asset_review or self.segment_acceptance_review)
+
+    @property
+    def selection_mode(self) -> str:
+        return "single" if self.first_frame_review or self.last_frame_review else "multi"
+
+    @property
+    def selection_required(self) -> bool:
+        return (
+            self.first_frame_review
+            or self.last_frame_review
+            or self.anchor_set_review
+            or self.reference_review
+            or self.final_media_review
+        )
+
+    @property
+    def selection_limit(self) -> int | None:
+        if self.first_frame_review or self.last_frame_review:
+            return 1
+        if self.anchor_set_review or self.reference_review:
+            return self.limit
+        return None
+
+
+@dataclass(frozen=True)
+class _AssetReviewCandidates:
+    ranked: list[str]
+    heuristic_ranked: list[dict[str, Any]]
+    bundle: dict[str, Any]
+    selected: list[str]
+    review_media_paths: list[str]
+    preferred_extensions: tuple[str, ...]
+    caption_review_notes: str
+    review_notes: str
+
+    @property
+    def ranked_candidates(self) -> list[dict[str, Any]]:
+        return self.bundle.get("ranked_candidates", self.heuristic_ranked)
+
+
 class AgentSocialSkills:
     def __init__(
         self,
@@ -47,8 +143,18 @@ class AgentSocialSkills:
             prefix = ""
         hashtags = context.node.inputs.get("hashtags") or context.plan.goal.constraints.get("hashtags") or []
         platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or context.node.inputs.get("platforms") or [])]
-        selected_media = self._collect_media_from_dependencies(context)
         review_select = context.state[context.node.depends_on[0]] if context.node.depends_on else {}
+        reviewed_media = (
+            review_select.get("selected_assets")
+            if "selected_assets" in review_select
+            else review_select.get("media_paths")
+        )
+        if isinstance(reviewed_media, str):
+            selected_media = [reviewed_media] if reviewed_media.strip() else []
+        elif isinstance(reviewed_media, list):
+            selected_media = [str(path) for path in reviewed_media if path]
+        else:
+            selected_media = self._collect_media_from_dependencies(context)
         approved_review_text = str(review_select.get("approved_review_text") or "").strip()
         edited_review_text = str(review_select.get("edited_review_text") or "").strip()
         review_text = approved_review_text or edited_review_text
@@ -301,412 +407,46 @@ class AgentSocialSkills:
         return SkillResult(status=skill_status, outputs=outputs, logs=["Dispatched a social publishing action."])
 
     def select_best_assets(self, context: SkillContext) -> SkillResult:
-        preferred_video_node = str(context.node.inputs.get("preferred_video_node") or "").strip()
-        preferred_video_path = self._preferred_video_path(context, preferred_video_node)
-        explicit_media_paths = context.node.inputs.get("media_paths") or []
-        if isinstance(explicit_media_paths, str):
-            explicit_media_paths = [explicit_media_paths]
-        media_paths = [str(path) for path in explicit_media_paths if path]
-        if not media_paths:
-            media_paths = (
-                [preferred_video_path]
-                if preferred_video_path
-                else self._collect_media_from_dependencies(context)
-            )
-        limit = int(context.node.inputs.get("limit", 10))
-        review_scope = str(
-            context.node.inputs.get("review_scope")
-            or context.plan.goal.constraints.get("review_scope")
-            or self._infer_review_scope(media_paths)
-        ).strip().lower()
-        review_phase = str(context.node.inputs.get("review_phase") or "").strip().lower()
-        segment_acceptance_review = review_phase == "segment_acceptance"
-        first_frame_review = review_scope == "first_frame" or review_phase == "opening_frame"
-        last_frame_review = review_scope == "last_frame"
-        anchor_set_review = review_scope in {"anchor_set", "anchors"} or review_phase == "anchor_set"
-        reference_review = review_scope == "reference" or review_phase == "reference_selection"
-        final_video_review = review_scope == "final_video"
-        final_media_review = review_scope == "final_media"
-        auto_select_for_probe = bool(context.node.inputs.get("auto_select_for_probe", False))
-        if final_video_review:
-            media_paths = [path for path in media_paths if Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS]
-        elif final_media_review:
-            media_paths = [
-                path
-                for path in media_paths
-                if Path(path).suffix.lower() in (VIDEO_REVIEW_EXTENSIONS | IMAGE_REVIEW_EXTENSIONS)
-            ]
-        review_all_candidates = bool(context.node.inputs.get("review_all_candidates", False))
-        # The publish boundary is an approval gate for every media type. A
-        # caller may omit the flag when constructing a publish_review goal,
-        # but that must never turn into automatic social dispatch.
-        require_human_review = bool(
-            context.plan.goal.media_type == "publish_review"
-            or context.node.inputs.get("require_human_review", False)
-            or context.plan.goal.constraints.get("require_human_review", False)
+        media_paths = self._asset_review_media_paths(context)
+        policy = self._asset_review_policy(context, media_paths)
+        candidates = self._prepare_asset_review_candidates(
+            context, policy, media_paths
         )
-        human_review_enabled = bool(
-            not auto_select_for_probe
-            and (
-                context.plan.goal.constraints.get("enable_stage_review", False)
-                or context.plan.goal.constraints.get("enable_review_loop", False)
-                or require_human_review
-            )
+        auto_select_for_probe = policy.auto_select_for_probe
+        human_review_enabled = policy.human_review_enabled
+        preferred_extensions = candidates.preferred_extensions
+        ranked = candidates.ranked
+        heuristic_ranked = candidates.heuristic_ranked
+        bundle = candidates.bundle
+        selected = candidates.selected
+        caption_bundle, decision = self._request_asset_review(
+            context, policy, candidates
         )
-        preferred_extensions = tuple(context.node.inputs.get("preferred_extensions", [".mp4", ".gif", ".png", ".jpg", ".jpeg", ".webp"]))
-        ranked = sorted(
-            media_paths,
-            key=lambda path: (0 if path.lower().endswith(preferred_extensions) else 1, path),
+        required_review_failure = self._required_review_unavailable_result(
+            decision=decision,
+            policy=policy,
+            candidates=candidates,
         )
-        heuristic_ranked = [
-            {
-                "media_path": path,
-                "rationale": f"Preferred extensions {preferred_extensions} with deterministic path ordering.",
-            }
-            for index, path in enumerate(ranked)
-        ]
-        caption_review_notes = str(
-            context.node.inputs.get("review_notes")
-            or context.plan.goal.constraints.get("review_notes")
-            or ""
+        if required_review_failure is not None:
+            return required_review_failure
+        terminal_review_result = self._terminal_discord_review_result(
+            context=context,
+            decision=decision,
+            policy=policy,
+            candidates=candidates,
         )
-        review_notes = caption_review_notes
-        if final_video_review and not review_notes.strip():
-            review_notes = (
-                "Final video review: inspect the rendered video for a clear opening conflict, visible escalation or reversal, "
-                "and a concrete ending. Accept to approve, Edit to update the caption, or Reject to stop publishing."
-            )
-        if final_media_review and not review_notes.strip():
-            review_notes = (
-                "Final media review: inspect every attached image or video, choose the media to publish, and verify the "
-                "prepared caption and hashtags. Accept to approve, Edit to update the caption, or Reject to stop publishing."
-            )
-        if (first_frame_review or last_frame_review or anchor_set_review) and not auto_select_for_probe:
-            bundle = {
-                "selected_assets": ranked[:limit],
-                "ranked_candidates": heuristic_ranked,
-                "selection_rationale": (
-                    f"{len(ranked)} opening-frame candidates are waiting for mandatory human selection."
-                    if first_frame_review
-                    else "The generated ending frame is waiting for mandatory human approval."
-                    if last_frame_review
-                    else "The first/last anchor set is waiting for explicit paired selection."
-                ),
-                "prompt_mode": (
-                    "human_first_frame"
-                    if first_frame_review
-                    else "human_last_frame"
-                    if last_frame_review
-                    else "human_anchor_set"
-                ),
-            }
-        elif final_video_review:
-            bundle = {
-                "selected_assets": ranked[:limit],
-                "ranked_candidates": heuristic_ranked,
-                "selection_rationale": "Final-video review is restricted to playable video artifacts.",
-                "prompt_mode": "final_video_deterministic",
-            }
-        elif final_media_review:
-            bundle = {
-                "selected_assets": ranked[:limit],
-                "ranked_candidates": heuristic_ranked,
-                "selection_rationale": "Final-media review keeps all generated media available for explicit Discord selection.",
-                "prompt_mode": "final_media_deterministic",
-            }
-        else:
-            bundle = {
-                "selected_assets": ranked[:limit],
-                "ranked_candidates": heuristic_ranked,
-                "selection_rationale": "All available candidates are presented; Discord owns creative selection.",
-                "prompt_mode": "human_review",
-            }
-        selected = [path for path in bundle.get("selected_assets", []) if path in ranked][:limit]
-        if not selected:
-            selected = ranked[:limit]
-        review_media_paths = ranked if (review_all_candidates or final_video_review or final_media_review) else (selected or ranked[:limit])
-        caption_media_paths = review_media_paths if (review_all_candidates or final_video_review or final_media_review) else (selected or ranked[:limit])
-        hashtags = context.plan.goal.constraints.get("hashtags") or []
-        platforms = [str(platform) for platform in (context.plan.goal.constraints.get("platforms") or [])]
-        if auto_select_for_probe or segment_acceptance_review:
-            caption_bundle = {"caption": context.plan.goal.prompt, "hashtags": ""}
-        else:
-            caption_bundle = self.prompt_engine.prepare_publish_caption(
-                context.plan.goal,
-                prefix=(
-                    ""
-                    if bool(context.plan.goal.constraints.get("serial_mode"))
-                    else str(
-                        context.node.inputs.get("caption_prefix")
-                        or context.plan.goal.constraints.get("caption_prefix")
-                        or ""
-                    )
-                ),
-                hashtags=[str(hashtags)] if isinstance(hashtags, str) else [str(tag) for tag in hashtags],
-                platforms=platforms,
-                media_paths=caption_media_paths,
-                review_notes=caption_review_notes,
-                visual_paths=self._visual_evidence_paths(
-                    caption_media_paths,
-                    visual_grounding=context.plan.goal.constraints.get("visual_grounding"),
-                ),
-            )
-        review_metadata = self._review_metadata(context)
-        review_context_text = ""
-        if review_phase != "serial_final_publish":
-            review_context_text = self._build_review_context_text(
-                context=context,
-                strategy=review_metadata["strategy"],
-                workflow=review_metadata["workflow"],
-                review_phase=review_phase,
-                review_scope=review_scope,
-            )
-        if first_frame_review or last_frame_review or anchor_set_review or reference_review:
-            review_text = self._build_stage_review_text(strategy=review_metadata["strategy"])
-        elif final_video_review or final_media_review:
-            review_text = self._build_final_publish_review_text(
-                draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
-                draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
-                review_guidance=(
-                    review_notes if review_phase == "segment_acceptance" else ""
-                ),
-            )
-        else:
-            review_text = self._build_review_text(
-                strategy=review_metadata["strategy"],
-                workflow=review_metadata["workflow"],
-                prompt=context.plan.goal.prompt,
-                review_notes=review_notes,
-                ranked_candidates=bundle.get("ranked_candidates", heuristic_ranked),
-                selection_limit=limit,
-                draft_caption=str(caption_bundle.get("caption", "") or context.plan.goal.prompt),
-                draft_hashtags=str(caption_bundle.get("hashtags", "") or ""),
-                candidate_paths=review_media_paths,
-                review_scope=review_scope,
-            )
-        decision = None
-        if human_review_enabled:
-            decision = self.discord_review.review_candidates(
-                text=review_text,
-                context_text=review_context_text,
-                media_paths=review_media_paths,
-                timeout_seconds=int(
-                    context.plan.goal.constraints.get(
-                        "discord_review_timeout_seconds"
-                    )
-                    or DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
-                ),
-                allow_asset_selection=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
-                allow_text_edit=not (
-                    first_frame_review
-                    or last_frame_review
-                    or anchor_set_review
-                    or reference_review
-                    or segment_acceptance_review
-                ),
-                selection_mode="single" if (first_frame_review or last_frame_review) else "multi",
-                selection_required=first_frame_review or last_frame_review or anchor_set_review or reference_review or final_media_review,
-                selection_limit=(1 if (first_frame_review or last_frame_review) else (limit if (anchor_set_review or reference_review) else None)),
-                review_scope=review_scope,
-                allow_regenerate=(
-                    segment_acceptance_review
-                    or bool(context.plan.goal.constraints.get("allow_regenerate_review", False))
-                ),
-                regenerate_current_segment=segment_acceptance_review,
-                allow_series_lifecycle_choice=review_phase == "serial_final_publish",
-            )
-        if require_human_review and (decision is None or getattr(decision, "review_mode", "") != "discord"):
-            fallback_reason = str(getattr(decision, "fallback_reason", "Discord human review did not start."))
-            return SkillResult(
-                status="blocked",
-                outputs={
-                    "media_paths": [],
-                    "selected_assets": [],
-                    "selected_count": 0,
-                    "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                    "rejected_assets": ranked,
-                    "selection_rationale": "Required Discord human review was unavailable; no candidate was selected automatically.",
-                    "review_mode": str(getattr(decision, "review_mode", "none")),
-                    "review_scope": review_scope,
-                    "fallback_reason": fallback_reason,
-                },
-                logs=["Blocked workflow because required Discord human review was unavailable; automatic selection is disabled."],
-            )
-        if decision is not None and decision.review_mode == "discord":
-            if decision.status == "regeneration_requested":
-                return SkillResult(
-                    status="blocked",
-                    outputs={
-                        "media_paths": [],
-                        "selected_assets": [],
-                        "selected_count": 0,
-                        "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                        "rejected_assets": ranked,
-                        "selection_rationale": (
-                            "Human reviewer requested regeneration of this serial segment."
-                            if segment_acceptance_review
-                            else "Human reviewer requested a full end-to-end rerun in Discord."
-                        ),
-                        "review_decision": "regenerate",
-                        "regeneration_requested": True,
-                        "review_mode": decision.review_mode,
-                        "review_scope": review_scope,
-                        "reviewer": decision.reviewer,
-                        "review_session_id": decision.session_id,
-                        "review_session_path": decision.session_path,
-                    },
-                    logs=[
-                        "Stopped the current workflow to regenerate this serial segment."
-                        if segment_acceptance_review
-                        else "Stopped the current workflow because Discord requested a fresh end-to-end run."
-                    ],
-                )
-            if decision.status == "rejected":
-                return SkillResult(
-                    status="blocked",
-                    outputs={
-                        "media_paths": [],
-                        "selected_assets": [],
-                        "selected_count": 0,
-                        "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                        "rejected_assets": ranked,
-                        "selection_rationale": "Human reviewer rejected all candidates in Discord.",
-                        "regeneration_notes": decision.edited_text or str(context.node.inputs.get("review_notes") or ""),
-                        "review_mode": decision.review_mode,
-                        "reviewer": decision.reviewer,
-                        "review_session_id": decision.session_id,
-                        "review_session_path": decision.session_path,
-                        "review_delivery": dict(getattr(decision, "delivery", {}) or {}),
-                        "prompt_mode": str(bundle.get("prompt_mode", "template")),
-                    },
-                    logs=["Blocked workflow because the Discord reviewer rejected the candidate set."],
-                )
-            if decision.status == "failed":
-                failure_policy = (
-                    "block"
-                    if segment_acceptance_review
-                    else str(
-                        context.plan.goal.constraints.get(
-                            "pre_video_review_failure_policy"
-                        )
-                        or "block"
-                    ).strip().lower()
-                )
-                fallback_selected = ranked[:limit]
-                if failure_policy == "fallback_to_top" and fallback_selected:
-                    fallback_reason = str(getattr(decision, "fallback_reason", "") or "Discord review did not complete")
-                    return SkillResult(
-                        status="success",
-                        outputs={
-                            "media_paths": fallback_selected,
-                            "selected_assets": fallback_selected,
-                            "selected_count": len(fallback_selected),
-                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                            "rejected_assets": [],
-                            "selection_rationale": "Discord review did not complete; used the deterministic top-ranked candidate.",
-                            "regeneration_notes": decision.edited_text or str(context.node.inputs.get("review_notes") or ""),
-                            "review_mode": decision.review_mode,
-                            "reviewer": decision.reviewer,
-                            "review_session_id": decision.session_id,
-                            "review_session_path": decision.session_path,
-                            "prompt_mode": str(bundle.get("prompt_mode", "template")),
-                            "fallback_reason": fallback_reason,
-                            "review_fallback_used": True,
-                        },
-                        logs=["Discord review did not complete; continued with the deterministic top-ranked candidate."],
-                    )
-                return SkillResult(
-                    status="blocked",
-                    outputs={
-                        "media_paths": [],
-                        "selected_assets": [],
-                        "selected_count": 0,
-                        "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                        "rejected_assets": [],
-                        "selection_rationale": "Discord review did not complete.",
-                        "regeneration_notes": decision.edited_text or str(context.node.inputs.get("review_notes") or ""),
-                        "review_mode": decision.review_mode,
-                        "reviewer": decision.reviewer,
-                        "review_session_id": decision.session_id,
-                        "review_session_path": decision.session_path,
-                        "prompt_mode": str(bundle.get("prompt_mode", "template")),
-                        "fallback_reason": getattr(decision, "fallback_reason", ""),
-                    },
-                    logs=["Blocked workflow because Discord review did not complete successfully."],
-                )
-            if first_frame_review or last_frame_review:
-                decision_selected = [path for path in (decision.selected_paths or []) if path in ranked]
-                if len(decision_selected) != 1:
-                    frame_label = "opening" if first_frame_review else "ending"
-                    return SkillResult(
-                        status="blocked",
-                        outputs={
-                            "media_paths": [],
-                            "selected_assets": [],
-                            "selected_count": 0,
-                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                            "rejected_assets": ranked,
-                            "selection_rationale": f"{frame_label.capitalize()}-frame review must select exactly one candidate; automatic first-item selection is disabled.",
-                            "review_mode": decision.review_mode,
-                            "review_scope": review_scope,
-                            "reviewer": decision.reviewer,
-                            "review_session_id": decision.session_id,
-                            "review_session_path": decision.session_path,
-                            "fallback_reason": f"Select exactly one {frame_label} frame in Discord before pressing Accept.",
-                        },
-                        logs=[f"Blocked workflow because {frame_label}-frame Discord review did not select exactly one candidate."],
-                    )
-                selected = decision_selected[:limit]
-            elif anchor_set_review:
-                decision_selected = [path for path in (decision.selected_paths or []) if path in ranked]
-                required_count = int(context.node.inputs.get("anchor_set_size") or 2)
-                if len(decision_selected) != required_count:
-                    return SkillResult(
-                        status="blocked",
-                        outputs={
-                            "media_paths": [],
-                            "selected_assets": [],
-                            "selected_count": 0,
-                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                            "rejected_assets": ranked,
-                            "selection_rationale": f"Anchor-set review must select exactly {required_count} paired assets.",
-                            "review_mode": decision.review_mode,
-                            "review_scope": review_scope,
-                            "reviewer": decision.reviewer,
-                            "review_session_id": decision.session_id,
-                            "review_session_path": decision.session_path,
-                            "fallback_reason": f"Select exactly {required_count} paired anchor assets in Discord before pressing Accept.",
-                        },
-                        logs=["Blocked workflow because the anchor-set Discord review did not select the required pair."],
-                    )
-                selected = decision_selected
-            elif reference_review:
-                decision_selected = [path for path in (decision.selected_paths or []) if path in ranked]
-                if not decision_selected or len(decision_selected) > limit:
-                    return SkillResult(
-                        status="blocked",
-                        outputs={
-                            "media_paths": [],
-                            "selected_assets": [],
-                            "selected_count": 0,
-                            "ranked_candidates": bundle.get("ranked_candidates", heuristic_ranked),
-                            "rejected_assets": ranked,
-                            "selection_rationale": (
-                                f"Reference review must select between 1 and {limit} candidates; "
-                                "the received selection was invalid."
-                            ),
-                            "review_mode": decision.review_mode,
-                            "review_scope": review_scope,
-                            "reviewer": decision.reviewer,
-                            "review_session_id": decision.session_id,
-                            "review_session_path": decision.session_path,
-                            "fallback_reason": f"Select 1-{limit} reference assets in Discord before pressing Accept.",
-                        },
-                        logs=["Blocked workflow because the Discord reference selection exceeded its configured limit or was empty."],
-                    )
-                selected = decision_selected
-            elif decision.selected_paths:
-                selected = [path for path in decision.selected_paths if path in ranked][:limit]
+        if terminal_review_result is not None:
+            return terminal_review_result
+        selection_result = self._reviewed_asset_selection(
+            context=context,
+            decision=decision,
+            policy=policy,
+            candidates=candidates,
+            selected=selected,
+        )
+        if isinstance(selection_result, SkillResult):
+            return selection_result
+        selected = selection_result
         review_mode = str(getattr(decision, "review_mode", "automatic"))
         reviewer = str(getattr(decision, "reviewer", ""))
         review_session_id = str(getattr(decision, "session_id", ""))
@@ -769,6 +509,573 @@ class AgentSocialSkills:
             metrics={"selected_count": len(selected), "candidate_count": len(ranked), "auto_select_for_probe": auto_select_for_probe},
             logs=selection_logs,
         )
+
+    @staticmethod
+    def _asset_review_media_paths(context: SkillContext) -> list[str]:
+        preferred_video_node = str(
+            context.node.inputs.get("preferred_video_node") or ""
+        ).strip()
+        preferred_video_path = AgentSocialSkills._preferred_video_path(
+            context, preferred_video_node
+        )
+        explicit_media_paths = context.node.inputs.get("media_paths") or []
+        if isinstance(explicit_media_paths, str):
+            explicit_media_paths = [explicit_media_paths]
+        media_paths = [str(path) for path in explicit_media_paths if path]
+        if media_paths:
+            return media_paths
+        if preferred_video_path:
+            return [preferred_video_path]
+        return AgentSocialSkills._collect_media_from_dependencies(context)
+
+    @staticmethod
+    def _asset_review_policy(
+        context: SkillContext, media_paths: list[str]
+    ) -> _AssetReviewPolicy:
+        review_scope = str(
+            context.node.inputs.get("review_scope")
+            or context.plan.goal.constraints.get("review_scope")
+            or AgentSocialSkills._infer_review_scope(media_paths)
+        ).strip().lower()
+        review_phase = str(context.node.inputs.get("review_phase") or "").strip().lower()
+        limit = int(context.node.inputs.get("limit", 10))
+        auto_select_for_probe = bool(
+            context.node.inputs.get("auto_select_for_probe", False)
+        )
+        # A publish-review plan always needs Discord approval, even when a
+        # caller omitted the explicit requirement from its node inputs.
+        require_human_review = bool(
+            context.plan.goal.media_type == "publish_review"
+            or context.node.inputs.get("require_human_review", False)
+            or context.plan.goal.constraints.get("require_human_review", False)
+        )
+        human_review_enabled = bool(
+            not auto_select_for_probe
+            and (
+                context.plan.goal.constraints.get("enable_stage_review", False)
+                or context.plan.goal.constraints.get("enable_review_loop", False)
+                or require_human_review
+            )
+        )
+        return _AssetReviewPolicy(
+            review_scope=review_scope,
+            review_phase=review_phase,
+            limit=limit,
+            auto_select_for_probe=auto_select_for_probe,
+            review_all_candidates=bool(
+                context.node.inputs.get("review_all_candidates", False)
+            ),
+            require_human_review=require_human_review,
+            human_review_enabled=human_review_enabled,
+            allow_regenerate_review=bool(
+                context.plan.goal.constraints.get("allow_regenerate_review", False)
+            ),
+        )
+
+    @staticmethod
+    def _asset_review_bundle(
+        policy: _AssetReviewPolicy,
+        ranked: list[str],
+        heuristic_ranked: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if (
+            policy.first_frame_review
+            or policy.last_frame_review
+            or policy.anchor_set_review
+        ) and not policy.auto_select_for_probe:
+            return {
+                "selected_assets": ranked[: policy.limit],
+                "ranked_candidates": heuristic_ranked,
+                "selection_rationale": (
+                    f"{len(ranked)} opening-frame candidates are waiting for mandatory human selection."
+                    if policy.first_frame_review
+                    else "The generated ending frame is waiting for mandatory human approval."
+                    if policy.last_frame_review
+                    else "The first/last anchor set is waiting for explicit paired selection."
+                ),
+                "prompt_mode": (
+                    "human_first_frame"
+                    if policy.first_frame_review
+                    else "human_last_frame"
+                    if policy.last_frame_review
+                    else "human_anchor_set"
+                ),
+            }
+        if policy.final_video_review:
+            return {
+                "selected_assets": ranked[: policy.limit],
+                "ranked_candidates": heuristic_ranked,
+                "selection_rationale": "Final-video review is restricted to playable video artifacts.",
+                "prompt_mode": "final_video_deterministic",
+            }
+        if policy.final_media_review:
+            return {
+                "selected_assets": ranked[: policy.limit],
+                "ranked_candidates": heuristic_ranked,
+                "selection_rationale": "Final-media review keeps all generated media available for explicit Discord selection.",
+                "prompt_mode": "final_media_deterministic",
+            }
+        return {
+            "selected_assets": ranked[: policy.limit],
+            "ranked_candidates": heuristic_ranked,
+            "selection_rationale": "All available candidates are presented; Discord owns creative selection.",
+            "prompt_mode": "human_review",
+        }
+
+    @staticmethod
+    def _prepare_asset_review_candidates(
+        context: SkillContext,
+        policy: _AssetReviewPolicy,
+        media_paths: list[str],
+    ) -> _AssetReviewCandidates:
+        if policy.final_video_review:
+            media_paths = [
+                path
+                for path in media_paths
+                if Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
+            ]
+        elif policy.final_media_review:
+            media_paths = [
+                path
+                for path in media_paths
+                if Path(path).suffix.lower()
+                in (VIDEO_REVIEW_EXTENSIONS | IMAGE_REVIEW_EXTENSIONS)
+            ]
+        preferred_extensions = tuple(
+            context.node.inputs.get(
+                "preferred_extensions",
+                [".mp4", ".gif", ".png", ".jpg", ".jpeg", ".webp"],
+            )
+        )
+        ranked = sorted(
+            media_paths,
+            key=lambda path: (
+                0 if path.lower().endswith(preferred_extensions) else 1,
+                path,
+            ),
+        )
+        heuristic_ranked = [
+            {
+                "media_path": path,
+                "rationale": f"Preferred extensions {preferred_extensions} with deterministic path ordering.",
+            }
+            for path in ranked
+        ]
+        caption_review_notes = str(
+            context.node.inputs.get("review_notes")
+            or context.plan.goal.constraints.get("review_notes")
+            or ""
+        )
+        review_notes = caption_review_notes
+        if policy.final_video_review and not review_notes.strip():
+            review_notes = (
+                "Final video review: inspect the rendered video for a clear opening conflict, visible escalation or reversal, "
+                "and a concrete ending. Accept to approve, Edit to update the caption, or Reject to stop publishing."
+            )
+        if policy.final_media_review and not review_notes.strip():
+            review_notes = (
+                "Final media review: inspect every attached image or video, choose the media to publish, and verify the "
+                "prepared caption and hashtags. Accept to approve, Edit to update the caption, or Reject to stop publishing."
+            )
+        bundle = AgentSocialSkills._asset_review_bundle(
+            policy, ranked, heuristic_ranked
+        )
+        selected = [
+            path for path in bundle.get("selected_assets", []) if path in ranked
+        ][: policy.limit]
+        if not selected:
+            selected = ranked[: policy.limit]
+        review_media_paths = (
+            ranked
+            if (
+                policy.review_all_candidates
+                or policy.final_video_review
+                or policy.final_media_review
+            )
+            else (selected or ranked[: policy.limit])
+        )
+        return _AssetReviewCandidates(
+            ranked=ranked,
+            heuristic_ranked=heuristic_ranked,
+            bundle=bundle,
+            selected=selected,
+            review_media_paths=review_media_paths,
+            preferred_extensions=preferred_extensions,
+            caption_review_notes=caption_review_notes,
+            review_notes=review_notes,
+        )
+
+    def _request_asset_review(
+        self,
+        context: SkillContext,
+        policy: _AssetReviewPolicy,
+        candidates: _AssetReviewCandidates,
+    ) -> tuple[dict[str, Any], Any]:
+        goal = context.plan.goal
+        if (
+            policy.auto_select_for_probe
+            or policy.segment_acceptance_review
+            or policy.stage_asset_review
+        ):
+            caption_bundle = {"caption": goal.prompt, "hashtags": ""}
+        else:
+            hashtags = goal.constraints.get("hashtags") or []
+            platforms = [
+                str(platform) for platform in (goal.constraints.get("platforms") or [])
+            ]
+            caption_bundle = self.prompt_engine.prepare_publish_caption(
+                goal,
+                prefix=(
+                    ""
+                    if bool(goal.constraints.get("serial_mode"))
+                    else str(
+                        context.node.inputs.get("caption_prefix")
+                        or goal.constraints.get("caption_prefix")
+                        or ""
+                    )
+                ),
+                hashtags=[str(hashtags)]
+                if isinstance(hashtags, str)
+                else [str(tag) for tag in hashtags],
+                platforms=platforms,
+                media_paths=candidates.review_media_paths,
+                review_notes=candidates.caption_review_notes,
+                visual_paths=self._visual_evidence_paths(
+                    candidates.review_media_paths,
+                    visual_grounding=goal.constraints.get("visual_grounding"),
+                ),
+            )
+        review_metadata = self._review_metadata(context)
+        if policy.review_phase == "serial_final_publish":
+            serial_context = goal.constraints.get("serial_story_review_context")
+            review_context_text = self._build_serial_story_review_context(
+                serial_context if isinstance(serial_context, dict) else {}
+            )
+        else:
+            review_context_text = self._build_review_context_text(
+                context=context,
+                strategy=review_metadata["strategy"],
+                workflow=review_metadata["workflow"],
+                review_phase=policy.review_phase,
+                review_scope=policy.review_scope,
+            )
+        if policy.stage_asset_review:
+            review_text = self._build_stage_review_text(
+                strategy=review_metadata["strategy"]
+            )
+        elif policy.final_video_review or policy.final_media_review:
+            review_text = self._build_final_publish_review_text(
+                draft_caption=str(
+                    caption_bundle.get("caption") or goal.prompt
+                ),
+                draft_hashtags=str(caption_bundle.get("hashtags") or ""),
+                review_guidance=(
+                    candidates.review_notes
+                    if policy.segment_acceptance_review
+                    else ""
+                ),
+            )
+        else:
+            review_text = self._build_review_text(
+                strategy=review_metadata["strategy"],
+                workflow=review_metadata["workflow"],
+                prompt=goal.prompt,
+                review_notes=candidates.review_notes,
+                ranked_candidates=candidates.ranked_candidates,
+                selection_limit=policy.limit,
+                draft_caption=str(caption_bundle.get("caption") or goal.prompt),
+                draft_hashtags=str(caption_bundle.get("hashtags") or ""),
+                candidate_paths=candidates.review_media_paths,
+                review_scope=policy.review_scope,
+            )
+        decision = None
+        if policy.human_review_enabled:
+            decision = self.discord_review.review_candidates(
+                text=review_text,
+                context_text=review_context_text,
+                media_paths=candidates.review_media_paths,
+                timeout_seconds=int(
+                    goal.constraints.get("discord_review_timeout_seconds")
+                    or DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
+                ),
+                allow_asset_selection=policy.allow_asset_selection,
+                allow_text_edit=policy.allow_text_edit,
+                selection_mode=policy.selection_mode,
+                selection_required=policy.selection_required,
+                selection_limit=policy.selection_limit,
+                review_scope=policy.review_scope,
+                allow_regenerate=(
+                    policy.segment_acceptance_review
+                    or policy.allow_regenerate_review
+                ),
+                regenerate_current_segment=policy.segment_acceptance_review,
+                allow_series_lifecycle_choice=(
+                    policy.review_phase == "serial_final_publish"
+                ),
+            )
+        return caption_bundle, decision
+
+    @staticmethod
+    def _required_review_unavailable_result(
+        *,
+        decision: Any,
+        policy: _AssetReviewPolicy,
+        candidates: _AssetReviewCandidates,
+    ) -> SkillResult | None:
+        if not policy.require_human_review or (
+            decision is not None
+            and getattr(decision, "review_mode", "") == "discord"
+        ):
+            return None
+        return SkillResult(
+            status="blocked",
+            outputs={
+                "media_paths": [],
+                "selected_assets": [],
+                "selected_count": 0,
+                "ranked_candidates": candidates.ranked_candidates,
+                "rejected_assets": candidates.ranked,
+                "selection_rationale": "Required Discord human review was unavailable; no candidate was selected automatically.",
+                "review_mode": str(getattr(decision, "review_mode", "none")),
+                "review_scope": policy.review_scope,
+                "fallback_reason": str(
+                    getattr(decision, "fallback_reason", "Discord human review did not start.")
+                ),
+            },
+            logs=[
+                "Blocked workflow because required Discord human review was unavailable; automatic selection is disabled."
+            ],
+        )
+
+    def _terminal_discord_review_result(
+        self,
+        *,
+        context: SkillContext,
+        decision: Any,
+        policy: _AssetReviewPolicy,
+        candidates: _AssetReviewCandidates,
+    ) -> SkillResult | None:
+        if decision is None or decision.review_mode != "discord":
+            return None
+        if decision.status == "regeneration_requested":
+            return SkillResult(
+                status="blocked",
+                outputs={
+                    "media_paths": [],
+                    "selected_assets": [],
+                    "selected_count": 0,
+                    "ranked_candidates": candidates.ranked_candidates,
+                    "rejected_assets": candidates.ranked,
+                    "selection_rationale": (
+                        "Human reviewer requested regeneration of this serial segment."
+                        if policy.segment_acceptance_review
+                        else "Human reviewer requested a full end-to-end rerun in Discord."
+                    ),
+                    "review_decision": "regenerate",
+                    "regeneration_requested": True,
+                    "review_mode": decision.review_mode,
+                    "review_scope": policy.review_scope,
+                    "reviewer": decision.reviewer,
+                    "review_session_id": decision.session_id,
+                    "review_session_path": decision.session_path,
+                },
+                logs=[
+                    "Stopped the current workflow to regenerate this serial segment."
+                    if policy.segment_acceptance_review
+                    else "Stopped the current workflow because Discord requested a fresh end-to-end run."
+                ],
+            )
+        if decision.status == "rejected":
+            return SkillResult(
+                status="blocked",
+                outputs={
+                    "media_paths": [],
+                    "selected_assets": [],
+                    "selected_count": 0,
+                    "ranked_candidates": candidates.ranked_candidates,
+                    "rejected_assets": candidates.ranked,
+                    "selection_rationale": "Human reviewer rejected all candidates in Discord.",
+                    "regeneration_notes": decision.edited_text
+                    or str(context.node.inputs.get("review_notes") or ""),
+                    "review_mode": decision.review_mode,
+                    "reviewer": decision.reviewer,
+                    "review_session_id": decision.session_id,
+                    "review_session_path": decision.session_path,
+                    "review_delivery": dict(getattr(decision, "delivery", {}) or {}),
+                    "prompt_mode": str(candidates.bundle.get("prompt_mode", "template")),
+                },
+                logs=[
+                    "Blocked workflow because the Discord reviewer rejected the candidate set."
+                ],
+            )
+        if decision.status != "failed":
+            return None
+        failure_policy = (
+            "block"
+            if policy.segment_acceptance_review
+            else str(
+                context.plan.goal.constraints.get("pre_video_review_failure_policy")
+                or "block"
+            )
+            .strip()
+            .lower()
+        )
+        fallback_selected = candidates.ranked[: policy.limit]
+        if failure_policy == "fallback_to_top" and fallback_selected:
+            return SkillResult(
+                status="success",
+                outputs={
+                    "media_paths": fallback_selected,
+                    "selected_assets": fallback_selected,
+                    "selected_count": len(fallback_selected),
+                    "ranked_candidates": candidates.ranked_candidates,
+                    "rejected_assets": [],
+                    "selection_rationale": "Discord review did not complete; used the deterministic top-ranked candidate.",
+                    "regeneration_notes": decision.edited_text
+                    or str(context.node.inputs.get("review_notes") or ""),
+                    "review_mode": decision.review_mode,
+                    "reviewer": decision.reviewer,
+                    "review_session_id": decision.session_id,
+                    "review_session_path": decision.session_path,
+                    "prompt_mode": str(candidates.bundle.get("prompt_mode", "template")),
+                    "fallback_reason": str(
+                        getattr(decision, "fallback_reason", "")
+                        or "Discord review did not complete"
+                    ),
+                    "review_fallback_used": True,
+                },
+                logs=[
+                    "Discord review did not complete; continued with the deterministic top-ranked candidate."
+                ],
+            )
+        return SkillResult(
+            status="blocked",
+            outputs={
+                "media_paths": [],
+                "selected_assets": [],
+                "selected_count": 0,
+                "ranked_candidates": candidates.ranked_candidates,
+                "rejected_assets": [],
+                "selection_rationale": "Discord review did not complete.",
+                "regeneration_notes": decision.edited_text
+                or str(context.node.inputs.get("review_notes") or ""),
+                "review_mode": decision.review_mode,
+                "reviewer": decision.reviewer,
+                "review_session_id": decision.session_id,
+                "review_session_path": decision.session_path,
+                "prompt_mode": str(candidates.bundle.get("prompt_mode", "template")),
+                "fallback_reason": getattr(decision, "fallback_reason", ""),
+            },
+            logs=[
+                "Blocked workflow because Discord review did not complete successfully."
+            ],
+        )
+
+    @staticmethod
+    def _reviewed_asset_selection(
+        *,
+        context: SkillContext,
+        decision: Any,
+        policy: _AssetReviewPolicy,
+        candidates: _AssetReviewCandidates,
+        selected: list[str],
+    ) -> list[str] | SkillResult:
+        ranked = candidates.ranked
+        ranked_candidates = candidates.ranked_candidates
+        limit = policy.limit
+        review_scope = policy.review_scope
+        first_frame_review = policy.first_frame_review
+        last_frame_review = policy.last_frame_review
+        anchor_set_review = policy.anchor_set_review
+        reference_review = policy.reference_review
+        if decision is None or decision.review_mode != "discord":
+            return selected
+        if first_frame_review or last_frame_review:
+            decision_selected = [
+                path for path in (decision.selected_paths or []) if path in ranked
+            ]
+            if len(decision_selected) != 1:
+                frame_label = "opening" if first_frame_review else "ending"
+                return SkillResult(
+                    status="blocked",
+                    outputs={
+                        "media_paths": [],
+                        "selected_assets": [],
+                        "selected_count": 0,
+                        "ranked_candidates": ranked_candidates,
+                        "rejected_assets": ranked,
+                        "selection_rationale": f"{frame_label.capitalize()}-frame review must select exactly one candidate; automatic first-item selection is disabled.",
+                        "review_mode": decision.review_mode,
+                        "review_scope": review_scope,
+                        "reviewer": decision.reviewer,
+                        "review_session_id": decision.session_id,
+                        "review_session_path": decision.session_path,
+                        "fallback_reason": f"Select exactly one {frame_label} frame in Discord before pressing Accept.",
+                    },
+                    logs=[
+                        f"Blocked workflow because {frame_label}-frame Discord review did not select exactly one candidate."
+                    ],
+                )
+            return decision_selected[:limit]
+        if anchor_set_review:
+            decision_selected = [
+                path for path in (decision.selected_paths or []) if path in ranked
+            ]
+            required_count = int(context.node.inputs.get("anchor_set_size") or 2)
+            if len(decision_selected) != required_count:
+                return SkillResult(
+                    status="blocked",
+                    outputs={
+                        "media_paths": [],
+                        "selected_assets": [],
+                        "selected_count": 0,
+                        "ranked_candidates": ranked_candidates,
+                        "rejected_assets": ranked,
+                        "selection_rationale": f"Anchor-set review must select exactly {required_count} paired assets.",
+                        "review_mode": decision.review_mode,
+                        "review_scope": review_scope,
+                        "reviewer": decision.reviewer,
+                        "review_session_id": decision.session_id,
+                        "review_session_path": decision.session_path,
+                        "fallback_reason": f"Select exactly {required_count} paired anchor assets in Discord before pressing Accept.",
+                    },
+                    logs=[
+                        "Blocked workflow because the anchor-set Discord review did not select the required pair."
+                    ],
+                )
+            return decision_selected
+        if reference_review:
+            decision_selected = [
+                path for path in (decision.selected_paths or []) if path in ranked
+            ]
+            if not decision_selected or len(decision_selected) > limit:
+                return SkillResult(
+                    status="blocked",
+                    outputs={
+                        "media_paths": [],
+                        "selected_assets": [],
+                        "selected_count": 0,
+                        "ranked_candidates": ranked_candidates,
+                        "rejected_assets": ranked,
+                        "selection_rationale": (
+                            f"Reference review must select between 1 and {limit} candidates; "
+                            "the received selection was invalid."
+                        ),
+                        "review_mode": decision.review_mode,
+                        "review_scope": review_scope,
+                        "reviewer": decision.reviewer,
+                        "review_session_id": decision.session_id,
+                        "review_session_path": decision.session_path,
+                        "fallback_reason": f"Select 1-{limit} reference assets in Discord before pressing Accept.",
+                    },
+                    logs=[
+                        "Blocked workflow because the Discord reference selection exceeded its configured limit or was empty."
+                    ],
+                )
+            return decision_selected
+        if decision.selected_paths:
+            return [path for path in decision.selected_paths if path in ranked][:limit]
+        return selected
 
     @staticmethod
     def _story_review_summary(context: SkillContext) -> str:
@@ -892,6 +1199,26 @@ class AgentSocialSkills:
             or context.plan.workflow_name
         ).strip()
         return {"strategy": strategy or "unknown", "workflow": workflow or "unknown"}
+
+    @staticmethod
+    def _build_serial_story_review_context(state: dict[str, Any]) -> str:
+        def compact(value: object, limit: int) -> str:
+            text = " ".join(str(value or "").split())
+            return text if len(text) <= limit else text[: limit - 1] + "…"
+
+        lines = [
+            "請直接觀看完整成片，依你的判斷審核故事效果、節奏和前後連續性。接受後，本集提出的結尾狀態會成為下一集起點。",
+        ]
+        starting_state = compact(state.get("approved_start_state"), 140)
+        ending_state = compact(state.get("proposed_end_state"), 250)
+        if starting_state:
+            lines.extend(["上一集已核准狀態：", starting_state])
+        else:
+            lines.append("這是系列首集，尚無前集狀態。")
+        if ending_state:
+            lines.extend(["本集結尾狀態提案：", ending_state])
+        review_context = "\n".join(lines)
+        return review_context[:500]
 
     @staticmethod
     def _build_review_context_text(
@@ -1044,6 +1371,26 @@ class AgentSocialSkills:
         return "\n".join(lines).strip()
 
     @staticmethod
+    def _normalize_review_copy_line(line: str) -> str | None:
+        lowered = line.lower()
+        if lowered.startswith(
+            (
+                "draft post:",
+                "platforms:",
+                "strategy:",
+                "workflow:",
+                "stage:",
+                "selection:",
+                "assets:",
+                "accept to publish with these assets",
+            )
+        ):
+            return None
+        if lowered.startswith(("caption:", "hashtags:")):
+            return line.split(":", 1)[1].strip()
+        return line
+
+    @staticmethod
     def _split_review_caption_and_hashtags(review_text: str) -> tuple[str, str]:
         lines = [line.rstrip() for line in review_text.splitlines()]
         content_lines: list[str] = []
@@ -1054,21 +1401,13 @@ class AgentSocialSkills:
                 if content_lines and content_lines[-1] != "":
                     content_lines.append("")
                 continue
-            if stripped.lower().startswith("draft post:") or stripped.lower().startswith("platforms:"):
+            normalized = AgentSocialSkills._normalize_review_copy_line(stripped)
+            if normalized is None:
                 continue
-            lowered = stripped.lower()
-            if lowered.startswith(("strategy:", "workflow:", "stage:", "selection:", "assets:")):
+            if normalized.startswith("#"):
+                hashtag_lines.append(normalized)
                 continue
-            if lowered.startswith("caption:"):
-                stripped = stripped.split(":", 1)[1].strip()
-            elif lowered.startswith("hashtags:"):
-                stripped = stripped.split(":", 1)[1].strip()
-            if stripped.startswith("#"):
-                hashtag_lines.append(stripped)
-                continue
-            if stripped.lower().startswith("accept to publish with these assets"):
-                continue
-            content_lines.append(stripped)
+            content_lines.append(normalized)
         while content_lines and content_lines[-1] == "":
             content_lines.pop()
         return "\n".join(content_lines).strip(), "\n".join(hashtag_lines).strip()
@@ -1108,13 +1447,247 @@ class AgentSocialSkills:
                 return value
         return ""
 
+def _serial_publication_video_path(context: SkillContext, skills: AgentSocialSkills) -> str:
+    video_path = skills._preferred_video_path(
+        context, str(context.node.inputs.get("preferred_video_node") or "").strip()
+    )
+    if video_path:
+        return video_path
+
+    explicit_paths = context.node.inputs.get("media_paths") or []
+    if isinstance(explicit_paths, str):
+        explicit_paths = [explicit_paths]
+    video_candidates = [
+        str(path)
+        for path in explicit_paths
+        if path and Path(str(path)).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
+    ]
+    if not video_candidates:
+        video_candidates = [
+            path
+            for path in skills._collect_media_from_dependencies(context)
+            if Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
+        ]
+    return video_candidates[0] if len(video_candidates) == 1 else ""
+
+
+def _begin_serial_publication_attempt(
+    context: SkillContext, serial_store: Any, skills: AgentSocialSkills
+) -> dict[str, Any]:
+    constraints = context.plan.goal.constraints
+    episode_id = str(constraints.get("serial_episode_id") or "").strip()
+    video_path = _serial_publication_video_path(context, skills)
+    if not episode_id or not video_path:
+        raise RuntimeError(
+            "Final serial publication review requires its episode ID and QA-passed assembled MP4."
+        )
+    return serial_store.begin_publication_attempt(
+        episode_id,
+        platforms=context.node.inputs.get("platforms") or constraints.get("platforms") or [],
+        episode_topic=str(constraints.get("episode_topic") or ""),
+        caption="",
+        hashtags=" ".join(str(tag) for tag in constraints.get("hashtags", []) or []),
+        media_path=video_path,
+    )
+
+
+def _record_serial_review_failure(
+    context: SkillContext,
+    serial_store: Any,
+    serial_acceptance: bool,
+    publication_attempt: dict[str, Any] | None,
+    error: Exception,
+) -> None:
+    constraints = context.plan.goal.constraints
+    error_detail = {"error": f"{type(error).__name__}: {error}"}
+    if publication_attempt is not None:
+        serial_store.record_publication_review(
+            str(constraints.get("serial_episode_id") or ""),
+            int(publication_attempt["attempt_number"]),
+            decision="failed",
+            details=error_detail,
+        )
+    if serial_acceptance:
+        episode_id = str(constraints.get("serial_episode_id") or "").strip()
+        if episode_id:
+            serial_store.record_review(
+                episode_id,
+                int(context.node.inputs.get("segment_index", 0)) + 1,
+                "failed",
+                details=error_detail,
+            )
+
+
+def _serial_review_selected_paths(outputs: dict[str, Any]) -> list[str]:
+    selected = outputs.get("selected_assets") or outputs.get("media_paths") or []
+    return [str(item) for item in selected if item]
+
+
+def _serial_final_review_disposition(outputs: dict[str, Any]) -> str:
+    review_delivery = outputs.get("review_delivery") or {}
+    if not isinstance(review_delivery, dict):
+        return ""
+    return str(review_delivery.get("series_disposition") or "").strip().lower()
+
+
+def _classify_serial_final_review(
+    result: SkillResult,
+    outputs: dict[str, Any],
+    *,
+    review_mode: str,
+    selected_paths: list[str],
+    series_disposition: str,
+) -> str:
+    if series_disposition == "discarded":
+        return "rejected"
+    if result.status == "success" and review_mode == "discord" and selected_paths:
+        return "accepted"
+    if outputs.get("regeneration_requested") or outputs.get("review_decision") == "regenerate":
+        return "rejected"
+    if review_mode != "discord":
+        return "unavailable"
+    reason = " ".join(
+        str(outputs.get(key) or "")
+        for key in ("selection_rationale", "fallback_reason")
+    ).lower()
+    if "timed out" in reason:
+        return "timeout"
+    if "rejected" in reason:
+        return "rejected"
+    return "failed"
+
+
+def _record_serial_final_publication_review(
+    context: SkillContext,
+    serial_store: Any,
+    skills: AgentSocialSkills,
+    result: SkillResult,
+    publication_attempt: dict[str, Any],
+) -> list[str]:
+    constraints = context.plan.goal.constraints
+    outputs = dict(result.outputs)
+    selected_paths = _serial_review_selected_paths(outputs)
+    review_mode = str(outputs.get("review_mode") or "").strip().lower()
+    series_disposition = _serial_final_review_disposition(outputs)
+    decision = _classify_serial_final_review(
+        result,
+        outputs,
+        review_mode=review_mode,
+        selected_paths=selected_paths,
+        series_disposition=series_disposition,
+    )
+    approved_text = str(outputs.get("approved_review_text") or "").strip()
+    if not approved_text:
+        approved_text = "\n\n".join(
+            part
+            for part in (
+                str(outputs.get("review_draft_caption") or "").strip(),
+                str(outputs.get("review_draft_hashtags") or "").strip(),
+            )
+            if part
+        )
+    caption, hashtags = skills._split_review_caption_and_hashtags(approved_text)
+    serial_store.record_publication_review(
+        str(constraints.get("serial_episode_id") or ""),
+        int(publication_attempt["attempt_number"]),
+        decision=decision,
+        review_session_id=str(outputs.get("review_session_id") or ""),
+        caption=caption or None,
+        hashtags=hashtags or None,
+        details={
+            "review_mode": review_mode,
+            "reviewer": outputs.get("reviewer", ""),
+            "review_session_path": outputs.get("review_session_path", ""),
+            "review_decision": outputs.get("review_decision", ""),
+            "selected_paths": selected_paths,
+            "result_status": result.status,
+            "series_disposition": series_disposition,
+        },
+    )
+    if series_disposition in {"completed", "discarded"}:
+        serial_store.set_series_lifecycle_status(
+            str(constraints.get("series_id") or ""),
+            series_disposition,
+            note=(
+                f"Creator selected {series_disposition} after reviewing episode "
+                f"{constraints.get('serial_episode_number')}"
+            ),
+        )
+    outputs["publication_attempt_number"] = publication_attempt["attempt_number"]
+    result.outputs = outputs
+    return selected_paths
+
+
+def _serial_segment_review_decision(
+    result: SkillResult,
+    outputs: dict[str, Any],
+    *,
+    review_mode: str,
+    selected_paths: list[str],
+) -> tuple[str, str | None]:
+    if result.status == "success" and review_mode == "discord" and selected_paths:
+        return "accepted", selected_paths[0]
+    if outputs.get("regeneration_requested") or outputs.get("review_decision") == "regenerate":
+        return "regeneration_requested", None
+    if review_mode != "discord":
+        return "unavailable", None
+    reason = " ".join(
+        str(outputs.get(key) or "")
+        for key in ("selection_rationale", "fallback_reason")
+    ).lower()
+    if "rejected" in reason:
+        return "rejected", None
+    if "timed out" in reason:
+        return "timeout", None
+    return "failed", None
+
+
+def _record_serial_segment_review(
+    context: SkillContext, serial_store: Any, result: SkillResult
+) -> None:
+    constraints = context.plan.goal.constraints
+    episode_id = str(constraints.get("serial_episode_id") or "").strip()
+    if not episode_id:
+        raise RuntimeError("Serial segment review requires a persisted episode ID")
+    outputs = dict(result.outputs)
+    selected_paths = _serial_review_selected_paths(outputs)
+    review_mode = str(outputs.get("review_mode") or "").strip().lower()
+    decision, reviewed_path = _serial_segment_review_decision(
+        result,
+        outputs,
+        review_mode=review_mode,
+        selected_paths=selected_paths,
+    )
+    serial_store.record_review(
+        episode_id,
+        int(context.node.inputs.get("segment_index", 0)) + 1,
+        decision,
+        reviewed_path,
+        {
+            "review_mode": review_mode,
+            "reviewer": outputs.get("reviewer", ""),
+            "review_session_id": outputs.get("review_session_id", ""),
+            "review_session_path": outputs.get("review_session_path", ""),
+            "fallback_reason": outputs.get("fallback_reason", ""),
+            "selected_paths": selected_paths,
+            "result_status": result.status,
+        },
+    )
+
+
 def register_agent_social_skills(
     skill_registry: SkillRegistry,
     tool_registry: ToolRegistry,
     output_root: Path,
     prompt_engine: LLMPromptEngine | None = None,
+    discord_review: Any | None = None,
 ) -> None:
-    skills = AgentSocialSkills(tool_registry, output_root, prompt_engine=prompt_engine)
+    skills = AgentSocialSkills(
+        tool_registry,
+        output_root,
+        prompt_engine=prompt_engine,
+        discord_review=discord_review,
+    )
     skill_registry.register("publish.media.ingest", skills.ingest_media, "Ingest candidate media for publish/review plans")
     skill_registry.register("publish.caption.prepare", skills.prepare_caption, "Prepare a social caption bundle")
     skill_registry.register("publish.media.collect", skills.collect_media, "Collect media artifacts for publishing")
@@ -1124,169 +1697,29 @@ def register_agent_social_skills(
     def select_and_record_serial_review(context: SkillContext) -> SkillResult:
         serial_store = store_from_constraints(context.plan.goal.constraints)
         review_phase = str(context.node.inputs.get("review_phase") or "").strip().lower()
-        serial_acceptance = (
-            serial_store is not None
-            and review_phase == "segment_acceptance"
-        )
+        serial_acceptance = serial_store is not None and review_phase == "segment_acceptance"
         serial_final_publish = serial_store is not None and review_phase == "serial_final_publish"
-        publication_attempt = None
-        if serial_final_publish:
-            episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
-            video_path = skills._preferred_video_path(
-                context, str(context.node.inputs.get("preferred_video_node") or "").strip()
-            )
-            if not video_path:
-                explicit_paths = context.node.inputs.get("media_paths") or []
-                if isinstance(explicit_paths, str):
-                    explicit_paths = [explicit_paths]
-                video_candidates = [
-                    str(path)
-                    for path in explicit_paths
-                    if path and Path(str(path)).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
-                ]
-                if not video_candidates:
-                    video_candidates = [
-                        path
-                        for path in skills._collect_media_from_dependencies(context)
-                        if Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS
-                    ]
-                if len(video_candidates) == 1:
-                    video_path = video_candidates[0]
-            if not episode_id or not video_path:
-                raise RuntimeError("Final serial publication review requires its episode ID and QA-passed assembled MP4.")
-            publication_attempt = serial_store.begin_publication_attempt(
-                episode_id,
-                platforms=context.node.inputs.get("platforms")
-                or context.plan.goal.constraints.get("platforms")
-                or [],
-                episode_topic=str(context.plan.goal.constraints.get("episode_topic") or ""),
-                caption="",
-                hashtags=" ".join(str(tag) for tag in context.plan.goal.constraints.get("hashtags", []) or []),
-                media_path=video_path,
-            )
+        publication_attempt = (
+            _begin_serial_publication_attempt(context, serial_store, skills)
+            if serial_final_publish
+            else None
+        )
         try:
             result = skills.select_best_assets(context)
         except Exception as exc:
-            if publication_attempt is not None:
-                serial_store.record_publication_review(
-                    str(context.plan.goal.constraints.get("serial_episode_id") or ""),
-                    int(publication_attempt["attempt_number"]),
-                    decision="failed",
-                    details={"error": f"{type(exc).__name__}: {exc}"},
+            if serial_acceptance or publication_attempt is not None:
+                _record_serial_review_failure(
+                    context, serial_store, serial_acceptance, publication_attempt, exc
                 )
-            if serial_acceptance:
-                episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
-                if episode_id:
-                    serial_store.record_review(
-                        episode_id,
-                        int(context.node.inputs.get("segment_index", 0)) + 1,
-                        "failed",
-                        details={"error": f"{type(exc).__name__}: {exc}"},
-                    )
             raise
         if serial_final_publish and publication_attempt is not None:
-            outputs = dict(result.outputs)
-            selected = outputs.get("selected_assets") or outputs.get("media_paths") or []
-            selected_paths = [str(item) for item in selected if item]
-            review_mode = str(outputs.get("review_mode") or "").strip().lower()
-            reason = " ".join(
-                str(outputs.get(key) or "")
-                for key in ("selection_rationale", "fallback_reason")
-            ).lower()
-            if result.status == "success" and review_mode == "discord" and selected_paths:
-                decision = "accepted"
-            elif outputs.get("regeneration_requested") or outputs.get("review_decision") == "regenerate":
-                decision = "rejected"
-            elif review_mode != "discord":
-                decision = "unavailable"
-            else:
-                decision = "timeout" if "timed out" in reason else "rejected" if "rejected" in reason else "failed"
-            approved_text = str(outputs.get("approved_review_text") or "").strip()
-            if not approved_text:
-                approved_text = "\n\n".join(
-                    part
-                    for part in (
-                        str(outputs.get("review_draft_caption") or "").strip(),
-                        str(outputs.get("review_draft_hashtags") or "").strip(),
-                    )
-                    if part
-                )
-            caption, hashtags = skills._split_review_caption_and_hashtags(approved_text)
-            serial_store.record_publication_review(
-                str(context.plan.goal.constraints.get("serial_episode_id") or ""),
-                int(publication_attempt["attempt_number"]),
-                decision=decision,
-                review_session_id=str(outputs.get("review_session_id") or ""),
-                caption=caption or None,
-                hashtags=hashtags or None,
-                details={
-                    "review_mode": review_mode,
-                    "reviewer": outputs.get("reviewer", ""),
-                    "review_session_path": outputs.get("review_session_path", ""),
-                    "review_decision": outputs.get("review_decision", ""),
-                    "selected_paths": selected_paths,
-                    "result_status": result.status,
-                    "series_disposition": str(
-                        (outputs.get("review_delivery") or {}).get("series_disposition") or ""
-                    ),
-                },
+            selected_paths = _record_serial_final_publication_review(
+                context, serial_store, skills, result, publication_attempt
             )
-            series_disposition = str(
-                (outputs.get("review_delivery") or {}).get("series_disposition") or ""
-            ).strip().lower()
-            if series_disposition in {"completed", "discarded"}:
-                serial_store.set_series_lifecycle_status(
-                    str(context.plan.goal.constraints.get("series_id") or ""),
-                    series_disposition,
-                    note=(
-                        f"Creator selected {series_disposition} after reviewing episode "
-                        f"{context.plan.goal.constraints.get('serial_episode_number')}"
-                    ),
-                )
-            outputs["publication_attempt_number"] = publication_attempt["attempt_number"]
-            result.outputs = outputs
             if not selected_paths:
                 return result
-        if not serial_acceptance:
-            return result
-
-        episode_id = str(context.plan.goal.constraints.get("serial_episode_id") or "").strip()
-        if not episode_id:
-            raise RuntimeError("Serial segment review requires a persisted episode ID")
-        outputs = dict(result.outputs)
-        selected = outputs.get("selected_assets") or outputs.get("media_paths") or []
-        selected_paths = [str(item) for item in selected if item]
-        review_mode = str(outputs.get("review_mode") or "").strip().lower()
-        if result.status == "success" and review_mode == "discord" and selected_paths:
-            decision = "accepted"
-            reviewed_path = selected_paths[0]
-        elif outputs.get("regeneration_requested") or outputs.get("review_decision") == "regenerate":
-            decision = "regeneration_requested"
-            reviewed_path = None
-        elif review_mode != "discord":
-            decision = "unavailable"
-            reviewed_path = None
-        else:
-            reason = " ".join(
-                str(outputs.get(key) or "") for key in ("selection_rationale", "fallback_reason")
-            ).lower()
-            decision = "rejected" if "rejected" in reason else "timeout" if "timed out" in reason else "failed"
-            reviewed_path = None
-        serial_store.record_review(
-            episode_id,
-            int(context.node.inputs.get("segment_index", 0)) + 1,
-            decision,
-            reviewed_path,
-            {
-                "review_mode": review_mode,
-                "reviewer": outputs.get("reviewer", ""),
-                "review_session_id": outputs.get("review_session_id", ""),
-                "review_session_path": outputs.get("review_session_path", ""),
-                "fallback_reason": outputs.get("fallback_reason", ""),
-                "selected_paths": selected_paths,
-                "result_status": result.status,
-            },
-        )
+        if serial_acceptance:
+            _record_serial_segment_review(context, serial_store, result)
         return result
 
     skill_registry.register("review.assets.select", select_and_record_serial_review, "Select a shortlist of candidate assets")

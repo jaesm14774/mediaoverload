@@ -8,7 +8,7 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import random
 import re
 from typing import Any, Iterator, Sequence
@@ -31,11 +31,188 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
+def _project_root() -> Path:
+    module_root = Path(__file__).resolve().parents[4]
+    if os.name == "nt":
+        return module_root
+    container_root = Path("/app")
+    if (container_root / "docker-compose.yml").is_file():
+        return container_root.resolve()
+    return module_root
+
+
+PROJECT_ROOT = _project_root()
+_JSON_PATH_FIELDS = {"path", "output_dir", "saved_files"}
+
+
+def _is_absolute_path(value: str) -> bool:
+    return Path(value).is_absolute() or PureWindowsPath(value).is_absolute()
+
+
+def _database_path(value: str | Path) -> str:
+    raw = str(value).strip()
+    if not raw:
+        return raw
+    if os.name != "nt" and PureWindowsPath(raw).is_absolute():
+        raise ValueError("Windows absolute paths cannot be stored by a non-Windows runtime.")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / raw.replace("\\", "/")
+    resolved = path.resolve(strict=False)
+    try:
+        relative = resolved.relative_to(PROJECT_ROOT)
+    except ValueError as exc:
+        raise ValueError("Serial database asset paths must be inside the project root.") from exc
+    if relative == Path("."):
+        raise ValueError("Serial database asset paths must identify a project file or directory.")
+    return relative.as_posix()
+
+
+def _runtime_path(value: str | Path) -> str:
+    raw = str(value).strip()
+    if not raw:
+        return raw
+    if _is_absolute_path(raw):
+        raise ValueError("Serial database asset paths must be project-relative.")
+    relative = Path(raw.replace("\\", "/"))
+    if any(part == ".." for part in relative.parts):
+        raise ValueError("Serial database asset paths cannot escape the project root.")
+    resolved = (PROJECT_ROOT / relative).resolve(strict=False)
+    try:
+        resolved.relative_to(PROJECT_ROOT)
+    except ValueError as exc:
+        raise ValueError("Serial database asset paths cannot escape the project root.") from exc
+    return str(resolved)
+
+
+def _is_json_path_field(name: str) -> bool:
+    return name in _JSON_PATH_FIELDS or name.endswith("_path") or name.endswith("_paths")
+
+
+def _transform_json_paths(value: Any, *, to_database: bool) -> Any:
+    if isinstance(value, dict):
+        transformed: dict[Any, Any] = {}
+        for key, child in value.items():
+            if _is_json_path_field(str(key)):
+                transformed[key] = _transform_json_path_value(child, to_database=to_database)
+            else:
+                transformed[key] = _transform_json_paths(child, to_database=to_database)
+        return transformed
+    if isinstance(value, list):
+        return [_transform_json_paths(child, to_database=to_database) for child in value]
+    return value
+
+
+def _transform_json_path_value(value: Any, *, to_database: bool) -> Any:
+    if isinstance(value, (str, Path)):
+        if not str(value).strip():
+            return str(value)
+        return _database_path(value) if to_database else _runtime_path(value)
+    if isinstance(value, list):
+        return [_transform_json_path_value(child, to_database=to_database) for child in value]
+    if isinstance(value, dict):
+        return _transform_json_paths(value, to_database=to_database)
+    return value
+
+
+def _database_parameter(value: Any) -> Any:
+    if isinstance(value, Path):
+        return _database_path(value)
+    if not isinstance(value, str):
+        return value
+    if _is_absolute_path(value):
+        return _database_path(value)
+    try:
+        payload = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
+    transformed = _transform_json_paths(payload, to_database=True)
+    return _json(transformed) if transformed != payload else value
+
+
+def _runtime_row(row: dict[str, Any]) -> dict[str, Any]:
+    transformed = dict(row)
+    for name, value in transformed.items():
+        if not isinstance(value, str) or not value:
+            continue
+        if name == "path" or name.endswith("_path"):
+            transformed[name] = _runtime_path(value)
+        elif name.endswith("_json"):
+            try:
+                payload = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            resolved = _transform_json_paths(payload, to_database=False)
+            if resolved != payload:
+                transformed[name] = _json(resolved)
+    return transformed
+
+
 def _existing_file(value: str | Path) -> Path:
-    path = Path(value).expanduser().resolve(strict=True)
+    raw = str(value).strip()
+    if os.name != "nt" and PureWindowsPath(raw).is_absolute():
+        raise ValueError("Windows absolute paths cannot be resolved by a non-Windows runtime.")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = path.resolve(strict=True)
     if not path.is_file():
         raise ValueError(f"Serial reference or media is not a file: {path}")
     return path
+
+
+def continuity_state_text(outline: str) -> str:
+    """Keep the human-readable ending state from an approved episode outline."""
+    text = str(outline or "").strip()
+    if not text:
+        return ""
+    heading = re.search(
+        r"(?im)^(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+[、.．]\s*)?"
+        r"(?:本集結尾狀態卡|本集結束後的連續狀態)(?:[^\n]*)$",
+        text,
+    )
+    if heading is None:
+        return text
+    body_start = heading.end()
+    next_section = re.search(
+        r"(?m)^(?:#{1,6}\s+|[一二三四五六七八九十]+[、.．])",
+        text[body_start:],
+    )
+    body_end = body_start + next_section.start() if next_section else len(text)
+    state = text[body_start:body_end].strip()
+    return state or text
+
+
+def _story_state_payload(value: str | dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _state_matches_episode(
+    value: str | dict[str, Any] | None,
+    episode_id: str,
+    episode_number: int,
+    final_video_sha256: str = "",
+) -> bool:
+    state = _story_state_payload(value)
+    try:
+        return (
+            state.get("version") == 1
+            and state.get("source_episode_id") == str(episode_id)
+            and int(state.get("episode_number") or 0) == int(episode_number)
+            and bool(str(state.get("state_text") or "").strip())
+            and (
+                not final_video_sha256
+                or state.get("final_video_sha256") == str(final_video_sha256)
+            )
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 class _QueryResult:
@@ -58,8 +235,24 @@ class _MySQLSession:
 
     def execute(self, statement: str, parameters: Sequence[Any] = ()) -> _QueryResult:
         with self._connection.cursor() as cursor:
-            cursor.execute(statement.replace("?", "%s"), tuple(parameters))
-            rows = list(cursor.fetchall()) if cursor.description else []
+            normalized_parameters = tuple(_database_parameter(value) for value in parameters)
+            cursor.execute(statement.replace("?", "%s"), normalized_parameters)
+            rows = [_runtime_row(row) for row in cursor.fetchall()] if cursor.description else []
+            return _QueryResult(rows, int(cursor.rowcount))
+
+    def executemany(
+        self,
+        statement: str,
+        parameter_rows: Sequence[Sequence[Any]],
+    ) -> _QueryResult:
+        if not parameter_rows:
+            return _QueryResult([], 0)
+        with self._connection.cursor() as cursor:
+            cursor.executemany(
+                statement.replace("?", "%s"),
+                [tuple(_database_parameter(value) for value in parameters) for parameters in parameter_rows],
+            )
+            rows = [_runtime_row(row) for row in cursor.fetchall()] if cursor.description else []
             return _QueryResult(rows, int(cursor.rowcount))
 
 
@@ -363,21 +556,28 @@ class SerialVideoStore:
             connection.close()
 
     @staticmethod
-    def _identity_files(paths: Sequence[str | Path]) -> list[dict[str, str]]:
-        files: list[dict[str, str]] = []
+    def _identity_paths(paths: Sequence[str | Path]) -> list[str]:
+        normalized_paths: list[str] = []
         for value in paths:
             path = _existing_file(value)
             if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
                 raise ValueError(f"Character identity reference must be an image: {path}")
-            files.append({"path": str(path), "sha256": _sha256(path)})
-        if len(files) > SerialVideoStore.IDENTITY_REFERENCE_LIMIT:
+            normalized_paths.append(str(path))
+        if len(normalized_paths) > SerialVideoStore.IDENTITY_REFERENCE_LIMIT:
             raise ValueError(
                 f"A series can use at most {SerialVideoStore.IDENTITY_REFERENCE_LIMIT} fixed character images; "
                 "Ref2VA also needs room for the prior episode tail."
             )
-        if len({item["path"] for item in files}) != len(files):
+        if len(set(normalized_paths)) != len(normalized_paths):
             raise ValueError("A character identity image can only be registered once per series.")
-        return sorted(files, key=lambda item: item["path"])
+        return sorted(normalized_paths)
+
+    @classmethod
+    def _identity_files(cls, paths: Sequence[str | Path]) -> list[dict[str, str]]:
+        return [
+            {"path": path, "sha256": _sha256(Path(path))}
+            for path in cls._identity_paths(paths)
+        ]
 
     @staticmethod
     def _row(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -734,10 +934,26 @@ class SerialVideoStore:
             ).fetchone()
         return self._character_card_payload(row)
 
-    def get_series_onboarding(self, series_id: str) -> dict[str, Any]:
-        """Return the current approved story and a character card pinned to that story."""
-        story = self.get_latest_approved_series_story(series_id)
-        character = self.get_latest_approved_character_card(series_id)
+    def _series_onboarding(
+        self,
+        connection: _MySQLSession,
+        series_id: str,
+    ) -> dict[str, Any]:
+        normalized_series_id = str(series_id or "").strip()
+        story_row = connection.execute(
+            """SELECT * FROM series_story_plans
+               WHERE series_id = ? AND status = 'approved'
+               ORDER BY version DESC LIMIT 1""",
+            (normalized_series_id,),
+        ).fetchone()
+        character_row = connection.execute(
+            """SELECT * FROM series_character_cards
+               WHERE series_id = ? AND status = 'approved'
+               ORDER BY version DESC LIMIT 1""",
+            (normalized_series_id,),
+        ).fetchone()
+        story = self._story_plan_payload(story_row)
+        character = self._character_card_payload(character_row)
         if character and (not story or character.get("story_plan_id") != story.get("story_plan_id")):
             character = None
         return {
@@ -745,6 +961,11 @@ class SerialVideoStore:
             "character": character,
             "is_complete": bool(story and character),
         }
+
+    def get_series_onboarding(self, series_id: str) -> dict[str, Any]:
+        """Return the current approved story and a character card pinned to that story."""
+        with self._connection() as connection:
+            return self._series_onboarding(connection, series_id)
 
     def production_series_exists(self, series_id: str) -> bool:
         with self._connection() as connection:
@@ -777,6 +998,33 @@ class SerialVideoStore:
             payload["reference_assets"] = []
         return payload
 
+    def _prepare_character_card_decision(
+        self,
+        decision: str,
+        character_name: str,
+        reviewed_card: str,
+        reference_paths: Sequence[str | Path],
+    ) -> tuple[str, str, str, list[dict[str, str]], str, str]:
+        normalized = str(decision or "").strip().lower()
+        if normalized not in {"accepted", "rejected"}:
+            raise ValueError("A character card decision must be accepted or rejected.")
+        name = str(character_name or "").strip()
+        reviewed_text = str(reviewed_card or "")
+        assets: list[dict[str, str]] = []
+        reviewed_sha = ""
+        status = "rejected"
+        if normalized == "accepted":
+            if not name:
+                raise ValueError("Approving a character card requires the final character name.")
+            if not reviewed_text.strip():
+                raise ValueError("Approving a character card requires the exact reviewed card text.")
+            if len(reference_paths) > 3:
+                raise ValueError("A character card can lock at most three identity reference images.")
+            assets = self._identity_files(reference_paths)
+            reviewed_sha = hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest()
+            status = "approved"
+        return normalized, name, reviewed_text, assets, reviewed_sha, status
+
     def record_series_character_card_decision(
         self,
         character_card_id: str,
@@ -788,24 +1036,18 @@ class SerialVideoStore:
         reviewer: str = "operator",
         notes: str = "",
     ) -> dict[str, Any]:
-        normalized_decision = str(decision or "").strip().lower()
-        if normalized_decision not in {"accepted", "rejected"}:
-            raise ValueError("A character card decision must be accepted or rejected.")
-        name = str(character_name or "").strip()
-        reviewed_text = str(reviewed_card or "")
-        assets: list[dict[str, str]] = []
-        if normalized_decision == "accepted":
-            if not name:
-                raise ValueError("Approving a character card requires the final character name.")
-            if not reviewed_text.strip():
-                raise ValueError("Approving a character card requires the exact reviewed card text.")
-            if len(reference_paths) > 3:
-                raise ValueError("A character card can lock at most three identity reference images.")
-            assets = self._identity_files(reference_paths)
-        reviewed_sha = (
-            hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest()
-            if normalized_decision == "accepted"
-            else ""
+        (
+            normalized_decision,
+            name,
+            reviewed_text,
+            assets,
+            reviewed_sha,
+            status,
+        ) = self._prepare_character_card_decision(
+            decision,
+            character_name,
+            reviewed_card,
+            reference_paths,
         )
         now = _now()
         card_id = str(character_card_id or "").strip()
@@ -826,7 +1068,6 @@ class SerialVideoStore:
             ).fetchone()
             if latest_story is None or latest_story["story_plan_id"] != card["story_plan_id"]:
                 raise ValueError("This character card is stale because its approved story has changed.")
-            status = "approved" if normalized_decision == "accepted" else "rejected"
             if status == "approved":
                 connection.execute(
                     """UPDATE series_character_cards SET status = 'superseded', updated_at = ?
@@ -1108,9 +1349,10 @@ class SerialVideoStore:
     def list_auto_continuation_candidates(
         self, character: str | None = None
     ) -> list[dict[str, Any]]:
-        query = """SELECT s.series_id, s.character_name, s.lifecycle_status,
+        query = """SELECT s.series_id, s.character_name, s.lifecycle_status, s.story_state_json,
                           e.episode_id AS latest_episode_id,
-                          e.episode_number AS latest_episode_number
+                          e.episode_number AS latest_episode_number,
+                          e.final_video_sha256 AS latest_video_sha256
                    FROM series s JOIN episodes e ON e.series_id = s.series_id AND e.is_current = 1
                    WHERE s.lifecycle_status = 'active'
                      AND e.episode_number = (
@@ -1125,7 +1367,17 @@ class SerialVideoStore:
             parameters = (normalized_character,)
         query += " ORDER BY s.series_id"
         with self._connection() as connection:
-            return connection.execute(query, parameters).fetchall()
+            rows = connection.execute(query, parameters).fetchall()
+        return [
+            row
+            for row in rows
+            if _state_matches_episode(
+                row["story_state_json"],
+                str(row["latest_episode_id"]),
+                int(row["latest_episode_number"]),
+                str(row["latest_video_sha256"] or ""),
+            )
+        ]
 
     def list_auto_resume_candidates(
         self, character: str | None = None
@@ -1199,9 +1451,6 @@ class SerialVideoStore:
             if onboarding["story"] is not None:
                 if not onboarding["is_complete"]:
                     continue
-                next_number = int(candidate["latest_episode_number"]) + 1
-                if self.get_latest_approved_series_episode_outline(candidate_series_id, next_number) is None:
-                    continue
             eligible_candidates.append(candidate)
         candidates = eligible_candidates
         mode = self.choose_auto_next_mode(
@@ -1217,7 +1466,7 @@ class SerialVideoStore:
                 identity_reference_paths,
                 episode_number=int(selected["latest_episode_number"]) + 1,
                 require_story_first_for_new=True,
-                require_episode_outline=True,
+                require_episode_outline=False,
             )
             context["automation_mode"] = "continue"
             context["automation_source_series_id"] = str(selected["series_id"])
@@ -1239,12 +1488,23 @@ class SerialVideoStore:
     def set_series_lifecycle_status(
         self, series_id: str, status: str, *, note: str = ""
     ) -> None:
-        """Close an active series as completed or discarded; terminal series cannot re-enter auto selection."""
+        """Close an active series once; replaying the same terminal outcome is safe."""
         normalized_status = str(status or "").strip().lower()
         if normalized_status not in {"completed", "discarded"}:
             raise ValueError("A serial lifecycle outcome must be completed or discarded.")
         now = _now()
         with self._connection(write=True) as connection:
+            current = connection.execute(
+                "SELECT lifecycle_status FROM series WHERE series_id = ? FOR UPDATE",
+                (str(series_id).strip(),),
+            ).fetchone()
+            if current is None:
+                raise ValueError("Only an active existing series can be completed or discarded.")
+            current_status = str(current["lifecycle_status"] or "").strip().lower()
+            if current_status == normalized_status:
+                return
+            if current_status != "active":
+                raise ValueError("Only an active existing series can be completed or discarded.")
             result = connection.execute(
                 """UPDATE series SET lifecycle_status = ?, lifecycle_note = ?,
                        lifecycle_updated_at = ?, updated_at = ?
@@ -1254,12 +1514,232 @@ class SerialVideoStore:
             if result.rowcount != 1:
                 raise ValueError("Only an active existing series can be completed or discarded.")
 
+    def get_human_approved_story_state(self, series_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT story_state_json FROM series WHERE series_id = ?",
+                (str(series_id).strip(),),
+            ).fetchone()
+        return _story_state_payload(row["story_state_json"] if row else None)
+
     def _validate_asset(self, path: str, expected_sha: str) -> Path:
         resolved = _existing_file(path)
         actual_sha = _sha256(resolved)
         if actual_sha != expected_sha:
             raise ValueError(f"Serial asset changed after registration or review: {resolved}")
         return resolved
+
+    def _previous_episode_references(
+        self,
+        connection: _MySQLSession,
+        previous: dict[str, Any] | None,
+        approved_story_state: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, list[dict[str, str]], str]:
+        if previous is None:
+            return None, [], ""
+        tail = connection.execute(
+            """SELECT * FROM reference_assets
+               WHERE episode_id = ? AND role = 'episode_end' AND status = 'active'
+               ORDER BY created_at DESC LIMIT 1""",
+            (previous["episode_id"],),
+        ).fetchone()
+        if tail is None:
+            raise ValueError("The prior episode has no current approved ending frame.")
+        self._validate_asset(tail["path"], tail["sha256"])
+        terminal = connection.execute(
+            """SELECT s.approved_render_id, r.output_path, r.output_sha256
+               FROM segments s JOIN render_attempts r ON r.render_id = s.approved_render_id
+               WHERE s.episode_id = ? ORDER BY s.ordinal DESC LIMIT 1""",
+            (previous["episode_id"],),
+        ).fetchone()
+        if (
+            terminal is None
+            or terminal["approved_render_id"] != tail["source_render_id"]
+            or not terminal["output_path"]
+        ):
+            raise ValueError("The prior episode ending frame no longer belongs to its approved final video.")
+        self._validate_asset(terminal["output_path"], terminal["output_sha256"])
+        return (
+            dict(tail),
+            [
+                {
+                    "path": tail["path"],
+                    "type": "image",
+                    "role": "continuation",
+                    "retention": "Use only for story state and character continuity; create a new shot composition and camera framing.",
+                    "notes": "Current approved ending frame from the previous episode.",
+                }
+            ],
+            self._story_context(approved_story_state),
+        )
+
+    def _resolve_series_identity_files(
+        self,
+        connection: _MySQLSession,
+        *,
+        series: dict[str, Any] | None,
+        series_id: str,
+        character: str,
+        supplied_identity_paths: list[str],
+        onboarding: dict[str, Any],
+        require_story_first_for_new: bool,
+    ) -> list[dict[str, str]]:
+        approved_assets = (
+            onboarding["character"]["reference_assets"]
+            if onboarding["is_complete"]
+            else None
+        )
+        if series is None:
+            if not supplied_identity_paths:
+                raise ValueError("A new series requires at least one fixed character identity image.")
+            identity_files = self._identity_files(supplied_identity_paths)
+        else:
+            if series["character_name"] != character and not (
+                require_story_first_for_new and onboarding["is_complete"]
+            ):
+                raise ValueError("The requested character differs from this series' fixed character.")
+            identity_files = self._active_identity_files(connection, series_id)
+            if not identity_files:
+                if require_story_first_for_new and onboarding["is_complete"]:
+                    identity_files = self._identity_files(supplied_identity_paths)
+                else:
+                    raise ValueError("This series has no active fixed character references.")
+        if supplied_identity_paths and supplied_identity_paths != [
+            item["path"] for item in identity_files
+        ]:
+            raise ValueError("Character reference paths or bytes changed; serial generation is blocked.")
+        if approved_assets is not None and identity_files != approved_assets:
+            raise ValueError("Character reference images changed after approval; review the character card again.")
+        for item in identity_files:
+            if series is not None:
+                self._validate_asset(item["path"], item["sha256"])
+        return identity_files
+
+    @staticmethod
+    def _resolve_episode_target(
+        connection: _MySQLSession,
+        series_id: str,
+        requested_episode_number: int | None,
+    ) -> tuple[int, dict[str, Any] | None]:
+        rows = connection.execute(
+            """SELECT * FROM episodes
+               WHERE series_id = ? AND is_current = 1
+               ORDER BY episode_number DESC, version DESC""",
+            (series_id,),
+        ).fetchall()
+        current_by_number = {int(row["episode_number"]): row for row in rows}
+        if requested_episode_number is None:
+            if rows and rows[0]["status"] != "ready":
+                raise ValueError(
+                    f"Episode {rows[0]['episode_number']} is not ready; pass --serial-resume-episode-number to resume it."
+                )
+            target_number = int(rows[0]["episode_number"]) + 1 if rows else 1
+        else:
+            target_number = int(requested_episode_number)
+            if target_number < 1:
+                raise ValueError("serial episode number must be positive")
+        previous = None
+        if target_number > 1:
+            previous = current_by_number.get(target_number - 1)
+            if previous is None or previous["status"] != "ready":
+                raise ValueError(
+                    f"Episode {target_number - 1} must be ready before episode {target_number} can start."
+                )
+        return target_number, previous
+
+    @staticmethod
+    def _resolve_approved_story_state(
+        series: dict[str, Any] | None,
+        previous: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        stored_state = _story_state_payload(
+            series["story_state_json"] if series is not None else None
+        )
+        approved_state = stored_state if previous is not None else {}
+        if previous is not None and not _state_matches_episode(
+            approved_state,
+            str(previous["episode_id"]),
+            int(previous["episode_number"]),
+            str(previous["final_video_sha256"] or ""),
+        ):
+            raise ValueError(
+                "The previous episode has no matching human-approved continuity state. "
+                "Review that episode before continuing the series."
+            )
+        return approved_state
+
+    @staticmethod
+    def _load_approved_onboarding_lineage(
+        connection: _MySQLSession,
+        *,
+        onboarding: dict[str, Any],
+        series_id: str,
+        episode_number: int,
+        require_episode_outline: bool,
+    ) -> dict[str, Any] | None:
+        if not onboarding["is_complete"]:
+            return None
+        story = onboarding["story"]
+        character_card = onboarding["character"]
+        outline_row = connection.execute(
+            """SELECT * FROM series_episode_outlines
+               WHERE series_id = ? AND episode_number = ? AND status = 'approved'
+                 AND story_plan_id = ? AND story_sha256 = ?
+                 AND character_card_id = ? AND character_sha256 = ?
+               ORDER BY version DESC LIMIT 1""",
+            (
+                series_id,
+                episode_number,
+                story["story_plan_id"],
+                story["approved_sha256"],
+                character_card["character_card_id"],
+                character_card["approved_sha256"],
+            ),
+        ).fetchone()
+        if require_episode_outline and outline_row is None:
+            raise ValueError(
+                f"Episode {episode_number} needs an approved story, scene and shot outline before video generation."
+            )
+        if outline_row is None:
+            return None
+        return {
+            "story_plan_id": str(story["story_plan_id"]),
+            "story_sha256": str(story["approved_sha256"]),
+            "character_card_id": str(character_card["character_card_id"]),
+            "character_sha256": str(character_card["approved_sha256"]),
+            "outline_id": str(outline_row["outline_id"]),
+            "outline_sha256": str(outline_row["approved_sha256"]),
+            "reference_assets": list(character_card["reference_assets"]),
+            "episode_topic": str(outline_row["episode_topic"]),
+            "episode_outline": str(outline_row["reviewed_outline"]),
+        }
+
+    def _resolve_identity_selection(
+        self,
+        character: str,
+        identity_reference_paths: Sequence[str | Path],
+        onboarding: dict[str, Any],
+    ) -> tuple[str, list[str]]:
+        normalized_character = str(character or "").strip()
+        selected_paths = identity_reference_paths
+        if onboarding["is_complete"]:
+            approved_character = onboarding["character"]
+            approved_name = str(approved_character["character_name"] or "").strip()
+            if not normalized_character:
+                normalized_character = approved_name
+            if normalized_character != approved_name:
+                raise ValueError("The requested character differs from the approved character card.")
+            approved_identity_paths = self._identity_paths(
+                [item["path"] for item in approved_character["reference_assets"]]
+            )
+            if identity_reference_paths:
+                supplied_identity_paths = self._identity_paths(identity_reference_paths)
+                if supplied_identity_paths != approved_identity_paths:
+                    raise ValueError("Character references differ from the approved character card.")
+            selected_paths = approved_identity_paths
+        if not normalized_character:
+            raise ValueError("serial mode requires an explicit fixed character")
+        return normalized_character, self._identity_paths(selected_paths)
 
     def prepare_series_context(
         self,
@@ -1273,11 +1753,15 @@ class SerialVideoStore:
     ) -> dict[str, Any]:
         """Resolve read-only episode context and current reference assets."""
         normalized_series_id = str(series_id or "").strip()
-        normalized_character = str(character or "").strip()
         if not normalized_series_id:
             raise ValueError("serial mode requires a non-empty series ID")
-        onboarding = self.get_series_onboarding(normalized_series_id)
-        production_series_exists = self.production_series_exists(normalized_series_id)
+        with self._connection() as connection:
+            onboarding = self._series_onboarding(connection, normalized_series_id)
+            production_row = connection.execute(
+                "SELECT series_id FROM series WHERE series_id = ?",
+                (normalized_series_id,),
+            ).fetchone()
+        production_series_exists = production_row is not None
         if require_story_first_for_new:
             if onboarding["story"] is not None and not onboarding["is_complete"]:
                 raise ValueError(
@@ -1287,146 +1771,42 @@ class SerialVideoStore:
                 raise ValueError(
                     "A new serial series must approve its complete story, character card, and reference image before video generation."
                 )
-        if onboarding["is_complete"]:
-            approved_character = onboarding["character"]
-            approved_name = str(approved_character["character_name"] or "").strip()
-            if not normalized_character:
-                normalized_character = approved_name
-            if normalized_character != approved_name:
-                raise ValueError("The requested character differs from the approved character card.")
-            approved_assets = self._identity_files(
-                [item["path"] for item in approved_character["reference_assets"]]
-            )
-            if identity_reference_paths:
-                supplied_assets = self._identity_files(identity_reference_paths)
-                if supplied_assets != approved_assets:
-                    raise ValueError("Character references differ from the approved character card.")
-            identity_reference_paths = [item["path"] for item in approved_assets]
-        if not normalized_character:
-            raise ValueError("serial mode requires an explicit fixed character")
-        supplied_identity = self._identity_files(identity_reference_paths)
+        normalized_character, supplied_identity_paths = self._resolve_identity_selection(
+            character,
+            identity_reference_paths,
+            onboarding,
+        )
         with self._connection() as connection:
             series = connection.execute(
                 "SELECT * FROM series WHERE series_id = ?", (normalized_series_id,)
             ).fetchone()
-            if series is None:
-                if not supplied_identity:
-                    raise ValueError("A new series requires at least one fixed character identity image.")
-                identity_files = supplied_identity
-            else:
-                if series["character_name"] != normalized_character and not (
-                    require_story_first_for_new and onboarding["is_complete"]
-                ):
-                    raise ValueError("The requested character differs from this series' fixed character.")
-                identity_files = self._active_identity_files(connection, normalized_series_id)
-                if not identity_files:
-                    if require_story_first_for_new and onboarding["is_complete"]:
-                        identity_files = supplied_identity
-                    else:
-                        raise ValueError("This series has no active fixed character references.")
-                if supplied_identity and supplied_identity != identity_files:
-                    raise ValueError("Character reference paths or bytes changed; serial generation is blocked.")
-                for item in identity_files:
-                    self._validate_asset(item["path"], item["sha256"])
-
-            rows = connection.execute(
-                """SELECT * FROM episodes
-                   WHERE series_id = ? AND is_current = 1
-                   ORDER BY episode_number DESC, version DESC""",
-                (normalized_series_id,),
-            ).fetchall()
-            current_by_number = {int(row["episode_number"]): row for row in rows}
-            if episode_number is None:
-                if rows and rows[0]["status"] != "ready":
-                    raise ValueError(
-                        f"Episode {rows[0]['episode_number']} is not ready; pass --serial-resume-episode-number to resume it."
-                    )
-                target_number = int(rows[0]["episode_number"]) + 1 if rows else 1
-            else:
-                target_number = int(episode_number)
-                if target_number < 1:
-                    raise ValueError("serial episode number must be positive")
-
-            previous = None
-            if target_number > 1:
-                previous = current_by_number.get(target_number - 1)
-                if previous is None or previous["status"] != "ready":
-                    raise ValueError(
-                        f"Episode {target_number - 1} must be ready before episode {target_number} can start."
-                    )
-            onboarding_lineage = None
-            if onboarding["is_complete"]:
-                story = onboarding["story"]
-                character_card = onboarding["character"]
-                outline_row = connection.execute(
-                    """SELECT * FROM series_episode_outlines
-                       WHERE series_id = ? AND episode_number = ? AND status = 'approved'
-                         AND story_plan_id = ? AND story_sha256 = ?
-                         AND character_card_id = ? AND character_sha256 = ?
-                       ORDER BY version DESC LIMIT 1""",
-                    (
-                        normalized_series_id,
-                        target_number,
-                        story["story_plan_id"],
-                        story["approved_sha256"],
-                        character_card["character_card_id"],
-                        character_card["approved_sha256"],
-                    ),
-                ).fetchone()
-                if require_episode_outline and outline_row is None:
-                    raise ValueError(
-                        f"Episode {target_number} needs an approved story, scene and shot outline before video generation."
-                    )
-                if outline_row is not None:
-                    onboarding_lineage = {
-                        "story_plan_id": str(story["story_plan_id"]),
-                        "story_sha256": str(story["approved_sha256"]),
-                        "character_card_id": str(character_card["character_card_id"]),
-                        "character_sha256": str(character_card["approved_sha256"]),
-                        "outline_id": str(outline_row["outline_id"]),
-                        "outline_sha256": str(outline_row["approved_sha256"]),
-                        "reference_assets": list(character_card["reference_assets"]),
-                        "episode_topic": str(outline_row["episode_topic"]),
-                        "episode_outline": str(outline_row["reviewed_outline"]),
-                    }
-            reference_manifest: list[dict[str, str]] = []
-            previous_tail: dict[str, Any] | None = None
-            story_context = ""
-            if previous is not None:
-                tail = connection.execute(
-                    """SELECT * FROM reference_assets
-                       WHERE episode_id = ? AND role = 'episode_end' AND status = 'active'
-                       ORDER BY created_at DESC LIMIT 1""",
-                    (previous["episode_id"],),
-                ).fetchone()
-                if tail is None:
-                    raise ValueError("The prior episode has no current approved ending frame.")
-                self._validate_asset(tail["path"], tail["sha256"])
-                terminal = connection.execute(
-                    """SELECT s.approved_render_id, r.output_path, r.output_sha256
-                       FROM segments s JOIN render_attempts r ON r.render_id = s.approved_render_id
-                       WHERE s.episode_id = ? ORDER BY s.ordinal DESC LIMIT 1""",
-                    (previous["episode_id"],),
-                ).fetchone()
-                if (
-                    terminal is None
-                    or terminal["approved_render_id"] != tail["source_render_id"]
-                    or not terminal["output_path"]
-                ):
-                    raise ValueError("The prior episode ending frame no longer belongs to its approved final video.")
-                self._validate_asset(terminal["output_path"], terminal["output_sha256"])
-                previous_tail = dict(tail)
-                reference_manifest.append(
-                    {
-                        "path": tail["path"],
-                        "type": "image",
-                        "role": "continuation",
-                        "retention": "Use only for story state and character continuity; create a new shot composition and camera framing.",
-                        "notes": "Current approved ending frame from the previous episode.",
-                    }
-                )
-                story_context = self._story_context(previous)
-
+            identity_files = self._resolve_series_identity_files(
+                connection,
+                series=series,
+                series_id=normalized_series_id,
+                character=normalized_character,
+                supplied_identity_paths=supplied_identity_paths,
+                onboarding=onboarding,
+                require_story_first_for_new=require_story_first_for_new,
+            )
+            target_number, previous = self._resolve_episode_target(
+                connection,
+                normalized_series_id,
+                episode_number,
+            )
+            approved_story_state = self._resolve_approved_story_state(series, previous)
+            onboarding_lineage = self._load_approved_onboarding_lineage(
+                connection,
+                onboarding=onboarding,
+                series_id=normalized_series_id,
+                episode_number=target_number,
+                require_episode_outline=require_episode_outline,
+            )
+            previous_tail, reference_manifest, story_context = self._previous_episode_references(
+                connection,
+                previous,
+                approved_story_state,
+            )
             for item in identity_files:
                 reference_manifest.append(
                     {
@@ -1444,6 +1824,7 @@ class SerialVideoStore:
                 "episode_number": target_number,
                 "previous_episode_id": str(previous["episode_id"]) if previous else "",
                 "story_context": story_context,
+                "story_state": approved_story_state,
                 "identity_references": identity_files,
                 "previous_tail": previous_tail,
                 "reference_manifest": reference_manifest,
@@ -1453,22 +1834,221 @@ class SerialVideoStore:
             }
 
     @staticmethod
-    def _story_context(previous: dict[str, Any]) -> str:
-        story = json.loads(previous["story_json"] or "[]")
-        if not isinstance(story, list) or not story:
+    def _story_context(approved_state: dict[str, Any]) -> str:
+        state_text = str(approved_state.get("state_text") or "").strip()
+        if not state_text:
             return ""
-        beats: list[str] = []
-        for item in story:
-            if not isinstance(item, dict):
-                continue
-            visual = str(item.get("visual") or item.get("narration") or "").strip()
-            ending = str(item.get("end_state") or item.get("effect") or "").strip()
-            beat = "；".join(value for value in (visual, ending) if value)
-            if beat:
-                beats.append(beat)
-        if not beats:
-            return ""
-        return f"Previous episode {previous['episode_number']} story state: " + " → ".join(beats)
+        return (
+            f"Latest human-approved state after episode {approved_state.get('episode_number')}:\n"
+            f"{state_text}"
+        )
+
+    def _normalize_episode_onboarding_lineage(
+        self,
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        onboarding_lineage = context.get("onboarding_lineage")
+        if onboarding_lineage is None:
+            return None
+        if not isinstance(onboarding_lineage, dict):
+            raise ValueError("Serial onboarding lineage must be a mapping.")
+        required_fields = (
+            "story_plan_id",
+            "story_sha256",
+            "character_card_id",
+            "character_sha256",
+            "outline_id",
+            "outline_sha256",
+            "reference_assets",
+        )
+        if any(not str(onboarding_lineage.get(key) or "").strip() for key in required_fields[:-1]):
+            raise ValueError("Serial onboarding lineage is incomplete.")
+        raw_assets = onboarding_lineage.get("reference_assets")
+        if not isinstance(raw_assets, list) or not raw_assets:
+            raise ValueError("Serial onboarding lineage is incomplete.")
+        approved_paths = self._identity_paths([item["path"] for item in raw_assets])
+        approved_digests = {
+            str(_existing_file(item["path"])): str(item.get("sha256") or "").strip()
+            for item in raw_assets
+        }
+        if len(approved_digests) != len(raw_assets) or any(not value for value in approved_digests.values()):
+            raise ValueError("Serial onboarding lineage is incomplete.")
+        approved_assets = [
+            {"path": path, "sha256": approved_digests[path]}
+            for path in approved_paths
+        ]
+        identity_references = context["identity_references"]
+        prepared_paths = self._identity_paths([item["path"] for item in identity_references])
+        if approved_paths != prepared_paths:
+            raise ValueError("Episode identity references differ from the approved character card.")
+        current_identity = self._identity_files(prepared_paths)
+        prepared_assets = sorted(
+            (
+                {"path": str(_existing_file(item["path"])), "sha256": str(item.get("sha256") or "").strip()}
+                for item in identity_references
+            ),
+            key=lambda item: item["path"],
+        )
+        if current_identity != prepared_assets:
+            raise ValueError("Character reference images changed after the series context was prepared.")
+        if current_identity != approved_assets:
+            raise ValueError("Character reference images changed after approval; review the character card again.")
+        normalized_lineage = dict(onboarding_lineage)
+        normalized_lineage["reference_assets"] = approved_assets
+        return normalized_lineage
+
+    def _validate_approved_episode_lineage(
+        self,
+        connection: _MySQLSession,
+        *,
+        series_id: str,
+        episode_number: int,
+        lineage: dict[str, Any] | None,
+    ) -> None:
+        if lineage is None:
+            return
+        story = connection.execute(
+            """SELECT story_plan_id, approved_sha256 FROM series_story_plans
+               WHERE series_id = ? AND status = 'approved'
+               ORDER BY version DESC LIMIT 1""",
+            (series_id,),
+        ).fetchone()
+        character_card = connection.execute(
+            """SELECT character_card_id, approved_sha256, reference_assets_json
+               FROM series_character_cards WHERE series_id = ? AND status = 'approved'
+               ORDER BY version DESC LIMIT 1""",
+            (series_id,),
+        ).fetchone()
+        outline = connection.execute(
+            """SELECT outline_id, story_plan_id, story_sha256, character_card_id,
+                      character_sha256, approved_sha256
+               FROM series_episode_outlines
+               WHERE series_id = ? AND episode_number = ? AND status = 'approved'
+               ORDER BY version DESC LIMIT 1""",
+            (series_id, episode_number),
+        ).fetchone()
+        if any(record is None for record in (story, character_card, outline)):
+            raise ValueError("Approved serial story, character or episode outline changed before generation.")
+        current_lineage = {
+            "story_plan_id": story["story_plan_id"],
+            "story_sha256": story["approved_sha256"],
+            "character_card_id": character_card["character_card_id"],
+            "character_sha256": character_card["approved_sha256"],
+            "outline_id": outline["outline_id"],
+            "outline_sha256": outline["approved_sha256"],
+            "outline_story_plan_id": outline["story_plan_id"],
+            "outline_character_card_id": outline["character_card_id"],
+        }
+        expected_lineage = {
+            key: lineage[key]
+            for key in (
+                "story_plan_id",
+                "story_sha256",
+                "character_card_id",
+                "character_sha256",
+                "outline_id",
+                "outline_sha256",
+            )
+        }
+        expected_lineage["outline_story_plan_id"] = lineage["story_plan_id"]
+        expected_lineage["outline_character_card_id"] = lineage["character_card_id"]
+        if current_lineage != expected_lineage:
+            raise ValueError("Approved serial story, character or episode outline changed before generation.")
+        stored_assets = json.loads(character_card["reference_assets_json"] or "[]")
+        stored_asset_hashes = sorted(
+            (str(item["path"]), str(item["sha256"])) for item in stored_assets
+        )
+        approved_asset_hashes = sorted(
+            (str(item["path"]), str(item["sha256"]))
+            for item in lineage["reference_assets"]
+        )
+        if stored_asset_hashes != approved_asset_hashes:
+            raise ValueError("Approved character reference images changed before episode creation.")
+
+    def _bind_episode_series_identity(
+        self,
+        connection: _MySQLSession,
+        *,
+        series: dict[str, Any] | None,
+        series_id: str,
+        character: str,
+        identity: list[dict[str, str]],
+        lineage: dict[str, Any] | None,
+        now: str,
+    ) -> None:
+        if series is None:
+            connection.execute(
+                "INSERT INTO series(series_id, character_name, story_state_json, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)",
+                (series_id, character, now, now),
+            )
+            for item in identity:
+                self._insert_reference(
+                    connection,
+                    series_id=series_id,
+                    episode_id=None,
+                    segment_number=0,
+                    role="character_identity",
+                    source_render_id=None,
+                    path=item["path"],
+                    sha256=item["sha256"],
+                    now=now,
+                )
+            return
+        if series["character_name"] != character and lineage is None:
+            raise ValueError("The requested character differs from this series' fixed character.")
+        active_identity = self._active_identity_files(connection, series_id)
+        if active_identity == identity:
+            return
+        if lineage is None or active_identity:
+            raise ValueError("Character reference assets changed while the episode was being prepared.")
+        for item in identity:
+            self._insert_reference(
+                connection,
+                series_id=series_id,
+                episode_id=None,
+                segment_number=0,
+                role="character_identity",
+                source_render_id=None,
+                path=item["path"],
+                sha256=item["sha256"],
+                now=now,
+            )
+        connection.execute(
+            "UPDATE series SET character_name = ?, updated_at = ? WHERE series_id = ?",
+            (character, now, series_id),
+        )
+
+    def _validate_episode_continuity(
+        self,
+        connection: _MySQLSession,
+        *,
+        context: dict[str, Any],
+        series: dict[str, Any] | None,
+        approved_story_state_before: dict[str, Any] | None,
+    ) -> str | None:
+        previous_episode_id = str(context.get("previous_episode_id") or "") or None
+        if previous_episode_id is None:
+            return None
+        previous = connection.execute(
+            "SELECT * FROM episodes WHERE episode_id = ? AND is_current = 1",
+            (previous_episode_id,),
+        ).fetchone()
+        if previous is None or previous["status"] != "ready":
+            raise ValueError("The prior episode changed before the new episode could be started.")
+        current_story_state = _story_state_payload(series["story_state_json"] if series else None)
+        matches_current_state = current_story_state == approved_story_state_before
+        matches_previous_episode = _state_matches_episode(
+            current_story_state,
+            previous_episode_id,
+            int(previous["episode_number"]),
+            str(previous["final_video_sha256"] or ""),
+        )
+        if not matches_current_state or not matches_previous_episode:
+            raise ValueError(
+                "Human-approved story state changed before the episode could be started; "
+                "replan from the current state."
+            )
+        return previous_episode_id
 
     def start_episode(
         self,
@@ -1493,126 +2073,40 @@ class SerialVideoStore:
             raise ValueError("A serial episode target duration must be positive.")
         episode_id = uuid.uuid4().hex
         now = _now()
-        onboarding_lineage = context.get("onboarding_lineage")
-        normalized_lineage: dict[str, Any] | None = None
-        if onboarding_lineage is not None:
-            if not isinstance(onboarding_lineage, dict):
-                raise ValueError("Serial onboarding lineage must be a mapping.")
-            required_lineage_fields = (
-                "story_plan_id",
-                "story_sha256",
-                "character_card_id",
-                "character_sha256",
-                "outline_id",
-                "outline_sha256",
-                "reference_assets",
-            )
-            if any(not str(onboarding_lineage.get(key) or "").strip() for key in required_lineage_fields[:-1]):
-                raise ValueError("Serial onboarding lineage is incomplete.")
-            lineage_assets = self._identity_files(
-                [item["path"] for item in onboarding_lineage.get("reference_assets", [])]
-            )
-            episode_identity = self._identity_files([item["path"] for item in context["identity_references"]])
-            if lineage_assets != episode_identity:
-                raise ValueError("Episode identity references differ from the approved character card.")
-            normalized_lineage = dict(onboarding_lineage)
-            normalized_lineage["reference_assets"] = lineage_assets
+        normalized_lineage = self._normalize_episode_onboarding_lineage(context)
+        outline_text = str(
+            normalized_lineage.get("episode_outline") if normalized_lineage is not None else prompt
+        )
+        continuity_state_proposal = continuity_state_text(outline_text)
+        approved_story_state_before = context.get("story_state")
         with self._connection(write=True) as connection:
             series = connection.execute(
                 "SELECT * FROM series WHERE series_id = ?", (series_id,)
             ).fetchone()
             if series is not None and series["lifecycle_status"] != "active":
                 raise ValueError("A completed or discarded series cannot start or rerender an episode.")
-            if normalized_lineage is not None:
-                story = connection.execute(
-                    """SELECT story_plan_id, approved_sha256 FROM series_story_plans
-                       WHERE series_id = ? AND status = 'approved'
-                       ORDER BY version DESC LIMIT 1""",
-                    (series_id,),
-                ).fetchone()
-                character_card = connection.execute(
-                    """SELECT character_card_id, approved_sha256, reference_assets_json
-                       FROM series_character_cards WHERE series_id = ? AND status = 'approved'
-                       ORDER BY version DESC LIMIT 1""",
-                    (series_id,),
-                ).fetchone()
-                outline = connection.execute(
-                    """SELECT outline_id, story_plan_id, story_sha256, character_card_id,
-                              character_sha256, approved_sha256
-                       FROM series_episode_outlines
-                       WHERE series_id = ? AND episode_number = ? AND status = 'approved'
-                       ORDER BY version DESC LIMIT 1""",
-                    (series_id, episode_number),
-                ).fetchone()
-                if (
-                    story is None
-                    or character_card is None
-                    or outline is None
-                    or story["story_plan_id"] != normalized_lineage["story_plan_id"]
-                    or story["approved_sha256"] != normalized_lineage["story_sha256"]
-                    or character_card["character_card_id"] != normalized_lineage["character_card_id"]
-                    or character_card["approved_sha256"] != normalized_lineage["character_sha256"]
-                    or outline["outline_id"] != normalized_lineage["outline_id"]
-                    or outline["approved_sha256"] != normalized_lineage["outline_sha256"]
-                    or outline["story_plan_id"] != normalized_lineage["story_plan_id"]
-                    or outline["character_card_id"] != normalized_lineage["character_card_id"]
-                ):
-                    raise ValueError("Approved serial story, character or episode outline changed before generation.")
-                stored_assets = self._identity_files(
-                    [item["path"] for item in json.loads(character_card["reference_assets_json"] or "[]")]
-                )
-                if stored_assets != normalized_lineage["reference_assets"]:
-                    raise ValueError("Approved character reference images changed before episode creation.")
+            self._validate_approved_episode_lineage(
+                connection,
+                series_id=series_id,
+                episode_number=episode_number,
+                lineage=normalized_lineage,
+            )
             identity = list(context["identity_references"])
-            if series is None:
-                connection.execute(
-                    "INSERT INTO series(series_id, character_name, story_state_json, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)",
-                    (series_id, character, now, now),
-                )
-                for item in identity:
-                    self._insert_reference(
-                        connection,
-                        series_id=series_id,
-                        episode_id=None,
-                        segment_number=0,
-                        role="character_identity",
-                        source_render_id=None,
-                        path=item["path"],
-                        sha256=item["sha256"],
-                        now=now,
-                    )
-            else:
-                if series["character_name"] != character and normalized_lineage is None:
-                    raise ValueError("The requested character differs from this series' fixed character.")
-                active_identity = self._active_identity_files(connection, series_id)
-                if active_identity != identity:
-                    if normalized_lineage is None or active_identity:
-                        raise ValueError("Character reference assets changed while the episode was being prepared.")
-                    for item in identity:
-                        self._insert_reference(
-                            connection,
-                            series_id=series_id,
-                            episode_id=None,
-                            segment_number=0,
-                            role="character_identity",
-                            source_render_id=None,
-                            path=item["path"],
-                            sha256=item["sha256"],
-                            now=now,
-                        )
-                    connection.execute(
-                        "UPDATE series SET character_name = ?, updated_at = ? WHERE series_id = ?",
-                        (character, now, series_id),
-                    )
-
-            previous_episode_id = str(context.get("previous_episode_id") or "") or None
-            if previous_episode_id:
-                previous = connection.execute(
-                    "SELECT * FROM episodes WHERE episode_id = ? AND is_current = 1",
-                    (previous_episode_id,),
-                ).fetchone()
-                if previous is None or previous["status"] != "ready":
-                    raise ValueError("The prior episode changed before the new episode could be started.")
+            self._bind_episode_series_identity(
+                connection,
+                series=series,
+                series_id=series_id,
+                character=character,
+                identity=identity,
+                lineage=normalized_lineage,
+                now=now,
+            )
+            previous_episode_id = self._validate_episode_continuity(
+                connection,
+                context=context,
+                series=series,
+                approved_story_state_before=approved_story_state_before,
+            )
 
             current_same_number = connection.execute(
                 """SELECT * FROM episodes WHERE series_id = ? AND episode_number = ? AND is_current = 1""",
@@ -1644,6 +2138,8 @@ class SerialVideoStore:
                     _json(
                         {
                             "story_context": context.get("story_context", ""),
+                            "approved_story_state_before": approved_story_state_before or {},
+                            "continuity_state_proposal": continuity_state_proposal,
                             "automation_mode": context.get("automation_mode", "manual"),
                             "automation_source_series_id": context.get("automation_source_series_id", ""),
                             "automation_source_episode_id": context.get("automation_source_episode_id", ""),
@@ -1726,7 +2222,8 @@ class SerialVideoStore:
         count = int(segment_count)
         if count < 1:
             raise ValueError("A serial episode must plan at least one video segment.")
-        plan_sha = hashlib.sha256(_json(plan_payload).encode("utf-8")).hexdigest()
+        stored_plan_payload = _transform_json_paths(plan_payload, to_database=True)
+        plan_sha = hashlib.sha256(_json(stored_plan_payload).encode("utf-8")).hexdigest()
         now = _now()
         with self._connection(write=True) as connection:
             episode = connection.execute(
@@ -1739,7 +2236,7 @@ class SerialVideoStore:
             ).fetchone()
             if existing_segments and int(existing_segments["row_count"]):
                 raise ValueError("Episode plan is already persisted; start a new episode version to replan it.")
-            goal_payload = plan_payload.get("goal", {})
+            goal_payload = stored_plan_payload.get("goal", {})
             duration = (
                 float(goal_payload.get("duration_seconds") or episode["target_duration_seconds"])
                 if isinstance(goal_payload, dict)
@@ -1753,16 +2250,18 @@ class SerialVideoStore:
             )
             connection.execute(
                 "INSERT INTO episode_plans(episode_id, plan_sha256, plan_json, created_at) VALUES (?, ?, ?, ?)",
-                (episode_id, plan_sha, _json(plan_payload), now),
+                (episode_id, plan_sha, _json(stored_plan_payload), now),
             )
-            for ordinal in range(1, count + 1):
-                connection.execute(
-                    """INSERT INTO segments(
-                           segment_id, episode_id, ordinal, target_duration_seconds, status,
-                           created_at, updated_at
-                       ) VALUES (?, ?, ?, ?, 'planned', ?, ?)""",
-                    (uuid.uuid4().hex, episode_id, ordinal, segment_duration, now, now),
-                )
+            connection.executemany(
+                """INSERT INTO segments(
+                       segment_id, episode_id, ordinal, target_duration_seconds, status,
+                       created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (uuid.uuid4().hex, episode_id, ordinal, segment_duration, "planned", now, now)
+                    for ordinal in range(1, count + 1)
+                ],
+            )
         return plan_sha
 
     def get_current_episode(self, series_id: str, episode_number: int) -> dict[str, Any]:
@@ -1796,6 +2295,50 @@ class SerialVideoStore:
                 raise ValueError("The persisted serial plan is not an object.")
             return payload
 
+    def _assert_episode_ready_for_publication(
+        self,
+        connection: _MySQLSession,
+        episode_id: str,
+        topic: str,
+        media: Path,
+        media_sha: str,
+    ) -> None:
+        episode = connection.execute(
+            """SELECT e.*, s.lifecycle_status FROM episodes e
+               JOIN series s ON s.series_id = e.series_id
+               WHERE e.episode_id = ? AND e.is_current = 1""",
+            (episode_id,),
+        ).fetchone()
+        if episode is None:
+            raise ValueError("Cannot publish a stale episode version.")
+        if episode["status"] != "ready" or not episode["final_video_path"]:
+            raise ValueError("Only a final-QA-passed ready episode can enter publication review.")
+        if episode["lifecycle_status"] == "discarded":
+            raise ValueError("A discarded series cannot start a publication attempt.")
+        if episode["episode_topic"] != topic:
+            raise ValueError("Publication topic differs from the topic bound to this episode.")
+        if episode["final_video_path"] != str(media) or episode["final_video_sha256"] != media_sha:
+            raise ValueError("Publication media differs from the current assembled episode video.")
+
+    @staticmethod
+    def _assert_publication_targets_unpublished(
+        connection: _MySQLSession,
+        episode_id: str,
+        platforms: Sequence[str],
+    ) -> None:
+        successful_rows = connection.execute(
+            """SELECT DISTINCT platform FROM episode_publications
+               WHERE episode_id = ? AND status = 'reported_success'""",
+            (episode_id,),
+        ).fetchall()
+        already_delivered = {str(row["platform"]) for row in successful_rows}
+        duplicate_targets = [platform for platform in platforms if platform in already_delivered]
+        if duplicate_targets:
+            raise ValueError(
+                "Platforms with an existing reported-success receipt cannot be dispatched again: "
+                + ", ".join(duplicate_targets)
+            )
+
     def begin_publication_attempt(
         self,
         episode_id: str,
@@ -1819,50 +2362,29 @@ class SerialVideoStore:
         media_sha = _sha256(media)
         now = _now()
         with self._connection(write=True) as connection:
-            episode = connection.execute(
-                """SELECT e.*, s.lifecycle_status FROM episodes e
-                   JOIN series s ON s.series_id = e.series_id
-                   WHERE e.episode_id = ? AND e.is_current = 1""",
-                (episode_id,),
-            ).fetchone()
-            if episode is None:
-                raise ValueError("Cannot publish a stale episode version.")
-            if episode["status"] != "ready" or not episode["final_video_path"]:
-                raise ValueError("Only a final-QA-passed ready episode can enter publication review.")
-            if episode["lifecycle_status"] == "discarded":
-                raise ValueError("A discarded series cannot start a publication attempt.")
-            if episode["episode_topic"] != topic:
-                raise ValueError("Publication topic differs from the topic bound to this episode.")
-            if (
-                episode["final_video_path"] != str(media)
-                or episode["final_video_sha256"] != media_sha
-            ):
-                raise ValueError("Publication media differs from the current assembled episode video.")
-            successful_rows = connection.execute(
-                """SELECT DISTINCT platform FROM episode_publications
-                   WHERE episode_id = ? AND status = 'reported_success'""",
-                (episode_id,),
-            ).fetchall()
-            already_delivered = {str(row["platform"]) for row in successful_rows}
-            duplicate_targets = [
-                platform for platform in normalized_platforms if platform in already_delivered
-            ]
-            if duplicate_targets:
-                raise ValueError(
-                    "Platforms with an existing reported-success receipt cannot be dispatched again: "
-                    + ", ".join(duplicate_targets)
-                )
+            self._assert_episode_ready_for_publication(
+                connection,
+                episode_id,
+                topic,
+                media,
+                media_sha,
+            )
+            self._assert_publication_targets_unpublished(
+                connection,
+                episode_id,
+                normalized_platforms,
+            )
             attempt_row = connection.execute(
                 "SELECT COALESCE(MAX(attempt_number), 0) AS attempt_number FROM episode_publications WHERE episode_id = ?",
                 (episode_id,),
             ).fetchone()
             attempt_number = int(attempt_row["attempt_number"]) + 1
-            for platform in normalized_platforms:
-                connection.execute(
-                    """INSERT INTO episode_publications(
-                           publication_id, episode_id, attempt_number, platform, episode_topic,
-                           caption, hashtags, media_path, media_sha256, status, started_at
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'review_pending', ?)""",
+            connection.executemany(
+                """INSERT INTO episode_publications(
+                       publication_id, episode_id, attempt_number, platform, episode_topic,
+                       caption, hashtags, media_path, media_sha256, status, started_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
                     (
                         uuid.uuid4().hex,
                         episode_id,
@@ -1873,9 +2395,12 @@ class SerialVideoStore:
                         str(hashtags or ""),
                         str(media),
                         media_sha,
+                        "review_pending",
                         now,
-                    ),
-                )
+                    )
+                    for platform in normalized_platforms
+                ],
+            )
         return {
             "episode_id": episode_id,
             "attempt_number": attempt_number,
@@ -1912,21 +2437,51 @@ class SerialVideoStore:
             ).fetchall()
             if not rows:
                 raise ValueError("Serial publication attempt does not exist.")
-            for row in rows:
+            connection.execute(
+                """UPDATE episode_publications SET status = ?, review_decision = ?,
+                       review_session_id = ?, caption = COALESCE(?, caption),
+                       hashtags = COALESCE(?, hashtags), receipt_json = ?
+                   WHERE episode_id = ? AND attempt_number = ?""",
+                (
+                    status_by_decision[normalized],
+                    normalized,
+                    str(review_session_id or ""),
+                    caption,
+                    hashtags,
+                    _json(details or {}),
+                    episode_id,
+                    int(attempt_number),
+                ),
+            )
+            if normalized == "accepted":
+                episode = connection.execute(
+                    """SELECT e.*, s.story_state_json FROM episodes e
+                       JOIN series s ON s.series_id = e.series_id
+                       WHERE e.episode_id = ? AND e.is_current = 1""",
+                    (episode_id,),
+                ).fetchone()
+                if episode is None or episode["status"] != "ready" or not episode["final_video_sha256"]:
+                    raise ValueError("Only the current assembled episode can commit human-approved story state.")
+                episode_context = _story_state_payload(episode["story_context_json"])
+                state_text = str(episode_context.get("continuity_state_proposal") or "").strip()
+                if not state_text:
+                    state_text = str(episode["prompt"] or "").strip()
+                if not state_text:
+                    raise ValueError("The reviewed episode has no story state to carry forward.")
+                now = _now()
+                approved_state = {
+                    "version": 1,
+                    "episode_number": int(episode["episode_number"]),
+                    "source_episode_id": str(episode_id),
+                    "final_video_sha256": str(episode["final_video_sha256"]),
+                    "approved_at": now,
+                    "review_session_id": str(review_session_id or ""),
+                    "reviewer": str((details or {}).get("reviewer") or ""),
+                    "state_text": state_text,
+                }
                 connection.execute(
-                    """UPDATE episode_publications SET status = ?, review_decision = ?,
-                           review_session_id = ?, caption = COALESCE(?, caption),
-                           hashtags = COALESCE(?, hashtags), receipt_json = ?
-                       WHERE publication_id = ?""",
-                    (
-                        status_by_decision[normalized],
-                        normalized,
-                        str(review_session_id or ""),
-                        caption,
-                        hashtags,
-                        _json(details or {}),
-                        row["publication_id"],
-                    ),
+                    "UPDATE series SET story_state_json = ?, updated_at = ? WHERE series_id = ?",
+                    (_json(approved_state), now, episode["series_id"]),
                 )
 
     def record_publication_dispatch(
@@ -1947,6 +2502,7 @@ class SerialVideoStore:
             ).fetchall()
             if not rows:
                 raise ValueError("Serial publication attempt does not exist.")
+            updates: list[tuple[str, str, str, str]] = []
             for row in rows:
                 if row["review_decision"] != "accepted":
                     raise ValueError("Social dispatch requires an accepted Discord publication review.")
@@ -1963,17 +2519,33 @@ class SerialVideoStore:
                     error = error or "provider reported success without a delivery receipt"
                 else:
                     status = "failed"
-                connection.execute(
-                    """UPDATE episode_publications SET status = ?, receipt_json = ?, error = ?,
-                           finished_at = ? WHERE publication_id = ?""",
+                updates.append(
                     (
+                        str(row["publication_id"]),
                         status,
                         _json({"dispatch_status": dispatch_status, "receipt": receipt}),
                         str(error or ""),
-                        now,
-                        row["publication_id"],
-                    ),
+                    )
                 )
+            status_cases = " ".join("WHEN ? THEN ?" for _ in updates)
+            receipt_cases = " ".join("WHEN ? THEN ?" for _ in updates)
+            error_cases = " ".join("WHEN ? THEN ?" for _ in updates)
+            connection.execute(
+                f"""UPDATE episode_publications
+                    SET status = CASE publication_id {status_cases} ELSE status END,
+                        receipt_json = CASE publication_id {receipt_cases} ELSE receipt_json END,
+                        error = CASE publication_id {error_cases} ELSE error END,
+                        finished_at = ?
+                    WHERE episode_id = ? AND attempt_number = ?""",
+                (
+                    *(value for publication_id, status, _, _ in updates for value in (publication_id, status)),
+                    *(value for publication_id, _, receipt_json, _ in updates for value in (publication_id, receipt_json)),
+                    *(value for publication_id, _, _, error in updates for value in (publication_id, error)),
+                    now,
+                    episode_id,
+                    int(attempt_number),
+                ),
+            )
 
     def get_episode_publications(self, episode_id: str) -> list[dict[str, Any]]:
         with self._connection() as connection:
@@ -2032,6 +2604,85 @@ class SerialVideoStore:
                 raise ValueError("The reviewed publication media no longer matches the ready episode SHA.")
             return {"path": str(media), "sha256": digest}
 
+    @staticmethod
+    def _has_current_accepted_render(segment: dict[str, Any]) -> bool:
+        return bool(
+            segment["status"] == "accepted"
+            and segment["approved_render_id"]
+            and segment["approved_render_id"] == segment["current_render_id"]
+            and segment["render_status"] == "rendered"
+            and segment["technical_status"] == "passed"
+            and segment["human_decision"] == "accepted"
+            and not segment["review_stale"]
+            and segment["video_sha256"] == segment["output_sha256"]
+            and segment["output_path"]
+        )
+
+    def _active_resume_tails(
+        self,
+        connection: _MySQLSession,
+        episode_id: str,
+        segments: Sequence[dict[str, Any]],
+    ) -> dict[int, dict[str, Any]]:
+        if not any(self._has_current_accepted_render(segment) for segment in segments):
+            return {}
+        tail_rows = connection.execute(
+            """SELECT * FROM reference_assets
+               WHERE episode_id = ? AND role IN ('segment_tail', 'episode_end')
+                 AND status = 'active'
+               ORDER BY segment_number, created_at DESC""",
+            (episode_id,),
+        ).fetchall()
+        tails_by_segment: dict[int, dict[str, Any]] = {}
+        for tail_row in tail_rows:
+            tails_by_segment.setdefault(int(tail_row["segment_number"]), tail_row)
+        return tails_by_segment
+
+    def _restore_accepted_segment_outputs(
+        self,
+        segment: dict[str, Any],
+        tails_by_segment: dict[int, dict[str, Any]],
+        initial_node_outputs: dict[str, Any],
+    ) -> None:
+        generated_path = self._validate_asset(
+            segment["generated_output_path"], segment["generated_output_sha256"]
+        )
+        path = self._validate_asset(segment["output_path"], segment["output_sha256"])
+        ordinal = int(segment["ordinal"])
+        review_payload = json.loads(segment["human_json"] or "{}")
+        technical_payload = json.loads(segment["technical_json"] or "{}")
+        initial_node_outputs[f"segment-video-{ordinal:02d}"] = {
+            "video_path": str(generated_path),
+            "final_video_path": str(generated_path),
+            "saved_files": [str(generated_path)],
+            "h3_mode": segment["h3_mode"],
+            "workflow_name": segment["workflow_name"],
+        }
+        if path != generated_path:
+            initial_node_outputs[f"segment-trim-{ordinal:02d}"] = {
+                "video_path": str(path),
+                "final_video_path": str(path),
+                "saved_files": [str(path)],
+            }
+        initial_node_outputs[f"segment-qa-{ordinal:02d}"] = technical_payload
+        initial_node_outputs[f"segment-review-{ordinal:02d}"] = {
+            **(review_payload if isinstance(review_payload, dict) else {}),
+            "human_decision": "accepted",
+            "video_path": str(path),
+            "media_paths": [str(path)],
+            "selected_assets": [str(path)],
+        }
+        tail = tails_by_segment.get(ordinal)
+        if tail is None:
+            return
+        tail_path = self._validate_asset(tail["path"], tail["sha256"])
+        if tail["source_render_id"] != segment["approved_render_id"]:
+            raise ValueError("An accepted segment's saved tail belongs to another render version.")
+        initial_node_outputs[f"segment-tail-{ordinal:02d}"] = {
+            "frame_path": str(tail_path),
+            "saved_files": [str(tail_path)],
+        }
+
     def resume_episode(self, episode_id: str) -> dict[str, Any]:
         """Reopen a blocked episode using only its contiguous, current accepted render prefix."""
         now = _now()
@@ -2065,68 +2716,22 @@ class SerialVideoStore:
                 raise ValueError("The blocked episode has no persisted segments to resume.")
             story = json.loads(episode["story_json"] or "[]")
             story_is_complete = isinstance(story, list) and len(story) == len(segments)
+            tails_by_segment = self._active_resume_tails(connection, episode_id, segments)
 
             accepted_prefix = 0
             gap_found = False
             for segment in segments:
-                accepted = (
-                    segment["status"] == "accepted"
-                    and segment["approved_render_id"]
-                    and segment["approved_render_id"] == segment["current_render_id"]
-                    and segment["render_status"] == "rendered"
-                    and segment["technical_status"] == "passed"
-                    and segment["human_decision"] == "accepted"
-                    and not segment["review_stale"]
-                    and segment["video_sha256"] == segment["output_sha256"]
-                    and segment["output_path"]
-                )
+                accepted = self._has_current_accepted_render(segment)
                 if accepted and gap_found:
                     raise ValueError("Accepted segments cannot appear after an unapproved segment gap.")
                 if not accepted:
                     gap_found = True
                     continue
-                generated_path = self._validate_asset(
-                    segment["generated_output_path"], segment["generated_output_sha256"]
+                self._restore_accepted_segment_outputs(
+                    segment,
+                    tails_by_segment,
+                    initial_node_outputs,
                 )
-                path = self._validate_asset(segment["output_path"], segment["output_sha256"])
-                ordinal = int(segment["ordinal"])
-                review_payload = json.loads(segment["human_json"] or "{}")
-                technical_payload = json.loads(segment["technical_json"] or "{}")
-                initial_node_outputs[f"segment-video-{ordinal:02d}"] = {
-                    "video_path": str(generated_path),
-                    "final_video_path": str(generated_path),
-                    "saved_files": [str(generated_path)],
-                    "h3_mode": segment["h3_mode"],
-                    "workflow_name": segment["workflow_name"],
-                }
-                if path != generated_path:
-                    initial_node_outputs[f"segment-trim-{ordinal:02d}"] = {
-                        "video_path": str(path),
-                        "final_video_path": str(path),
-                        "saved_files": [str(path)],
-                    }
-                initial_node_outputs[f"segment-qa-{ordinal:02d}"] = technical_payload
-                initial_node_outputs[f"segment-review-{ordinal:02d}"] = {
-                    **(review_payload if isinstance(review_payload, dict) else {}),
-                    "human_decision": "accepted",
-                    "video_path": str(path),
-                    "media_paths": [str(path)],
-                    "selected_assets": [str(path)],
-                }
-                tail = connection.execute(
-                    """SELECT * FROM reference_assets WHERE episode_id = ? AND segment_number = ?
-                       AND role IN ('segment_tail', 'episode_end') AND status = 'active'
-                       ORDER BY created_at DESC LIMIT 1""",
-                    (episode_id, ordinal),
-                ).fetchone()
-                if tail is not None:
-                    tail_path = self._validate_asset(tail["path"], tail["sha256"])
-                    if tail["source_render_id"] != segment["approved_render_id"]:
-                        raise ValueError("An accepted segment's saved tail belongs to another render version.")
-                    initial_node_outputs[f"segment-tail-{ordinal:02d}"] = {
-                        "frame_path": str(tail_path),
-                        "saved_files": [str(tail_path)],
-                    }
                 accepted_prefix += 1
 
             if accepted_prefix and not story_is_complete:
@@ -2157,10 +2762,16 @@ class SerialVideoStore:
             ).fetchall()
             if len(rows) != len(story):
                 raise ValueError("Story plan segment count differs from the persisted episode plan.")
-            for row, item in zip(rows, story, strict=True):
+            if story:
+                story_cases = " ".join("WHEN ? THEN ?" for _ in story)
+                story_parameters: list[Any] = []
+                for row, item in zip(rows, story, strict=True):
+                    story_parameters.extend((int(row["ordinal"]), _json(item)))
+                story_parameters.extend((now, episode_id))
                 connection.execute(
-                    "UPDATE segments SET story_json = ?, updated_at = ? WHERE segment_id = ?",
-                    (_json(item), now, row["segment_id"]),
+                    f"""UPDATE segments SET story_json = CASE ordinal {story_cases}
+                           ELSE story_json END, updated_at = ? WHERE episode_id = ?""",
+                    story_parameters,
                 )
             connection.execute(
                 "UPDATE episodes SET story_json = ?, updated_at = ? WHERE episode_id = ?",
@@ -2282,34 +2893,41 @@ class SerialVideoStore:
             (series_id, int(from_episode_number)),
         ).fetchall()
         episode_ids = [row["episode_id"] for row in episode_rows]
+        if not episode_ids:
+            return
+        placeholders = ", ".join("?" for _ in episode_ids)
+        episode_parameters = tuple(episode_ids)
         now = _now()
-        for episode_id in episode_ids:
-            segment_rows = connection.execute(
-                "SELECT segment_id, ordinal, current_render_id FROM segments WHERE episode_id = ?",
-                (episode_id,),
-            ).fetchall()
-            render_ids = [row["current_render_id"] for row in segment_rows if row["current_render_id"]]
-            connection.execute(
-                "UPDATE reviews SET stale = 1, updated_at = ? WHERE segment_id IN (SELECT segment_id FROM segments WHERE episode_id = ?)",
-                (now, episode_id),
-            )
-            connection.execute(
-                "UPDATE segments SET status = 'stale', approved_render_id = NULL, tail_asset_id = NULL, updated_at = ? WHERE episode_id = ?",
-                (now, episode_id),
-            )
-            connection.execute(
-                "UPDATE reference_assets SET status = 'stale' WHERE episode_id = ?",
-                (episode_id,),
-            )
-            connection.execute(
-                "UPDATE episodes SET is_current = 0, status = 'stale', final_video_path = '', final_video_sha256 = '', updated_at = ? WHERE episode_id = ?",
-                (now, episode_id),
-            )
-            for render_id in render_ids:
-                connection.execute(
-                    "UPDATE render_attempts SET status = 'superseded' WHERE render_id = ? AND status IN ('running', 'rendered')",
-                    (render_id,),
-                )
+        connection.execute(
+            f"""UPDATE reviews SET stale = 1, updated_at = ?
+                WHERE segment_id IN (
+                    SELECT segment_id FROM segments WHERE episode_id IN ({placeholders})
+                )""",
+            (now, *episode_parameters),
+        )
+        connection.execute(
+            f"""UPDATE segments SET status = 'stale', approved_render_id = NULL,
+                   tail_asset_id = NULL, updated_at = ?
+               WHERE episode_id IN ({placeholders})""",
+            (now, *episode_parameters),
+        )
+        connection.execute(
+            f"UPDATE reference_assets SET status = 'stale' WHERE episode_id IN ({placeholders})",
+            episode_parameters,
+        )
+        connection.execute(
+            f"""UPDATE episodes SET is_current = 0, status = 'stale', final_video_path = '',
+                   final_video_sha256 = '', updated_at = ?
+               WHERE episode_id IN ({placeholders})""",
+            (now, *episode_parameters),
+        )
+        connection.execute(
+            f"""UPDATE render_attempts SET status = 'superseded'
+               WHERE render_id IN (
+                   SELECT current_render_id FROM segments WHERE episode_id IN ({placeholders})
+               ) AND status IN ('running', 'rendered')""",
+            episode_parameters,
+        )
 
     def _invalidate_after_segment(
         self,
@@ -2318,29 +2936,31 @@ class SerialVideoStore:
         segment: dict[str, Any],
     ) -> None:
         now = _now()
-        same_episode_rows = connection.execute(
-            """SELECT segment_id, ordinal, current_render_id FROM segments
-               WHERE episode_id = ? AND ordinal >= ?""",
-            (episode["episode_id"], segment["ordinal"]),
-        ).fetchall()
-        for row in same_episode_rows:
-            connection.execute(
-                "UPDATE reviews SET stale = 1, updated_at = ? WHERE segment_id = ?",
-                (now, row["segment_id"]),
-            )
-            connection.execute(
-                "UPDATE reference_assets SET status = 'stale' WHERE episode_id = ? AND segment_number = ?",
-                (episode["episode_id"], row["ordinal"]),
-            )
-            if row["current_render_id"]:
-                connection.execute(
-                    "UPDATE render_attempts SET status = 'superseded' WHERE render_id = ? AND status IN ('running', 'rendered')",
-                    (row["current_render_id"],),
-                )
+        episode_id = str(episode["episode_id"])
+        ordinal = int(segment["ordinal"])
+        connection.execute(
+            """UPDATE reviews SET stale = 1, updated_at = ?
+               WHERE segment_id IN (
+                   SELECT segment_id FROM segments WHERE episode_id = ? AND ordinal >= ?
+               )""",
+            (now, episode_id, ordinal),
+        )
+        connection.execute(
+            """UPDATE reference_assets SET status = 'stale'
+               WHERE episode_id = ? AND segment_number >= ?""",
+            (episode_id, ordinal),
+        )
+        connection.execute(
+            """UPDATE render_attempts SET status = 'superseded'
+               WHERE render_id IN (
+                   SELECT current_render_id FROM segments WHERE episode_id = ? AND ordinal >= ?
+               ) AND status IN ('running', 'rendered')""",
+            (episode_id, ordinal),
+        )
         connection.execute(
             """UPDATE segments SET status = 'stale', approved_render_id = NULL, tail_asset_id = NULL, updated_at = ?
                WHERE episode_id = ? AND ordinal > ?""",
-            (now, episode["episode_id"], segment["ordinal"]),
+            (now, episode_id, ordinal),
         )
         connection.execute(
             "UPDATE segments SET status = 'rendering', approved_render_id = NULL, tail_asset_id = NULL, updated_at = ? WHERE segment_id = ?",
@@ -2348,7 +2968,7 @@ class SerialVideoStore:
         )
         connection.execute(
             "UPDATE episodes SET status = 'rendering', final_video_path = '', final_video_sha256 = '', error = '', updated_at = ? WHERE episode_id = ?",
-            (now, episode["episode_id"]),
+            (now, episode_id),
         )
         self._stale_episode_tree(connection, episode["series_id"], int(episode["episode_number"]) + 1)
 
@@ -2390,7 +3010,8 @@ class SerialVideoStore:
                 "source_render_id": source_render_id,
                 "render_inputs": dict(render_inputs or {}),
             }
-            input_sha = hashlib.sha256(_json(input_record).encode("utf-8")).hexdigest()
+            stored_input_record = _transform_json_paths(input_record, to_database=True)
+            input_sha = hashlib.sha256(_json(stored_input_record).encode("utf-8")).hexdigest()
             connection.execute(
                 """INSERT INTO render_attempts(
                        render_id, segment_id, attempt_number, status, workflow_name,
@@ -2402,7 +3023,7 @@ class SerialVideoStore:
                     attempt_number,
                     str(workflow_name),
                     mode,
-                    _json(input_record),
+                    _json(stored_input_record),
                     input_sha,
                     _now(),
                 ),
@@ -2573,15 +3194,16 @@ class SerialVideoStore:
             ).fetchone()
             if review is None or review["technical_status"] != "passed":
                 raise ValueError("Human review cannot accept or reject a video before technical QA passes.")
-            actual_video = self._validate_asset(render["output_path"], render["output_sha256"])
+            actual_video = _existing_file(render["output_path"])
             if review["video_sha256"] != render["output_sha256"]:
                 raise ValueError("Human review is bound to a different video SHA.")
             if normalized == "accepted" and reviewed_path is None:
                 raise ValueError("An accepted review must identify the reviewed MP4 path.")
             if reviewed_path is not None:
                 candidate = _existing_file(reviewed_path)
-                if candidate != actual_video or _sha256(candidate) != render["output_sha256"]:
-                    raise ValueError("Human review identified a different or changed video version.")
+                if candidate != actual_video:
+                    raise ValueError("Human review identified a different video version.")
+            actual_video = self._validate_asset(str(actual_video), render["output_sha256"])
             connection.execute(
                 "UPDATE reviews SET human_decision = ?, human_json = ?, updated_at = ? WHERE review_id = ?",
                 (normalized, _json(details or {}), now, review["review_id"]),
@@ -2697,8 +3319,13 @@ class SerialVideoStore:
             if episode is None:
                 raise ValueError("Cannot finalize a stale episode version.")
             segments = connection.execute(
-                """SELECT s.*, r.output_path, r.output_sha256
+                """SELECT s.*, r.output_path, r.output_sha256,
+                          rv.render_id AS reviewed_render_id, rv.stale AS review_stale,
+                          rv.video_sha256 AS reviewed_video_sha256,
+                          rv.technical_status AS review_technical_status,
+                          rv.human_decision AS review_human_decision
                    FROM segments s LEFT JOIN render_attempts r ON r.render_id = s.approved_render_id
+                   LEFT JOIN reviews rv ON rv.render_id = s.approved_render_id
                    WHERE s.episode_id = ? ORDER BY s.ordinal""",
                 (episode_id,),
             ).fetchall()
@@ -2713,12 +3340,13 @@ class SerialVideoStore:
                 raise ValueError("Episode assembly requires every current segment to be an accepted MP4.")
             for row in segments:
                 self._validate_asset(row["output_path"], row["output_sha256"])
-                review = connection.execute(
-                    """SELECT 1 FROM reviews WHERE render_id = ? AND stale = 0
-                       AND video_sha256 = ? AND technical_status = 'passed' AND human_decision = 'accepted'""",
-                    (row["approved_render_id"], row["output_sha256"]),
-                ).fetchone()
-                if review is None:
+                if (
+                    row["reviewed_render_id"] is None
+                    or row["review_stale"]
+                    or row["reviewed_video_sha256"] != row["output_sha256"]
+                    or row["review_technical_status"] != "passed"
+                    or row["review_human_decision"] != "accepted"
+                ):
                     raise ValueError("Episode assembly found a missing or stale segment review.")
             terminal = segments[-1]
             tail = connection.execute(
@@ -2728,18 +3356,10 @@ class SerialVideoStore:
             ).fetchone()
             if tail is None:
                 raise ValueError("Episode assembly requires the accepted final segment's current extracted tail frame.")
-            story = json.loads(episode["story_json"] or "[]")
-            ending = {}
-            if isinstance(story, list) and story and isinstance(story[-1], dict):
-                ending = {key: story[-1].get(key) for key in ("end_state", "effect", "visual") if story[-1].get(key)}
             connection.execute(
                 """UPDATE episodes SET status = 'ready', final_video_path = ?, final_video_sha256 = ?,
                        error = '', updated_at = ? WHERE episode_id = ?""",
                 (str(final_path), digest, now, episode_id),
-            )
-            connection.execute(
-                "UPDATE series SET story_state_json = ?, updated_at = ? WHERE series_id = ?",
-                (_json({"episode_number": episode["episode_number"], "ending": ending}), now, episode["series_id"]),
             )
         return {"episode_id": episode_id, "status": "ready", "final_video_path": str(final_path), "final_video_sha256": digest}
 

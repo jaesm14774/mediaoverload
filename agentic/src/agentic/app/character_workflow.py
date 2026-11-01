@@ -223,10 +223,19 @@ def run_character_workflow(
         if serial_dispatcher is None:
             from agentic.app.serial_video_dispatch import dispatch_serial_video_request
 
-            serial_dispatcher = lambda: dispatch_serial_video_request(request)
+            canvas_profile = dict(payload.get("canvas_profile") or {})
+            serial_dispatcher = lambda: dispatch_serial_video_request(
+                request,
+                canvas_width=int(canvas_profile["width"]),
+                canvas_height=int(canvas_profile["height"]),
+            )
         logger.info(
-            "serial.strategy.selected | routing_source=%s",
+            "serial.strategy.selected | routing_source=%s | canvas=%s | aspect_ratio=%s | dimensions=%sx%s",
             payload.get("routing_selection_source", ""),
+            payload.get("canvas_profile", {}).get("id", ""),
+            payload.get("canvas_profile", {}).get("aspect_ratio", ""),
+            payload.get("canvas_profile", {}).get("width", ""),
+            payload.get("canvas_profile", {}).get("height", ""),
         )
         try:
             serial_result = serial_dispatcher()
@@ -237,6 +246,7 @@ def run_character_workflow(
                     "source_generation_type": "serial_video",
                     "failure_reason": f"{type(exc).__name__}: {exc}",
                     "routing_reason": payload.get("routing_reason", ""),
+                    "canvas_profile": payload.get("canvas_profile", {}),
                 }
             )
             raise
@@ -246,6 +256,7 @@ def run_character_workflow(
                 "source_generation_type": "serial_video",
                 "serial_dispatch": serial_result,
                 "routing_reason": payload.get("routing_reason", ""),
+                "canvas_profile": payload.get("canvas_profile", {}),
             }
         )
         return serial_result

@@ -118,16 +118,24 @@ def _build_vectors(
     vectors: list[dict[str, float]] = []
     norms: list[float] = []
     postings: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    inverse_document_frequency_by_frequency: dict[int, float] = {}
     for index, document in enumerate(documents):
         vector: dict[str, float] = {}
         for term, frequency in document.items():
             frequency_in_documents = document_frequency[term]
             if frequency_in_documents < 2 or frequency_in_documents > max_document_frequency:
                 continue
-            inverse_document_frequency = log(
-                (len(rows) + 1) / (frequency_in_documents + 1)
-            ) + 1
-            term_frequency = 1 + log(frequency)
+            inverse_document_frequency = inverse_document_frequency_by_frequency.get(
+                frequency_in_documents
+            )
+            if inverse_document_frequency is None:
+                inverse_document_frequency = log(
+                    (len(rows) + 1) / (frequency_in_documents + 1)
+                ) + 1
+                inverse_document_frequency_by_frequency[
+                    frequency_in_documents
+                ] = inverse_document_frequency
+            term_frequency = 1.0 if frequency == 1 else 1 + log(frequency)
             feature_weight = 0.65 if term.startswith(("k:", "kw:")) else 1.0
             vector[term] = term_frequency * inverse_document_frequency * feature_weight
         norm = sqrt(sum(weight * weight for weight in vector.values()))
@@ -135,6 +143,7 @@ def _build_vectors(
         norms.append(norm)
         for term, weight in vector.items():
             postings[term].append((index, weight))
+        document.clear()
     return vectors, norms, postings
 
 

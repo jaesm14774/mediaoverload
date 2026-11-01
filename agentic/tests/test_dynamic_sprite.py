@@ -359,8 +359,10 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
     assert "sprite_chroma_threshold" not in payload["constraints"]
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
     assert payload["constraints"]["video_workflow_name"] == "minimax_h3_i2va"
-    assert payload["constraints"]["sprite_source_width"] == 1024
-    assert payload["constraints"]["sprite_source_height"] == 576
+    assert payload["constraints"]["sprite_source_width"] == payload["constraints"]["canvas_width"]
+    assert payload["constraints"]["sprite_source_height"] == payload["constraints"]["canvas_height"]
+    assert payload["constraints"]["sprite_video_width"] == payload["constraints"]["canvas_width"]
+    assert payload["constraints"]["sprite_video_height"] == payload["constraints"]["canvas_height"]
     assert payload["constraints"]["sprite_h3_model_profile"] == "q4"
     assert payload["constraints"]["strategy_context"]["reference_pack_version"] == "game_sprite_action_references_v1"
     assert len(payload["constraints"]["strategy_context"]["creative_inspiration"]) == 25

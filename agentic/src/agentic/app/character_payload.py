@@ -21,11 +21,7 @@ from agentic.runtime.strategies import (
     NATIVE_STORY_GENERATION_TYPES,
     media_type_for_generation,
 )
-from agentic.runtime.story_cards import (
-    STORY_CARD_DEFAULT_HEIGHT,
-    STORY_CARD_DEFAULT_WIDTH,
-    STORY_CARD_PAGE_COUNT_DEFAULT,
-)
+from agentic.runtime.story_cards import STORY_CARD_PAGE_COUNT_DEFAULT
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.app.character_selection import (
     _fixed_character_selection,
@@ -51,6 +47,7 @@ from agentic.app.character_config import (
     load_character_config,
     load_global_social_config,
 )
+from agentic.app.style_catalog import StyleLibrary
 from agentic.app.generation_routing import (
     _build_default_prompt,
     _build_routing_summary,
@@ -113,7 +110,6 @@ def build_goal_payload_from_character_config(
     config = load_character_config(path)
     character = dict(config.get("character", {}) or {})
     generation = dict(config.get("generation", {}) or {})
-    additional_params = dict(config.get("additional_params", {}) or {})
     requested_duration_seconds = duration_seconds
     if requested_duration_seconds is not None and int(requested_duration_seconds) <= 0:
         raise ValueError("duration_seconds must be a positive integer")
@@ -169,9 +165,11 @@ def build_goal_payload_from_character_config(
     if creative_rng is None and rng is not None and hasattr(rng, "getstate"):
         creative_rng = random.Random()
         creative_rng.setstate(rng.getstate())
+    style_library = StyleLibrary()
     creative_profile = resolve_creative_profile(
         dict(generation.get("creative_profile") or {}),
         rng=creative_rng,
+        style_library=style_library,
     )
     canvas_profile = dict(creative_profile["canvas"])
     style_profile = dict(creative_profile["style"])
@@ -206,6 +204,7 @@ def build_goal_payload_from_character_config(
             "source_generation_type": config_generation_type,
             "routing_reason": routing.get("reason", ""),
             "routing_selection_source": routing.get("selection_source", ""),
+            "canvas_profile": canvas_profile,
         }
     if motion_graphics_requested and config_generation_type != "text2image2video":
         raise ValueError(
@@ -493,12 +492,8 @@ def build_goal_payload_from_character_config(
             story_card_config.get("page_count", STORY_CARD_PAGE_COUNT_DEFAULT)
         ).strip()
         or STORY_CARD_PAGE_COUNT_DEFAULT,
-        "story_card_width": int(
-            story_card_config.get("width", STORY_CARD_DEFAULT_WIDTH)
-        ),
-        "story_card_height": int(
-            story_card_config.get("height", STORY_CARD_DEFAULT_HEIGHT)
-        ),
+        "story_card_width": int(canvas_profile["width"]),
+        "story_card_height": int(canvas_profile["height"]),
         "story_card_overlay_opacity": int(
             story_card_config.get("overlay_opacity", 202)
         ),
@@ -713,7 +708,12 @@ def build_goal_payload_from_character_config(
     if motion_graphics_requested:
         constraints["enable_motion_graphics"] = True
     if config_generation_type == "motion_comic":
-        constraints["motion_comic"] = dict(generation.get("motion_comic", {}) or {})
+        motion_comic_config = dict(generation.get("motion_comic", {}) or {})
+        motion_comic_config["width"] = int(canvas_profile["width"])
+        motion_comic_config["height"] = int(canvas_profile["height"])
+        motion_comic_config["image_width"] = int(canvas_profile["width"])
+        motion_comic_config["image_height"] = int(canvas_profile["height"])
+        constraints["motion_comic"] = motion_comic_config
     if config_generation_type == "game_sprite":
         requested_sprite_length = (
             max(1, round(float(duration_seconds) * 24.0))
@@ -728,14 +728,10 @@ def build_goal_payload_from_character_config(
         constraints.update(
             {
                 "game_sprite": game_sprite_config,
-                "sprite_source_width": int(
-                    game_sprite_config.get("source_width", 1024)
-                ),
-                "sprite_source_height": int(
-                    game_sprite_config.get("source_height", 576)
-                ),
-                "sprite_video_width": int(game_sprite_config.get("video_width", 608)),
-                "sprite_video_height": int(game_sprite_config.get("video_height", 352)),
+                "sprite_source_width": int(canvas_profile["width"]),
+                "sprite_source_height": int(canvas_profile["height"]),
+                "sprite_video_width": int(canvas_profile["width"]),
+                "sprite_video_height": int(canvas_profile["height"]),
                 "sprite_video_length": requested_sprite_length
                 or configured_sprite_length,
                 "sprite_video_steps": int(game_sprite_config.get("video_steps", 16)),
@@ -805,6 +801,7 @@ def build_goal_payload_from_character_config(
         generation=generation,
         social_media=social_media,
         platform_configs=platform_configs,
+        style_library=style_library,
     )
     character_config_summary["subject_context"] = subject_context
     character_config_summary["creative_profile"] = creative_profile

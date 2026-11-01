@@ -172,6 +172,7 @@ class MediaServiceTools:
                     video_path,
                     silence_threshold_db=float(payload.get("silence_threshold_db", -50.0)),
                     silence_min_seconds=float(payload.get("silence_min_seconds", 0.4)),
+                    duration_seconds=duration,
                 )
                 # Loudness and silence are measured, but only explicit numeric
                 # requirements may turn these observations into a blocking check.
@@ -246,7 +247,6 @@ class MediaServiceTools:
             video_path=str(payload["video_path"]),
             output_path=str(payload["output_path"]),
             plan=raw_plan,
-            work_dir=Path(str(payload["work_dir"])),
         )
 
     def merge_audio_video(self, payload: dict[str, object]) -> dict[str, object]:

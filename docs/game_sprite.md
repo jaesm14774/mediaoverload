@@ -49,9 +49,10 @@ agentic --goal "Kirby folds a glowing leaf into a tiny glider and returns" \
 ```
 
 The Kirby character workflow can also select the mode explicitly with
-`preferred_generation_type=game_sprite`. In that path, Kirby YAML contributes
-the resolved character profile, visual style, Krea/H3 workflow names, and
-sprite technical parameters. The mode uses Krea for one clean source image,
+`preferred_generation_type=game_sprite`. In that path, the selected
+`generation.creative_profile.canvas` sets the run's source-image and video
+canvas. `generation.game_sprite` supplies the Krea/H3 workflows, timing, and
+atlas cell settings. The mode uses Krea for one clean source image,
 MiniMax H3 I2V for the continuous clip, then samples that clip into 16 frames
 in one decode pass. The manifest records the exact interval-midpoint sample
 times under `sampling.timestamps_seconds`.

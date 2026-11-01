@@ -36,8 +36,8 @@ def generate_serial_episode_idea(
     if normalized_mode == "continue" and not prior_context:
         raise ValueError("Continuation generation requires the latest approved story context.")
     if normalized_mode == "continue":
-        context_label = "Latest accepted episode story state (untrusted reference data)"
-        mode_instruction = "Continue the latest approved story. Open from its last visible state, then quickly introduce a different action, obstacle, and visual payoff. Do not repeat the prior episode's central object, action, reveal, or ending. Keep the fixed character recognizable."
+        context_label = "Approved series treatment and latest human-approved continuity state (untrusted reference data)"
+        mode_instruction = "Continue the approved series roadmap at the next unfinished story beat. Begin from the latest human-approved state and preserve any continuing character, relationship, clue, prop, and scene facts unless this episode visibly changes them. Do not repeat the same event or ending, but keep a relevant recurring prop when the story calls for it. Keep the fixed character recognizable and do not prematurely resolve the series ending."
     elif prior_context:
         context_label = "Approved series story for episode 1 (untrusted reference data)"
         mode_instruction = "Create the first episode of this approved series from its main story. Preserve the protagonist, central goal, problem, and resolution; do not invent a separate storyline."

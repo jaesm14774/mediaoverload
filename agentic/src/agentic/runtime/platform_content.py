@@ -8,14 +8,16 @@ from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.post_strategy import resolve_post_strategy
 
 
-PLATFORM_STRATEGY_VERSION = "2026-09-02.v2"
+PLATFORM_STRATEGY_VERSION = "2026-10-31.v3"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 YOUTUBE_TITLE_MAX = 100
 YOUTUBE_DESCRIPTION_MAX = 5000
 FACEBOOK_CAPTION_MAX = 600
-FACEBOOK_HASHTAG_MAX = 3
+FACEBOOK_HASHTAG_MAX = 5
 THREADS_TEXT_MAX = 500
+THREADS_CAROUSEL_MIN_ITEMS = 2
+THREADS_CAROUSEL_MAX_ITEMS = 20
 YOUTUBE_TAG_MAX = 12
 
 _STOP_WORDS = {
@@ -306,14 +308,16 @@ def _build_threads_package(
     media_paths: list[str],
     post_strategy: dict[str, Any],
 ) -> dict[str, Any]:
-    video_paths = _paths_with_extensions(media_paths, VIDEO_EXTENSIONS)
-    image_paths = _paths_with_extensions(media_paths, IMAGE_EXTENSIONS)
+    video_paths = _paths_with_extensions(media_paths, {".mp4"})
+    image_paths = _paths_with_extensions(media_paths, {".jpg", ".jpeg", ".png"})
     supported_paths = [*video_paths, *image_paths]
     format_name = (
         "video"
         if len(media_paths) == 1 and video_paths
         else "image"
         if len(media_paths) == 1 and image_paths
+        else "carousel"
+        if len(media_paths) > 1 and len(supported_paths) == len(media_paths)
         else "unsupported_media"
     )
     text = "\n".join(part for part in (caption, hashtags) if part)
@@ -322,13 +326,18 @@ def _build_threads_package(
         issues.append("caption_required")
     if not media_paths:
         issues.append("caption_and_media_required")
-    elif len(media_paths) != 1:
-        issues.append("threads_requires_single_media_item")
-    elif not supported_paths:
+    elif len(supported_paths) != len(media_paths):
         issues.append("threads_media_format_unsupported")
+    elif len(media_paths) > THREADS_CAROUSEL_MAX_ITEMS:
+        issues.append("threads_carousel_requires_2_to_20_media_items")
     if len(text) > THREADS_TEXT_MAX:
         issues.append("threads_text_exceeds_500_characters")
-    platform_eligible = len(media_paths) == 1 and len(supported_paths) == 1
+    platform_eligible = (
+        len(media_paths) == 1 and len(supported_paths) == 1
+    ) or (
+        THREADS_CAROUSEL_MIN_ITEMS <= len(media_paths) <= THREADS_CAROUSEL_MAX_ITEMS
+        and len(supported_paths) == len(media_paths)
+    )
     platform_ready = bool(caption) and platform_eligible and len(text) <= THREADS_TEXT_MAX
     return {
         "format": format_name,
@@ -451,11 +460,12 @@ def _limit_hashtags(hashtags: str, limit: int) -> str:
 
 def sanitize_hashtags(value: str) -> str:
     """Keep only public, deduplicated hashtags from a human or model draft."""
-    return " ".join(
+    tags = [
         f"#{token}"
         for token in _hashtag_tokens(value)
         if token.casefold() != "mediaoverload"
-    )
+    ]
+    return " ".join(tags[:5])
 
 
 def _hashtag_tokens(value: str) -> list[str]:

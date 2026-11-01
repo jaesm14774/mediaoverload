@@ -7,7 +7,12 @@ from typing import Any
 from agentic.runtime.contracts import GoalRequest
 
 
-POST_STRATEGY_VERSION = "2026-09-02.v1"
+POST_STRATEGY_VERSION = "2026-10-31.v2"
+
+_HASHTAG_POLICY = (
+    "four_or_five_specific_relevant_terms_when_supported_by_the_source; "
+    "fewer_only_when_evidence_is_thin; never_use_reach_bait"
+)
 
 _VARIANTS: tuple[dict[str, str], ...] = (
     {
@@ -17,7 +22,7 @@ _VARIANTS: tuple[dict[str, str], ...] = (
         "hook_mode": "specific_visible_change",
         "payoff_mode": "visible_consequence",
         "cta_policy": "none unless a specific observation question is natural",
-        "hashtag_policy": "zero_or_relevant_semantic_terms",
+        "hashtag_policy": _HASHTAG_POLICY,
     },
     {
         "variant_id": "cause_and_effect",
@@ -26,7 +31,7 @@ _VARIANTS: tuple[dict[str, str], ...] = (
         "hook_mode": "cause_or_trigger",
         "payoff_mode": "resulting_state",
         "cta_policy": "none unless the causal turn invites a precise reply",
-        "hashtag_policy": "zero_or_relevant_semantic_terms",
+        "hashtag_policy": _HASHTAG_POLICY,
     },
     {
         "variant_id": "character_choice",
@@ -35,7 +40,7 @@ _VARIANTS: tuple[dict[str, str], ...] = (
         "hook_mode": "character_decision",
         "payoff_mode": "choice_revealed_by_action",
         "cta_policy": "a specific question is allowed only when the visible choice supports it",
-        "hashtag_policy": "zero_or_character_or_action_terms",
+        "hashtag_policy": _HASHTAG_POLICY,
     },
     {
         "variant_id": "replay_detail",
@@ -44,7 +49,7 @@ _VARIANTS: tuple[dict[str, str], ...] = (
         "hook_mode": "detail_to_notice",
         "payoff_mode": "detail_reframed",
         "cta_policy": "invite a specific observation only if the detail is unambiguous",
-        "hashtag_policy": "zero_or_one_specific_term",
+        "hashtag_policy": _HASHTAG_POLICY,
     },
     {
         "variant_id": "contrast",
@@ -53,7 +58,7 @@ _VARIANTS: tuple[dict[str, str], ...] = (
         "hook_mode": "contrast",
         "payoff_mode": "state_change",
         "cta_policy": "none unless the contrast creates a concrete comparison question",
-        "hashtag_policy": "zero_or_relevant_semantic_terms",
+        "hashtag_policy": _HASHTAG_POLICY,
     },
     {
         "variant_id": "news_mechanism_bridge",
@@ -62,7 +67,7 @@ _VARIANTS: tuple[dict[str, str], ...] = (
         "hook_mode": "news_mechanism",
         "payoff_mode": "visual_translation",
         "cta_policy": "none unless a precise mechanism question is useful",
-        "hashtag_policy": "zero_or_source_topic_terms",
+        "hashtag_policy": _HASHTAG_POLICY,
     },
 )
 

@@ -47,12 +47,35 @@ class PlatformContentTests(unittest.TestCase):
         self.assertTrue(youtube["validation"]["is_platform_eligible"])
         self.assertEqual(facebook["format"], "reel")
         self.assertEqual(facebook["additional_params"]["facebook_use_reels"], True)
-        self.assertEqual(facebook["hashtags"], "#Kirby #NeonAnimation #ShortFilm")
-        self.assertLessEqual(facebook["validation"]["hashtag_count"], 3)
+        self.assertEqual(
+            facebook["hashtags"],
+            "#Kirby #NeonAnimation #ShortFilm #OriginalArt #ExtraTag",
+        )
+        self.assertLessEqual(facebook["validation"]["hashtag_count"], 5)
         self.assertIn(
             "reel_duration_and_canvas_checked_at_publish",
             facebook["validation"]["warnings"],
         )
+
+    def test_user_given_six_relevant_topics_when_packaging_social_posts_then_five_tags_reach_instagram_and_facebook(self) -> None:
+        """User Given six relevant topic tags When preparing Instagram and Facebook posts Then five tags remain on each platform."""
+        bundle = build_platform_bundle(
+            goal=GoalRequest(prompt="Taiwan road safety post", media_type="publish_review"),
+            caption="A source-backed post about a Taiwan road safety issue.",
+            hashtags=(
+                "#交通安全 #道路事故 #國道一號 #行車安全 #通勤生活 #第六個標籤"
+            ),
+            platform_captions={
+                "instagram_graph": "The Instagram version opens with the road safety angle.",
+                "facebook": "The Facebook version explains why the road safety issue matters.",
+            },
+            platforms=["instagram_graph", "facebook"],
+            media_paths=["road-safety.png"],
+        )
+
+        expected = "#交通安全 #道路事故 #國道一號 #行車安全 #通勤生活"
+        self.assertEqual(bundle["instagram_graph"]["hashtags"], expected)
+        self.assertEqual(bundle["facebook"]["hashtags"], expected)
 
     def test_image_bundle_is_native_photo_and_not_a_reel(self) -> None:
         goal = GoalRequest(prompt="Kirby crystal key visual", media_type="publish_review")

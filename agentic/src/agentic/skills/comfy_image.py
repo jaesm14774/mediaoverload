@@ -59,7 +59,10 @@ class ComfyImageSkills:
         return SkillResult(
             status="success",
             outputs=result,
-            metrics={"image_count": len(result["saved_files"])},
+            metrics={
+                "image_count": len(result["saved_files"]),
+                "comfy_execution_timings": result.get("execution_timings", {}),
+            },
             logs=["Rendered a real image through ComfyUI."],
         )
 

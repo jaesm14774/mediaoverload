@@ -72,6 +72,107 @@ class AssetRegistryTests(unittest.TestCase):
         self.assertEqual(validation["output_nodes"], ["2"])
         self.assertEqual(validation["unresolved_inputs"][0]["missing_node"], "999")
 
+    def test_user_given_valid_workflow_when_validated_then_reports_aliases_and_outputs(self) -> None:
+        """User Given a valid workflow with aliased nodes When it is validated Then aliases and output nodes are reported in stable order."""
+        root = self.make_workspace_tempdir()
+        self._write_workflow(
+            root,
+            "valid_image",
+            {
+                "1": {
+                    "class_type": "LoadImage",
+                    "inputs": {},
+                    "_meta": {"alias": "image_input"},
+                },
+                "2": {
+                    "class_type": "SaveImage",
+                    "inputs": {"images": ["1", 0]},
+                    "_meta": {"alias": "image_output"},
+                },
+            },
+        )
+        registry = AssetRegistry(root, asset_root=root)
+
+        validation = registry.validate_workflow("valid_image")
+
+        self.assertTrue(validation["valid"])
+        self.assertEqual(validation["issues"], [])
+        self.assertEqual(validation["warnings"], [])
+        self.assertEqual(validation["aliases"], ["image_input", "image_output"])
+        self.assertEqual(validation["output_nodes"], ["2"])
+        self.assertEqual(validation["unresolved_inputs"], [])
+
+    def test_user_given_empty_workflow_when_validated_then_reports_empty_node_mapping(self) -> None:
+        """User Given a workflow JSON with an empty node mapping When it is validated Then it is rejected with the existing empty-workflow issue."""
+        root = self.make_workspace_tempdir()
+        self._write_workflow(root, "empty_workflow", {})
+        registry = AssetRegistry(root, asset_root=root)
+
+        validation = registry.validate_workflow("empty_workflow")
+
+        self.assertFalse(validation["valid"])
+        self.assertEqual(validation["issues"], ["Workflow JSON is empty or not a node mapping."])
+        self.assertEqual(validation["warnings"], [])
+        self.assertEqual(validation["aliases"], [])
+        self.assertEqual(validation["output_nodes"], [])
+        self.assertEqual(validation["unresolved_inputs"], [])
+
+    def test_user_given_malformed_workflow_nodes_when_validated_then_reports_each_schema_issue(self) -> None:
+        """User Given workflow nodes with invalid shapes When validation runs Then invalid nodes are reported and skipped without hiding valid output nodes."""
+        root = self.make_workspace_tempdir()
+        self._write_workflow(
+            root,
+            "malformed_nodes",
+            {
+                "1": "not-a-node",
+                "2": {
+                    "class_type": "KSampler",
+                    "inputs": [],
+                    "_meta": {"alias": "skipped_alias"},
+                },
+                "3": {"class_type": "SaveImage", "inputs": {}},
+            },
+        )
+        registry = AssetRegistry(root, asset_root=root)
+
+        validation = registry.validate_workflow("malformed_nodes")
+
+        self.assertFalse(validation["valid"])
+        self.assertEqual(
+            validation["issues"],
+            [
+                "Node '1' is not an object.",
+                "Node '2' inputs are not a mapping.",
+            ],
+        )
+        self.assertEqual(validation["aliases"], [])
+        self.assertEqual(validation["output_nodes"], ["3"])
+        self.assertEqual(validation["unresolved_inputs"], [])
+
+    def test_user_given_workflow_removed_after_registry_load_when_validated_then_reports_missing_file(self) -> None:
+        """User Given a workflow file disappears after registry discovery When validation runs Then the missing-file issue is returned without throwing."""
+        root = self.make_workspace_tempdir()
+        self._write_workflow(
+            root,
+            "removed_workflow",
+            {"1": {"class_type": "SaveImage", "inputs": {}}},
+        )
+        registry = AssetRegistry(root, asset_root=root)
+        workflow_path = registry.materialize_workflow(
+            registry.get_manifest("removed_workflow")
+        )
+        workflow_path.unlink()
+
+        validation = registry.validate_workflow("removed_workflow")
+
+        self.assertFalse(validation["valid"])
+        self.assertEqual(len(validation["issues"]), 1)
+        self.assertIn("Workflow file does not exist:", validation["issues"][0])
+        self.assertEqual(validation["warnings"], [])
+        self.assertEqual(validation["aliases"], [])
+        self.assertEqual(validation["output_nodes"], [])
+        self.assertEqual(validation["unresolved_inputs"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

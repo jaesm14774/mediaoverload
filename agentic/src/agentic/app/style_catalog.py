@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+from agentic.runtime.yaml_config import safe_yaml_load
+
 
 STYLE_CONFIG_DIR = Path(__file__).resolve().parents[4] / "configs" / "styles"
 
@@ -49,6 +51,10 @@ class StyleLibrary:
             ids.add(style["id"])
         return data
 
+    @cached_property
+    def _catalog_ids(self) -> frozenset[str]:
+        return frozenset(style["id"] for style in self.catalog["styles"])
+
     def _validate_ids(self, ids: object) -> list[str]:
         if not isinstance(ids, list) or not ids:
             raise ValueError("至少保留一種風格，才能進行 random 抽選。")
@@ -56,8 +62,7 @@ class StyleLibrary:
             raise ValueError("風格清單必須由風格 ID 組成。")
         if len(set(ids)) != len(ids):
             raise ValueError("風格清單含有重複項目。")
-        known = {style["id"] for style in self.catalog["styles"]}
-        unknown = set(ids) - known
+        unknown = set(ids) - self._catalog_ids
         if unknown:
             raise ValueError(f"未知的風格：{', '.join(sorted(unknown))}")
         return ids
@@ -65,7 +70,7 @@ class StyleLibrary:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             raw = self.selection_path.read_bytes()
-            selection = yaml.safe_load(raw)
+            selection = safe_yaml_load(raw)
             if not isinstance(selection, dict):
                 raise ValueError("style selection must be a mapping")
             enabled = self._validate_ids(selection.get("enabled"))

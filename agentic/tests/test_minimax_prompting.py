@@ -72,6 +72,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertNotIn("must", reference.lower())
 
     def test_local_h3_prompt_uses_context_ir_order_and_i2v_input_relation(self) -> None:
+        """User Given a structured H3 story When its prompt is composed Then the story goal, visible action and camera remain in order without invented input guidance."""
         prompt = compose_minimax_h3_prompt(
             duration_seconds=6,
             character="Kirby",

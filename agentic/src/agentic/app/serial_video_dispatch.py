@@ -13,6 +13,7 @@ from agentic.app.character_config import (
     normalize_discord_review_timeout_seconds,
 )
 from agentic.app.character_requests import CharacterWorkflowRequest
+from agentic.app.creative_profiles import resolve_creative_profile
 from agentic.app.serial_video_execution import run_serial_episodes
 
 
@@ -101,6 +102,8 @@ def build_serial_video_argv(
     comfy_port: int | None = None,
     comfy_root: str | None = None,
     story_complexity: str | None = None,
+    canvas_width: int | None = None,
+    canvas_height: int | None = None,
 ) -> list[str]:
     character, generation, serial, social = load_serial_video_settings(config_path)
     try:
@@ -150,6 +153,12 @@ def build_serial_video_argv(
         "--serial-story-complexity", complexity,
         "--execute",
     ]
+    if (canvas_width is None) != (canvas_height is None):
+        raise ValueError("Serial video canvas width and height must be provided together")
+    if canvas_width is not None and canvas_height is not None:
+        if canvas_width < 256 or canvas_height < 256:
+            raise ValueError("Serial video canvas dimensions must be at least 256 pixels")
+        command.extend(("--width", str(canvas_width), "--height", str(canvas_height)))
     if episode_index == 0 and prompt.strip():
         command.extend(("--goal", prompt.strip()))
     if episode_index == 0 and episode_topic.strip():
@@ -181,6 +190,8 @@ def dispatch_serial_video_request(
     request: CharacterWorkflowRequest,
     *,
     serial_runner: Callable[[Sequence[str]], Any] | None = None,
+    canvas_width: int | None = None,
+    canvas_height: int | None = None,
 ) -> dict[str, Any]:
     if (
         not request.review.publish_after_generate
@@ -191,7 +202,15 @@ def dispatch_serial_video_request(
             "serial_video requires Discord review and configured publication; "
             "no-publish, no-review, and stage-probe are unavailable"
         )
-    _, _, serial, _ = load_serial_video_settings(request.config_path)
+    _, generation, serial, _ = load_serial_video_settings(request.config_path)
+    if canvas_width is None and canvas_height is None:
+        selected_canvas = resolve_creative_profile(
+            dict(generation.get("creative_profile") or {})
+        )["canvas"]
+        canvas_width = int(selected_canvas["width"])
+        canvas_height = int(selected_canvas["height"])
+    elif canvas_width is None or canvas_height is None:
+        raise ValueError("Serial video canvas width and height must be provided together")
     try:
         episode_count = int(serial.get("episodes_per_run", 1))
     except (TypeError, ValueError) as exc:
@@ -216,6 +235,8 @@ def dispatch_serial_video_request(
                 comfy_port=request.runtime.comfy_port,
                 comfy_root=request.runtime.comfy_root,
                 story_complexity=request.generation.story_complexity,
+                canvas_width=canvas_width,
+                canvas_height=canvas_height,
         ),
         serial_runner=serial_runner,
     )

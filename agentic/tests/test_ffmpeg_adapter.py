@@ -60,20 +60,22 @@ def source_factory(tmp_path):
 
 
 @pytest.mark.parametrize("variable_timing", [False, True])
+@pytest.mark.parametrize(("suffix", "image_format"), [(".png", "PNG"), (".jpg", "JPEG")])
 def test_user_given_fixed_sample_times_when_extracting_a_batch_then_pixels_match_individual_samples(
-    source_factory, tmp_path, variable_timing,
+    source_factory, tmp_path, variable_timing, suffix, image_format,
 ):
-    """User Given fixed video and timestamps When extracting a batch Then each frame matches the individual sample pixels."""
+    """User Given fixed video and timestamps When extracting a batch to PNG or JPEG Then output formats and sampled pixels match individual extraction."""
     source = source_factory(audio=False, changing=True, variable_timing=variable_timing)
     adapter = FFmpegAdapter()
     timestamps = [0.0, 0.137, 0.137, 0.75, 1.001, 1.875]
-    outputs = [str(tmp_path / f"batch-{index}.png") for index in range(len(timestamps))]
+    outputs = [str(tmp_path / f"batch-{index}{suffix}") for index in range(len(timestamps))]
     result = adapter.extract_frames_at(str(source), outputs, timestamps)
     assert result == outputs
     for index, timestamp in enumerate(timestamps):
-        individual = tmp_path / f"individual-{index}.png"
+        individual = tmp_path / f"individual-{index}{suffix}"
         adapter.extract_frame_at(str(source), str(individual), timestamp)
         with Image.open(individual) as expected, Image.open(outputs[index]) as actual:
+            assert expected.format == actual.format == image_format
             assert actual.size == expected.size
             assert actual.convert("RGBA").tobytes() == expected.convert("RGBA").tobytes()
 

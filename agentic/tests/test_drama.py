@@ -146,6 +146,20 @@ class DramaPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(DramaPlanError, "scene.start_state"):
             build_plan(incomplete).validate()
 
+    def test_user_given_a_scene_references_an_unknown_prop_when_validating_then_the_plan_names_the_missing_prop(self) -> None:
+        """User Given a scene refers to a prop absent from the plan When validating Then the error identifies the unknown prop."""
+        scene = replace(build_scene("S01"), prop_ids=("unknown-prop",))
+
+        with self.assertRaisesRegex(DramaPlanError, "unknown prop: unknown-prop"):
+            build_plan(scene).validate()
+
+    def test_user_given_drama_metadata_cannot_be_encoded_as_json_when_validating_then_a_contract_error_is_returned(self) -> None:
+        """User Given plan metadata contains a runtime-only object When validating the plan Then validation reports that metadata must be JSON serializable."""
+        plan = replace(build_plan(build_scene("S01")), metadata={"unsupported": object()})
+
+        with self.assertRaisesRegex(DramaPlanError, "metadata must be JSON serializable"):
+            plan.validate()
+
     def test_audio_cues_accept_audio_files_and_reject_media_files(self) -> None:
         scene = build_scene("S01")
         scene = replace(
