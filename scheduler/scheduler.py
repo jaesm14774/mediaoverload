@@ -35,7 +35,7 @@ from agentic.app.character_session import run_character_session
 from agentic.app.character_workflow import run_character_workflow
 
 LOGGER = logging.getLogger("mediaoverload.scheduler")
-QUIET_HOURS_END = 6
+QUIET_HOURS_END = 5
 
 
 @dataclass(slots=True)

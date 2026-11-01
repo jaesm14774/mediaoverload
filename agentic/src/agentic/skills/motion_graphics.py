@@ -62,7 +62,6 @@ class MotionGraphicsSkills:
                 {
                     "video_path": source_video,
                     "output_path": str(output_path),
-                    "work_dir": str(run_dir / "frames"),
                     "motion_graphics_plan": plan.to_dict(),
                 },
             )

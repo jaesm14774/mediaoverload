@@ -23,6 +23,7 @@ def build_serial_episode_outline_prompts(
     episode_topic: str,
     episode_direction: str = "",
     previous_episode_summaries: Sequence[str] = (),
+    approved_story_state: str = "",
     complexity: str = "simple",
 ) -> tuple[str, str]:
     story = str(approved_story or "").strip()
@@ -39,6 +40,7 @@ def build_serial_episode_outline_prompts(
     if not topic:
         raise ValueError("Episode planning requires a human-readable episode topic.")
     previous = [str(item).strip() for item in previous_episode_summaries if str(item).strip()]
+    current_state = str(approved_story_state or "").strip()
     prompt_parts = [
         "以下是已核准的完整系列故事，必須保留它的主線、角色改變與結局方向：",
         story,
@@ -53,7 +55,7 @@ def build_serial_episode_outline_prompts(
         prompt_parts.extend(
             [
                 "",
-                "本集複雜度：simple。只講一件小事：主角的一個目標、一個看得見的麻煩、一個簡單解法和清楚結果。最多兩個場景，不加支線、額外角色或反派。用三個節拍寫：開始、遇到問題、解決問題。每個節拍只安排一個主要動作，使用日常詞彙；不寫大場面、長篇解說或反轉。",
+                "本集複雜度：simple。只講一件小事：主角的一個目標、一個看得見的麻煩、一個簡單解法和清楚結果。最多兩個場景，不加支線、額外角色或反派。用三個節拍寫：開始、遇到問題、解決問題。每個節拍只安排一個主要動作，使用日常詞彙；不寫大場面、長篇解說或反轉。這是長篇主線的一集，依全系列分集路線推進當前事件，不要把整個系列提早結束，也不要另起無關故事。",
             ]
         )
     else:
@@ -71,11 +73,20 @@ def build_serial_episode_outline_prompts(
                 *[f"- {summary}" for summary in previous],
             ]
         )
+    if current_state:
+        prompt_parts.extend(
+            [
+                "",
+                "這是上一集經創作者接受後保存的正式連續狀態；它描述已核准發生的事，優先於模型記憶或草稿摘要：",
+                current_state,
+                "新一集必須從此狀態出發；除非本集故事明確造成改變，否則不得重置人物位置、身體／情緒狀態、角色知情內容、關係、線索、道具持有人／位置／狀況或場景變化。",
+            ]
+        )
     if normalized_complexity == "simple":
         prompt_parts.extend(
             [
                 "",
-                "請只輸出三部分：本集一句話；開始、問題、解決三個短節拍；最多五個簡單畫面提示，交代角色做什麼和畫面如何結束即可。省略全系列分析、分鏡術語、鏡頭運動和道具狀態表。",
+                "請輸出四部分：一、本集一句話，並說明它在全系列路線中的位置；二、開始、問題、解決三個短節拍，清楚交代行動與因果；三、本集結尾狀態卡，逐項寫人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及留給下一集的未完成目標；四、最多五個簡單畫面提示。狀態卡要描述本集結尾後會實際延續的狀態，沒有變化的項目寫「不變」，沒有相關內容寫「無」。不用輸出 JSON、分鏡術語或鏡頭運動。",
             ]
         )
     else:
@@ -87,6 +98,7 @@ def build_serial_episode_outline_prompts(
                 "二、按因果順序列出本集劇情節點：開場狀態、目標、阻礙如何升級、角色作出的選擇、高潮轉折、結尾狀態。",
                 "三、依劇情節點拆成場景，再把場景拆成適合連續影片生成的短鏡頭。",
                 "四、每個鏡頭依序列出目的、開場狀態、角色動作節拍、道具變化、構圖或鏡頭移動、結尾狀態。描述要具體到能交給影片生成流程，並指出必要時人物、位置、道具或情緒如何延續。",
+                "五、本集結尾狀態卡：寫出人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及留給下一集的未完成目標。沒有變化寫「不變」，沒有相關內容寫「無」。",
                 "故事內容要完整推進本集的事件，鏡頭清單不可取代劇情；不確定集數時以最自然的篇幅規劃，不為增加集數重複事件。",
             ]
         )
@@ -102,6 +114,7 @@ def generate_serial_episode_outline(
     episode_topic: str,
     episode_direction: str = "",
     previous_episode_summaries: Sequence[str] = (),
+    approved_story_state: str = "",
     complexity: str = "simple",
 ) -> str:
     system_prompt, user_prompt = build_serial_episode_outline_prompts(
@@ -111,6 +124,7 @@ def generate_serial_episode_outline(
         episode_topic=episode_topic,
         episode_direction=episode_direction,
         previous_episode_summaries=previous_episode_summaries,
+        approved_story_state=approved_story_state,
         complexity=complexity,
     )
     return client.generate_text(

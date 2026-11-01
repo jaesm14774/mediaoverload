@@ -117,10 +117,14 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
         image_height = int(goal.constraints["sprite_source_height"])
     video_defaults = dict(video_manifest.recommended_defaults or {})
     video_width = int(
-        goal.constraints.get("sprite_video_width") or video_defaults.get("width", 608)
+        goal.constraints.get("canvas_width")
+        or goal.constraints.get("sprite_video_width")
+        or video_defaults.get("width", 608)
     )
     video_height = int(
-        goal.constraints.get("sprite_video_height") or video_defaults.get("height", 352)
+        goal.constraints.get("canvas_height")
+        or goal.constraints.get("sprite_video_height")
+        or video_defaults.get("height", 352)
     )
     target_duration_seconds = max(
         MIN_VIDEO_DURATION_SECONDS,

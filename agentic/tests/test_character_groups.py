@@ -108,6 +108,7 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertEqual(selection.selected_profile["keywords"], "pink, red feet")
 
     def test_selected_group_character_replaces_config_identity_in_payload(self) -> None:
+        """User selects a group member with a role profile Given Kirby config and a MetaKnight selection When a Native H3 payload is built Then its creative brief uses the selected identity and role."""
         selection = {
             "mode": "group",
             "group_name": "Kirby",
@@ -139,6 +140,10 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertEqual(payload["character_selection"]["selected_character"], "MetaKnight")
         self.assertEqual(payload["constraints"]["character"], "MetaKnight")
         self.assertIn("MetaKnight", payload["constraints"]["native_h3_creative_brief"])
+        self.assertIn(
+            "a masked knight who protects the group",
+            payload["constraints"]["native_h3_creative_brief"],
+        )
         self.assertNotIn("Kirby", payload["constraints"]["native_h3_creative_brief"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "MetaKnight")
 
@@ -161,6 +166,7 @@ class CharacterGroupSelectionTests(unittest.TestCase):
                     )
 
     def test_group_name_cannot_be_used_as_prompt_identity_without_selection(self) -> None:
+        """User Given a group config has no selected character When a goal payload is built Then construction rejects the ambiguous group identity."""
         with tempfile.TemporaryDirectory() as temp_dir:
             config = Path(temp_dir) / "group-only.yaml"
             config.write_text(
@@ -664,6 +670,7 @@ class CharacterGroupSelectionTests(unittest.TestCase):
                     make_character_workflow_request(
                         self.repo_root,
                         config,
+                        prompt="A deterministic fixed-prompt test.",
                         preferred_generation_type="text2img",
                         publish_after_generate=False,
                     )

@@ -54,17 +54,41 @@ User Given the configured MySQL service is available, When serial mode starts, T
 
 User Given an episode has passed final video QA and the creator has reviewed its caption and hashtags in Discord, When the creator accepts the final MP4, Then MediaOverload dispatches that approved copy to the enabled platforms and stores a receipt or failure outcome for each platform in MySQL.
 
+### Human acceptance is the only story-quality decision
+
+User Given a complete serial episode is attached to the existing final Discord review, When the creator reviews its story, pacing, character and prop continuity and accepts the video, Then MediaOverload accepts the creator's decision without an LLM score, semantic QA verdict, or additional story-quality gate.
+
+### Accepted episode state becomes the next episode's starting state
+
+User Given a serial episode has a proposed ending state for character locations, condition, knowledge, relationships, clues, props, and scene changes, When the creator accepts the complete episode in Discord, Then MediaOverload saves that state with the accepted episode lineage and supplies it to the next episode plan.
+
+### Rejected or incomplete final review does not advance story state
+
+User Given a serial episode has a proposed ending state, When the creator rejects the video or final Discord review is unavailable or times out, Then MediaOverload leaves the last human-approved series state unchanged and does not publish the rejected episode.
+
+### Long story planning is independent of episodes generated per run
+
+User Given a creator starts a simple serial story and the character profile generates one episode per run, When the series story is drafted and episodes are generated over multiple runs, Then the treatment describes a complete connected multi-episode arc with natural per-episode goals and a clear ending, while each run remains limited by `episodes_per_run` and the story has no three-episode cap.
+
+### Automatic continuation plans and reviews the next episode when needed
+
+User Given an active story-first series has an accepted latest episode but no approved outline for the next episode, When serial auto-next selects the series, Then it drafts the next outline from the approved series arc and latest human-approved state, sends that outline through the existing human review, and starts video generation only after acceptance.
+
 ### Final QA records the ready episode before publication review
 
 User Given every segment has current technical QA, human acceptance, and valid tail lineage, When final video QA passes, Then MySQL stores the assembled MP4 path and SHA and marks the episode ready before Discord publication review begins.
+
+### Automatic serial failures do not restart the scheduler
+
+User Given a serial episode is running through the scheduler with automatic continuation enabled, When its workflow or required platform delivery fails, Then the serial runner returns a failed result to the scheduler, records the episode failure, and does not exit the scheduler process or start an immediate weighted strategy run.
 
 ### Approved serial copy stays free of forced episode labels
 
 User Given the creator approves a serial episode caption and hashtags in Discord, When MediaOverload prepares platform captions, Then it dispatches the approved copy without adding an episode number, topic heading, or workflow metadata.
 
-### Final publication review contains only publishable copy
+### Final publication review separates creator guidance from publishable copy
 
-User Given a serial episode is ready for publication, When MediaOverload sends its final review to Discord, Then the review card contains the caption and hashtags that will be published, with no separate episode, topic, strategy, or workflow description.
+User Given a serial episode is ready for publication, When MediaOverload sends its final review to Discord, Then the creator sees the complete video and guidance to judge story, pacing, continuity, and the caption, while only the approved caption and hashtags are dispatched as public copy.
 
 ### Episode duration controls segment count and final runtime
 

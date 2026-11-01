@@ -450,6 +450,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result["prompt_mode"], "llm")
 
     def test_route_generation_strategy_uses_llm_json_when_available(self) -> None:
+        """User Given valid strategy candidates and a model-selected route When routing is normalized Then only eligible workflows and in-range counts are returned with the decision reason."""
         engine = LLMPromptEngine(
             mode="llm",
             manager=_FakeManager(

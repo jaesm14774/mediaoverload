@@ -14,9 +14,11 @@ from typing import Any
 
 from agentic.runtime.registry import ToolRegistry
 from agentic.tools.comfy_adapter import ComfyAdapter
+from agentic.tools.comfy_backend import ComfyPromptTiming, get_object_info_for_nodes
+from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 
 
-CHUNK_FRAMES = 32
+CHUNK_FRAMES = 128
 UPSCALE_FACTOR = 2
 FRAME_RATE_MULTIPLIER = 2
 
@@ -117,12 +119,14 @@ class ComfyNvidiaVfxToolset:
             "Upscale and interpolate a final video with NVIDIA VFX nodes",
         )
 
-    def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _resolve_paths(payload: dict[str, Any]) -> tuple[Path, Path]:
         source = Path(str(payload.get("video_path") or "")).expanduser().resolve()
-        target = Path(str(payload.get("output_path") or "")).expanduser().resolve()
+        output_path = str(payload.get("output_path") or "")
+        target = Path(output_path).expanduser().resolve()
         if not source.is_file():
             raise FileNotFoundError(f"NVIDIA VFX source video does not exist: {source}")
-        if not str(payload.get("output_path") or "").strip():
+        if not output_path.strip():
             raise ValueError("NVIDIA VFX post-process requires output_path")
         if source == target:
             raise ValueError("NVIDIA VFX output_path must differ from video_path")
@@ -130,6 +134,23 @@ class ComfyNvidiaVfxToolset:
             raise ValueError("NVIDIA VFX post-process output_path must end in .mp4")
         if target.exists():
             raise FileExistsError(f"NVIDIA VFX output already exists: {target}")
+        return source, target
+
+    def _require_nodes(self, generator: Any) -> None:
+        node_info = get_object_info_for_nodes(generator, self.REQUIRED_NODES)
+        missing = sorted(self.REQUIRED_NODES - node_info.keys())
+        if missing:
+            raise RuntimeError(
+                "ComfyUI is missing NVIDIA VFX post-process node(s): "
+                + ", ".join(missing)
+                + ". Install Comfy-Org/ComfyUI_Nvidia_VFX_Nodes in this ComfyUI "
+                "custom_nodes folder, install nvidia-vfx in ComfyUI's Python, "
+                "and restart ComfyUI on an RTX 40-series or newer GPU."
+            )
+
+    def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
+        source, target = self._resolve_paths(payload)
 
         source_info = _probe_video(source)
         _validate_source_video(source_info)
@@ -167,26 +188,34 @@ class ComfyNvidiaVfxToolset:
             },
             "chunk_results": [],
             "comfy_output_subfolder": comfy_output_subfolder,
+            "phase_seconds": {
+                "preflight": time.perf_counter() - started,
+                "comfy_setup": None,
+                "source_upload": None,
+                "chunk_generation_total": 0.0,
+                "chunk_assembly": None,
+                "result_validation": None,
+            },
+            "chunk_generation_timings": [],
         }
-        started = time.perf_counter()
+        phase_seconds = summary["phase_seconds"]
         generator = None
         try:
-            generator = self.adapter.build_generator(
-                host=self.comfy_host,
-                port=self.comfy_port,
-            )
-            node_info = generator.get_object_info()
-            missing = sorted(self.REQUIRED_NODES - node_info.keys())
-            if missing:
-                raise RuntimeError(
-                    "ComfyUI is missing NVIDIA VFX post-process node(s): "
-                    + ", ".join(missing)
-                    + ". Install Comfy-Org/ComfyUI_Nvidia_VFX_Nodes in this ComfyUI "
-                    "custom_nodes folder, install nvidia-vfx in ComfyUI's Python, "
-                    "and restart ComfyUI on an RTX 40-series or newer GPU."
+            phase_started = time.perf_counter()
+            try:
+                generator = self.adapter.build_generator(
+                    host=self.comfy_host,
+                    port=self.comfy_port,
                 )
+                self._require_nodes(generator)
+            finally:
+                phase_seconds["comfy_setup"] = time.perf_counter() - phase_started
 
-            uploaded_video = generator.upload_image(str(source))
+            phase_started = time.perf_counter()
+            try:
+                uploaded_video = generator.upload_image(str(source)).comfy_path
+            finally:
+                phase_seconds["source_upload"] = time.perf_counter() - phase_started
             chunk_paths: list[Path] = []
             with tempfile.TemporaryDirectory(
                 prefix="nvidia-vfx-",
@@ -208,13 +237,30 @@ class ComfyNvidiaVfxToolset:
                             f"{comfy_output_subfolder}/chunk_{index + 1:04d}"
                         ),
                     )
-                    paths = generator.generate(
-                        workflow_path=str(source),
-                        workflow=graph,
-                        updates=[],
-                        output_dir=str(chunk_dir),
-                        file_prefix=f"chunk_{index + 1:04d}",
-                    )
+                    chunk_started = time.perf_counter()
+                    prompt_timings: list[ComfyPromptTiming] = []
+                    try:
+                        paths = generator.generate(
+                            workflow_path=str(source),
+                            workflow=graph,
+                            updates=[],
+                            output_dir=str(chunk_dir),
+                            file_prefix=f"chunk_{index + 1:04d}",
+                            timing_sink=prompt_timings,
+                        )
+                    finally:
+                        chunk_seconds = time.perf_counter() - chunk_started
+                        phase_seconds["chunk_generation_total"] += chunk_seconds
+                        prompt_timing = prompt_timings[-1] if prompt_timings else None
+                        summary["chunk_generation_timings"].append(
+                            {
+                                "index": index + 1,
+                                "seconds": chunk_seconds,
+                                "comfy_prompt_timing": dict(prompt_timing)
+                                if prompt_timing is not None
+                                else None,
+                            }
+                        )
                     files = [
                         Path(path)
                         for path in paths
@@ -225,7 +271,7 @@ class ComfyNvidiaVfxToolset:
                             "ComfyUI NVIDIA VFX chunk did not produce one MP4: "
                             f"{paths}"
                         )
-                    chunk_info = _probe_video(files[0])
+                    chunk_info = _probe_video(files[0], count_frames=False)
                     expected_chunk_frames = (
                         (count - 1) * FRAME_RATE_MULTIPLIER + 1
                         if count > 1
@@ -249,16 +295,24 @@ class ComfyNvidiaVfxToolset:
                     )
 
                 staged_output = chunk_dir / "final.mp4"
-                _assemble_chunks(
-                    chunk_paths,
-                    source,
-                    staged_output,
-                    source_info=source_info,
-                    output_fps=output_fps,
-                    expected_frames=expected_frames,
-                )
-                result_info = _probe_video(staged_output)
-                _validate_result(source_info, result_info, expected_frames, output_fps)
+                phase_started = time.perf_counter()
+                try:
+                    _assemble_chunks(
+                        chunk_paths,
+                        source,
+                        staged_output,
+                        source_info=source_info,
+                        output_fps=output_fps,
+                        expected_frames=expected_frames,
+                    )
+                finally:
+                    phase_seconds["chunk_assembly"] = time.perf_counter() - phase_started
+                phase_started = time.perf_counter()
+                try:
+                    result_info = _probe_video(staged_output)
+                    _validate_result(source_info, result_info, expected_frames, output_fps)
+                finally:
+                    phase_seconds["result_validation"] = time.perf_counter() - phase_started
                 os.replace(staged_output, target)
             summary.update(
                 success=True,
@@ -304,20 +358,20 @@ def _chunk_starts(frame_count: int) -> list[int]:
     return starts
 
 
-def _probe_video(path: Path) -> dict[str, Any]:
+def _probe_video(path: Path, *, count_frames: bool = True) -> dict[str, Any]:
     try:
+        command = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+            str(path),
+        ]
         completed = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-count_frames",
-                "-show_streams",
-                "-show_format",
-                "-of",
-                "json",
-                str(path),
-            ],
+            command,
             capture_output=True,
             check=True,
             encoding="utf-8",
@@ -343,20 +397,36 @@ def _probe_video(path: Path) -> dict[str, Any]:
         raise ValueError(f"Video has no readable video stream: {path}")
     audio_streams = [item for item in streams if item.get("codec_type") == "audio"]
     audio = audio_streams[0] if audio_streams else None
-    rate = _parse_rate(video.get("avg_frame_rate") or video.get("r_frame_rate"))
-    if rate <= 0:
+    average_rate = _parse_rate(video.get("avg_frame_rate"))
+    nominal_rate = _parse_rate(video.get("r_frame_rate"))
+    if average_rate <= 0:
+        average_rate = nominal_rate
+    if nominal_rate <= 0:
+        nominal_rate = average_rate
+    if average_rate <= 0:
         raise ValueError(f"Video has no usable frame rate: {path}")
+    time_base = _parse_rate(video.get("time_base"))
     format_info = data.get("format", {})
     duration = _parse_duration(video.get("duration"))
     if duration is None:
         duration = _parse_duration(format_info.get("duration"))
     audio_duration = _parse_duration(audio.get("duration")) if audio else None
+    try:
+        frame_count = int(video.get("nb_read_frames") or video.get("nb_frames") or 0)
+    except (TypeError, ValueError):
+        frame_count = 0
+    if count_frames and frame_count <= 0:
+        frame_count = FFmpegAdapter.count_video_frames(str(path))
     return {
         "width": int(video.get("width") or 0),
         "height": int(video.get("height") or 0),
-        "fps": float(rate),
-        "fps_fraction": str(rate),
-        "frame_count": int(video.get("nb_read_frames") or video.get("nb_frames") or 0),
+        "fps": float(average_rate),
+        "fps_fraction": str(average_rate),
+        "nominal_fps": float(nominal_rate),
+        "nominal_fps_fraction": str(nominal_rate),
+        "time_base_seconds": float(time_base),
+        "time_base_fraction": str(time_base),
+        "frame_count": frame_count,
         "duration_seconds": duration or 0.0,
         "video_codec": str(video.get("codec_name") or ""),
         "pixel_format": str(video.get("pix_fmt") or ""),
@@ -442,7 +512,7 @@ def _assemble_chunks(
     else:
         final_input = "[chunk0]"
     filters.append(
-        f"{final_input}tpad=stop_mode=clone:stop_duration={1 / output_fps:.12g},"
+        f"{final_input}tpad=stop_mode=clone:stop=1,"
         f"trim=end_frame={expected_frames},"
         f"setpts=N/({output_fps:.12g}*TB)[final_video]"
     )
@@ -461,13 +531,15 @@ def _assemble_chunks(
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            "veryfast",
             "-crf",
-            "18",
+            "17",
             "-pix_fmt",
             "yuv420p",
             "-movflags",
             "+faststart",
+            "-vsync",
+            "0",
             str(target),
         ]
     )
@@ -505,11 +577,13 @@ def _validate_result(
             raise RuntimeError(
                 f"NVIDIA VFX output {key} was {result[key]}, expected {expected}"
             )
-    if abs(result["fps"] - expected_fps) > 0.01:
-        raise RuntimeError(
-            f"NVIDIA VFX output frame rate was {result['fps']}, expected {expected_fps}"
-        )
-    tolerance = 1 / expected_fps
+    # Exact frame count and duration define the delivered cadence; nominal FPS
+    # can differ because the MP4 time base rounds frame timestamps.
+    tolerance = (
+        1 / expected_fps
+        + source["time_base_seconds"]
+        + result["time_base_seconds"]
+    )
     if abs(result["duration_seconds"] - source["duration_seconds"]) > tolerance:
         raise RuntimeError(
             "NVIDIA VFX output duration differs from its source by more than one output frame"

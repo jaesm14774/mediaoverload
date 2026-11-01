@@ -156,6 +156,44 @@ def test_user_given_final_review_when_regenerate_is_clicked_then_the_decision_re
     assert result.outputs["media_paths"] == []
 
 
+def test_user_given_an_approved_review_with_a_selected_subset_when_review_finishes_then_the_session_preserves_the_decision(tmp_path, monkeypatch):
+    """User Given an approved review selects one of several valid candidates When the review service finishes Then only the selected candidate and the reviewer's edited text are returned and persisted."""
+    monkeypatch.setenv("discord_review_bot_token", "contract-fake")
+    monkeypatch.setenv("discord_review_channel_id", "123")
+    media_paths = [tmp_path / "first.png", tmp_path / "second.png"]
+    for path, color in zip(media_paths, ("red", "blue"), strict=True):
+        Image.new("RGB", (32, 20), color).save(path)
+
+    async def feedback(**values):
+        from agentic.tools.context_services import _run_discord_file_feedback_process
+
+        inspect.signature(_run_discord_file_feedback_process).bind(**values)
+        assert values["filepaths"] == [str(path) for path in media_paths]
+        return (
+            "accept",
+            "Reviewer",
+            "Edited review copy",
+            [1],
+            {"status": "decision_received", "edit_requested": True},
+        )
+
+    service = DiscordHumanReviewService(tmp_path, feedback_process=feedback)
+    decision = service.review_candidates(
+        text="Review copy",
+        media_paths=[str(path) for path in media_paths],
+        selection_mode="multi",
+    )
+
+    assert decision.status == "approved"
+    assert decision.selected_paths == [str(media_paths[1])]
+    assert decision.edited_text == "Edited review copy"
+    assert decision.edit_requested is True
+    session = json.loads(Path(decision.session_path).read_text(encoding="utf-8"))
+    assert session["normalized_status"] == "approved"
+    assert session["selected_paths"] == [str(media_paths[1])]
+    assert session["reviewer"] == "Reviewer"
+
+
 def test_user_given_disabled_regeneration_when_buttons_are_created_then_only_standard_controls_are_available():
     """User Given regeneration is disabled When review controls are created Then only Accept, Reject and Edit remain available."""
     from agentic.tools.discord_review_view import create_discord_review_view

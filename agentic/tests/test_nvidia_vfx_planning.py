@@ -28,7 +28,7 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
 
         self.assertEqual(
             by_id["sprite-motion-nvidia-vfx"].depends_on,
-            ["sprite-motion-video"],
+            ["sprite-motion-editorial-pacing"],
         )
         self.assertEqual(
             by_id["sprite-package"].inputs["video_node"],
@@ -59,9 +59,9 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
         self.assertNotIn("sprite-motion-nvidia-vfx", by_id)
         self.assertEqual(
             by_id["sprite-package"].inputs["video_node"],
-            "sprite-motion-video",
+            "sprite-motion-editorial-pacing",
         )
-        self.assertIn("sprite-motion-video", by_id["sprite-package"].depends_on)
+        self.assertIn("sprite-motion-editorial-pacing", by_id["sprite-package"].depends_on)
 
     def test_user_given_generated_video_when_short_video_plan_is_built_then_qa_and_review_use_nvidia_output(self) -> None:
         """User Given a generated short video When its plan is built Then final QA, preview, and review use NVIDIA VFX output."""
@@ -90,13 +90,16 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
         plan = planner.build_plan(goal)
         by_id = {node.node_id: node for node in plan.nodes}
 
-        self.assertEqual(by_id["video-nvidia-vfx"].depends_on, ["video-canvas"])
+        self.assertEqual(
+            by_id["video-nvidia-vfx"].depends_on,
+            ["video-editorial-pacing"],
+        )
         self.assertEqual(by_id["video-qa"].depends_on[0], "video-nvidia-vfx")
         self.assertEqual(by_id["gif-preview"].depends_on, ["video-nvidia-vfx"])
         self.assertEqual(by_id["video-qa"].inputs["expected_fps"], 48)
         self.assertEqual(
             by_id["review-video-nvidia-vfx"].depends_on,
-            ["review-video-canvas"],
+            ["review-video-editorial-pacing"],
         )
         self.assertIn(
             "review-video-nvidia-vfx",
@@ -131,7 +134,7 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
         by_id = {node.node_id: node for node in plan.nodes}
 
         self.assertNotIn("video-nvidia-vfx", by_id)
-        self.assertEqual(by_id["video-qa"].depends_on[0], "video-canvas")
+        self.assertEqual(by_id["video-qa"].depends_on[0], "video-editorial-pacing")
         self.assertEqual(by_id["video-qa"].inputs["expected_fps"], 24)
 
     def test_user_given_other_generated_video_routes_when_plan_is_built_then_final_qa_follows_nvidia_output(self) -> None:
@@ -144,12 +147,18 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
             comfy_port=8188,
         )
         cases = [
-            ("text2video", {}, "video-nvidia-vfx", "animate-video", "video-qa"),
+            (
+                "text2video",
+                {},
+                "video-nvidia-vfx",
+                "video-editorial-pacing",
+                "video-qa",
+            ),
             (
                 "motion_comic",
                 {},
                 "motion-comic-nvidia-vfx",
-                "motion-comic-compose",
+                "motion-comic-editorial-pacing",
                 "motion-comic-qa",
             ),
             (
@@ -160,7 +169,7 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
                     )
                 },
                 "native-h3-nvidia-vfx",
-                "native-h3-render",
+                "native-h3-editorial-pacing",
                 "native-h3-qa",
             ),
         ]

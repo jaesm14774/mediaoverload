@@ -111,7 +111,13 @@ class H3ModePlanTests(unittest.TestCase):
         qa = next(node for node in plan.nodes if node.node_id == "native-h3-qa")
         canvas_nodes = [node for node in plan.nodes if node.node_id == "native-h3-canvas"]
         self.assertEqual(qa.inputs["video_node"], "native-h3-nvidia-vfx")
-        self.assertTrue(canvas_nodes)
+        canvas_width = int(plan.goal.constraints["canvas_width"])
+        canvas_height = int(plan.goal.constraints["canvas_height"])
+        normalization_required = canvas_width % 32 != 0 or canvas_height % 32 != 0
+        self.assertEqual(bool(canvas_nodes), normalization_required)
+        if canvas_nodes:
+            self.assertEqual(canvas_nodes[0].inputs["target_width"], canvas_width)
+            self.assertEqual(canvas_nodes[0].inputs["target_height"], canvas_height)
         self.assertNotIn("target_duration", qa.inputs)
 
     def test_ref2va_plan_records_manifest_and_disables_reference_audio(self) -> None:

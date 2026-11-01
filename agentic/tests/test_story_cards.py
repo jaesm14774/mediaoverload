@@ -95,6 +95,29 @@ class StoryCardContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "background_prompt"):
             validate_story_card_payload(payload)
 
+    def test_user_given_valid_story_card_with_surrounding_prompt_whitespace_when_normalized_then_public_fields_and_page_number_are_preserved(self) -> None:
+        """User Given a valid one-page story card with padded English prompts When its payload is normalized Then prompts are trimmed and the text, title, and page number are preserved."""
+        payload = sample_payload(self.make_goal(), 1)
+        original_title = payload["title"]
+        original_text = payload["pages"][0]["text"]
+        payload["anchor_prompt"] = f"  {payload['anchor_prompt']}  "
+        payload["negative_prompt"] = "  avoid text  "
+        payload["pages"][0]["background_prompt"] = (
+            f"  {payload['pages'][0]['background_prompt']}  "
+        )
+
+        normalized = validate_story_card_payload(payload, expected_page_count=1)
+
+        self.assertEqual(normalized["title"], original_title)
+        self.assertEqual(normalized["pages"][0]["page"], 1)
+        self.assertEqual(normalized["pages"][0]["text"], original_text)
+        self.assertEqual(normalized["anchor_prompt"], payload["anchor_prompt"].strip())
+        self.assertEqual(normalized["negative_prompt"], "avoid text")
+        self.assertEqual(
+            normalized["pages"][0]["background_prompt"],
+            payload["pages"][0]["background_prompt"].strip(),
+        )
+
     def test_user_given_long_english_image_directions_when_story_card_is_checked_then_text_is_preserved_without_a_small_length_cap(self) -> None:
         """User Given a long English image direction When the story-card payload is checked Then the full direction survives aside from surrounding whitespace."""
         payload = sample_payload(self.make_goal(), 1)
@@ -118,6 +141,28 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertEqual(result['writing_process']['writer_passes'], 1)
         self.assertIn('Kirby', result['pages'][1]['background_prompt'])
         self.assertIn('network gateway', result['pages'][1]['background_prompt'])
+
+    def test_user_given_editorial_plan_and_writer_pages_when_public_story_card_builder_runs_then_source_and_page_contracts_are_preserved(self) -> None:
+        """User Given a valid editorial plan and two writer pages When the public story-card builder runs Then it preserves the source context, editorial brief, page order, and single-pass completion state."""
+        goal = self.make_goal(
+            news_context={"title": "金融業準備後量子加密"},
+            story_card_page_count=2,
+        )
+        plan = sample_plan(goal)
+        final = sample_payload(goal, 2)
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=ScriptedLLMManager([plan, final]),
+        )
+
+        result = engine.build_story_card(goal)
+
+        self.assertEqual(result["title"], final["title"])
+        self.assertEqual(result["page_count"], 2)
+        self.assertEqual([page["page"] for page in result["pages"]], [1, 2])
+        self.assertEqual(result["editorial_brief"], plan["editorial_brief"])
+        self.assertEqual(result["source_context"]["title"], "金融業準備後量子加密")
+        self.assertEqual(result["writing_process"]["writer_passes"], 1)
 
     def test_repeated_title_is_a_human_editorial_decision(self) -> None:
         payload = sample_payload(self.make_goal(), 1)
@@ -605,6 +650,32 @@ class StoryCardContractTests(unittest.TestCase):
 
         self.assertEqual([shot["action"] for shot in result["native_shots"]], ["Base action"] * len(times))
         self.assertIn("Base action", prompt)
+
+    def test_user_given_provider_returns_time_keyed_story_beats_when_h3_payload_is_normalized_then_beats_and_source_anchors_are_renderable(self) -> None:
+        """User Given a provider returns time-keyed beats and delimited source anchors When its H3 payload is normalized Then beats are ordered, titled, and retain the source concepts."""
+        normalized = normalize_native_h3_story_payload(
+            {
+                "story": {
+                    "15-20s": {"action": "Kirby steadies the glowing lantern."},
+                    "0-5s": {"action": "Kirby spots the lantern by the canal."},
+                    "news_trace": {
+                        "source_concepts": "lantern; canal",
+                        "visual_anchors": "lantern, canal | current",
+                    },
+                }
+            }
+        )
+        story = extract_native_h3_story(normalized)
+
+        self.assertEqual([shot["time"] for shot in story["native_shots"]], ["0-5s", "15-20s"])
+        self.assertEqual(
+            [shot["title"] for shot in story["native_shots"]],
+            ["Kirby spots the lantern by the canal", "Kirby steadies the glowing lantern"],
+        )
+        self.assertEqual(story["news_trace"]["source_concepts"], ["lantern", "canal"])
+        self.assertEqual(
+            story["news_trace"]["visual_anchors"], ["lantern", "canal", "current"]
+        )
 
     def test_user_given_news_visual_anchor_when_background_is_built_then_prompt_keeps_the_concept(self) -> None:
         """User: Given a page has an English source-grounded visual anchor, When the image prompt is built, Then the news concept remains in the background direction."""

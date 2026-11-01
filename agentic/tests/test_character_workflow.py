@@ -20,7 +20,7 @@ from agentic.app.character_config import _resolve_output_dir, load_character_con
 from agentic.app.character_payload import build_goal_payload_from_character_config
 from agentic.app.character_selection import resolve_character_selection
 from character_workflow_helpers import make_character_workflow_request
-from agentic.tools.context_services import NewsContextService, NewsSelection
+from agentic.tools.context_services import NewsSelection
 from agentic.runtime.news_grounding import is_brand_safe_news_selection
 from agentic.app.main import _allow_runtime_output_for_visual_evidence
 
@@ -70,6 +70,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     self.repo_root,
                     temporary_config,
                     prompt="Kirby finds a glowing star",
+                    preferred_generation_type="text2image2video",
                     publish_platforms=["threads"],
                     publish_after_generate=False,
                 )
@@ -193,6 +194,77 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(selection["selected_character"], "Kirby")
         self.assertEqual(selection["selection_source"], "fixed_config_role")
 
+    def test_user_given_a_selected_canvas_and_requested_sprite_duration_when_payload_is_built_then_sprite_uses_the_run_canvas_and_resolved_duration(self) -> None:
+        """User Given a game-sprite route and selected run canvas When its payload is built Then source and video dimensions match that canvas and frame count follows the resolved duration."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "sprite.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "character": {"name": "Kirby"},
+                        "generation": {
+                            "game_sprite": {
+                                "video_length": 600,
+                            }
+                        },
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            payload = build_goal_payload_from_character_config(
+                make_character_workflow_request(
+                    self.repo_root,
+                    config_path,
+                    prompt="Kirby crosses a changing sprite world",
+                    preferred_generation_type="game_sprite",
+                    duration_seconds=2,
+                    publish_after_generate=False,
+                )
+            )
+
+        constraints = payload["constraints"]
+        self.assertEqual(
+            constraints["sprite_video_length"],
+            max(1, round(payload["duration_seconds"] * 24.0)),
+        )
+        self.assertNotEqual(constraints["sprite_video_length"], 600)
+        self.assertEqual(
+            constraints["sprite_source_width"], constraints["canvas_width"]
+        )
+        self.assertEqual(
+            constraints["sprite_source_height"], constraints["canvas_height"]
+        )
+        self.assertEqual(
+            constraints["sprite_video_width"], constraints["canvas_width"]
+        )
+        self.assertEqual(
+            constraints["sprite_video_height"], constraints["canvas_height"]
+        )
+
+    def test_user_given_reference_video_preferences_when_payload_is_built_then_requested_analysis_settings_are_retained(self) -> None:
+        """User provides reference-video preferences Given an explicit video route When its payload is built Then requested depth and keyframe limits are retained."""
+        payload = build_goal_payload_from_character_config(
+            make_character_workflow_request(
+                self.repo_root,
+                self.kirby_config,
+                prompt="Kirby follows the visual rhythm of a reference clip",
+                preferred_generation_type="text2image2video",
+                reference_video_source="C:/references/reference.mp4",
+                reference_video_depth="deep",
+                reference_video_max_keyframes=16,
+                publish_after_generate=False,
+            )
+        )
+
+        self.assertEqual(
+            payload["constraints"]["reference_video_source"],
+            "C:/references/reference.mp4",
+        )
+        self.assertEqual(payload["constraints"]["reference_video_depth"], "deep")
+        self.assertEqual(payload["constraints"]["reference_video_max_keyframes"], 16)
+
     def test_collect_media_paths_prefers_the_last_editorial_output_for_publish(self) -> None:
         paths = collect_media_paths_from_run_result(
             {
@@ -236,6 +308,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         )
 
     def test_no_review_text2image2video_uses_one_keyframe_without_pre_video_gate(self) -> None:
+        """User Given a text-to-image-to-video request skips review When a goal payload is built Then it schedules one keyframe and no pre-video review gate."""
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
             self.kirby_config,
@@ -419,6 +492,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(set(policies["text2img"]), {"image_count", "review_selection_limit"})
 
     def test_run_manifest_exposes_failure_reason_at_top_level(self) -> None:
+        """User receives a failed render Given a node reports diagnostics When the workflow completes Then the run manifest promotes the originating error."""
         payload = {
             "prompt": "Kirby story",
             "duration_seconds": 15,
@@ -500,6 +574,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(result["artifacts"]["media_paths"], [])
 
     def test_publish_stage_reads_review_options_from_request(self) -> None:
+        """User requests a dry-run review Given publishing is configured When generation succeeds Then review options reach the publish stage without public visibility."""
         payload = {
             "prompt": "Kirby story",
             "duration_seconds": 15,
@@ -607,6 +682,11 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                 ))
 
         self.assertEqual(result["status"], "success")
+        self.assertEqual(result["stage_status"]["publish"]["status"], "success")
+        dispatch_outputs = result["publish"]["result"]["state"]["node_outputs"]["dispatch-publish"]
+        self.assertEqual(dispatch_outputs["publication_state"], "dry_run")
+        self.assertFalse(dispatch_outputs["publicly_visible"])
+        self.assertEqual(result["discord_notification"]["status"], "skipped")
         self.assertEqual(len(planner.goals), 2)
         publish_constraints = planner.goals[1]["constraints"]
         self.assertIsInstance(publish_constraints, dict)
@@ -764,6 +844,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(result, [trimmed_video_path])
 
     def test_publish_review_prefers_explicit_final_video_over_segment_videos(self) -> None:
+        """User Given a publishable final video and its segment clips When candidates are collected Then only the final video is returned."""
         final_video_path = r"C:\runs\longvideo_final.mp4"
         segment_paths = [r"C:\runs\segment_01.mp4", r"C:\runs\segment_02.mp4"]
         result = collect_media_paths_from_run_result(

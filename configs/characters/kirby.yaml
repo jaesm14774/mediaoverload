@@ -32,17 +32,15 @@ generation:
     two_character_interaction: 1
   two_character_interaction:
     is_same_group: false
-  # One creative profile is selected per run. The canvas selection is shared
-  # by every still and video node in that run; story cards keep their own
-  # editorial 4:5 layout contract below.
+  # Select one weighted canvas per run and share it across generated images
+  # and videos, including serial-video and editorial story cards.
   creative_profile:
     canvas:
-      mode: fixed
-      fixed: landscape_16_9
+      mode: random
       random_weights:
-        landscape_16_9: 3
-        portrait_4_5: 2
-        square_1_1: 2
+        landscape_16_9: 2
+        portrait_4_5: 3
+        square_1_1: 1
       profiles:
         landscape_16_9:
           aspect_ratio: "16:9"
@@ -63,22 +61,16 @@ generation:
   identity_refine_workflow_name: flux3_image_klein_img2img
   motion_comic:
     duration_seconds: 10
-    width: 576
-    height: 1024
     fps: 24
-    image_width: 1024
-    image_height: 768
     steps: 8
-  # Writing-first Traditional-Chinese story cards. Every page is generated
-  # independently from one shared visual contract before Pillow places text.
+    # Writing-first Traditional-Chinese story cards. Every page uses the
+    # selected run canvas before Pillow places text.
   story_card:
     page_stage:
       workflow_name: krea2_turbo
     # Auto keeps a short thought on one card and splits anything over 40
     # characters into the smallest coherent set of pages.
     page_count: auto
-    width: 540
-    height: 675
     overlay_opacity: 176
     brand_label: CHARACTER NOTE
   # Longvideo stories are generated from the current brief/news context. A
@@ -91,10 +83,6 @@ generation:
     video_workflow_name: minimax_h3_i2va
     h3_model_profile: q4
     duration_seconds: 10
-    source_width: 1024
-    source_height: 576
-    video_width: 608
-    video_height: 352
     video_length: 240
     video_steps: 16
     fps: 12

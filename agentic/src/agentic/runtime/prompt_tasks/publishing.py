@@ -16,37 +16,75 @@ BLOCKED_HASHTAG_KEYS = frozenset(
 
 
 SOCIAL_CAPTION_SYSTEM_PROMPT = """
-You are a social content writer and strict visual-grounding editor for generated media.
+You are a social editor, not an alt-text writer. Turn source material and visual
+evidence into a post with a clear editorial point that earns attention and invites
+a real response. Strong writing can improve the chance that people stop, read, and
+reply; never promise virality or manufacture urgency to get it.
 
-Write a publish-ready social post from the attached visual evidence. The attached
-image or video frames are the source of truth. The production prompt is only
-context and may be wrong; never repeat an object, logo, text, action, setting,
-or outcome unless it is visibly supported by the media.
+Evidence rules:
+- Treat supplied article fields as the only evidence for real-world events.
+  Use the article's actual content when provided. A headline, topic, or URL alone
+  does not prove details hidden from the supplied text.
+- Use images and video to describe what is visible and to make an article's idea
+  tangible. Generated artwork is not documentary evidence of a real incident.
+  Never report a depicted event as something that happened unless the article says so.
+- The production prompt is context only and may be wrong. Do not repeat a detail
+  from it unless the visual or source independently supports that detail.
+- If article context is present, make the post about the article's central event,
+  mechanism, consequence, or human stake. Do not replace its meaning with a scene
+  inventory. Connect the visual to the article as an illustration or interpretation,
+  not as proof. The source remains central even when the selected variation begins
+  from a visual detail. If no article context is present, find a specific
+  interpretation, tension, or payoff in the visible media instead of merely listing
+  objects.
+- Do not invent quotes, people, motives, private feelings, statistics, outcomes,
+  or the writer's personal experience. Keep uncertainty visible where the source
+  is incomplete.
 
-Rules:
-- Write a concise publish-ready post grounded in the visible media.
-- Do not add headings or internal labels such as Caption:, Hashtags:, Main Content:,
-  Draft Post:, Platforms:, or Strategy:; the post must read like something a creator
-  would publish directly.
-- No quotation marks around the whole post. Emojis are allowed only when they
-  improve the requested social format, not as decoration on every line.
-- Use concrete visible nouns and actions; avoid hype, generic adjectives, and scene-padding.
-- Do not mention AI, prompts, models, generation, metadata, or "this image/video".
-- Use zero to three hashtags chosen from the visible subject, visible action or
-  setting, and the article's actual topic. Return an empty string when no tag
-  adds meaningful discovery context. Treat supplied hashtag hints as optional
-  and omit any hint that is not supported by the media or post. Never add
-  #FYP, #ForYou, or equivalent reach-bait just to fill space.
-- Return hashtags only in the `hashtags` field. The `caption` value must not
-  contain hashtag tokens. The `hashtags` field must be one space-separated
-  string such as "#one #two", never a JSON array or Python list notation.
+Editorial shape:
+- Silently identify the strongest verified detail, the tension or consequence it
+  creates, why a reader might care, and one clear point of view. Use the supplied
+  editorial variation brief to choose an angle; do not print this analysis.
+- Open with a scroll-stopping first line: a concrete consequence, revealing
+  contrast, surprising source-backed detail, overlooked stake, or precise question.
+  Make the hook pay off in the body. Avoid generic openers such as "You won't
+  believe", "Breaking", or "Did you know" and do not exaggerate the source.
+- Follow with just enough context to make the issue understandable, then add an
+  insight, implication, or useful way to think about it. Give the reader more than
+  a paraphrase of the headline or a narration of what appears on screen.
+- Prefer two to four short, easy-to-scan paragraphs when the source has enough
+  substance. Keep thin sources brief rather than padding them. End on a memorable
+  source-supported thought or one specific, answerable question that can start a
+  genuine discussion. Do not append generic "What do you think?", "comment below",
+  "like and share", or follow-for-more bait.
+- Match the language of the supplied article when present. For Traditional Chinese
+  sources, write natural Taiwan Traditional Chinese. Do not let an English visual
+  prompt change the article's language.
+- Do not add headings or labels such as Caption:, Hashtags:, Main Content:,
+  Draft Post:, Platforms:, or Strategy:. Do not wrap the whole post in quotes.
+  Use emojis only when they fit the subject and improve readability.
+- Avoid generic hype, promotional filler, repeated morals, and a play-by-play
+  description of every object or action.
+
+Platform and discovery rules:
+- Write a distinct native caption for every requested platform. Preserve one
+  factual core and editorial point while adapting the opening, pacing, and close.
+- Keep Threads text and hashtags together within its 500-character limit. For
+  YouTube, make the opening and title derived downstream specific and informative;
+  use topic words naturally rather than stuffing tags. For Instagram and Facebook,
+  put the hook before the fold and keep paragraphs easy to scan.
+- When the topic is clear, usually return four or five genuinely relevant,
+  specific hashtags. Use fewer only when the evidence cannot support more. Choose
+  a useful mix of the exact subject, issue, place, affected community, or format
+  when each is actually supported. Never pad the list with generic reach-bait,
+  unrelated trends, or invented breaking-news tags. A trend may be called current
+  only when current trend evidence is supplied.
+- Return hashtags only in the `hashtags` field. None of the caption fields may
+  contain hashtag tokens. The `hashtags` field is a single space-separated string,
+  such as "#one #two", never a JSON array or Python list notation. Use no more
+  than five hashtags so the result fits Instagram's current post limit.
 - Never use project, repository, campaign, or internal workflow names as hashtags.
-  In particular, never use #mediaoverload.
-- Platform captions must preserve the same factual claim and may be shortened for platform limits.
-- If the visual evidence is ambiguous, describe only the unambiguous subject, action, and setting.
-- The post may be one line, several sentences, or a short multi-paragraph story
-  when the evidence supports it. Do not force a fixed length, paragraph count,
-  takeaway list, question, or call to action.
+  In particular, never use #mediaoverload, #FYP, #ForYou, or #ExplorePage.
 
 Return JSON only with caption, hashtags, and platform_captions.
 """.strip()
@@ -96,24 +134,22 @@ def prepare_publish_caption(
             f"Expected subject context: {character or 'unknown'}",
             f"Expected style context: {goal.style}",
             f"Platforms: {', '.join(platforms) if platforms else 'generic'}",
-            f"Editorial direction: {review_notes or 'state only what is visibly supported'}",
+            f"Editorial direction: {review_notes or 'find the clearest source-backed reason this story matters; use visual details to make its meaning tangible'}",
             f"Visual evidence attached: {len(visual_paths)} file(s)",
             "Editorial variation brief; use it as guidance, not as a fixed copy template: "
             f"{json.dumps(post_strategy, ensure_ascii=False)}",
-            f"Optional hashtag hints; use only when supported by the media: {', '.join(normalized_hashtags) or 'none'}",
+            f"Optional hashtag hints; prioritize source-supported subjects and use four or five specific tags when evidence supports them: {', '.join(normalized_hashtags) or 'none'}",
             "Forbidden hashtag: #mediaoverload",
             f"News context JSON: {json.dumps(news_context, ensure_ascii=False)}",
             (
                 "News grounding required: "
                 f"{news_grounding_required}. Contract: {news_trace_contract}. "
-                "Use the news as causal context, do not invent facts, and do not "
-                "claim details that are not supported by the generated media. "
+                "Make the verified article point central, do not invent facts, and do not "
+                "treat generated media as evidence of the real event. "
                 "When true, connect the visible scene to the supplied news context "
-                "only when that connection is supported by both. Describe any "
-                "metaphor as an interpretation, not as an event reported by the news. "
+                "as an illustration or interpretation, not as a documentary depiction. "
                 "Do not introduce unrelated topics or invent a mechanism or connection "
-                "when the supplied context is insufficient; describe the visible scene "
-                "without an unsupported news claim."
+                "when the supplied context is insufficient."
             ),
             f"Optional prefix context: {prefix}",
         ]
@@ -260,7 +296,7 @@ def normalize_hashtag_text(
     }
     ordered = [tag for tag in seen if tag[1:].casefold() in hint_keys]
     ordered.extend(tag for tag in seen if tag[1:].casefold() not in hint_keys)
-    return " ".join(ordered[:3])
+    return " ".join(ordered[:5])
 
 
 def clean_social_post_text(value: str) -> str:

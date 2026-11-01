@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 from unittest.mock import Mock, patch
 
 import requests
+from PIL import Image
 
 from agentic.tools.comfy_backend import AgenticComfyCommunicator
 from agentic.tools.media_services import MediaServiceTools
@@ -79,6 +80,67 @@ class PublishingDeliveryVariantTests(unittest.TestCase):
             self.assertEqual(facebook_delivery["media_path"], instagram_delivery["media_path"])
             self.assertEqual(youtube_delivery["media_path"], str(source))
             self.assertEqual(youtube_delivery["aspect_ratio"], "16:9")
+
+    def test_user_given_transparent_png_when_preparing_publication_media_then_jpeg_is_written_and_source_is_preserved(self) -> None:
+        """User Given a transparent PNG When publication media is prepared Then an opaque JPEG is staged and the original image remains available."""
+        with tempfile.TemporaryDirectory(prefix="mediaoverload-image-delivery-") as temp_dir:
+            root = Path(temp_dir)
+            source_dir = root / "source"
+            source_dir.mkdir()
+            source = source_dir / "cover.png"
+            image = Image.new("RGBA", (64, 32), (0, 0, 0, 0))
+            image.paste((220, 20, 30, 255), (0, 0, 32, 32))
+            image.save(source)
+            output_dir = root / "publish_ready"
+
+            result = SocialServiceTools(root / "runtime").process_media(
+                {
+                    "media_paths": [str(source)],
+                    "output_dir": str(output_dir),
+                    "platforms": ["instagram_graph"],
+                }
+            )
+
+            converted = Path(result["media_paths"][0])
+            self.assertEqual(converted, output_dir / "cover.jpg")
+            self.assertTrue(source.is_file())
+            self.assertEqual(
+                result["delivery_variants"]["instagram_graph"]["media_paths"],
+                [str(converted)],
+            )
+            with Image.open(converted) as saved:
+                self.assertEqual(saved.format, "JPEG")
+                self.assertEqual(saved.size, (640, 320))
+                rgb = saved.convert("RGB")
+                self.assertGreater(rgb.getpixel((160, 160))[0], 170)
+                self.assertGreater(min(rgb.getpixel((480, 160))), 235)
+
+    def test_user_given_a_jpeg_with_jpeg_suffix_when_preparing_publication_media_then_original_bytes_are_reused(self) -> None:
+        """User Given a JPEG image When publication media is prepared Then its existing encoding and source file are reused without recompression."""
+        with tempfile.TemporaryDirectory(prefix="mediaoverload-jpeg-delivery-") as temp_dir:
+            root = Path(temp_dir)
+            source = root / "cover.jpeg"
+            Image.new("RGB", (24, 16), (30, 100, 180)).save(
+                source,
+                format="JPEG",
+                quality=92,
+            )
+            source_bytes = source.read_bytes()
+
+            result = SocialServiceTools(root / "runtime").process_media(
+                {
+                    "media_paths": [str(source)],
+                    "output_dir": str(root / "publish_ready"),
+                    "platforms": ["instagram_graph"],
+                }
+            )
+
+            self.assertEqual(result["media_paths"], [str(source)])
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(
+                result["delivery_variants"]["instagram_graph"]["media_paths"],
+                [str(source)],
+            )
 
 
 class AgenticComfyCommunicatorTests(unittest.TestCase):
@@ -243,32 +305,57 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
         self.assertIn("/interrupt", interrupt_request.full_url)
 
     def test_save_results_uses_preview_when_comfy_history_has_no_persistent_media(self) -> None:
-        communicator = AgenticComfyCommunicator.__new__(AgenticComfyCommunicator)
-        communicator.get_history = lambda _prompt_id: {  # type: ignore[method-assign]
-            "prompt-1": {
-                "outputs": {
-                    "preview": {
-                        "images": [
-                            {
-                                "filename": "ComfyUI_temp_preview_00001_.png",
-                                "subfolder": "",
-                                "type": "temp",
-                            }
-                        ]
-                    }
-                }
-            }
+        """User Given ComfyUI history contains only a temporary preview When results are saved Then the preview is downloaded into the run directory."""
+        preview = {
+            "filename": "ComfyUI_temp_preview_00001_.png",
+            "subfolder": "",
+            "type": "temp",
         }
-        communicator.get_media_file = lambda filename, subfolder, folder_type: (  # type: ignore[method-assign]
-            b"preview-bytes"
-        )
+        preview_bytes = b"preview-bytes"
 
-        output_dir = Path(tempfile.mkdtemp())
-        success, saved_files = communicator.save_results("prompt-1", str(output_dir), "render")
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if self.path == "/history/prompt-1":
+                    body = json.dumps(
+                        {"prompt-1": {"outputs": {"preview": {"images": [preview]}}}}
+                    ).encode()
+                    content_type = "application/json"
+                elif self.path.startswith("/view?"):
+                    body = preview_bytes
+                    content_type = "image/png"
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
-        self.assertTrue(success)
-        self.assertEqual(len(saved_files), 1)
-        self.assertEqual(Path(saved_files[0]).read_bytes(), b"preview-bytes")
+            def log_message(self, *_args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            communicator = AgenticComfyCommunicator(
+                host="127.0.0.1", port=server.server_port
+            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                output_dir = Path(temp_dir) / "outputs"
+                success, saved_files = communicator.save_results(
+                    "prompt-1", str(output_dir), "render"
+                )
+                saved_media = Path(saved_files[0]) if saved_files else None
+                self.assertTrue(success)
+                self.assertEqual(len(saved_files), 1)
+                self.assertIsNotNone(saved_media)
+                self.assertEqual(saved_media.read_bytes(), preview_bytes)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_free_memory_uses_comfy_endpoint_with_timeout(self) -> None:
         communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
@@ -561,6 +648,7 @@ class SocialServiceToolsTests(unittest.TestCase):
         self.assertEqual(fb_post.media_paths, ["fb-a.9x16.mp4", "fb-b.9x16.mp4"])
 
     def test_publish_social_collects_partial_failures(self) -> None:
+        """User Given one publisher fails When publishing to multiple platforms Then each result is retained and the overall run reports partial failure."""
         tools = SocialServiceTools(Path.cwd())
 
         class FakePublishing:
@@ -689,6 +777,7 @@ class SocialServiceToolsTests(unittest.TestCase):
         )
 
     def test_publish_social_reports_public_only_after_verified_public_receipts(self) -> None:
+        """User Given a publisher reports success When its receipt verifies public visibility Then the result may be reported as publicly published."""
         tools = SocialServiceTools(Path(tempfile.mkdtemp()))
 
         class FakePublishing:
@@ -1210,6 +1299,19 @@ class ThreadsPlatformTests(unittest.TestCase):
         requests_seen: list[dict[str, object]] = []
 
         class Handler(BaseHTTPRequestHandler):
+            get_responses = {
+                "me": {"id": "threads-user-1", "username": "kirby"},
+                "container-1": {"id": "container-1", "status": "FINISHED"},
+                "post-1": {
+                    "id": "post-1",
+                    "permalink": "https://www.threads.net/@kirby/post/abc123",
+                },
+            }
+            post_responses = {
+                "threads": {"id": "container-1"},
+                "threads_publish": {"id": "post-1"},
+            }
+
             def log_message(self, _format: str, *_args: object) -> None:
                 return
 
@@ -1231,19 +1333,11 @@ class ThreadsPlatformTests(unittest.TestCase):
                         "authorization": self.headers.get("Authorization", ""),
                     }
                 )
-                if parsed.path.endswith("/me"):
-                    self._write_json({"id": "threads-user-1", "username": "kirby"})
-                elif parsed.path.endswith("/container-1"):
-                    self._write_json({"id": "container-1", "status": "FINISHED"})
-                elif parsed.path.endswith("/post-1"):
-                    self._write_json(
-                        {
-                            "id": "post-1",
-                            "permalink": "https://www.threads.net/@kirby/post/abc123",
-                        }
-                    )
-                else:
+                response = self.get_responses.get(parsed.path.rsplit("/", 1)[-1])
+                if response is None:
                     self.send_error(404)
+                    return
+                self._write_json(response)
 
             def do_POST(self) -> None:
                 parsed = urlsplit(self.path)
@@ -1257,12 +1351,11 @@ class ThreadsPlatformTests(unittest.TestCase):
                         "authorization": self.headers.get("Authorization", ""),
                     }
                 )
-                if parsed.path.endswith("/threads"):
-                    self._write_json({"id": "container-1"})
-                elif parsed.path.endswith("/threads_publish"):
-                    self._write_json({"id": "post-1"})
-                else:
+                response = self.post_responses.get(parsed.path.rsplit("/", 1)[-1])
+                if response is None:
                     self.send_error(404)
+                    return
+                self._write_json(response)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         worker = threading.Thread(target=server.serve_forever, daemon=True)

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext, SkillResult
-from agentic.runtime.registry import SkillRegistry
+from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
 from agentic.skills.agent_primitives import AgentMediaSkills
 
@@ -72,6 +72,48 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(result.state.prompt_lineage[0]["timeline_path"], "C:\\runs\\story_timeline.json")
         self.assertEqual(result.state.prompt_lineage[0]["selected_assets"], ["C:\\asset.png"])
 
+    def test_user_given_persisted_node_output_when_resuming_then_removed_skill_is_not_required(self) -> None:
+        """User Given an accepted persisted output whose skill has been removed When resuming its workflow Then downstream collection reuses the output and succeeds."""
+        registry = SkillRegistry()
+        media_skills = AgentMediaSkills(ToolRegistry(), self.make_workspace_tempdir())
+        registry.register(
+            "agent.output.collect",
+            media_skills.collect_outputs,
+            "Collects outputs from completed workflow nodes.",
+        )
+        video_path = r"C:\runs\accepted.mp4"
+        plan = ExecutionPlan(
+            goal=GoalRequest(prompt="resume accepted video"),
+            workflow_name="resume_workflow",
+            metadata={"serial_mode": True},
+            nodes=[
+                ExecutionNode(
+                    node_id="accepted-video",
+                    skill_name="removed.video.renderer",
+                ),
+                ExecutionNode(
+                    node_id="collect-output",
+                    skill_name="agent.output.collect",
+                    inputs={
+                        "keys": ["video_path"],
+                        "preferred_video_node": "accepted-video",
+                    },
+                    depends_on=["accepted-video"],
+                ),
+            ],
+        )
+
+        result = WorkflowRunner(registry).run(
+            plan,
+            initial_node_outputs={
+                "accepted-video": {"video_path": video_path},
+            },
+        )
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.state.node_outputs["accepted-video"]["video_path"], video_path)
+        self.assertEqual(result.state.node_outputs["collect-output"]["final_video_path"], [video_path])
+
     def test_runner_records_review_selection_lineage(self) -> None:
         registry = SkillRegistry()
 
@@ -133,6 +175,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(result.state.prompt_lineage[0]["llm_backend"]["text_provider"], "gemini")
 
     def test_runner_converts_skill_exception_into_failed_result(self) -> None:
+        """User Given a registered skill raises during execution When the workflow runs Then the node becomes an explicit failed result with the exception recorded."""
         registry = SkillRegistry()
 
         def broken_skill(context: SkillContext) -> SkillResult:

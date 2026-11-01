@@ -537,6 +537,64 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(captured["selection_required"])
         self.assertEqual(captured["selection_limit"], 1)
 
+    def test_user_given_stage_asset_review_when_discord_runs_then_caption_generation_is_skipped(self) -> None:
+        """User Given a frame, anchor, or reference selection stage When Discord review runs Then no publish caption is requested from the LLM."""
+        class NoCaptionPromptEngine:
+            def prepare_publish_caption(self, *_args, **_kwargs):
+                raise AssertionError("Stage asset review does not need a publish caption")
+
+        for review_scope, candidate_count in (
+            ("first_frame", 1),
+            ("last_frame", 1),
+            ("anchor_set", 2),
+            ("reference", 2),
+        ):
+            with self.subTest(review_scope=review_scope):
+                candidate_paths = [
+                    rf"C:\frames\{review_scope}_{index}.png"
+                    for index in range(candidate_count)
+                ]
+                skills = AgentSocialSkills(
+                    ToolRegistry(),
+                    self.project_root / ".tmp-tests",
+                    prompt_engine=NoCaptionPromptEngine(),
+                    discord_review=RecordingDiscordReview(),
+                )
+                plan = ExecutionPlan(
+                    goal=GoalRequest(
+                        prompt=f"Choose {review_scope} assets for Kirby",
+                        media_type="native_h3_story",
+                        style="anime",
+                        constraints={"require_human_review": True},
+                    ),
+                    workflow_name="minimax_h3_fl2va",
+                    nodes=[],
+                )
+                node = ExecutionNode(
+                    node_id="stage-asset-review",
+                    skill_name="review.assets.select",
+                    depends_on=["render-stage-assets"],
+                    inputs={
+                        "limit": candidate_count,
+                        "review_all_candidates": True,
+                        "review_scope": review_scope,
+                    },
+                )
+                state = RunState(
+                    goal={"prompt": plan.goal.prompt},
+                    metadata={},
+                    node_outputs={
+                        "render-stage-assets": {"saved_files": candidate_paths}
+                    },
+                )
+
+                result = skills.select_best_assets(
+                    SkillContext(plan=plan, node=node, state=state)
+                )
+
+                self.assertEqual(result.status, "success")
+                self.assertEqual(result.outputs["selected_assets"], candidate_paths)
+
     def test_stage_probe_keeps_candidates_without_automatic_image_dq(self) -> None:
         """User: Given an artifact-only probe, When it selects generated media, Then it does not generate a publish caption."""
         tool_registry = ToolRegistry()
@@ -874,6 +932,66 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertEqual(result.status, "blocked")
         self.assertIn("exactly one", result.outputs["selection_rationale"])
 
+    def test_user_given_an_approved_review_with_workflow_metadata_when_preparing_caption_then_only_public_copy_is_used(self) -> None:
+        """User Given approved Discord copy contains workflow headings When preparing publication content Then only the caption and hashtags reach platform delivery."""
+        class NoCaptionGeneration:
+            def prepare_publish_caption(self, *_args, **_kwargs):
+                raise AssertionError("Approved review copy should bypass caption generation")
+
+        skills = AgentSocialSkills(
+            ToolRegistry(),
+            self.project_root / ".tmp-tests",
+            prompt_engine=NoCaptionGeneration(),
+        )
+        review_text = "\n".join(
+            (
+                "Draft post:",
+                "Strategy: single-story",
+                "Workflow: serial-video-v1",
+                "Stage: final-review",
+                "Selection: approved asset",
+                "Assets: C:/selected.mp4",
+                "Caption: The approved story is ready to share.",
+                "",
+                "Hashtags: #Kirby #Lantern",
+                "Accept to publish with these assets.",
+            )
+        )
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="Publish the reviewed clip",
+                media_type="video",
+                style="social",
+                constraints={"platforms": ["instagram_graph"]},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="prepare-caption",
+            skill_name="publish.caption.prepare",
+            depends_on=["review-select", "process-media"],
+            inputs={"platforms": ["instagram_graph"]},
+        )
+        state = RunState(
+            goal={"prompt": plan.goal.prompt},
+            metadata={},
+            node_outputs={
+                "review-select": {"approved_review_text": review_text},
+                "process-media": {"media_paths": ["C:/selected.mp4"]},
+            },
+        )
+
+        result = skills.prepare_caption(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["caption"], "The approved story is ready to share.")
+        self.assertEqual(result.outputs["hashtags"], "#Kirby #Lantern")
+        self.assertEqual(
+            result.outputs["platform_bundle"]["instagram_graph"]["caption"],
+            "The approved story is ready to share.",
+        )
+
     def test_prepare_caption_uses_edited_review_text_as_final_caption(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
@@ -976,8 +1094,8 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(youtube_title)
         self.assertNotIn("第 1 集｜主題：", youtube_title)
 
-    def test_user_given_a_serial_final_video_is_ready_when_discord_review_starts_then_only_public_copy_is_sent(self) -> None:
-        """User Given a serial video is ready for publication When Discord review starts Then the review message contains publishable copy without a separate metadata message."""
+    def test_user_given_a_serial_final_video_with_approved_story_states_when_discord_review_starts_then_public_copy_and_context_are_separate(self) -> None:
+        """User Given a serial final video has approved story states When Discord review starts Then interactive copy contains only caption and hashtags while context explains continuity."""
         discord = RecordingDiscordReview()
         skills = AgentSocialSkills(
             ToolRegistry(),
@@ -996,6 +1114,10 @@ class AgentSocialSkillTests(unittest.TestCase):
                     "episode_topic": "星花引路",
                     "platforms": ["instagram_graph", "facebook", "youtube"],
                     "hashtags": ["#Kirby"],
+                    "serial_story_review_context": {
+                        "approved_start_state": "The firefly is waiting beneath the old stone bridge.",
+                        "proposed_end_state": "Kirby guides the firefly to the warm lantern garden.",
+                    },
                 },
             ),
             workflow_name="serial_video_v1",
@@ -1022,7 +1144,11 @@ class AgentSocialSkillTests(unittest.TestCase):
         )
 
         self.assertEqual(discord.request["text"], "Draft social post\n\n#kirby")
-        self.assertEqual(discord.request["context_text"], "")
+        context_text = discord.request["context_text"]
+        self.assertIn("上一集已核准狀態：", context_text)
+        self.assertIn("The firefly is waiting beneath the old stone bridge.", context_text)
+        self.assertIn("本集結尾狀態提案：", context_text)
+        self.assertIn("Kirby guides the firefly to the warm lantern garden.", context_text)
 
     def test_prepare_caption_uses_approved_review_text_without_second_llm_gate(self) -> None:
         tool_registry = ToolRegistry()

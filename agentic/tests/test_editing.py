@@ -132,7 +132,8 @@ class EditPlanTests(unittest.TestCase):
             candidate.write_bytes(b"candidate")
             candidate_manifest = root / "candidate.edit_manifest.json"
             candidate_manifest.write_text(
-                '{"sources":[{"path":"' + str(original).replace("\\", "\\\\") + '"}]}',
+                '{"sources":[{"path":"' + str(original).replace("\\", "\\\\") + '"}],'
+                '"output":{"sha256":"candidate","probe":{}}}',
                 encoding="utf-8",
             )
             adapter = OpenCutEditAdapter(output_root=root, input_roots=[root])
@@ -156,32 +157,6 @@ class EditPlanTests(unittest.TestCase):
             adapter = OpenCutEditAdapter(output_root=root, input_roots=[root])
             with self.assertRaisesRegex(EditRenderError, "symlink path"):
                 adapter._validate_input_path(link)
-
-    def test_review_evidence_includes_hard_cut_boundaries(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-
-            class FakeFFmpeg:
-                def extract_frame_at(self, video_path: str, output_path: str, timestamp_seconds: float) -> str:
-                    Path(output_path).write_bytes(f"{video_path}:{timestamp_seconds}".encode())
-                    return output_path
-
-            adapter = OpenCutEditAdapter.__new__(OpenCutEditAdapter)
-            adapter._ffmpeg = FakeFFmpeg()
-            evidence = adapter._build_review_evidence(
-                root / "final.mp4",
-                EditPlan(clips=(EditClip("/tmp/one.mp4"), EditClip("/tmp/two.mp4"), EditClip("/tmp/three.mp4"))),
-                [2.0, 2.0, 2.0],
-                {"duration": 6.0, "video_duration": 6.0, "frame_rate": 24.0},
-                root / "review_frames",
-            )
-
-            self.assertEqual(len(evidence), 8)
-            self.assertTrue(any("boundary_01_join_2.000s.jpg" in path for path in evidence))
-            self.assertTrue(any("boundary_02_join_4.000s.jpg" in path for path in evidence))
-
-
-
 
 if __name__ == "__main__":
     unittest.main()

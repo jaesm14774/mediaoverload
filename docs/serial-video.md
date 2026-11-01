@@ -4,7 +4,7 @@
 
 ## Story-first 連載流程
 
-新系列沿用命令列選定的角色作為主角。預設 `simple` 複雜度適合動畫短劇：一條清楚主線、小範圍事件和少量角色。想寫多層因果、較大事件與角色弧線時，可選 `cinematic`。
+新系列沿用命令列選定的角色作為主角。預設 `simple` 複雜度適合動畫連載短劇：整個故事有完整主線與結局，每集處理一件容易看懂的小事，並延續角色、線索、道具和場景狀態；分集數依故事自然篇幅規劃，不設三集上限。想寫多層因果、較大事件與角色弧線時，可選 `cinematic`。`episodes_per_run` 只限制單次執行製作幾集，不限制故事總集數。
 
 從 repo 根目錄啟動完整流程：
 
@@ -100,7 +100,7 @@ python -m agentic.app.main `
   --serial-character-reference "<selected_identity_image.png>"
 ~~~
 
-每集先產生故事節點、場景與鏡頭文字清單。提供集名／主題，`--goal` 可選填本集方向。輸出會列出目的、開場狀態、角色動作、道具變化、鏡頭構圖或移動、結尾狀態：
+每集先依完整系列路線和上一集人審核准的狀態，產生故事節點、場景與鏡頭文字清單。提供集名／主題，`--goal` 可選填本集方向。簡單模式也會列出角色位置、身體與情緒狀態、角色知情、關係、線索、道具持有人／位置／狀況、場景變化和下集目標，讓下一集有明確起點：
 
 ~~~powershell
 python -m agentic.app.main `
@@ -139,7 +139,9 @@ python -m agentic.app.main `
 
 ## 目前可操作的流程
 
-新集生成完成且最終影片技術 QA 通過後，Discord 最終發布審核只顯示即將發布的文案與標籤。Accept 後才會把審核通過的公開內容送到已啟用的平台；集數、主題與工作流資訊只留在內部故事規劃和 MySQL 紀錄，不放進發布審核內容。各平台的結果、錯誤與 provider receipt 都記到 episode_publications。拒絕、逾時、Discord 無法審核或發布失敗，都會留下可辨識的狀態；技術 QA 通過不代表影片已發布。
+新集生成完成且最終影片技術 QA 通過後，既有 Discord 最終審核會附上完整成片、公開文案，以及上一集核准狀態和本集提出的結尾狀態。創作者直接判斷整集故事、節奏、角色與道具銜接；不使用 LLM 故事品質評分或額外語意 QA。Accept 會將本集結尾狀態連同核准者、審核 session 和成片 SHA 寫入系列狀態，並核准公開文案進入發布流程。集數、主題與工作流資訊不會加進公開文案。各平台的結果、錯誤與 provider receipt 都記到 episode_publications。拒絕、逾時或 Discord 無法審核時，系列狀態不前進且不發布；技術 QA 通過只代表影片技術檢查完成。
+
+更新前的系列若只有舊版技術 QA 寫入的 ending 摘要，不會被當作人審核准狀態自動續集；需從新系列開始。系統不會把舊摘要自動升級成連續狀態。
 
 連載策略整合在既有 `run_media_interface.py` 入口中，不需要另外執行 PowerShell 腳本，也沒有新增瀏覽器頁面。角色 YAML 的 `generation.serial_video` 控制預設片長、連跑集數、風格、輸出目錄、故事複雜度、Discord 審核逾時與固定身份參考圖；啟用的平台和發布設定沿用同一份角色 YAML 的 `social_media.platforms`。
 
@@ -163,7 +165,7 @@ flowchart LR
 
 第 1 段使用前集已接受的集尾影格和固定角色參考圖做 Ref2VA，同集後續段使用已接受片段的尾幀做 I2VA。每段都要經過技術 QA 和 Discord 接受，才能作為下一段的參考或進入最終組裝。
 
-最終發布審核卡只顯示即將發布的文案與標籤；接受後發布審核中確認的內容，不額外加入集數、主題或工作流說明。一般 Accept 會發布並讓系列繼續；「完成系列並發布本集」會發布本集並把系列標為 completed；「廢棄系列」會標為 discarded，並拒絕發布本集。新集生成後不按終止選項，系列預設仍為 active。
+最終審核將成片與故事連續狀態放在內部審核內容，公開文案仍只含核准的 caption 和 hashtags。一般 Accept 會核准狀態並發布，系列保持 active；「完成系列並發布本集」會發布本集並把系列標為 completed；「廢棄系列」會標為 discarded，並拒絕發布本集。新集生成後不按終止選項，系列預設仍為 active。影片技術檢查和整集創作判斷分開：前者只處理成片技術狀態，後者完全由創作者決定。
 
 ## MySQL 資料表
 
@@ -179,9 +181,9 @@ serial_video_mysql_password=<your-generated-password>
 
 | 資料表 | 一列代表什麼 |
 |---|---|
-| series | 固定角色的系列與目前故事狀態 |
+| series | 固定角色的系列與最近一次人審核准的連續狀態 |
 | series_story_plans | 完整系列故事草稿、新聞靈感快照、人工決定與 SHA-256；角色核准前獨立於 production series |
-| episodes | 一集的一個版本，含主題、總片長、前集、狀態、最終影片路徑與 SHA-256 |
+| episodes | 一集的一個版本，含主題、總片長、前集、故事狀態提案與起始狀態、最終影片路徑與 SHA-256 |
 | episode_plans | 綁定該集的執行計畫及其 SHA-256 |
 | segments | 有序故事段落、預計片長、目前與已接受的 render、尾幀狀態 |
 | render_attempts | 每次 H3 生成、條件輸入、輸出檔案與 SHA-256 |
@@ -257,7 +259,7 @@ python run_media_interface.py --character kirby --generation-type serial_video
 
 不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 40；若抽中連載，會直接交給同一個連載 runner，執行故事、角色與首集大綱的 Discord 審核，再接續影片流程。審核遭拒、逾時或生成失敗時，入口會回報 blocked／failed，不會假裝整個流程成功。
 
-預設 `simple` 是短劇模式：一件小事、少量角色、簡單結果。要提高故事層次時可加 `--story-complexity cinematic`；也能在角色 YAML 的 `generation.serial_video.story_complexity` 設定預設值。
+預設 `simple` 是連載短劇模式：全系列有完整結局，每集是一件小事、少量角色和簡單結果；分集路線沒有三集上限，且會把人審核准的狀態帶到下一集。要提高故事層次時可加 `--story-complexity cinematic`；也能在角色 YAML 的 `generation.serial_video.story_complexity` 設定預設值。`episodes_per_run` 控制一次生成的集數，和故事規劃集數分開。
 
 Kirby 預設每次跑一集、每集 30 秒。想一次連跑五集、每集 60 秒：
 
@@ -281,7 +283,7 @@ serial_video:
 
 這個角色設定會套用到每個片段審核和最終發布審核；設定值優先於命令列值。未設定時使用 1800 秒預設值。
 
-每集送 Discord 審核和發布完成後，才會開始下一集。自動策略先查找目前格式的最新失敗集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若 Discord 審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
+每集送 Discord 審核、核准狀態並完成發布流程後，才會開始下一集。自動策略先查找目前格式的最新失敗集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若片段審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若續集尚無下一集大綱，系統會先依完整故事路線和人審核准狀態產生大綱，等待 Discord 接受後才產片。若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
 
 使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
 

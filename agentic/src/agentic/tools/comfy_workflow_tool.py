@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from typing import Any
 
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.registry import ToolRegistry
+from agentic.tools.comfy_backend import ComfyPromptTiming, get_object_info_for_nodes
 from agentic.tools.comfy_adapter import ComfyAdapter
 
 
@@ -88,17 +90,23 @@ class ComfyWorkflowToolset:
         return handler
 
     def execute(self, spec_name: str, payload: dict[str, object]) -> dict[str, object]:
+        execution_started = time.perf_counter()
+        execution_timings: dict[str, Any] = {"candidate_runs": []}
         spec = self.specs[spec_name]
         merged_payload: dict[str, Any] = {**spec.default_payload, **payload}
         requested_workflow_name = str(merged_payload.get("workflow_name") or spec.workflow_name)
+        phase_started = time.perf_counter()
         manifest = self.asset_registry.get_manifest(requested_workflow_name)
         workflow_path = self.asset_registry.materialize_workflow(manifest)
         workflow = self.adapter.load_workflow(workflow_path)
         run_dir = Path(str(merged_payload["run_dir"]))
-        run_dir.mkdir(parents=True, exist_ok=True)
+        execution_timings["workflow_load_seconds"] = time.perf_counter() - phase_started
 
+        phase_started = time.perf_counter()
         self._check_server()
+        execution_timings["server_check_seconds"] = time.perf_counter() - phase_started
 
+        phase_started = time.perf_counter()
         try:
             generator_kwargs: dict[str, Any] = {"host": self.comfy_host, "port": self.comfy_port}
             if spec.timeout_seconds is not None:
@@ -106,67 +114,44 @@ class ComfyWorkflowToolset:
             generator = self.adapter.build_generator(**generator_kwargs)
         except Exception as exc:
             raise RuntimeError(self._connection_error_message()) from exc
+        execution_timings["generator_setup_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         self._check_required_node_types(generator, spec)
+        execution_timings["node_preflight_seconds"] = time.perf_counter() - phase_started
         runtime_workflow = workflow
         model_overrides = self._resolve_model_overrides(spec, merged_payload)
         if model_overrides:
-            runtime_workflow = self._apply_model_overrides(runtime_workflow, model_overrides)
+            runtime_workflow = self._apply_model_overrides(
+                runtime_workflow, model_overrides
+            )
             merged_payload["model_overrides"] = model_overrides
         output_dir = run_dir / spec.output_folder
         output_dir.mkdir(parents=True, exist_ok=True)
         render_count = max(1, int(merged_payload.get(spec.count_payload_key, 1)))
-        saved_files: list[str] = []
-        render_attempts: list[dict[str, Any]] = []
-        memory_retry_count = 0
         base_seed = merged_payload.get("seed")
         if spec.seed_enabled:
             if base_seed is None:
                 base_seed = random.randint(1, 999999999)
             base_seed = int(base_seed)
         try:
-            for run_index in range(render_count):
-                iteration_payload = dict(merged_payload)
-                if spec.seed_enabled:
-                    iteration_payload["seed"] = (base_seed + run_index) % (2**64)
-                updates = self._build_updates(
-                    spec,
-                    workflow_path,
-                    iteration_payload,
-                    generator,
-                    workflow=runtime_workflow if model_overrides else None,
-                )
-                run_suffix = spec.file_prefix if render_count == 1 else f"{spec.file_prefix}_{run_index + 1:02d}"
-                generate_kwargs = {
-                    "workflow_path": str(workflow_path),
-                    "updates": updates,
-                    "output_dir": str(output_dir),
-                    "file_prefix": run_suffix,
-                }
-                if model_overrides:
-                    generate_kwargs["workflow"] = runtime_workflow
-                try:
-                    rendered_files = generator.generate(**generate_kwargs)
-                except Exception as exc:
-                    # Recover actual image memory pressure by releasing cached
-                    # models, then retry the exact same recipe once;
-                    # never switch to another workflow as an implicit fallback.
-                    if not self._is_memory_error(exc):
-                        raise
-                    self._release_comfy_memory(generator)
-                    memory_retry_count += 1
-                    rendered_files = generator.generate(**generate_kwargs)
-                saved_files.extend(rendered_files)
-                render_attempts.append(
-                    {
-                        "candidate_index": run_index + 1,
-                        "seed": iteration_payload.get("seed"),
-                        "saved_files": list(rendered_files),
-                    }
-                )
+            saved_files, render_attempts, memory_retry_count = self._generate_candidates(
+                spec=spec,
+                merged_payload=merged_payload,
+                generator=generator,
+                workflow_path=workflow_path,
+                runtime_workflow=runtime_workflow,
+                output_dir=output_dir,
+                render_count=render_count,
+                base_seed=base_seed,
+                execution_timings=execution_timings,
+            )
         except Exception as exc:
             raise RuntimeError(f"ComfyUI generation failed for {spec_name}: {exc}") from exc
 
         summary_path = run_dir / f"{spec.file_prefix}_summary.json"
+        execution_timings["generation_pipeline_seconds"] = (
+            time.perf_counter() - execution_started
+        )
         summary = {
             "tool_name": spec_name,
             "workflow_name": manifest.name,
@@ -176,6 +161,7 @@ class ComfyWorkflowToolset:
             "render_attempts": render_attempts,
             "payload": self._serialize_payload(merged_payload),
             "memory_retry_count": memory_retry_count,
+            "execution_timings": execution_timings,
             "comfy_host": self.comfy_host or "127.0.0.1",
             "comfy_port": self.comfy_port or 8188,
         }
@@ -187,12 +173,90 @@ class ComfyWorkflowToolset:
             "summary_path": str(summary_path),
             "workflow_name": manifest.name,
             "memory_retry_count": memory_retry_count,
+            "execution_timings": execution_timings,
         }
         if not saved_files:
             fallback = merged_payload.get("image_path") or merged_payload.get("input_image_path")
             if fallback:
                 result["image_path"] = str(fallback)
         return result
+
+    def _generate_candidates(
+        self,
+        *,
+        spec: ComfyWorkflowSpec,
+        merged_payload: dict[str, Any],
+        generator: Any,
+        workflow_path: Path,
+        runtime_workflow: dict[str, Any],
+        output_dir: Path,
+        render_count: int,
+        base_seed: int | None,
+        execution_timings: dict[str, Any],
+    ) -> tuple[list[str], list[dict[str, Any]], int]:
+        image_path = merged_payload.get("image_path") or merged_payload.get("input_image_path")
+        phase_started = time.perf_counter()
+        uploaded_image_filename = (
+            generator.upload_image(str(image_path)).comfy_path
+            if spec.image_binding and image_path
+            else None
+        )
+        execution_timings["input_upload_seconds"] = time.perf_counter() - phase_started
+        saved_files: list[str] = []
+        render_attempts: list[dict[str, Any]] = []
+        memory_retry_count = 0
+        for run_index in range(render_count):
+            iteration_payload = dict(merged_payload)
+            if spec.seed_enabled:
+                iteration_payload["seed"] = (base_seed + run_index) % (2**64)
+            phase_started = time.perf_counter()
+            updates = self._build_updates(
+                spec,
+                workflow_path,
+                iteration_payload,
+                image_filename=uploaded_image_filename,
+                workflow=runtime_workflow,
+            )
+            update_build_seconds = time.perf_counter() - phase_started
+            run_suffix = (
+                spec.file_prefix
+                if render_count == 1
+                else f"{spec.file_prefix}_{run_index + 1:02d}"
+            )
+            comfy_runs: list[ComfyPromptTiming] = []
+            generate_kwargs = {
+                "workflow_path": str(workflow_path),
+                "updates": updates,
+                "output_dir": str(output_dir),
+                "file_prefix": run_suffix,
+                "timing_sink": comfy_runs,
+                "workflow": runtime_workflow,
+            }
+            try:
+                rendered_files = generator.generate(**generate_kwargs)
+            except Exception as exc:
+                # Retry the same recipe once after releasing cached models on memory pressure.
+                if not self._is_memory_error(exc):
+                    raise
+                self._release_comfy_memory(generator)
+                memory_retry_count += 1
+                rendered_files = generator.generate(**generate_kwargs)
+            saved_files.extend(rendered_files)
+            candidate_timing = {
+                "candidate_index": run_index + 1,
+                "update_build_seconds": update_build_seconds,
+                "comfy_runs": comfy_runs,
+            }
+            execution_timings["candidate_runs"].append(candidate_timing)
+            render_attempts.append(
+                {
+                    "candidate_index": run_index + 1,
+                    "seed": iteration_payload.get("seed"),
+                    "saved_files": list(rendered_files),
+                    "timings": candidate_timing,
+                }
+            )
+        return saved_files, render_attempts, memory_retry_count
 
     @staticmethod
     def _is_memory_error(error: BaseException) -> bool:
@@ -214,8 +278,8 @@ class ComfyWorkflowToolset:
         spec: ComfyWorkflowSpec,
         workflow_path: Path,
         payload: dict[str, Any],
-        generator: Any,
         *,
+        image_filename: str | None,
         workflow: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         updates: list[dict[str, Any]] = []
@@ -236,7 +300,8 @@ class ComfyWorkflowToolset:
         image_path = payload.get("image_path") or payload.get("input_image_path")
         image_binding = spec.image_binding
         if image_binding and image_path:
-            image_filename = generator.upload_image(str(image_path))
+            if not image_filename:
+                raise ValueError("ComfyUI image input must be uploaded before candidate rendering")
             updates.append(self._binding_update(image_binding, image_filename, str(workflow_path)))
 
         seed = payload.get("seed")
@@ -296,14 +361,18 @@ class ComfyWorkflowToolset:
 
     @staticmethod
     def _check_required_node_types(generator: Any, spec: ComfyWorkflowSpec) -> None:
-        missing: list[str] = []
-        for node_type in spec.required_node_types:
-            try:
-                info = generator.get_object_info(node_type)
-            except Exception:
-                info = {}
-            if not isinstance(info, dict) or not info.get(node_type):
-                missing.append(node_type)
+        if not spec.required_node_types:
+            return
+        node_info = get_object_info_for_nodes(
+            generator,
+            spec.required_node_types,
+            tolerate_errors=True,
+        )
+        missing = [
+            node_type
+            for node_type in spec.required_node_types
+            if not node_info.get(node_type)
+        ]
         if missing:
             raise RuntimeError(
                 "ComfyUI is missing required node type(s): "

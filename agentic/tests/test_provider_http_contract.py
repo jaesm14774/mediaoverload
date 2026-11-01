@@ -22,10 +22,12 @@ from PIL import Image
 import pytest
 
 from agentic.runtime.model_backends import (
+    FallbackChatModel,
     ModelConfig,
     OpenAICompatibleModel,
     ProviderRequestError,
 )
+from agentic.runtime.observability import RunRecorder
 from agentic.runtime.prompt_requests import JsonChatRequest
 from agentic.runtime.structured_chat import chat_json
 from provider_fakes import ScriptedChatModel
@@ -113,9 +115,9 @@ def endpoint(tmp_path, monkeypatch):
         server.server_close()
 
 
-def adapter(endpoint, *, supports_response_format=True):
+def adapter(endpoint, *, model_name="contract-model", supports_response_format=True):
     return OpenAICompatibleModel(
-        ModelConfig("contract-model"),
+        ModelConfig(model_name),
         provider_name="contract-provider",
         base_url=endpoint.url,
         api_key_env=("MEDIAOVERLOAD_CONTRACT_API_KEY",),
@@ -184,6 +186,42 @@ def test_user_given_a_real_image_when_calling_a_vision_provider_then_the_request
     )
 
 
+def test_user_given_a_real_image_and_primary_provider_failure_when_vision_falls_back_then_each_provider_receives_the_original_image(
+    endpoint,
+    tmp_path,
+):
+    """User Given a real image and a primary provider failure When vision falls back to another provider Then both HTTP requests carry the original image bytes and the fallback result is returned."""
+    image = tmp_path / "fallback-reference.png"
+    Image.new("RGB", (32, 32), "blue").save(image)
+    endpoint.responses.put((503, {"error": "temporarily unavailable"}, {}))
+    endpoint.responses.put((200, completion("A blue square."), {}))
+    model = FallbackChatModel(
+        adapter(endpoint, model_name="primary-model"),
+        adapter(endpoint, model_name="fallback-model"),
+    )
+
+    result = model.chat_completion(
+        [{"role": "user", "content": "Describe this image."}],
+        images=[str(image)],
+        max_retries=1,
+    )
+
+    assert result == "A blue square."
+    assert [request["payload"]["model"] for request in endpoint.requests] == [
+        "primary-model",
+        "fallback-model",
+    ]
+    encoded_images = [
+        request["payload"]["messages"][0]["content"][1]["image_url"]["url"]
+        for request in endpoint.requests
+    ]
+    assert all(
+        base64.b64decode(value.split(",", 1)[1]) == image.read_bytes()
+        for value in encoded_images
+    )
+    assert encoded_images[0] == encoded_images[1]
+
+
 def test_user_given_an_incompatible_schema_provider_when_requesting_json_then_the_wire_request_respects_its_capability(
     endpoint,
 ):
@@ -204,14 +242,17 @@ def test_user_given_a_rate_limited_provider_when_retry_is_allowed_then_a_later_h
     """User Given a provider response with a zero-delay retry instruction When retry is allowed Then the eventual successful HTTP response is returned."""
     endpoint.responses.put((429, {"error": "rate limited"}, {"Retry-After": "0"}))
     endpoint.responses.put((200, completion("Recovered."), {}))
+    model = adapter(endpoint)
     assert (
-        adapter(endpoint).chat_completion(
+        model.chat_completion(
             [{"role": "user", "content": "Continue."}],
             max_retries=2,
             initial_retry_delay=0,
         )
         == "Recovered."
     )
+    assert model.last_attempts[0]["request_count"] == 2
+    assert model.last_attempts[0]["status"] == "success"
 
 
 def test_user_given_a_failed_http_provider_when_no_retry_remains_then_failure_is_explicit(
@@ -223,3 +264,57 @@ def test_user_given_a_failed_http_provider_when_no_retry_remains_then_failure_is
         adapter(endpoint).chat_completion(
             [{"role": "user", "content": "Continue."}], max_retries=1
         )
+
+
+def test_user_given_a_provider_fallback_when_a_structured_call_is_recorded_then_elapsed_time_and_each_attempt_are_saved(
+    endpoint,
+    tmp_path,
+):
+    """User Given the first provider fails and a later provider responds When a structured LLM call is recorded Then elapsed time and each provider attempt are saved without duplicating prompt or response data."""
+    endpoint.responses.put((500, {"error": "unavailable"}, {}))
+    endpoint.responses.put((200, completion('{"ready":true}'), {}))
+    recorder = RunRecorder(tmp_path, "provider-attempt-timing")
+    manager = SimpleNamespace(
+        text_model=FallbackChatModel(
+            adapter(endpoint, model_name="primary-model"),
+            adapter(endpoint, model_name="fallback-model"),
+        )
+    )
+
+    result = chat_json(
+        JsonChatRequest(
+            manager=manager,
+            system_prompt="Return a small object.",
+            user_prompt="Return ready true.",
+            schema_name="provider_attempt_timing_v1",
+            schema={"type": "object"},
+            recorder=recorder,
+            max_retries=1,
+            repair_attempts=0,
+        )
+    )
+
+    call = json.loads(
+        next(recorder.run_dir.joinpath("llm").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["ready"] is True
+    assert call["chat_completion_elapsed_seconds"] >= 0
+    attempts = call["provider_attempts"]
+    assert [attempt["model"] for attempt in attempts] == [
+        "primary-model",
+        "fallback-model",
+    ]
+    assert [attempt["status"] for attempt in attempts] == ["failed", "success"]
+    assert all(attempt["duration_seconds"] >= 0 for attempt in attempts)
+    assert all(attempt["request_count"] == 1 for attempt in attempts)
+    assert all("messages" not in attempt and "response" not in attempt for attempt in attempts)
+    assert len(endpoint.requests) == 2
+    completed_event = next(
+        event
+        for event in map(json.loads, recorder.events_path.read_text(encoding="utf-8").splitlines())
+        if event["event"] == "llm.call.completed"
+    )
+    assert completed_event["payload"]["chat_completion_elapsed_seconds"] >= 0
+    assert completed_event["payload"]["provider_attempts_count"] == 2

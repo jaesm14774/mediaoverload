@@ -1,10 +1,38 @@
 import glob
-
-from PIL import Image
 import os
-from typing import Optional, Tuple, List
-import piexif
 from pathlib import Path
+
+import piexif
+from PIL import Image
+
+
+def _load_exif(image: Image.Image, preserve_exif: bool) -> dict | None:
+    if not preserve_exif:
+        return None
+    try:
+        return piexif.load(image.info.get('exif', b''))
+    except Exception:  # noqa: BLE001 - malformed metadata must not block conversion.
+        return None
+
+
+def _to_rgb(image: Image.Image) -> Image.Image:
+    if image.mode in ('RGBA', 'LA'):
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        background.paste(image, mask=image.split()[-1])
+        return background
+    if image.mode != 'RGB':
+        return image.convert('RGB')
+    return image
+
+
+def _dump_exif(exif_data: dict | None) -> bytes | None:
+    if not exif_data:
+        return None
+    try:
+        return piexif.dump(exif_data)
+    except Exception:  # noqa: BLE001 - malformed metadata must not block conversion.
+        return None
+
 
 class ImageConverter:
     def __init__(self, quality: int = 95):
@@ -15,7 +43,7 @@ class ImageConverter:
         self.quality = quality
         self.supported_formats = {'.png', '.jpeg', '.jpg', '.webp'}
 
-    def _get_output_path(self, input_path: str, output_dir: Optional[str] = None) -> str:
+    def _get_output_path(self, input_path: str, output_dir: str | None = None) -> str:
         """
         生成輸出檔案路徑
         """
@@ -34,7 +62,7 @@ class ImageConverter:
             
         return str(output_path)
 
-    def _check_image_size(self, image: Image.Image) -> Tuple[int, int]:
+    def _check_image_size(self, image: Image.Image) -> tuple[int, int]:
         """
         檢查並調整圖片尺寸以符合 Instagram 要求
         """
@@ -61,8 +89,8 @@ class ImageConverter:
 
     def convert_to_jpg(self, 
                       input_path: str, 
-                      output_dir: Optional[str] = None,
-                      preserve_exif: bool = True) -> Optional[str]:
+                      output_dir: str | None = None,
+                      preserve_exif: bool = True) -> str | None:
         """
         將圖片轉換為 JPG 格式
         
@@ -86,20 +114,10 @@ class ImageConverter:
             # 開啟圖片
             with Image.open(input_path) as img:
                 # 保存原始 EXIF 資料
-                exif_data = None
-                if preserve_exif:
-                    try:
-                        exif_data = piexif.load(img.info.get('exif', b''))
-                    except:
-                        pass
+                exif_data = _load_exif(img, preserve_exif)
 
                 # 轉換色彩模式
-                if img.mode in ('RGBA', 'LA'):
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    background.paste(img, mask=img.split()[-1])
-                    img = background
-                elif img.mode != 'RGB':
-                    img = img.convert('RGB')
+                img = _to_rgb(img)
 
                 # 檢查並調整尺寸
                 new_size = self._check_image_size(img)
@@ -115,23 +133,20 @@ class ImageConverter:
                     'optimize': True
                 }
                 
-                if exif_data:
-                    try:
-                        save_kwargs['exif'] = piexif.dump(exif_data)
-                    except:
-                        pass
+                if exif_bytes := _dump_exif(exif_data):
+                    save_kwargs['exif'] = exif_bytes
 
                 img.save(output_path, 'JPEG', **save_kwargs)
                 print(f"圖片轉換成功: {output_path}")
                 return output_path
 
-        except Exception as e:
-            print(f"轉換圖片時發生錯誤: {str(e)}")
+        except Exception as e:  # noqa: BLE001 - the public conversion contract returns None on failure.
+            print(f"轉換圖片時發生錯誤: {e!s}")
             return None
 
     def batch_convert(self, 
-                     input_paths: List[str], 
-                     output_dir: Optional[str] = None) -> List[str]:
+                     input_paths: list[str],
+                     output_dir: str | None = None) -> list[str]:
         """
         批次轉換多張圖片
         
@@ -157,7 +172,7 @@ class ImageProcessor:
             
         self.image_folder = image_folder
         
-    def get_image_files(self) -> List[str]:
+    def get_image_files(self) -> list[str]:
         """取得資料夾下所有圖片檔案"""
         types = ('*.png', '*.jpg', '*.jpeg')
         image_files = []
@@ -172,15 +187,12 @@ class ImageProcessor:
         # 取得所有圖片檔案
         image_files = self.get_image_files()
         
-        # 轉換非jpg檔案並刪除原始檔
-        converted_paths = converter.batch_convert(
-            input_paths=[f for f in image_files if not f.lower().endswith('.jpg')],
-            output_dir=self.image_folder
-        )
-        
-        # 刪除已轉換的原始檔
+        # 只有成功產生 JPG 後才刪除來源，失敗時保留原始資料。
         for path in image_files:
-            if not path.lower().endswith('.jpg'):
+            if (
+                not path.lower().endswith('.jpg')
+                and converter.convert_to_jpg(path, output_dir=self.image_folder)
+            ):
                 os.remove(path)
         
         # 更新轉換後的檔案清單

@@ -21,6 +21,9 @@ from agentic.runtime.editing import (
 from agentic.tools.ffmpeg_adapter import FFMPEG_COMMAND_TIMEOUT_SECONDS, FFmpegAdapter
 
 
+MAX_REVIEW_EVIDENCE_FRAMES = 24
+
+
 class EditRenderError(RuntimeError):
     """Raised when a deterministic timeline cannot be rendered."""
 
@@ -202,35 +205,41 @@ class OpenCutEditAdapter:
             manifest_path or str(output.with_suffix(".edit_manifest.json")),
             "manifest",
         )
-        manifest_data = json.loads(source_manifest.read_text(encoding="utf-8"))
-        if not isinstance(manifest_data, dict):
-            raise EditRenderError("Selected edit candidate manifest is not an object")
-        source_paths = {
-            Path(str(item.get("path"))).expanduser().resolve()
-            for item in (manifest_data.get("sources") or [])
-            if isinstance(item, dict) and str(item.get("path") or "").strip()
-        }
+        manifest_data, source_paths = self._read_materialization_manifest(source_manifest)
+        output_evidence = manifest_data.get("output")
+        if not isinstance(output_evidence, dict):
+            raise EditRenderError("Selected edit candidate manifest is missing output evidence")
+        expected_sha256 = str(output_evidence.get("sha256") or "")
+        final_probe = output_evidence.get("probe")
+        if not expected_sha256 or not isinstance(final_probe, dict):
+            raise EditRenderError("Selected edit candidate manifest is missing output integrity evidence")
         contact_file = None
         if contact_sheet_path:
             if not source_contact.is_file():
                 raise EditRenderError("Selected edit candidate is missing its contact sheet")
             self._resolve_output_path(str(source_contact), "candidate contact sheet")
             contact_file = self._resolve_output_path(contact_sheet_path, "contact sheet")
-        artifact_paths = {output, manifest_file}
-        if contact_file:
-            artifact_paths.add(contact_file)
-        self._reject_artifact_collisions(artifact_paths, source_paths)
-        if len(artifact_paths) != 2 + int(contact_file is not None):
-            raise EditRenderError("Edit materialization artifacts must use distinct paths")
-        if manifest_file in {source_video, source_contact} or (contact_file and contact_file in {source_video, source_manifest}):
-            raise EditRenderError("Edit materialization artifacts cannot overwrite candidate media")
+        self._validate_materialization_artifacts(
+            output,
+            manifest_file,
+            contact_file,
+            source_video,
+            source_manifest,
+            source_contact,
+            source_paths,
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
         if source_video != output:
-            self._copy_atomic(source_video, output)
-        final_probe = self._ffmpeg.probe_media(str(output))
+            self._copy_atomic(
+                source_video,
+                output,
+                expected_sha256=expected_sha256,
+            )
+        elif self._sha256(output) != expected_sha256:
+            raise EditRenderError("Selected edit candidate changed before materialization")
         manifest_data["output"] = {
             "path": str(output),
-            "sha256": self._sha256(output),
+            "sha256": expected_sha256,
             "probe": final_probe,
         }
         self._write_json_atomic(manifest_file, manifest_data)
@@ -249,6 +258,41 @@ class OpenCutEditAdapter:
         )
         return materialized
 
+    @staticmethod
+    def _read_materialization_manifest(
+        source_manifest: Path,
+    ) -> tuple[dict[str, Any], set[Path]]:
+        manifest_data = json.loads(source_manifest.read_text(encoding="utf-8"))
+        if not isinstance(manifest_data, dict):
+            raise EditRenderError("Selected edit candidate manifest is not an object")
+        source_paths = {
+            Path(str(item.get("path"))).expanduser().resolve()
+            for item in (manifest_data.get("sources") or [])
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        }
+        return manifest_data, source_paths
+
+    def _validate_materialization_artifacts(
+        self,
+        output: Path,
+        manifest_file: Path,
+        contact_file: Path | None,
+        source_video: Path,
+        source_manifest: Path,
+        source_contact: Path,
+        source_paths: set[Path],
+    ) -> None:
+        artifact_paths = {output, manifest_file}
+        if contact_file:
+            artifact_paths.add(contact_file)
+        self._reject_artifact_collisions(artifact_paths, source_paths)
+        if len(artifact_paths) != 2 + int(contact_file is not None):
+            raise EditRenderError("Edit materialization artifacts must use distinct paths")
+        if manifest_file in {source_video, source_contact} or (
+            contact_file and contact_file in {source_video, source_manifest}
+        ):
+            raise EditRenderError("Edit materialization artifacts cannot overwrite candidate media")
+
     def _write_json_atomic(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-manifest-", dir=str(self.output_root)) as temp_root:
@@ -256,11 +300,19 @@ class OpenCutEditAdapter:
             temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
             os.replace(temporary, path)
 
-    def _copy_atomic(self, source: Path, destination: Path) -> None:
+    def _copy_atomic(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        expected_sha256: str | None = None,
+    ) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="mediaoverload-edit-copy-", dir=str(self.output_root)) as temp_root:
             temporary = Path(temp_root) / destination.name
             shutil.copy2(source, temporary)
+            if expected_sha256 is not None and self._sha256(temporary) != expected_sha256:
+                raise EditRenderError("Selected edit candidate changed before materialization")
             os.replace(temporary, destination)
 
     def _build_review_evidence(
@@ -282,25 +334,50 @@ class OpenCutEditAdapter:
         if duration <= 0 or fps <= 0:
             return []
         times: list[tuple[str, float]] = [("opening", 0.0)]
-        if plan.transitions:
-            current_duration = float(durations[0])
-            boundaries = []
-            for index, transition in enumerate(plan.transitions, start=1):
-                boundaries.append((index, max(0.0, current_duration - transition.duration_seconds / 2.0)))
-                current_duration += float(durations[index]) - transition.duration_seconds
-        else:
-            boundaries = []
-            current_duration = 0.0
-            for index, clip_duration in enumerate(durations[:-1], start=1):
-                current_duration += float(clip_duration)
-                boundaries.append((index, current_duration))
-        for index, boundary in boundaries:
+        for index, boundary in self._review_join_boundaries(plan, durations):
             if boundary >= duration:
                 continue
             for label, offset in (("before", -0.12), ("join", 0.0), ("after", 0.12)):
                 times.append((f"boundary_{index:02d}_{label}", boundary + offset))
         times.append(("ending", max(0.0, duration - (1.0 / fps))))
         evidence_dir.mkdir(parents=True, exist_ok=True)
+        unique = self._unique_review_evidence_times(times, duration, fps)
+        selected = self._select_review_evidence_frames(unique)
+        paths = [
+            str(evidence_dir / f"{label}_{timestamp:.3f}s.jpg")
+            for label, timestamp in selected
+        ]
+        self._ffmpeg.extract_frames_at(
+            str(output),
+            paths,
+            [timestamp for _, timestamp in selected],
+        )
+        return paths
+
+    @staticmethod
+    def _review_join_boundaries(
+        plan: EditPlan,
+        durations: list[float],
+    ) -> list[tuple[int, float]]:
+        boundaries: list[tuple[int, float]] = []
+        if plan.transitions:
+            current_duration = float(durations[0])
+            for index, transition in enumerate(plan.transitions, start=1):
+                boundaries.append((index, max(0.0, current_duration - transition.duration_seconds / 2.0)))
+                current_duration += float(durations[index]) - transition.duration_seconds
+            return boundaries
+        current_duration = 0.0
+        for index, clip_duration in enumerate(durations[:-1], start=1):
+            current_duration += float(clip_duration)
+            boundaries.append((index, current_duration))
+        return boundaries
+
+    @staticmethod
+    def _unique_review_evidence_times(
+        times: list[tuple[str, float]],
+        duration: float,
+        fps: float,
+    ) -> list[tuple[str, float]]:
         unique: list[tuple[str, float]] = []
         seen: set[float] = set()
         max_timestamp = max(0.0, duration - (1.0 / fps))
@@ -311,12 +388,22 @@ class OpenCutEditAdapter:
                 continue
             seen.add(rounded)
             unique.append((label, timestamp))
-        paths: list[str] = []
-        for label, timestamp in unique[:24]:
-            frame_path = evidence_dir / f"{label}_{timestamp:.3f}s.jpg"
-            self._ffmpeg.extract_frame_at(str(output), str(frame_path), timestamp)
-            paths.append(str(frame_path))
-        return paths
+        return unique
+
+    @staticmethod
+    def _select_review_evidence_frames(
+        unique: list[tuple[str, float]],
+    ) -> list[tuple[str, float]]:
+        if len(unique) <= MAX_REVIEW_EVIDENCE_FRAMES:
+            return unique
+        interior = unique[1:-1]
+        selected_count = MAX_REVIEW_EVIDENCE_FRAMES - 2
+        last_index = len(interior) - 1
+        indices = [
+            round(index * last_index / (selected_count - 1))
+            for index in range(selected_count)
+        ]
+        return [unique[0], *(interior[index] for index in indices), unique[-1]]
 
     def _source_records(self, plan: EditPlan) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
@@ -368,8 +455,6 @@ class OpenCutEditAdapter:
         """Snapshot an approved source so FFmpeg cannot follow a later path swap."""
 
         validated = self._validate_input_path(source)
-        if self._sha256(validated) != expected_sha256:
-            raise EditRenderError(f"Edit input changed during validation: {validated}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(validated, destination)
         if self._sha256(destination) != expected_sha256:
@@ -474,36 +559,72 @@ class OpenCutEditAdapter:
         fps = max(1, round(plan.fps))
         frames = max(1, round(duration * fps))
         fit = f"scale={width}:{height}:force_original_aspect_ratio=increase"
-        if Path(clip.path).suffix.lower() not in IMAGE_SUFFIXES:
-            if clip.motion == "none":
-                return f"{fit},crop={width}:{height}:(in_w-out_w)/2:(in_h-out_h)/2,setsar=1,fps={plan.fps:.6g},format=yuv420p"
-            overscan = "scale=ceil(iw*1.08/2)*2:ceil(ih*1.08/2)*2"
-            denominator = max(1, frames - 1)
-            if clip.motion == "slow_zoom_in":
-                zoom = f"(1+0.08*n/{denominator})"
-                crop = (
-                    f"crop=w='trunc(iw/{zoom}/2)*2':h='trunc(ih/{zoom}/2)*2':"
-                    "x='(iw-ow)/2':y='(ih-oh)/2'"
-                )
-            elif clip.motion == "slow_zoom_out":
-                zoom = f"(1.08-0.08*n/{denominator})"
-                crop = (
-                    f"crop=w='trunc(iw/{zoom}/2)*2':h='trunc(ih/{zoom}/2)*2':"
-                    "x='(iw-ow)/2':y='(ih-oh)/2'"
-                )
-            elif clip.motion == "pan_left":
-                crop = f"crop={width}:{height}:x='(iw-ow)*n/{denominator}':y='(ih-oh)/2'"
-            elif clip.motion == "pan_right":
-                crop = f"crop={width}:{height}:x='(iw-ow)*(1-n/{denominator})':y='(ih-oh)/2'"
-            elif clip.motion == "drift_up":
-                crop = f"crop={width}:{height}:x='(iw-ow)/2':y='(ih-oh)*n/{denominator}'"
-            else:
-                crop = f"crop={width}:{height}:x='(iw-ow)/2':y='(ih-oh)*(1-n/{denominator})'"
-            return f"{fit},{overscan},{crop},scale={width}:{height},setsar=1,fps={plan.fps:.6g},format=yuv420p"
+        if Path(clip.path).suffix.lower() in IMAGE_SUFFIXES:
+            return self._image_motion_filter(
+                clip.motion,
+                fit=fit,
+                width=width,
+                height=height,
+                fps=plan.fps,
+                frames=frames,
+            )
+        return self._video_motion_filter(
+            clip.motion,
+            fit=fit,
+            width=width,
+            height=height,
+            fps=plan.fps,
+            frames=frames,
+        )
 
+    @staticmethod
+    def _video_motion_filter(
+        motion: str,
+        *,
+        fit: str,
+        width: int,
+        height: int,
+        fps: float,
+        frames: int,
+    ) -> str:
+        if motion == "none":
+            return f"{fit},crop={width}:{height}:(in_w-out_w)/2:(in_h-out_h)/2,setsar=1,fps={fps:.6g},format=yuv420p"
+        overscan = "scale=ceil(iw*1.08/2)*2:ceil(ih*1.08/2)*2"
+        denominator = max(1, frames - 1)
+        if motion == "slow_zoom_in":
+            zoom = f"(1+0.08*n/{denominator})"
+            crop = (
+                f"crop=w='trunc(iw/{zoom}/2)*2':h='trunc(ih/{zoom}/2)*2':"
+                "x='(iw-ow)/2':y='(ih-oh)/2'"
+            )
+        elif motion == "slow_zoom_out":
+            zoom = f"(1.08-0.08*n/{denominator})"
+            crop = (
+                f"crop=w='trunc(iw/{zoom}/2)*2':h='trunc(ih/{zoom}/2)*2':"
+                "x='(iw-ow)/2':y='(ih-oh)/2'"
+            )
+        elif motion == "pan_left":
+            crop = f"crop={width}:{height}:x='(iw-ow)*n/{denominator}':y='(ih-oh)/2'"
+        elif motion == "pan_right":
+            crop = f"crop={width}:{height}:x='(iw-ow)*(1-n/{denominator})':y='(ih-oh)/2'"
+        elif motion == "drift_up":
+            crop = f"crop={width}:{height}:x='(iw-ow)/2':y='(ih-oh)*n/{denominator}'"
+        else:
+            crop = f"crop={width}:{height}:x='(iw-ow)/2':y='(ih-oh)*(1-n/{denominator})'"
+        return f"{fit},{overscan},{crop},scale={width}:{height},setsar=1,fps={fps:.6g},format=yuv420p"
+
+    @staticmethod
+    def _image_motion_filter(
+        motion: str,
+        *,
+        fit: str,
+        width: int,
+        height: int,
+        fps: float,
+        frames: int,
+    ) -> str:
         zoomed = "scale=ceil(iw*1.18/2)*2:ceil(ih*1.18/2)*2"
         denominator = max(1, frames - 1)
-        motion = clip.motion
         if motion == "slow_zoom_in":
             zoom = f"min(1+0.10*on/{denominator},1.10)"
             x = "iw/2-(iw/zoom/2)"
@@ -533,7 +654,7 @@ class OpenCutEditAdapter:
             x = "iw/2-(iw/zoom/2)"
             y = "ih/2-(ih/zoom/2)"
         return (
-            f"{fit},{zoomed},zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={plan.fps:.6g},"
+            f"{fit},{zoomed},zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps:.6g},"
             "setsar=1,format=yuv420p"
         )
 
@@ -673,7 +794,10 @@ class OpenCutEditAdapter:
                     ]
                 )
                 os.replace(padded, output)
-        if float(self._ffmpeg.probe_media(str(output)).get("duration") or 0.0) > target_duration + 0.03:
+            current_duration = float(
+                self._ffmpeg.probe_media(str(output)).get("duration") or 0.0
+            )
+        if current_duration > target_duration + 0.03:
             self._trim_output(output, target_duration)
 
     @staticmethod

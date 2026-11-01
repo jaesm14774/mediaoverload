@@ -74,6 +74,38 @@ class CreativeProfileTests(unittest.TestCase):
                     self.assertIn("a masked knight", brief)
                     self.assertNotIn("Kirby protects", brief)
 
+    def test_user_given_a_krea2_style_when_goal_payload_is_built_then_profile_and_summary_use_the_same_catalog(self) -> None:
+        """User Given a configured Krea2 style When the goal payload is built Then its selected profile is available and the summary reports the catalog's style count."""
+        profiles = StyleLibrary().profiles()
+        original = self.kirby_config.read_text(encoding="utf-8")
+        config = yaml.safe_load(original)
+        selected_id = next(iter(profiles))
+        config["character"].pop("group_name", None)
+        config["generation"]["subject_mode"] = "single"
+        config["generation"]["creative_profile"]["style"].update(
+            mode="fixed", fixed=selected_id
+        )
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.yaml"
+            path.write_text(yaml.safe_dump(config), encoding="utf-8")
+            payload = build_goal_payload_from_character_config(
+                make_character_workflow_request(
+                    self.repo_root,
+                    path,
+                    prompt="Kirby inspects a glowing mechanism",
+                    preferred_generation_type="text2img",
+                    publish_after_generate=False,
+                )
+            )
+
+        self.assertEqual(
+            payload["constraints"]["visual_style_profile"]["id"], selected_id
+        )
+        self.assertEqual(
+            payload["character_config_summary"]["style_count"], len(profiles)
+        )
+
     def test_fixed_canvas_and_style_are_resolved_from_config(self) -> None:
         profile = resolve_creative_profile(
             {

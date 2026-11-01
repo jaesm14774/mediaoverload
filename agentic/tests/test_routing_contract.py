@@ -9,7 +9,11 @@ from unittest.mock import patch
 
 import yaml
 
-from agentic.app.generation_routing import _build_h3_reference_runtime_context
+from agentic.app.generation_routing import (
+    _build_h3_reference_runtime_context,
+    _load_global_routing_config,
+    _route_generation_from_character_config,
+)
 from agentic.app.character_payload import build_goal_payload_from_character_config
 from agentic.assets.registry import AssetRegistry
 from agentic.runtime.route_selection import select_weighted_route
@@ -41,6 +45,75 @@ class RoutingContractTests(unittest.TestCase):
             workflow_names - set(self.hints["workflow_descriptions"]),
             set(),
         )
+
+    def test_user_given_workflow_names_and_paths_when_routing_resolves_stages_then_both_workflows_are_retained(self) -> None:
+        """User Given workflow stages are configured by a workflow name and a file path When routing resolves the stage candidates Then both references identify their existing workflow files."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow_dir = root / "configs" / "workflow"
+            workflow_dir.mkdir(parents=True)
+            (workflow_dir / "image-stage.json").write_text("{}", encoding="utf-8")
+            (workflow_dir / "video-stage.json").write_text("{}", encoding="utf-8")
+            routing_dir = root / "configs"
+            (routing_dir / "routing.yaml").write_text(
+                "routing:\n"
+                "  enabled: true\n"
+                "  workflow_stage_candidates:\n"
+                "    text2image2video:\n"
+                "      image_workflow_name: [image-stage]\n"
+                "      video_workflow_name: [configs/workflow/video-stage.json]\n",
+                encoding="utf-8",
+            )
+
+            result = _route_generation_from_character_config(
+                root,
+                {"generation": {}, "additional_params": {}},
+                character_name="Kirby",
+                style="storybook",
+                prompt="A short image-to-video scene",
+                preferred_generation_type="text2image2video",
+                requested_duration_seconds=None,
+                rng=None,
+            )
+
+        self.assertEqual(
+            result["workflow_plan"]["image_workflow_name"], "image-stage"
+        )
+        self.assertEqual(
+            result["workflow_plan"]["video_workflow_name"], "video-stage"
+        )
+
+    def test_user_given_an_unrelated_path_shares_a_workflow_filename_when_routing_resolves_stages_then_it_is_not_selected(self) -> None:
+        """User Given an unrelated file shares a workflow filename When routing resolves a configured path Then the unrelated file is not treated as a workflow candidate."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow_dir = root / "configs" / "workflow"
+            workflow_dir.mkdir(parents=True)
+            (workflow_dir / "video-stage.json").write_text("{}", encoding="utf-8")
+            unrelated_dir = root / "other"
+            unrelated_dir.mkdir()
+            (unrelated_dir / "video-stage.json").write_text("{}", encoding="utf-8")
+            (root / "configs" / "routing.yaml").write_text(
+                "routing:\n"
+                "  enabled: true\n"
+                "  workflow_stage_candidates:\n"
+                "    text2image2video:\n"
+                "      video_workflow_name: [other/video-stage.json]\n",
+                encoding="utf-8",
+            )
+
+            result = _route_generation_from_character_config(
+                root,
+                {"generation": {}, "additional_params": {}},
+                character_name="Kirby",
+                style="storybook",
+                prompt="A short image-to-video scene",
+                preferred_generation_type="text2image2video",
+                requested_duration_seconds=None,
+                rng=None,
+            )
+
+        self.assertEqual(result["workflow_plan"]["video_workflow_name"], "")
 
     def test_h3_strategy_contracts_match_routing_semantics(self) -> None:
         descriptions = self.hints["strategy_descriptions"]
@@ -85,6 +158,28 @@ class RoutingContractTests(unittest.TestCase):
             "text2image2native_h3_ref2va",
         ):
             self.assertEqual(self.routing["count_policies"][strategy]["image_count"], {"min": 6, "max": 6})
+
+    def test_user_given_routing_config_changes_when_workflow_resolves_it_again_then_latest_values_apply(self) -> None:
+        """User Given a routing config changes while the process is alive When the workflow resolves it again Then new values apply without sharing mutated prior results."""
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "configs" / "routing.yaml"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                "routing:\n  enabled: true\n  marker: first\n",
+                encoding="utf-8",
+            )
+
+            first = _load_global_routing_config(Path(directory))
+            first["marker"] = "caller mutation"
+            unchanged = _load_global_routing_config(Path(directory))
+            config_path.write_text(
+                "routing:\n  enabled: true\n  marker: updated\n",
+                encoding="utf-8",
+            )
+            second = _load_global_routing_config(Path(directory))
+
+        self.assertEqual(unchanged["marker"], "first")
+        self.assertEqual(second["marker"], "updated")
 
     def test_user_given_current_strategy_weights_when_routes_are_selected_then_every_enabled_strategy_is_eligible(self) -> None:
         """User Given current character weights When a configured positive strategy is selected Then it belongs to the available pool and can be selected without requiring historical weight values."""

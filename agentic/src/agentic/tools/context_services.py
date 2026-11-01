@@ -141,8 +141,8 @@ class NewsContextService:
             + "|".join(re.escape(category) for category in categories)
             + r")\s*($|[;；,，|])"
         )
-        query = f"""
-            SELECT title, keyword, category, created_at, content, article_url AS url, source
+        query = """
+            SELECT id, title, keyword, category, created_at, article_url AS url, source
             FROM news_ch.news
             WHERE category IS NOT NULL
               AND category NOT REGEXP %s
@@ -214,30 +214,41 @@ class NewsContextService:
                         _logger().warning(
                             "news.fetch.ptt_unavailable | error=%s", type(exc).__name__
                         )
+            rows = [
+                row
+                for row in rows
+                if is_usable_news_selection(row.get("title", ""), row.get("keyword", ""))
+                and is_brand_safe_news_selection(row.get("title", ""), row.get("keyword", ""))
+                and is_traceable_news(row)
+            ]
+            if not rows:
+                _logger().info("news.fetch.empty | reason=no_traceable_usable_news_rows")
+                return None
+            decision = (
+                select_random_news_inspiration(rows, rng=random_source)
+                if random_inspiration
+                else select_news_candidate(
+                    rows,
+                    ptt_rows=ptt_rows,
+                    news_volume=news_volume,
+                    reference_time=reference_time,
+                )
+            )
+            selected = decision.selected
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT content FROM news_ch.news WHERE id = %s",
+                    [selected["id"]],
+                )
+                content_row = cursor.fetchone()
+            if content_row is None:
+                raise RuntimeError(
+                    "Selected news article disappeared before its content could be loaded."
+                )
+            selected["content"] = content_row.get("content")
         finally:
             connection.close()
 
-        rows = [
-            row
-            for row in rows
-            if is_usable_news_selection(row.get("title", ""), row.get("keyword", ""))
-            and is_brand_safe_news_selection(row.get("title", ""), row.get("keyword", ""))
-            and is_traceable_news(row)
-        ]
-        if not rows:
-            _logger().info("news.fetch.empty | reason=no_traceable_usable_news_rows")
-            return None
-        decision = (
-            select_random_news_inspiration(rows, rng=random_source)
-            if random_inspiration
-            else select_news_candidate(
-                rows,
-                ptt_rows=ptt_rows,
-                news_volume=news_volume,
-                reference_time=reference_time,
-            )
-        )
-        selected = decision.selected
         _logger().info("news.fetch.title | %s", str(selected.get("title") or "").strip())
         _logger().info(
             "news.fetch.selected | reason=%s | event_title=%s | evidence=%s | title=%s | keyword=%s | category=%s | source=%s | url=%s",

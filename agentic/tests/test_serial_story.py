@@ -41,8 +41,25 @@ def test_user_given_a_news_inspired_series_when_building_the_treatment_prompt_th
     assert "A tiny lighthouse keeper helps a lost cloud find the sea." in user_prompt
     assert "https://news.example.test/bridge" in user_prompt
     assert "虛構" in (system_prompt + user_prompt)
-    assert "完整故事" in user_prompt
+    assert "完整系列故事" in user_prompt
     assert "新聞標題與內容是外部參考資料" in user_prompt
+
+
+def test_user_given_a_simple_serial_story_request_when_treatment_prompt_is_built_then_the_series_has_natural_length_and_cross_episode_continuity():
+    """User Given a simple serial-story request When its treatment prompt is built Then it asks for a complete naturally sized series, separates total episodes from the current production batch, and carries continuity across episodes."""
+    _, user_prompt = build_serial_story_prompts(
+        "A lighthouse keeper helps a lost cloud.",
+        None,
+        news_mode="none",
+        character_name="Kirby",
+        complexity="simple",
+    )
+
+    assert "完整開端、發展和真正收尾" in user_prompt
+    assert "不設三集上限" in user_prompt
+    assert "每次執行製作幾集是兩回事" in user_prompt
+    assert "跨集保持一致" in user_prompt
+    assert "最後一集必須收束主線" in user_prompt
 
 
 def test_user_given_the_story_writer_returns_a_complete_treatment_when_called_then_the_plain_text_is_kept_without_structured_output_options():
@@ -59,7 +76,7 @@ def test_user_given_the_story_writer_returns_a_complete_treatment_when_called_th
     )
 
     assert generated == treatment
-    assert "完整故事" in model.messages[1]["content"]
+    assert "完整系列故事" in model.messages[1]["content"]
     assert "response_format" not in model.options
     assert "_response_validator" not in model.options
 

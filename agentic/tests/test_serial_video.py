@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import subprocess
 import unittest
 import os
 import hashlib
 import json
-import random
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,15 +18,38 @@ from agentic.app.cli import parse_args
 from agentic.app.main import (
     _allow_runtime_output_for_visual_evidence,
     _prepare_serial_execution_plan,
+    _record_serial_character_review,
+    _record_serial_episode_outline_review,
+    _record_serial_story_review,
+    _resolve_serial_character_reference_paths,
+    _serial_first_episode_argv,
+    _serial_completion_result,
+    main as app_main,
 )
 from agentic.assets.registry import AssetRegistry
-from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext, SkillResult
+from agentic.runtime.contracts import (
+    ExecutionNode,
+    ExecutionPlan,
+    GoalRequest,
+    RunState,
+    SkillContext,
+    SkillResult,
+    WorkflowRunResult,
+)
 from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
 from agentic.runtime.serial_video import SerialVideoStore
 from agentic.skills.agent_primitives import AgentMediaSkills, AgentPlanningSkills
+from agentic.skills.agent_social import register_agent_social_skills
 from agentic.tools.media_services import register_media_service_tools
+from agentic.tools.context_services import HumanReviewDecision
+
+
+def _workspace_temporary_directory() -> TemporaryDirectory:
+    temp_root = Path(__file__).resolve().parents[2] / ".tmp-tests"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    return TemporaryDirectory(dir=temp_root)
 
 
 def _write_video(path: Path, color: str, duration_seconds: float = 0.5) -> Path:
@@ -67,7 +90,11 @@ def _write_reference(path: Path, content: bytes) -> Path:
 
 
 def _seed_accepted_existing_episode(
-    store: SerialVideoStore, root: Path, series_id: str
+    store: SerialVideoStore,
+    root: Path,
+    series_id: str,
+    *,
+    approve_for_continuation: bool = False,
 ) -> dict[str, object]:
     identity = _write_reference(root / f"{series_id}-identity.png", b"identity")
     context = store.prepare_series_context(series_id, "Hero", [identity])
@@ -94,6 +121,18 @@ def _seed_accepted_existing_episode(
     store.record_tail(episode["episode_id"], 1, segment_video, ending, episode_end=True)
     final_video = _write_video(root / f"{series_id}-final.mp4", "blue")
     store.complete_episode(episode["episode_id"], "success", final_video)
+    if approve_for_continuation:
+        publication = store.begin_publication_attempt(
+            episode["episode_id"],
+            platforms=["threads"],
+            episode_topic="A new turn",
+            caption="An existing story continues.",
+            hashtags="#Hero",
+            media_path=final_video,
+        )
+        store.record_publication_review(
+            episode["episode_id"], publication["attempt_number"], decision="accepted"
+        )
     return episode
 
 
@@ -253,9 +292,199 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             approved["story_plan_id"],
         )
 
+    def test_user_given_a_pending_story_plan_when_creator_uses_story_review_cli_then_exact_approved_file_is_recorded(self) -> None:
+        """User Given a pending series story has an editable registered Markdown file When the creator accepts it through the CLI Then MySQL records the exact reviewed text as approved."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            story_path = root / "story.md"
+            reviewed_text = "# Approved story\n\nThe lighthouse keeper guides the lost cloud home."
+            story_path.write_text(reviewed_text, encoding="utf-8")
+            draft = store.save_series_story_draft(
+                "story-review-cli",
+                "# Draft\n\nThe lighthouse keeper meets a cloud.",
+                user_idea="A lighthouse keeper helps a cloud.",
+                prompt_sha256="a" * 64,
+                model_id="contract-test-model",
+                artifact_path=str(story_path),
+            )
+
+            app_main(
+                [
+                    "--serial-story-review-plan-id",
+                    str(draft["story_plan_id"]),
+                    "--serial-story-review-decision",
+                    "accepted",
+                    "--serial-story-reviewed-file",
+                    str(story_path),
+                ]
+            )
+
+            approved = store.get_latest_approved_series_story("story-review-cli")
+            self.assertEqual(approved["status"], "approved")
+            self.assertEqual(approved["approved_treatment"], reviewed_text)
+
+    def test_user_given_a_creator_rejects_a_serial_story_in_discord_when_onboarding_records_the_decision_then_later_stages_are_blocked(self) -> None:
+        """User Given a pending story draft When its Discord decision is rejected Then MySQL records rejection and onboarding returns a blocked story stage."""
+        store = self._new_store()
+        series_id = "rejected-onboarding-story"
+        draft = store.save_series_story_draft(series_id, "A keeper guides a cloud home.")
+        decision = HumanReviewDecision(
+            status="rejected",
+            selected_paths=[],
+            edited_text="",
+            reviewer="creator",
+            review_mode="discord",
+        )
+
+        blocked = _record_serial_story_review(
+            store, series_id, str(draft["story_plan_id"]), "A keeper guides a cloud home.", decision
+        )
+
+        self.assertEqual(blocked["onboarding_stage"], "story")
+        self.assertEqual(store.get_series_story_plan(str(draft["story_plan_id"]))["status"], "rejected")
+
+    def test_user_given_a_creator_accepts_a_character_with_a_selected_reference_when_onboarding_records_the_decision_then_identity_is_locked(self) -> None:
+        """User Given an approved story and pending character card When Discord accepts the card and selects an image Then MySQL locks the reviewed card and selected reference."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = "approved-onboarding-character"
+            story = store.save_series_story_draft(series_id, "A keeper guides a cloud home.")
+            approved_story = store.record_series_story_decision(
+                str(story["story_plan_id"]),
+                "accepted",
+                reviewed_treatment="A keeper guides a cloud home.",
+            )
+            card = store.save_series_character_card_draft(
+                series_id, str(approved_story["story_plan_id"]), "Blue-gray seal post carrier."
+            )
+            reference = _write_reference(root / "identity.png", b"identity")
+            decision = HumanReviewDecision(
+                status="approved",
+                selected_paths=[str(reference)],
+                edited_text="",
+                reviewer="creator",
+                review_mode="discord",
+            )
+
+            blocked = _record_serial_character_review(
+                store,
+                series_id,
+                str(card["character_card_id"]),
+                "Tide",
+                "Tide is a blue-gray seal post carrier.",
+                decision,
+            )
+
+            approved_card = store.get_latest_approved_character_card(series_id)
+            self.assertIsNone(blocked)
+            self.assertEqual(approved_card["character_name"], "Tide")
+            self.assertEqual(approved_card["reference_assets"][0]["path"], str(reference.resolve()))
+
+    def test_user_given_a_creator_accepts_an_episode_outline_when_onboarding_records_the_decision_then_outline_is_approved(self) -> None:
+        """User Given an approved story, character, and pending episode outline When Discord accepts the outline Then MySQL records the exact reviewed outline before production."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = "approved-onboarding-outline"
+            story = store.save_series_story_draft(series_id, "A keeper guides a cloud home.")
+            approved_story = store.record_series_story_decision(
+                str(story["story_plan_id"]),
+                "accepted",
+                reviewed_treatment="A keeper guides a cloud home.",
+            )
+            card = store.save_series_character_card_draft(
+                series_id, str(approved_story["story_plan_id"]), "Blue-gray seal post carrier."
+            )
+            store.record_series_character_card_decision(
+                str(card["character_card_id"]),
+                "accepted",
+                character_name="Tide",
+                reviewed_card="Tide is a blue-gray seal post carrier.",
+                reference_paths=[_write_reference(root / "identity.png", b"identity")],
+            )
+            outline = store.save_series_episode_outline_draft(
+                series_id, 1, "The lighthouse goes dark", "Tide clears salt from the lantern."
+            )
+            reviewed_text = "Episode 1: The lighthouse goes dark\n\nTide restores the harbor signal."
+            decision = HumanReviewDecision(
+                status="approved",
+                selected_paths=[],
+                edited_text="",
+                reviewer="creator",
+                review_mode="discord",
+            )
+
+            blocked = _record_serial_episode_outline_review(
+                store,
+                series_id,
+                str(outline["outline_id"]),
+                reviewed_text,
+                decision,
+            )
+
+            approved_outline = store.get_latest_approved_series_episode_outline(series_id, 1)
+            self.assertIsNone(blocked)
+            self.assertEqual(approved_outline["approved_outline"], reviewed_text)
+
+    def test_user_given_existing_character_reference_paths_when_onboarding_resolves_candidates_then_it_keeps_the_selected_files(self) -> None:
+        """User Given the creator supplied fixed character reference images When onboarding resolves candidate files Then it returns those exact resolved paths without requesting another generation."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            supplied = _write_reference(root / "identity.png", b"identity")
+
+            paths, failure = _resolve_serial_character_reference_paths(
+                argparse.Namespace(serial_character_references=[str(supplied)]),
+                output_root=root / "output",
+                series_id="existing-reference",
+                character_name="Hero",
+                card_text="Approved character card",
+            )
+
+            self.assertEqual(paths, [str(supplied.resolve())])
+            self.assertEqual(failure, "")
+
+    def test_user_given_no_character_references_and_no_production_profile_when_onboarding_prepares_candidates_then_generation_is_blocked(self) -> None:
+        """User Given no character reference images or production profile exist When onboarding prepares reference candidates Then it reports the missing profile before starting image generation."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            paths, failure = _resolve_serial_character_reference_paths(
+                argparse.Namespace(
+                    serial_character_references=[],
+                    character_config=str(root / "missing-character.yaml"),
+                ),
+                output_root=root / "output",
+                series_id="missing-profile",
+                character_name="Hero",
+                card_text="Approved character card",
+            )
+
+            self.assertEqual(paths, [])
+            self.assertIn("Character production profile does not exist", failure)
+
+    def test_user_given_onboarding_generation_arguments_when_the_first_episode_is_dispatched_then_auto_next_and_unreviewed_references_are_removed(self) -> None:
+        """User Given CLI arguments were built for automatic serial continuation When onboarding dispatches its first episode Then it removes the auto-next flag and unreviewed reference pair while preserving the approved outline."""
+        argv = [
+            "--goal",
+            "Approved first-episode outline",
+            "--serial-auto-next",
+            "--serial-character-reference",
+            "generated-candidate.png",
+            "--duration-seconds",
+            "60",
+        ]
+
+        first_episode_argv = _serial_first_episode_argv(argv)
+
+        self.assertEqual(
+            first_episode_argv,
+            ["--goal", "Approved first-episode outline", "--duration-seconds", "60"],
+        )
+
     def test_user_given_a_character_proposal_and_selected_reference_when_approved_then_mysql_locks_the_reviewed_card_and_image_hash(self) -> None:
         """User Given an approved series story and a reviewed character card with one selected image When the creator approves the character Then MySQL stores the card version and exact reference image SHA without creating the production series."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
             series_id = f"character-first-{uuid.uuid4().hex[:12]}"
@@ -315,7 +544,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_approved_story_and_character_when_an_episode_outline_is_approved_then_the_outline_keeps_both_source_versions_and_waits_before_video(self) -> None:
         """User Given an approved story and character card When an episode outline is drafted and approved Then MySQL stores the exact readable outline with its source version IDs and hashes before any production episode exists."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
             series_id = f"outline-first-{uuid.uuid4().hex[:12]}"
@@ -369,7 +598,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_story_change_after_an_episode_outline_draft_when_the_outline_is_approved_then_stale_lineage_is_rejected(self) -> None:
         """User Given an episode outline based on an approved story When a newer story version is approved before outline review Then the old outline cannot become approved."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
             series_id = f"stale-outline-{uuid.uuid4().hex[:12]}"
@@ -403,7 +632,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_registered_identity_image_when_visual_evidence_roots_are_configured_then_its_parent_is_allowed_without_dropping_existing_roots(self) -> None:
         """User Given an explicitly registered serial identity image When visual evidence roots are configured Then its parent and existing caller roots remain allowed."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             output_root = root / "output"
             reference_root = root / "references"
@@ -539,7 +768,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             def choice(self, values):
                 return values[0]
 
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -571,7 +800,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_the_first_segment_failed_before_any_acceptance_when_episode_resumes_then_segment_one_is_runnable(self) -> None:
         """User Given a persisted episode whose first segment failed review When the creator resumes it Then the accepted prefix may be empty and segment one remains runnable."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -594,7 +823,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_story_planning_failed_before_any_story_was_saved_when_episode_resumes_then_saved_workflow_can_plan_it_again(self) -> None:
         """User Given a blocked episode has its plan and segments but no persisted story beats When it resumes before segment one Then it does not invent accepted work and leaves story planning runnable."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -614,7 +843,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_ready_series_when_lifecycle_is_terminal_then_mysql_excludes_it_from_auto_continuation(self) -> None:
         """User Given active, completed, and discarded series with ready latest episodes When the MySQL continuation pool is read Then only the active series is eligible and each candidate points to its latest ready episode."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -626,10 +855,27 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             ):
                 context = store.prepare_series_context(series_id, "Hero", [identity])
                 episode = store.start_episode(context, f"{series_id} story", topic="新冒險")
+                final_video = _write_video(root / f"{series_id}-final.mp4", "blue")
+                final_video_sha256 = hashlib.sha256(final_video.read_bytes()).hexdigest()
                 with store._connection(write=True) as connection:
                     connection.execute(
-                        "UPDATE episodes SET status = 'ready' WHERE episode_id = ?",
-                        (episode["episode_id"],),
+                        "UPDATE episodes SET status = 'ready', final_video_path = ?, final_video_sha256 = ? WHERE episode_id = ?",
+                        (str(final_video.resolve()), final_video_sha256, episode["episode_id"]),
+                    )
+                    connection.execute(
+                        "UPDATE series SET story_state_json = ? WHERE series_id = ?",
+                        (
+                            json.dumps(
+                                {
+                                    "version": 1,
+                                    "episode_number": episode["episode_number"],
+                                    "source_episode_id": episode["episode_id"],
+                                    "final_video_sha256": final_video_sha256,
+                                    "state_text": f"{series_id} story",
+                                }
+                            ),
+                            series_id,
+                        ),
                     )
                 if outcome != "active":
                     store.set_series_lifecycle_status(series_id, outcome, note="creator decision")
@@ -661,10 +907,12 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_an_eligible_series_and_default_weights_when_auto_next_rolls_then_new_and_continue_each_use_half_the_interval(self) -> None:
         """User Given an eligible existing series and default 0.5/0.5 weights When auto-next rolls below or at the midpoint Then it chooses new onboarding below the midpoint and continuation at the midpoint."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
-            _seed_accepted_existing_episode(store, root, "existing-series")
+            _seed_accepted_existing_episode(
+                store, root, "existing-series", approve_for_continuation=True
+            )
 
             new_selection = store.prepare_auto_next_context(
                 "Hero", random_source=_FixedRandomSource(0.49)
@@ -679,10 +927,12 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_an_eligible_series_and_custom_selection_weights_when_auto_next_rolls_then_it_uses_the_configured_ratio(self) -> None:
         """User Given an eligible existing series and configured 0.75/0.25 or 0.25/0.75 weights When the same roll is evaluated Then the selected mode follows each configured ratio."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
-            _seed_accepted_existing_episode(store, root, "existing-series")
+            _seed_accepted_existing_episode(
+                store, root, "existing-series", approve_for_continuation=True
+            )
 
             new_favored = store.prepare_auto_next_context(
                 "Hero",
@@ -700,7 +950,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_an_approved_story_character_reference_and_episode_outline_when_a_new_serial_episode_starts_then_the_episode_records_all_approved_lineage(self) -> None:
         """User Given all onboarding stages are approved When serial generation starts a new series episode Then production is created from the locked character image and the episode records story, character and outline IDs and hashes."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
             series_id = f"onboarded-production-{uuid.uuid4().hex[:12]}"
@@ -752,9 +1002,66 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(lineage["reference_assets"][0]["sha256"], character["reference_assets"][0]["sha256"])
             self.assertTrue(store.production_series_exists(series_id))
 
+    def test_user_given_an_approved_character_reference_when_its_bytes_change_before_new_series_preparation_then_generation_is_blocked(self) -> None:
+        """User Given a story, character image and outline have been approved When the image bytes change before preparation or episode start Then serial generation is blocked until the character is reviewed again."""
+        with _workspace_temporary_directory() as temporary:
+            store = self._new_store()
+            root = Path(temporary)
+            series_id = f"approved-reference-integrity-{uuid.uuid4().hex[:12]}"
+            story_draft = store.save_series_story_draft(series_id, "A keeper guides a lost cloud home.")
+            story = store.record_series_story_decision(
+                story_draft["story_plan_id"], "accepted", reviewed_treatment="A keeper guides a lost cloud home."
+            )
+            card_draft = store.save_series_character_card_draft(
+                series_id, story["story_plan_id"], "Tide is a blue-gray seal carrier."
+            )
+            approved_identity = b"approved Tide identity"
+            reference = _write_reference(root / "tide.png", approved_identity)
+            store.record_series_character_card_decision(
+                card_draft["character_card_id"],
+                "accepted",
+                character_name="Tide",
+                reviewed_card="Tide is a blue-gray seal carrier.",
+                reference_paths=[reference],
+            )
+            outline_draft = store.save_series_episode_outline_draft(
+                series_id, 1, "The harbor signal", "Episode 1 story and approved shot list."
+            )
+            store.record_series_episode_outline_decision(
+                outline_draft["outline_id"],
+                "accepted",
+                reviewed_outline="Episode 1 story and approved shot list.",
+            )
+            reference.write_bytes(b"different Tide identity after approval")
+
+            with self.assertRaises(ValueError):
+                store.prepare_series_context(
+                    series_id,
+                    "",
+                    require_story_first_for_new=True,
+                    require_episode_outline=True,
+                )
+            self.assertFalse(store.production_series_exists(series_id))
+
+            reference.write_bytes(approved_identity)
+            context = store.prepare_series_context(
+                series_id,
+                "",
+                require_story_first_for_new=True,
+                require_episode_outline=True,
+            )
+            reference.write_bytes(b"different Tide identity after preparation")
+            with self.assertRaises(ValueError):
+                store.start_episode(
+                    context,
+                    context["onboarding_lineage"]["episode_outline"],
+                    topic=context["onboarding_lineage"]["episode_topic"],
+                )
+            self.assertFalse(store.production_series_exists(series_id))
+
     def test_user_given_a_production_series_when_the_creator_approves_a_new_story_then_old_episode_assets_are_staled_and_generation_waits_for_new_character_and_outline_approvals(self) -> None:
         """User Given a production series with an approved story, character and outline When the creator approves a revised story Then prior episode outputs and identity references become stale until the revised character and episode outline are approved."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             store = self._new_store()
             root = Path(temporary)
             series_id = f"story-revision-{uuid.uuid4().hex[:12]}"
@@ -865,7 +1172,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_series_marked_terminal_when_it_is_marked_active_again_then_mysql_rejects_reopening(self) -> None:
         """User Given a series has been completed or discarded When automation tries to make it active again Then MySQL rejects that change so terminal series cannot silently re-enter the pool."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -878,7 +1185,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_terminal_series_when_episode_one_is_requested_again_then_serial_context_rejects_reopening(self) -> None:
         """User Given a series is completed or discarded When its first episode is explicitly requested again Then serial planning rejects the request and keeps the series closed."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -903,7 +1210,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_titled_60_second_episode_when_its_approval_and_delivery_are_recorded_then_mysql_keeps_six_segments_and_each_platform_receipt(self) -> None:
         """User Given a titled 60-second serial episode When its plan, Discord approval, and three platform results are recorded Then MySQL stores its topic, six 10-second segment targets, and per-platform receipts."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -979,9 +1286,91 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertTrue(all(row["status"] == "reported_success" for row in publications))
             self.assertTrue(all(json.loads(row["receipt_json"])["receipt"]["post_id"] for row in publications))
 
+    def test_user_given_a_ready_serial_episode_when_discord_review_is_unavailable_then_registered_review_blocks_and_records_unavailable_attempt(self) -> None:
+        """User Given a QA-approved serial episode and a local review service that reports unavailable When the registered final-publication review runs Then no asset is approved and MySQL records the publication attempt as unavailable."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = f"review-unavailable-{uuid.uuid4().hex[:12]}"
+            episode = _seed_accepted_existing_episode(store, root, series_id)
+            video = root / f"{series_id}-final.mp4"
+
+            class UnavailableDiscordReview:
+                review_scope = ""
+                allow_series_lifecycle_choice = False
+
+                def review_candidates(self, **request: object) -> HumanReviewDecision:
+                    self.review_scope = str(request.get("review_scope") or "")
+                    self.allow_series_lifecycle_choice = bool(
+                        request.get("allow_series_lifecycle_choice")
+                    )
+                    return HumanReviewDecision(
+                        status="skipped",
+                        selected_paths=[],
+                        edited_text=str(request.get("text") or ""),
+                        review_mode="auto",
+                        fallback_reason="Discord review service is unavailable.",
+                    )
+
+            discord_review = UnavailableDiscordReview()
+
+            skill_registry = SkillRegistry()
+            tool_registry = ToolRegistry()
+            register_media_service_tools(tool_registry, root)
+
+            class FixedCaptionEngine:
+                def prepare_publish_caption(self, _goal: object, **_kwargs: object) -> dict[str, str]:
+                    return {"caption": "A new turn", "hashtags": "#story"}
+
+            register_agent_social_skills(
+                skill_registry,
+                tool_registry,
+                root,
+                prompt_engine=FixedCaptionEngine(),
+                discord_review=discord_review,
+            )
+            goal = GoalRequest(
+                prompt="An existing story",
+                media_type="publish_review",
+                constraints={
+                    "serial_mode": True,
+                    "serial_database_name": store.database_name,
+                    "serial_episode_id": episode["episode_id"],
+                    "episode_topic": "A new turn",
+                    "platforms": ["threads"],
+                },
+            )
+            context = SkillContext(
+                plan=ExecutionPlan(goal=goal, workflow_name="serial_publish", nodes=[]),
+                node=ExecutionNode(
+                    node_id="final-review",
+                    skill_name="review.assets.select",
+                    inputs={
+                        "review_phase": "serial_final_publish",
+                        "review_scope": "final_media",
+                        "media_paths": [str(video)],
+                        "platforms": ["threads"],
+                    },
+                ),
+                state=RunState(goal={}, metadata={}),
+            )
+
+            result = skill_registry.get("review.assets.select").handler(context)
+
+            publications = store.get_episode_publications(episode["episode_id"])
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(result.outputs["selected_assets"], [])
+            self.assertEqual(result.outputs["publication_attempt_number"], 1)
+            self.assertEqual(len(publications), 1)
+            self.assertEqual(publications[0]["status"], "review_unavailable")
+            self.assertEqual(publications[0]["review_decision"], "unavailable")
+            self.assertEqual(discord_review.review_scope, "final_media")
+            self.assertTrue(discord_review.allow_series_lifecycle_choice)
+            self.assertEqual(Path(publications[0]["media_path"]).resolve(), video.resolve())
+
     def test_user_given_a_planned_episode_when_publication_is_requested_then_no_publication_attempt_is_created(self) -> None:
         """User Given a planned episode without final QA When publication is requested Then the runtime refuses to open Discord approval or create delivery rows."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1003,7 +1392,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_partial_publication_when_an_episode_is_retried_then_only_unpublished_current_destinations_are_retried(self) -> None:
         """User Given an episode has a successful Instagram receipt and failed Facebook and YouTube receipts When it is retried with the current platform list including Threads Then the retry targets Facebook, Threads, and YouTube without duplicating Instagram."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1053,9 +1442,283 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 retry_attempt["platforms"], ["facebook", "threads", "youtube"]
             )
 
+    def test_user_given_a_completed_series_with_one_failed_platform_when_that_platform_is_retried_then_only_its_delivery_state_controls_dispatch(self) -> None:
+        """User Given a completed series with Facebook reported successful and Threads failed When the creator approves a Threads-only retry and repeats the completed disposition Then Threads can finish while Facebook remains protected from duplicate delivery."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = f"completed-platform-retry-{uuid.uuid4().hex[:12]}"
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context(series_id, "Hero", [identity])
+            episode = store.start_episode(
+                context, "A hero protects a glowing flower", topic="守護星花"
+            )
+            final_video = _write_video(root / "final.mp4", "blue")
+            with store._connection(write=True) as connection:
+                connection.execute(
+                    """UPDATE episodes SET status = 'ready', final_video_path = ?,
+                           final_video_sha256 = ? WHERE episode_id = ?""",
+                    (
+                        str(final_video.resolve()),
+                        hashlib.sha256(final_video.read_bytes()).hexdigest(),
+                        episode["episode_id"],
+                    ),
+                )
+
+            first_attempt = store.begin_publication_attempt(
+                episode["episode_id"],
+                platforms=["facebook", "threads"],
+                episode_topic="守護星花",
+                caption="A tiny flower shines.",
+                hashtags="#Hero",
+                media_path=final_video,
+            )
+            store.record_publication_review(
+                episode["episode_id"], first_attempt["attempt_number"], decision="accepted"
+            )
+            store.set_series_lifecycle_status(
+                series_id, "completed", note="creator completed the series"
+            )
+            store.record_publication_dispatch(
+                episode["episode_id"],
+                first_attempt["attempt_number"],
+                results={"facebook": True, "threads": False},
+                receipts={"facebook": {"post_id": "facebook-post"}},
+                errors={"threads": "container status request failed"},
+                dispatch_status="partial",
+            )
+
+            retry_attempt = store.begin_publication_attempt(
+                episode["episode_id"],
+                platforms=["threads"],
+                episode_topic="守護星花",
+                caption="A tiny flower shines.",
+                hashtags="#Hero",
+                media_path=final_video,
+            )
+            store.record_publication_review(
+                episode["episode_id"], retry_attempt["attempt_number"], decision="accepted"
+            )
+            store.set_series_lifecycle_status(
+                series_id, "completed", note="the approved retry keeps the series completed"
+            )
+            store.record_publication_dispatch(
+                episode["episode_id"],
+                retry_attempt["attempt_number"],
+                results={"threads": True},
+                receipts={"threads": {"post_id": "threads-post"}},
+                errors={},
+                dispatch_status="success",
+            )
+
+            publications = store.get_episode_publications(episode["episode_id"])
+            statuses = {
+                (row["attempt_number"], row["platform"]): row["status"]
+                for row in publications
+            }
+            self.assertEqual(retry_attempt["platforms"], ["threads"])
+            self.assertEqual(statuses[(1, "facebook")], "reported_success")
+            self.assertEqual(statuses[(1, "threads")], "failed")
+            self.assertEqual(statuses[(2, "threads")], "reported_success")
+
+            with self.assertRaises(ValueError):
+                store.begin_publication_attempt(
+                    episode["episode_id"],
+                    platforms=["facebook"],
+                    episode_topic="守護星花",
+                    caption="A tiny flower shines.",
+                    hashtags="#Hero",
+                    media_path=final_video,
+                )
+
+    def test_user_given_an_accepted_multi_platform_attempt_when_dispatch_finishes_then_each_platform_keeps_its_outcome_and_receipt(self) -> None:
+        """User Given an accepted publication attempt spans several platforms When dispatch returns success, missing receipt, provider failure, and dry-run outcomes Then MySQL stores each platform's own status, receipt, and error."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("dispatch-outcomes", "Hero", [identity])
+            episode = store.start_episode(context, "A hero protects a glowing flower", topic="守護星花")
+            final_video = _write_video(root / "final.mp4", "blue")
+            with store._connection(write=True) as connection:
+                connection.execute(
+                    """UPDATE episodes SET status = 'ready', final_video_path = ?,
+                           final_video_sha256 = ? WHERE episode_id = ?""",
+                    (str(final_video.resolve()), hashlib.sha256(final_video.read_bytes()).hexdigest(), episode["episode_id"]),
+                )
+
+            attempt = store.begin_publication_attempt(
+                episode["episode_id"],
+                platforms=["instagram_graph", "facebook", "youtube"],
+                episode_topic="守護星花",
+                caption="A tiny flower shines.",
+                hashtags="#Hero",
+                media_path=final_video,
+            )
+            store.record_publication_review(
+                episode["episode_id"], attempt["attempt_number"], decision="accepted"
+            )
+            store.record_publication_dispatch(
+                episode["episode_id"],
+                attempt["attempt_number"],
+                results={"instagram_graph": True, "facebook": True, "youtube": False},
+                receipts={"instagram_graph": {"post_id": "instagram-post"}},
+                errors={"youtube": "provider timeout"},
+                dispatch_status="partial",
+            )
+
+            dry_run_attempt = store.begin_publication_attempt(
+                episode["episode_id"],
+                platforms=["vimeo"],
+                episode_topic="守護星花",
+                caption="A tiny flower shines.",
+                hashtags="#Hero",
+                media_path=final_video,
+            )
+            store.record_publication_review(
+                episode["episode_id"], dry_run_attempt["attempt_number"], decision="accepted"
+            )
+            store.record_publication_dispatch(
+                episode["episode_id"],
+                dry_run_attempt["attempt_number"],
+                results={"vimeo": True},
+                receipts={"vimeo": {"post_id": "dry-run-post"}},
+                errors={},
+                dispatch_status="dry_run",
+            )
+
+            rows = store.get_episode_publications(episode["episode_id"])
+            by_platform = {row["platform"]: row for row in rows}
+
+            self.assertEqual(by_platform["instagram_graph"]["status"], "reported_success")
+            self.assertEqual(
+                json.loads(by_platform["instagram_graph"]["receipt_json"])["receipt"]["post_id"],
+                "instagram-post",
+            )
+            self.assertEqual(by_platform["facebook"]["status"], "receipt_missing")
+            self.assertEqual(
+                by_platform["facebook"]["error"],
+                "provider reported success without a delivery receipt",
+            )
+            self.assertEqual(by_platform["youtube"]["status"], "failed")
+            self.assertEqual(by_platform["youtube"]["error"], "provider timeout")
+            self.assertEqual(by_platform["vimeo"]["status"], "dry_run")
+
+    def test_user_given_an_automated_serial_episode_with_all_delivery_receipts_when_execution_finishes_then_completion_reports_success(self) -> None:
+        """User Given an automated episode has reported-success receipts for every required platform When workflow completion is evaluated Then the result identifies the delivered episode as successful."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("automatic-complete", "Hero", [identity])
+            context["automation_mode"] = "continue"
+            episode = store.start_episode(
+                context, "A hero protects a glowing flower", topic="守護星花"
+            )
+            final_video = _write_video(root / "final.mp4", "blue")
+            with store._connection(write=True) as connection:
+                connection.execute(
+                    """UPDATE episodes SET status = 'ready', final_video_path = ?,
+                           final_video_sha256 = ? WHERE episode_id = ?""",
+                    (str(final_video.resolve()), hashlib.sha256(final_video.read_bytes()).hexdigest(), episode["episode_id"]),
+                )
+            attempt = store.begin_publication_attempt(
+                episode["episode_id"],
+                platforms=["threads"],
+                episode_topic="守護星花",
+                caption="A tiny flower shines.",
+                hashtags="#Hero",
+                media_path=final_video,
+            )
+            store.record_publication_review(
+                episode["episode_id"], attempt["attempt_number"], decision="accepted"
+            )
+            store.record_publication_dispatch(
+                episode["episode_id"],
+                attempt["attempt_number"],
+                results={"threads": True},
+                receipts={"threads": {"post_id": "thread-post"}},
+                errors={},
+                dispatch_status="success",
+            )
+            plan = ExecutionPlan(
+                GoalRequest(prompt="A hero protects a glowing flower", constraints={"platforms": ["threads"]}),
+                workflow_name="serial",
+                nodes=[],
+            )
+            result = WorkflowRunResult("serial", "success", [], RunState(goal={}, metadata={}))
+
+            completion = _serial_completion_result(
+                argparse.Namespace(serial_auto_next=True, serial_require_delivery_receipts=False),
+                store,
+                context,
+                store.get_episode(episode["episode_id"]),
+                plan,
+                result,
+            )
+
+            self.assertEqual(completion["status"], "success")
+            self.assertEqual(completion["episode_id"], episode["episode_id"])
+            self.assertEqual(completion["episode_number"], 1)
+
+    def test_user_given_a_required_serial_delivery_without_receipts_when_execution_finishes_then_episode_is_blocked(self) -> None:
+        """User Given a serial workflow completed without receipts for its required platforms When required delivery completion is evaluated Then the episode is blocked and the result reports failed delivery."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("missing-delivery", "Hero", [identity])
+            episode = store.start_episode(context, "A hero protects a glowing flower")
+            plan = ExecutionPlan(
+                GoalRequest(prompt="A hero protects a glowing flower", constraints={"platforms": ["threads"]}),
+                workflow_name="serial",
+                nodes=[],
+            )
+            result = WorkflowRunResult("serial", "success", [], RunState(goal={}, metadata={}))
+
+            completion = _serial_completion_result(
+                argparse.Namespace(serial_auto_next=False, serial_require_delivery_receipts=True),
+                store,
+                context,
+                episode,
+                plan,
+                result,
+            )
+
+            self.assertEqual(completion["status"], "failed")
+            self.assertEqual(store.get_episode(episode["episode_id"])["status"], "blocked")
+
+    def test_user_given_a_manual_serial_episode_when_workflow_does_not_succeed_then_completion_keeps_episode_identity(self) -> None:
+        """User Given a manually run serial episode When workflow completion is blocked Then the result keeps the episode identity and reports the blocked state."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("manual-blocked", "Hero", [identity])
+            episode = store.start_episode(context, "A hero protects a glowing flower")
+            plan = ExecutionPlan(
+                GoalRequest(prompt="A hero protects a glowing flower"),
+                workflow_name="serial",
+                nodes=[],
+            )
+            result = WorkflowRunResult("serial", "blocked", [], RunState(goal={}, metadata={}))
+
+            completion = _serial_completion_result(
+                argparse.Namespace(serial_auto_next=False, serial_require_delivery_receipts=False),
+                store,
+                context,
+                episode,
+                plan,
+                result,
+            )
+
+            self.assertEqual(completion["status"], "blocked")
+            self.assertEqual(completion["episode_id"], episode["episode_id"])
+            self.assertEqual(completion["series_id"], "manual-blocked")
+
     def test_user_given_a_resumed_episode_with_a_saved_platform_list_when_character_targets_change_then_publish_nodes_use_the_current_character_targets(self) -> None:
         """User Given a resumed episode has a persisted platform list from an earlier run When the selected character currently allows another platform set Then the restored review and dispatch plan uses the current character targets and configs."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1150,7 +1813,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_an_approved_final_video_when_its_bytes_change_before_dispatch_then_the_publication_media_check_blocks_it(self) -> None:
         """User Given Discord approved a serial episode MP4 When its bytes change before social dispatch Then the publication media contract rejects those changed bytes."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1199,7 +1862,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_discarded_series_when_publication_is_requested_then_no_publication_attempt_is_created(self) -> None:
         """User Given a creator discarded a series When publication is requested for one of its episodes Then the runtime refuses to create a new publication attempt."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1294,7 +1957,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         """User Given a QA-passed clip with a timed-out Discord review When the creator accepts its exact MP4 through the CLI Then the ledger stores the decision and reviewed SHA."""
         import json
 
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             output_root = root / "output"
             store = self._new_store()
@@ -1363,7 +2026,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_user_accepted_review_after_timeout_when_episode_is_resumed_then_prior_video_is_seeded_and_next_segment_is_selected(self) -> None:
         """User Given a timed-out review later accepted by the creator When the episode resumes Then its same accepted MP4 is reused and the next segment becomes runnable."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1415,10 +2078,10 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(store.get_plan_payload(episode["episode_id"]), plan_payload)
 
     def test_user_given_serial_story_segments_when_story_planning_completes_then_episode_keeps_the_exact_beats_for_resume(self) -> None:
-        """User Given a serial episode's story planner When its beats are generated Then the persisted episode story matches the beats sent to rendering."""
+        """User Given a blocked episode with an accepted render and saved tail When it resumes Then the accepted video, delivered video, tail and story plan are restored for the next segment."""
         import json
 
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1494,8 +2157,8 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         self.assertEqual(result.state.node_outputs["package"]["video_path"], "accepted-segment.mp4")
 
     def test_user_given_a_series_when_its_next_episode_is_prepared_then_references_include_current_identity_and_approved_prior_tail(self) -> None:
-        """User Given a completed episode and unchanged identity images When the next episode is prepared Then Ref2VA references include its approved ending frame and the fixed character images."""
-        with TemporaryDirectory() as temporary:
+        """User Given a human-approved completed episode and unchanged identity images When the next episode is prepared Then Ref2VA references include its approved ending frame and the fixed character images."""
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "kirby.png", b"identity version one")
@@ -1539,6 +2202,21 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             store.record_tail(episode["episode_id"], 2, second_video, episode_tail, episode_end=True)
             final_video = _write_video(root / "episode-final.mp4", "green")
             store.complete_episode(episode["episode_id"], "success", final_video)
+            publication = store.begin_publication_attempt(
+                episode["episode_id"],
+                platforms=["threads"],
+                episode_topic="Kirby finds a moon seed",
+                caption="Kirby finds a moon seed.",
+                hashtags="",
+                media_path=final_video,
+            )
+            store.record_publication_review(
+                episode["episode_id"],
+                publication["attempt_number"],
+                decision="accepted",
+                review_session_id="human-final-review",
+                details={"reviewer": "operator"},
+            )
 
             next_context = store.prepare_series_context("kirby", "Kirby", [])
 
@@ -1547,11 +2225,11 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 [Path(item["path"]).resolve() for item in next_context["reference_manifest"]],
                 [episode_tail.resolve(), identity.resolve()],
             )
-            self.assertIn("A moon flower opens", next_context["story_context"])
+            self.assertIn("Kirby finds a moon seed", next_context["story_context"])
 
     def test_user_given_an_accepted_review_when_its_video_bytes_change_then_continuation_is_blocked(self) -> None:
         """User Given a review accepted one video SHA When that video changes before continuation Then its old approval cannot supply a tail."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1574,9 +2252,48 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.assert_can_continue(episode["episode_id"], 1, video)
 
+    def test_user_given_a_registered_identity_image_changes_when_next_episode_context_is_prepared_then_serial_generation_is_blocked(self) -> None:
+        """User Given a fixed character identity image changes after registration When the next episode context is prepared Then serial generation rejects the changed reference."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"registered identity")
+            context = store.prepare_series_context("identity-change", "Hero", [identity])
+            store.start_episode(context, "A hero protects the garden")
+            identity.write_bytes(b"changed identity")
+
+            with self.assertRaises(ValueError):
+                store.prepare_series_context("identity-change", "Hero", [identity])
+
+    def test_user_given_a_video_changed_after_technical_qa_when_the_user_accepts_it_then_review_is_rejected(self) -> None:
+        """User Given a segment passed technical QA and its MP4 changed When the user accepts that path Then review rejects content that no longer matches the registered video SHA."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("series", "Hero", [identity])
+            episode = store.start_episode(context, "A hero enters a station")
+            store.record_plan(episode["episode_id"], segment_count=1, plan_payload={"episode": 1})
+            attempt = store.begin_render(
+                episode["episode_id"],
+                1,
+                workflow_name="minimax_h3_ref2va",
+                h3_mode="ref2va",
+                conditioning_paths=[identity],
+            )
+            video = _write_video(root / "reviewed.mp4", "red")
+            store.complete_render(attempt, video)
+            store.record_technical_qa(
+                episode["episode_id"], 1, video, True, {"passed": True}
+            )
+            video.write_bytes(b"changed after technical QA")
+
+            with self.assertRaises(ValueError):
+                store.record_review(episode["episode_id"], 1, "accepted", video)
+
     def test_user_given_a_rejected_segment_when_its_tail_is_requested_then_continuation_is_blocked(self) -> None:
         """User Given a segment rejected by its human reviewer When the workflow requests its tail Then the ledger refuses to create a continuation asset."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1600,7 +2317,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_a_trimmed_segment_when_it_is_reviewed_then_qa_review_and_tail_bind_to_the_trimmed_video(self) -> None:
         """User Given a duration-normalized segment When QA, acceptance, and tail extraction run Then they bind to the trimmed MP4 produced from the H3 render."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1627,7 +2344,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_an_accepted_trimmed_segment_when_a_later_review_times_out_then_resume_reuses_render_and_delivered_nodes(self) -> None:
         """User Given an H3 segment was trimmed and accepted before a later review timeout When the episode resumes Then its render node reuses the generated MP4 and its trim node reuses the approved delivered MP4."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1671,10 +2388,14 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 Path(outputs["segment-trim-01"]["video_path"]).resolve(),
                 delivered_video.resolve(),
             )
+            self.assertEqual(
+                Path(outputs["segment-tail-01"]["frame_path"]).resolve(),
+                tail.resolve(),
+            )
 
     def test_user_given_an_accepted_downstream_segment_when_an_earlier_segment_is_rendered_again_then_old_downstream_is_stale(self) -> None:
         """User Given two accepted segments When the earlier segment receives a new render attempt Then the later segment's old approval is invalidated."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             store = self._new_store()
             identity = _write_reference(root / "identity.png", b"identity")
@@ -1709,8 +2430,8 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(store.get_segment(episode["episode_id"], 1)["current_render_id"], replacement)
 
     def test_user_given_a_ready_later_episode_when_its_source_episode_is_regenerated_then_later_episode_lineage_is_stale(self) -> None:
-        """User Given episode 2 is ready from episode 1's accepted ending When episode 1 is rendered again Then episode 2's approval, tail, and final delivery are stale."""
-        with TemporaryDirectory() as temporary:
+        """User Given episode 2 follows episode 1's human-approved final video When episode 1 is rendered again Then episode 2's approval, tail, and final delivery are stale."""
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             identity = _write_reference(root / "identity.png", b"identity")
             store = self._new_store()
@@ -1749,6 +2470,21 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             store.record_tail(first_episode["episode_id"], 1, first_video, first_tail, episode_end=True)
             first_final = _write_video(root / "episode-1-final.mp4", "green", duration_seconds=10)
             store.complete_episode(first_episode["episode_id"], "success", first_final)
+            publication = store.begin_publication_attempt(
+                first_episode["episode_id"],
+                platforms=["threads"],
+                episode_topic="A hero protects a star flower",
+                caption="A hero protects the star flower.",
+                hashtags="",
+                media_path=first_final,
+            )
+            store.record_publication_review(
+                first_episode["episode_id"],
+                publication["attempt_number"],
+                decision="accepted",
+                review_session_id="human-final-review",
+                details={"reviewer": "operator"},
+            )
 
             second_context = store.prepare_series_context("garden", "Hero", [])
             second_episode = store.start_episode(second_context, "A hero follows the flower's light")
@@ -1816,7 +2552,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         """User Given explicit serial mode and validated references When the formal long-video plan is built Then it selects Ref2VA once, I2VA thereafter, and requires acceptance after each render."""
         project_root = Path(__file__).resolve().parents[1]
         planner = TaskPlanner(AssetRegistry(project_root, asset_root=project_root))
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             identity = _write_reference(Path(temporary) / "identity.png", b"identity")
             goal = GoalRequest(
                 prompt="A hero carries a moon seed to a quiet garden",
@@ -1850,10 +2586,10 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(second_video.inputs["anchor_nodes"]["first"], "segment-tail-01")
 
     def test_user_given_a_titled_30_second_serial_episode_when_final_qa_passes_then_discord_acceptance_gates_all_three_platforms(self) -> None:
-        """User Given a 30-second serial episode with a topic and three targets When its plan is built Then final QA precedes a Discord publish review and acceptance gates all three platform deliveries."""
+        """User Given a 30-second serial episode with a topic and three targets When its plan is built Then QA, output collection, final review, and publication refer to the same post-processed video."""
         project_root = Path(__file__).resolve().parents[1]
         planner = TaskPlanner(AssetRegistry(project_root, asset_root=project_root))
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             identity = _write_reference(Path(temporary) / "identity.png", b"identity")
             platforms = ["instagram_graph", "facebook", "youtube"]
             goal = GoalRequest(
@@ -1888,8 +2624,18 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             final_qa = by_id["longvideo-video-qa"]
             final_review = by_id["serial-final-publish-review"]
             dispatch = by_id["serial-publish-dispatch"]
+            final_video_node = plan.metadata["final_video_node"]
             self.assertEqual(plan.metadata["segment_count"], 3)
             self.assertIn("longvideo-video-qa", final_review.depends_on)
+            self.assertIn(final_video_node, final_qa.depends_on)
+            self.assertEqual(
+                by_id["collect-longvideo-outputs"].inputs["preferred_video_node"],
+                final_video_node,
+            )
+            self.assertIn(final_video_node, final_review.depends_on)
+            self.assertIn("segment-review-01", by_id["concat-final-video"].depends_on)
+            self.assertIn("segment-review-02", by_id["concat-final-video"].depends_on)
+            self.assertIn("segment-review-03", by_id["concat-final-video"].depends_on)
             self.assertEqual(final_review.inputs["review_scope"], "final_video")
             self.assertEqual(final_review.inputs["review_phase"], "serial_final_publish")
             self.assertEqual(final_review.inputs["platforms"], platforms)
@@ -1904,7 +2650,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         """User Given a valid serial video at improved resolution When final QA runs Then its dimensions do not block review."""
         project_root = Path(__file__).resolve().parents[1]
         planner = TaskPlanner(AssetRegistry(project_root, asset_root=project_root))
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             identity = _write_reference(root / "identity.png", b"identity")
             goal = GoalRequest(
@@ -1955,7 +2701,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
         """User Given an H3 clip longer than its planned segment When the serial plan inserts duration trimming Then QA, review, tail extraction, and assembly use the delivered clip."""
         project_root = Path(__file__).resolve().parents[1]
         planner = TaskPlanner(AssetRegistry(project_root, asset_root=project_root))
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             identity = _write_reference(Path(temporary) / "identity.png", b"identity")
             goal = GoalRequest(
                 prompt="A hero carries a moon seed to a quiet garden",
@@ -1986,7 +2732,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
     def test_user_given_serial_episode_when_final_qa_inspects_assembled_video_then_episode_is_ready_and_segment_review_stays_bound_to_its_render(self) -> None:
         """User Given a serial episode with every segment accepted When final QA inspects the assembled MP4 Then MySQL marks the assembled episode ready and keeps segment review bound to its render."""
-        with TemporaryDirectory() as temporary:
+        with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
             identity = _write_reference(root / "identity.png", b"identity image")
             store = self._new_store()

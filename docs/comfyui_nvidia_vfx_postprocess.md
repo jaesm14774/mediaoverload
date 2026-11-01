@@ -21,7 +21,7 @@ The project does not install NVIDIA's SDK into the agent Python environment. The
 
 The final video path runs:
 
-1. Read at most 32 source frames through VideoHelperSuite, overlapping adjacent chunks by one frame.
+1. Read at most 128 source frames through VideoHelperSuite, overlapping adjacent chunks by one frame.
 2. Upscale each chunk 2x with `RTXVideoSuperResolution`, `ULTRA`, strength `1.0`, and 8-bit RGB.
 3. Generate 2x the frame rate with `RTXVideoFrameGeneration`, `MEDIUM`, with automatic shot-change detection.
 4. Join the chunks, remove each repeated boundary frame, hold the final endpoint for one output frame, and mux the source audio back onto the result. Canvas normalization copies an existing AAC stream and bounds the output to the video stream duration, avoiding a second AAC encode and its packet-end drift.

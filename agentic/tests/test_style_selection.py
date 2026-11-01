@@ -214,6 +214,24 @@ def test_user_given_a_malformed_save_when_submitting_then_the_saved_pool_remains
     assert len(library.profiles()) == 3
 
 
+def test_user_given_an_oversized_selection_request_when_saving_then_the_request_is_rejected_without_changing_the_pool(picker):
+    """User Given a selection request larger than the local API limit When saving Then the server rejects it and preserves the last valid pool."""
+    base, library = picker
+    before = library.selection_path.read_bytes()
+    request = Request(
+        base + "/api/selection",
+        method="PUT",
+        data=b" " * 65537,
+        headers={"Content-Type": "application/json"},
+    )
+
+    with pytest.raises(HTTPError) as error:
+        urlopen(request)
+
+    assert error.value.code == 400
+    assert library.selection_path.read_bytes() == before
+
+
 def test_user_given_an_expired_page_token_when_saving_then_the_selection_is_not_changed(picker):
     """User Given an expired page token When saving Then the picker asks for a reload and preserves the selection."""
     base, library = picker

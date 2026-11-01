@@ -393,29 +393,38 @@ class FacebookPlatform(BaseConfigPlatform):
         return self._upload_multiple(valid_paths[:10], caption)
 
     def _upload_reel(self, media_path: str, caption: str, additional: dict[str, Any]) -> bool:
-        upload_path = media_path
-        if Path(media_path).suffix.lower() == ".gif":
-            upload_path = self._gif_to_mp4(media_path)
+        upload_path = self._prepare_reel_upload(media_path)
+        video_state = self._reel_video_state(additional)
+        video_id, upload_url = self._start_reel_upload(video_state)
+        self._transfer_reel_file(upload_path, upload_url, video_id)
+        return self._finish_reel_upload(video_id, caption, video_state, additional)
+
+    def _prepare_reel_upload(self, media_path: str) -> str:
+        upload_path = self._gif_to_mp4(media_path) if Path(media_path).suffix.lower() == ".gif" else media_path
         probe = self.ffmpeg.probe_media(upload_path)
         duration = float(probe.get("duration") or 0.0)
         if duration < 4 or duration > 60:
             raise ValueError(f"Facebook Reels video duration must be 4-60 seconds, got {duration:.3f}")
-        upload_path = self._prepare_reel_canvas(upload_path)
+        return self._prepare_reel_canvas(upload_path)
 
+    @staticmethod
+    def _reel_video_state(additional: dict[str, Any]) -> str:
         video_state = str(additional.get("facebook_video_state") or "PUBLISHED").strip().upper()
         if video_state not in {"DRAFT", "SCHEDULED", "PUBLISHED"}:
             raise ValueError(f"Unsupported Facebook Reels video_state: {video_state}")
+        return video_state
 
+    def _start_reel_upload(self, video_state: str) -> tuple[str, str]:
         start_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/video_reels"
-        start_response = requests.post(
+        response = requests.post(
             start_url,
             params={"access_token": self.page_access_token, "upload_phase": "start"},
             timeout=60,
         )
-        start_response.raise_for_status()
-        start_body = start_response.json()
-        video_id = str(start_body.get("video_id") or "")
-        upload_url = str(start_body.get("upload_url") or "")
+        response.raise_for_status()
+        body = response.json()
+        video_id = str(body.get("video_id") or "")
+        upload_url = str(body.get("upload_url") or "")
         if not video_id or not upload_url:
             raise RuntimeError("Facebook Reels start phase did not return video_id and upload_url")
         self._record_publish_receipt(
@@ -426,10 +435,12 @@ class FacebookPlatform(BaseConfigPlatform):
             visibility=video_state.lower(),
             details={"start_response": {"video_id": video_id, "upload_url": upload_url}},
         )
+        return video_id, upload_url
 
+    def _transfer_reel_file(self, upload_path: str, upload_url: str, video_id: str) -> None:
         file_size = Path(upload_path).stat().st_size
         with open(upload_path, "rb") as handle:
-            upload_response = requests.post(
+            response = requests.post(
                 upload_url,
                 headers={
                     "Authorization": f"OAuth {self.page_access_token}",
@@ -440,22 +451,28 @@ class FacebookPlatform(BaseConfigPlatform):
                 data=handle,
                 timeout=600,
             )
-        upload_response.raise_for_status()
-        upload_body = upload_response.json()
-        if upload_body.get("success") is not True:
-            self._record_publish_receipt(
-                platform="facebook",
-                external_id=video_id,
-                status="upload_failed",
-                verified=False,
-                details={"upload_response": upload_body},
-            )
-            raise RuntimeError(f"Facebook Reels upload did not confirm success for video_id={video_id}")
+        response.raise_for_status()
+        body = response.json()
+        if body.get("success") is True:
+            return
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=video_id,
+            status="upload_failed",
+            verified=False,
+            details={"upload_response": body},
+        )
+        raise RuntimeError(f"Facebook Reels upload did not confirm success for video_id={video_id}")
 
-        # Facebook documents status polling as optional and requires the finish
-        # phase to end the upload and start assembly/encoding. Waiting for READY
-        # here deadlocks because processing_phase remains not_started until the
-        # finish request is sent.
+    def _finish_reel_upload(
+        self,
+        video_id: str,
+        caption: str,
+        video_state: str,
+        additional: dict[str, Any],
+    ) -> bool:
+        # Finish starts Facebook's assembly/encoding. Polling for READY before
+        # this request deadlocks because processing has not started yet.
         finish_params = {
             "access_token": self.page_access_token,
             "video_id": video_id,
@@ -466,58 +483,73 @@ class FacebookPlatform(BaseConfigPlatform):
         title = str(additional.get("facebook_title") or "").strip()
         if title:
             finish_params["title"] = title[:100]
-        finish_response = requests.post(start_url, params=finish_params, timeout=60)
-        finish_error: dict[str, Any] | None = None
+        finish_url = f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/me/video_reels"
+        response = requests.post(finish_url, params=finish_params, timeout=60)
         try:
-            finish_response.raise_for_status()
-            finish_body = finish_response.json()
-        except requests.RequestException as exc:
-            finish_body = {}
-            try:
-                response_body = finish_response.json()
-            except ValueError:
-                response_body = {}
-            finish_error = {
-                "error_type": type(exc).__name__,
-                "status_code": finish_response.status_code,
-                "body": response_body if isinstance(response_body, dict) else {},
-            }
-            verified, status_body = self._wait_for_reel_ready(video_id, video_state=video_state)
-            if verified:
-                receipt_status = "draft_ready" if video_state == "DRAFT" else "published_ready"
-                self._record_publish_receipt(
-                    platform="facebook",
-                    external_id=video_id,
-                    status=receipt_status,
-                    verified=True,
-                    visibility=video_state.lower(),
-                    details={
-                        "finish_error": finish_error,
-                        "status_response": status_body,
-                        "reconciled_after_finish_error": True,
-                    },
-                )
-                return True
+            response.raise_for_status()
+            body = response.json()
+        except requests.RequestException as error:
+            return self._reconcile_reel_finish_error(response, error, video_id, video_state)
+        if body.get("success") is not True:
             self._record_publish_receipt(
                 platform="facebook",
                 external_id=video_id,
                 status="finish_failed",
                 verified=False,
                 visibility=video_state.lower(),
-                details={"finish_error": finish_error, "status_response": status_body},
-            )
-            raise RuntimeError(f"Facebook Reels finish failed for video_id={video_id}") from exc
-        if finish_body.get("success") is not True:
-            self._record_publish_receipt(
-                platform="facebook",
-                external_id=video_id,
-                status="finish_failed",
-                verified=False,
-                visibility=video_state.lower(),
-                details={"finish_response": finish_body},
+                details={"finish_response": body},
             )
             raise RuntimeError(f"Facebook Reels finish did not confirm success for video_id={video_id}")
+        return self._verify_finished_reel(video_id, video_state, body)
 
+    def _reconcile_reel_finish_error(
+        self,
+        response: requests.Response,
+        error: requests.RequestException,
+        video_id: str,
+        video_state: str,
+    ) -> bool:
+        try:
+            response_body = response.json()
+        except ValueError:
+            response_body = {}
+        finish_error = {
+            "error_type": type(error).__name__,
+            "status_code": response.status_code,
+            "body": response_body if isinstance(response_body, dict) else {},
+        }
+        verified, status_body = self._wait_for_reel_ready(video_id, video_state=video_state)
+        if verified:
+            receipt_status = "draft_ready" if video_state == "DRAFT" else "published_ready"
+            self._record_publish_receipt(
+                platform="facebook",
+                external_id=video_id,
+                status=receipt_status,
+                verified=True,
+                visibility=video_state.lower(),
+                details={
+                    "finish_error": finish_error,
+                    "status_response": status_body,
+                    "reconciled_after_finish_error": True,
+                },
+            )
+            return True
+        self._record_publish_receipt(
+            platform="facebook",
+            external_id=video_id,
+            status="finish_failed",
+            verified=False,
+            visibility=video_state.lower(),
+            details={"finish_error": finish_error, "status_response": status_body},
+        )
+        raise RuntimeError(f"Facebook Reels finish failed for video_id={video_id}") from error
+
+    def _verify_finished_reel(
+        self,
+        video_id: str,
+        video_state: str,
+        finish_body: dict[str, Any],
+    ) -> bool:
         verified, status_body = self._wait_for_reel_ready(video_id, video_state=video_state)
         receipt_status = "draft_ready" if video_state == "DRAFT" else "published_ready"
         self._record_publish_receipt(
@@ -1074,6 +1106,8 @@ class ThreadsPlatform(BaseConfigPlatform):
     CAPTION_MAX = 500
     CONTAINER_POLL_SECONDS = 2
     CONTAINER_TIMEOUT_SECONDS = 300
+    CAROUSEL_MIN_ITEMS = 2
+    CAROUSEL_MAX_ITEMS = 20
     VIDEO_EXTENSIONS = {".mp4"}
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
@@ -1166,37 +1200,69 @@ class ThreadsPlatform(BaseConfigPlatform):
             raise ValueError(f"Unsupported Threads publish mode: {publish_mode}")
 
         valid_paths = [path for path in post.media_paths if Path(path).is_file()]
+        if post.media_paths and len(valid_paths) != len(post.media_paths):
+            raise ValueError("Threads publishing requires every selected local media file to exist")
         if not valid_paths:
-            if post.media_paths:
-                raise ValueError("Threads publishing requires an existing local media file")
             if not caption.strip():
                 raise ValueError("Threads text-only posts require text")
             media_type = "TEXT"
             media_field = None
             media_url = None
-        else:
-            if len(valid_paths) != 1:
-                raise ValueError("Threads publishing currently requires exactly one local media file")
+            container_id = self._create_media_container(
+                media_type=media_type,
+                media_field=media_field,
+                media_url=media_url,
+                caption=caption,
+            )
+        elif len(valid_paths) == 1:
             media_path = valid_paths[0]
-            extension = Path(media_path).suffix.lower()
-            if extension in self.VIDEO_EXTENSIONS:
-                media_type = "VIDEO"
-                media_field = "video_url"
-            elif extension in self.IMAGE_EXTENSIONS:
-                media_type = "IMAGE"
-                media_field = "image_url"
-            else:
-                raise ValueError(
-                    "Threads publishing supports one MP4 video or JPG, JPEG, or PNG image"
-                )
+            media_type, media_field = self._media_container_fields(media_path)
             media_url = self._require_media_url(media_path)
-
-        container_id = self._create_media_container(
-            media_type=media_type,
-            media_field=media_field,
-            media_url=media_url,
-            caption=caption,
-        )
+            container_id = self._create_media_container(
+                media_type=media_type,
+                media_field=media_field,
+                media_url=media_url,
+                caption=caption,
+            )
+        else:
+            if not self.CAROUSEL_MIN_ITEMS <= len(valid_paths) <= self.CAROUSEL_MAX_ITEMS:
+                raise ValueError(
+                    "Threads carousels require 2 to 20 local media files"
+                )
+            carousel_items = [
+                (media_path, *self._media_container_fields(media_path))
+                for media_path in valid_paths
+            ]
+            child_container_ids: list[str] = []
+            for media_path, media_type, media_field in carousel_items:
+                child_container_id = self._create_media_container(
+                    media_type=media_type,
+                    media_field=media_field,
+                    media_url=self._require_media_url(media_path),
+                    caption="",
+                    is_carousel_item=True,
+                )
+                if not self._wait_container_ready(child_container_id):
+                    self._record_publish_receipt(
+                        platform="threads",
+                        external_id=child_container_id,
+                        status="carousel_item_not_ready",
+                        verified=False,
+                        visibility="container_only",
+                        details={
+                            "media_path": str(media_path),
+                            "container_status": dict(self.last_container_status),
+                        },
+                    )
+                    raise RuntimeError(
+                        f"Threads carousel media container was not ready: {child_container_id} "
+                        f"({self._container_status_summary()})"
+                    )
+                child_container_ids.append(child_container_id)
+            container_id = self._create_carousel_container(
+                children=child_container_ids,
+                caption=caption,
+            )
         if not self._wait_container_ready(container_id):
             self._record_publish_receipt(
                 platform="threads",
@@ -1283,10 +1349,42 @@ class ThreadsPlatform(BaseConfigPlatform):
         media_field: str | None,
         media_url: str | None,
         caption: str,
+        is_carousel_item: bool = False,
     ) -> str:
         data = {"media_type": media_type}
         if media_field and media_url:
             data[media_field] = media_url
+        if caption:
+            data["text"] = caption
+        if is_carousel_item:
+            data["is_carousel_item"] = "true"
+        response = requests.post(
+            f"{self.GRAPH_API_BASE}/{self.GRAPH_API_VERSION}/{self.user_id}/threads",
+            data=data,
+            headers={"Authorization": f"Bearer {self.access_token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        container_id = str(response.json().get("id") or "").strip()
+        if not container_id:
+            raise RuntimeError("Threads media container creation did not return an id")
+        return container_id
+
+    def _media_container_fields(self, media_path: str) -> tuple[str, str]:
+        extension = Path(media_path).suffix.lower()
+        if extension in self.VIDEO_EXTENSIONS:
+            return "VIDEO", "video_url"
+        if extension in self.IMAGE_EXTENSIONS:
+            return "IMAGE", "image_url"
+        raise ValueError(
+            "Threads publishing supports MP4 videos or JPG, JPEG, and PNG images"
+        )
+
+    def _create_carousel_container(self, *, children: list[str], caption: str) -> str:
+        data = {
+            "media_type": "CAROUSEL",
+            "children": ",".join(children),
+        }
         if caption:
             data["text"] = caption
         response = requests.post(
@@ -1298,7 +1396,7 @@ class ThreadsPlatform(BaseConfigPlatform):
         response.raise_for_status()
         container_id = str(response.json().get("id") or "").strip()
         if not container_id:
-            raise RuntimeError("Threads media container creation did not return an id")
+            raise RuntimeError("Threads carousel container creation did not return an id")
         return container_id
 
     def _wait_container_ready(self, container_id: str) -> bool:
@@ -1641,24 +1739,19 @@ class PublishingService:
 
         converter = ImageConverter(quality=95)
         processed_paths: list[str] = []
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        for media_path in media_paths:
-            if not Path(media_path).exists():
+        output_root = Path(output_dir)
+        output_root.mkdir(parents=True, exist_ok=True)
+        for media_path in dict.fromkeys(media_paths):
+            source = Path(media_path)
+            if not source.is_file():
                 continue
-            suffix = Path(media_path).suffix.lower()
-            if suffix in {".mp4", ".avi", ".mov", ".gif", ".webm", ".jpg"}:
+            if source.suffix.lower() in DELIVERY_VIDEO_EXTENSIONS | {".jpg", ".jpeg"}:
                 processed_paths.append(media_path)
                 continue
-            converted = converter.convert_to_jpg(media_path, output_dir=None)
-            if converted and Path(converted).exists():
+            converted = converter.convert_to_jpg(str(source), output_dir=str(output_root))
+            if converted and Path(converted).is_file():
                 processed_paths.append(converted)
-                try:
-                    Path(media_path).unlink()
-                except Exception:
-                    pass
-            else:
-                processed_paths.append(media_path)
-        return list(dict.fromkeys(processed_paths))
+        return processed_paths
 
     def prepare_delivery_variants(
         self,

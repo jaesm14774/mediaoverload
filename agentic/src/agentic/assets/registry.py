@@ -15,9 +15,9 @@ def _load_workflow_metadata(workflow_dir: Path) -> dict[str, dict[str, Any]]:
     if not config_path.exists():
         return {}
     try:
-        import yaml
+        from agentic.runtime.yaml_config import safe_yaml_load
 
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        payload = safe_yaml_load(config_path.read_text(encoding="utf-8")) or {}
         raw = payload.get("workflows", {}) if isinstance(payload, dict) else {}
         return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
     except Exception:

@@ -6,7 +6,6 @@ import os
 import random
 from pathlib import Path
 from typing import Any
-import yaml
 from agentic.assets.registry import AssetRegistry
 from agentic.h3_reference import normalize_reference_manifest
 from agentic.runtime.llm_engine import LLMPromptEngine
@@ -21,6 +20,7 @@ from agentic.runtime.strategies import (
     media_type_for_generation,
     primary_workflow_name,
 )
+from agentic.runtime.yaml_config import safe_yaml_load
 from agentic.runtime.contracts import (
     MIN_VIDEO_DURATION_SECONDS,
     normalize_video_duration,
@@ -758,7 +758,7 @@ def _load_global_routing_config(repo_root: Path) -> dict[str, Any]:
     routing_path = repo_root / "configs" / "routing.yaml"
     if not routing_path.exists():
         raise FileNotFoundError(f"Global routing config not found: {routing_path}")
-    data = yaml.safe_load(routing_path.read_text(encoding="utf-8")) or {}
+    data = safe_yaml_load(routing_path.read_text(encoding="utf-8")) or {}
     if "routing" in data and isinstance(data["routing"], dict):
         return dict(data["routing"])
     if isinstance(data, dict):

@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
-from typing import Any, ClassVar, Protocol
+from typing import Any, Callable, ClassVar, Protocol
 from urllib.parse import urlparse
 
 import requests
@@ -22,6 +22,59 @@ MAX_OPENROUTER_MODELS_PER_CALL = 5
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 OPENAI_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+ATTEMPT_DIAGNOSTIC_FIELDS = frozenset(
+    {"provider", "model", "duration_seconds", "request_count", "status", "error_type"}
+)
+
+
+def _llm_attempt_record(
+    model: Any,
+    *,
+    started_at: float,
+    status: str,
+    model_name: str | None = None,
+    error: Exception | None = None,
+) -> dict[str, Any]:
+    config = getattr(model, "config", None)
+    name = str(
+        model_name
+        or getattr(model, "last_attempt_model", "")
+        or getattr(model, "last_success_model", "")
+        or getattr(config, "model_name", "")
+    ).strip()
+    record: dict[str, Any] = {
+        "provider": str(getattr(model, "provider_name", "") or type(model).__name__),
+        "model": name,
+        "duration_seconds": round(max(0.0, time.monotonic() - started_at), 6),
+        "status": status,
+    }
+    request_count = getattr(model, "last_request_attempts", None)
+    if isinstance(request_count, int) and not isinstance(request_count, bool):
+        record["request_count"] = request_count
+    if error is not None:
+        record["error_type"] = type(error).__name__
+    return record
+
+
+def _attempt_records_for_model(
+    model: Any,
+    *,
+    started_at: float,
+    status: str,
+    error: Exception | None = None,
+) -> list[dict[str, Any]]:
+    recorded = getattr(model, "last_attempts", None)
+    if isinstance(recorded, list) and recorded:
+        return [
+            {
+                key: attempt[key]
+                for key in ATTEMPT_DIAGNOSTIC_FIELDS
+                if key in attempt
+            }
+            for attempt in recorded
+            if isinstance(attempt, dict)
+        ]
+    return [_llm_attempt_record(model, started_at=started_at, status=status, error=error)]
 DEFAULT_STATIC_MODEL_POOLS = {
     "text": [
         "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -174,6 +227,18 @@ def _remaining_deadline(deadline: float | None) -> float | None:
     return remaining
 
 
+def _image_cache_for_call(value: Any = None) -> dict[str, str]:
+    return value if isinstance(value, dict) else {}
+
+
+def _take_image_cache(
+    images: list[str] | None,
+    options: dict[str, Any],
+) -> dict[str, str] | None:
+    supplied_cache = options.pop("_encoded_image_cache", None)
+    return _image_cache_for_call(supplied_cache) if images else None
+
+
 class FallbackChatModel:
     """Try the primary model, then configured auxiliary models in order."""
 
@@ -186,6 +251,7 @@ class FallbackChatModel:
         self._primary = models[0]
         self.last_success_model: str = ""
         self.last_attempt_model: str = ""
+        self.last_attempts: list[dict[str, Any]] = []
 
     def chat_completion(
         self,
@@ -196,6 +262,8 @@ class FallbackChatModel:
         **kwargs,
     ) -> str:
         errors: list[str] = []
+        self.last_attempts = []
+        encoded_image_cache = _take_image_cache(images, kwargs)
         models = list(self._models)
         preferred_model_id = _MODEL_SEQUENCE_PREFERRED_MODEL.get()
         if _MODEL_SEQUENCE_ACTIVE.get() and preferred_model_id:
@@ -220,16 +288,57 @@ class FallbackChatModel:
                 providers_left = max(1, len(self._models) - index)
                 attempt_deadline = time.monotonic() + (remaining / providers_left)
                 attempt_deadline = min(attempt_deadline, _deadline)
+            started_at = time.monotonic()
             try:
-                result = model.chat_completion(messages, images=images, _deadline=attempt_deadline, **kwargs)
+                result = model.chat_completion(
+                    messages,
+                    images=images,
+                    _deadline=attempt_deadline,
+                    **_provider_call_options(
+                        model,
+                        kwargs,
+                        encoded_image_cache,
+                    ),
+                )
+                self.last_attempts.extend(
+                    _attempt_records_for_model(
+                        model,
+                        started_at=started_at,
+                        status="success",
+                    )
+                )
                 self.last_success_model = self._model_id(model)
                 _remember_sequence_model(self.last_success_model)
                 return result
             except ProviderRequestError as exc:
+                self.last_attempts.extend(
+                    _attempt_records_for_model(
+                        model,
+                        started_at=started_at,
+                        status="failed",
+                        error=exc,
+                    )
+                )
                 errors.append(f"{self.last_attempt_model or type(model).__name__}: {type(exc).__name__}: {exc}")
             except (requests.RequestException, TimeoutError, ConnectionError) as exc:
+                self.last_attempts.extend(
+                    _attempt_records_for_model(
+                        model,
+                        started_at=started_at,
+                        status="failed",
+                        error=exc,
+                    )
+                )
                 errors.append(f"{self.last_attempt_model or type(model).__name__}: {type(exc).__name__}: {exc}")
-            else:
+            except Exception as exc:
+                self.last_attempts.extend(
+                    _attempt_records_for_model(
+                        model,
+                        started_at=started_at,
+                        status="failed",
+                        error=exc,
+                    )
+                )
                 raise
         raise ProviderRequestError("All configured LLM providers failed: " + " | ".join(errors))
 
@@ -367,6 +476,8 @@ class OpenAICompatibleModel:
         self.supports_response_format = bool(supports_response_format)
         self.last_success_model: str = ""
         self.last_attempt_model: str = ""
+        self.last_request_attempts = 0
+        self.last_attempts: list[dict[str, Any]] = []
 
     @classmethod
     def from_provider(cls, provider: str, config: ModelConfig) -> "OpenAICompatibleModel":
@@ -402,12 +513,64 @@ class OpenAICompatibleModel:
         _deadline: float | None = None,
         **kwargs: object,
     ) -> str:
+        self.last_request_attempts = 0
         response_validator = kwargs.pop("_response_validator", None)
+        encoded_image_cache = _take_image_cache(images, kwargs)
+        payload = self._build_chat_payload(
+            model_name,
+            messages,
+            images,
+            encoded_image_cache,
+            kwargs,
+        )
+        self.last_attempt_model = model_name
+        attempt_limit = min(MAX_PROVIDER_RETRIES, max(1, int(max_retries)))
+        last_error: Exception | None = None
+        for attempt in range(attempt_limit):
+            self.last_request_attempts += 1
+            text, error, response, failure_stage = self._chat_completion_attempt(
+                model_name=model_name,
+                payload=payload,
+                response_validator=response_validator,
+                request_timeout=request_timeout,
+                deadline=_deadline,
+            )
+            if error is None:
+                self.last_success_model = model_name
+                return text or ""
+            last_error = error
+            if failure_stage == "request" and not self._is_retryable_error(error):
+                break
+            if attempt >= attempt_limit - 1:
+                break
+            self._wait_before_retry(
+                response,
+                attempt,
+                initial_retry_delay,
+                _deadline,
+            )
+        detail = self._provider_error_detail(last_error)
+        raise ProviderRequestError(
+            f"{self.provider_name} API call failed for model {model_name!r} after {attempt_limit} attempts: {last_error}{detail}"
+        )
+
+    def _build_chat_payload(
+        self,
+        model_name: str,
+        messages: list[dict],
+        images: list[str] | None,
+        encoded_image_cache: dict[str, str] | None,
+        kwargs: dict[str, object],
+    ) -> dict[str, object]:
         if images and not self.supports_vision:
             raise ProviderConfigurationError(f"{self.provider_name} does not support vision requests.")
         payload: dict[str, object] = {
             "model": model_name,
-            "messages": self._process_messages_with_images(messages, images),
+            "messages": self._process_messages_with_images(
+                messages,
+                images,
+                encoded_image_cache=encoded_image_cache,
+            ),
         }
         if self.provider_name == "openai":
             payload["reasoning_effort"] = self.reasoning_effort
@@ -427,95 +590,96 @@ class OpenAICompatibleModel:
                 if key == "response_format" and not self.supports_response_format:
                     continue
                 payload[key] = value
+        return payload
 
-        last_error: Exception | None = None
-        self.last_attempt_model = model_name
-        attempt_limit = min(MAX_PROVIDER_RETRIES, max(1, int(max_retries)))
-        for attempt in range(attempt_limit):
-            response = None
-            try:
-                remaining = _remaining_deadline(_deadline)
-                configured_read_timeout = (
-                    max(0.1, float(request_timeout))
-                    if request_timeout is not None
-                    else _configured_timeout("AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS", 30.0)
-                )
-                read_timeout = min(configured_read_timeout, remaining) if remaining is not None else configured_read_timeout
-                connect_timeout = min(10.0, read_timeout)
-                response = requests.post(
-                    self.base_url,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=(connect_timeout, read_timeout),
-                    stream=_deadline is not None,
-                )
-                response.raise_for_status()
-            except requests.RequestException as exc:
-                last_error = exc
-                if _deadline is not None and time.monotonic() >= _deadline:
-                    raise ProviderRequestError(
-                        f"{self.provider_name} request exceeded its total deadline for model {model_name!r}"
-                    ) from exc
-                if attempt >= attempt_limit - 1 or not self._is_retryable_error(exc):
-                    break
-                retry_delay = self._retry_delay(response, attempt, initial_retry_delay)
-                if _deadline is not None:
-                    retry_delay = min(retry_delay, max(0.0, _deadline - time.monotonic()))
-                time.sleep(retry_delay)
-                continue
-            try:
-                if _deadline is None:
-                    body = response.json()
-                else:
-                    body = self._read_streamed_json(response, _deadline)
-                message = body["choices"][0]["message"]
-                text = self._extract_message_text(message)
-            except requests.RequestException as exc:
-                last_error = exc
-                if _deadline is not None and time.monotonic() >= _deadline:
-                    raise ProviderRequestError(
-                        f"{self.provider_name} response exceeded its total deadline for model {model_name!r}"
-                    ) from exc
-                if attempt >= attempt_limit - 1:
-                    break
-                retry_delay = self._retry_delay(response, attempt, initial_retry_delay)
-                if _deadline is not None:
-                    retry_delay = min(retry_delay, max(0.0, _deadline - time.monotonic()))
-                time.sleep(retry_delay)
-                continue
-            except (KeyError, ValueError, TypeError) as exc:
+    def _chat_completion_attempt(
+        self,
+        *,
+        model_name: str,
+        payload: dict[str, object],
+        response_validator: Callable[[str], Any] | None,
+        request_timeout: float | None,
+        deadline: float | None,
+    ) -> tuple[str | None, Exception | None, requests.Response | None, str | None]:
+        response: requests.Response | None = None
+        try:
+            remaining = _remaining_deadline(deadline)
+            configured_read_timeout = (
+                max(0.1, float(request_timeout))
+                if request_timeout is not None
+                else _configured_timeout("AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS", 30.0)
+            )
+            read_timeout = (
+                min(configured_read_timeout, remaining)
+                if remaining is not None
+                else configured_read_timeout
+            )
+            connect_timeout = min(10.0, read_timeout)
+            response = requests.post(
+                self.base_url,
+                headers=self.headers,
+                json=payload,
+                timeout=(connect_timeout, read_timeout),
+                stream=deadline is not None,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            if deadline is not None and time.monotonic() >= deadline:
                 raise ProviderRequestError(
-                    f"{self.provider_name} returned an invalid chat completion for model {model_name!r}: {exc}"
+                    f"{self.provider_name} request exceeded its total deadline for model {model_name!r}"
                 ) from exc
-            if response_validator is not None:
-                try:
-                    response_validator(text)
-                except Exception as exc:
-                    last_error = ProviderRequestError(
-                        f"{self.provider_name} returned invalid model output for model {model_name!r}: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
-                    if attempt >= attempt_limit - 1:
-                        break
-                    retry_delay = self._retry_delay(response, attempt, initial_retry_delay)
-                    if _deadline is not None:
-                        retry_delay = min(retry_delay, max(0.0, _deadline - time.monotonic()))
-                    time.sleep(retry_delay)
-                    continue
-            self.last_success_model = model_name
-            return text
-        detail = ""
-        response = getattr(last_error, "response", None)
-        if response is not None:
+            return None, exc, response, "request"
+        try:
+            body = (
+                response.json()
+                if deadline is None
+                else self._read_streamed_json(response, deadline)
+            )
+            message = body["choices"][0]["message"]
+            text = self._extract_message_text(message)
+        except requests.RequestException as exc:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ProviderRequestError(
+                    f"{self.provider_name} response exceeded its total deadline for model {model_name!r}"
+                ) from exc
+            return None, exc, response, "response"
+        except (KeyError, ValueError, TypeError) as exc:
+            raise ProviderRequestError(
+                f"{self.provider_name} returned an invalid chat completion for model {model_name!r}: {exc}"
+            ) from exc
+        if response_validator is not None:
             try:
-                body = str(response.text or "").strip()
-                if body:
-                    detail = f"; response={body[:1000]}"
-            except Exception:
-                pass
-        raise ProviderRequestError(
-            f"{self.provider_name} API call failed for model {model_name!r} after {attempt_limit} attempts: {last_error}{detail}"
-        )
+                response_validator(text)
+            except Exception as exc:
+                error = ProviderRequestError(
+                    f"{self.provider_name} returned invalid model output for model {model_name!r}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                return None, error, response, "validation"
+        return text, None, response, None
+
+    def _wait_before_retry(
+        self,
+        response: requests.Response | None,
+        attempt: int,
+        initial_retry_delay: float,
+        deadline: float | None,
+    ) -> None:
+        retry_delay = self._retry_delay(response, attempt, initial_retry_delay)
+        if deadline is not None:
+            retry_delay = min(retry_delay, max(0.0, deadline - time.monotonic()))
+        time.sleep(retry_delay)
+
+    @staticmethod
+    def _provider_error_detail(error: Exception | None) -> str:
+        response = getattr(error, "response", None)
+        if response is None:
+            return ""
+        try:
+            body = str(response.text or "").strip()
+            return f"; response={body[:1000]}" if body else ""
+        except Exception:
+            return ""
 
     @staticmethod
     def _read_streamed_json(response: requests.Response, deadline: float) -> Any:
@@ -543,16 +707,33 @@ class OpenAICompatibleModel:
         _deadline: float | None = None,
         **kwargs: object,
     ) -> str:
-        return self.chat_completion_single_model(
-            self.config.model_name,
-            messages,
-            images=images,
-            max_retries=max_retries,
-            initial_retry_delay=initial_retry_delay,
-            request_timeout=request_timeout,
-            _deadline=_deadline,
-            **kwargs,
-        )
+        self.last_attempts = []
+        started_at = time.monotonic()
+        try:
+            response = self.chat_completion_single_model(
+                self.config.model_name,
+                messages,
+                images=images,
+                max_retries=max_retries,
+                initial_retry_delay=initial_retry_delay,
+                request_timeout=request_timeout,
+                _deadline=_deadline,
+                **kwargs,
+            )
+        except Exception as exc:
+            self.last_attempts = [
+                _llm_attempt_record(
+                    self,
+                    started_at=started_at,
+                    status="failed",
+                    error=exc,
+                )
+            ]
+            raise
+        self.last_attempts = [
+            _llm_attempt_record(self, started_at=started_at, status="success")
+        ]
+        return response
 
     @staticmethod
     def _is_retryable_error(exc: Exception) -> bool:
@@ -600,7 +781,26 @@ class OpenAICompatibleModel:
         raise ValueError(f"{message}")
 
     @classmethod
-    def _process_messages_with_images(cls, messages: list[dict], images: list[str] | None = None) -> list[dict]:
+    def _image_data_url(
+        cls,
+        image_path: str,
+        encoded_image_cache: dict[str, str] | None = None,
+    ) -> str:
+        if encoded_image_cache is not None and image_path in encoded_image_cache:
+            return encoded_image_cache[image_path]
+        data_url = cls._encode_image_to_base64(image_path)
+        if encoded_image_cache is not None:
+            encoded_image_cache[image_path] = data_url
+        return data_url
+
+    @classmethod
+    def _process_messages_with_images(
+        cls,
+        messages: list[dict],
+        images: list[str] | None = None,
+        *,
+        encoded_image_cache: dict[str, str] | None = None,
+    ) -> list[dict]:
         if not images:
             return [dict(message) for message in messages]
 
@@ -617,10 +817,14 @@ class OpenAICompatibleModel:
             elif isinstance(content, list):
                 parts.extend(item for item in content if isinstance(item, dict))
             for image_path in images:
+                encoded_image = cls._image_data_url(
+                    image_path,
+                    encoded_image_cache,
+                )
                 parts.append(
                     {
                         "type": "image_url",
-                        "image_url": {"url": cls._encode_image_to_base64(image_path)},
+                        "image_url": {"url": encoded_image},
                     }
                 )
             copied["content"] = parts
@@ -980,6 +1184,24 @@ class OpenRouterRotatingModel:
 class AgenticLLMManager:
     text_model: ChatModel
     vision_model: ChatModel
+
+
+def _provider_call_options(
+    model: Any,
+    options: dict[str, Any],
+    encoded_image_cache: dict[str, str] | None,
+) -> dict[str, Any]:
+    if encoded_image_cache is None:
+        return options
+    cache_aware_models = (
+        FallbackChatModel,
+        OpenAICompatibleModel,
+        OllamaModel,
+        OpenRouterRotatingModel,
+    )
+    if isinstance(model, cache_aware_models):
+        return {**options, "_encoded_image_cache": encoded_image_cache}
+    return options
 
 
 def build_model(provider: str, config: ModelConfig) -> ChatModel:
