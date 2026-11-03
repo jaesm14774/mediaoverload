@@ -71,12 +71,47 @@ def _visual_identity_phrase(identity: str) -> str:
     return f"{name}, {description}" if description else name
 
 
+IMAGE_PROMPT_CONTRACT = (
+    "For an image request, describe one finished frame and one visual thesis: a decisive visible state plus the "
+    "relationship or result that makes it matter. Treat the requested and selected cast, action, setting, and any "
+    "explicit framing as fixed. If two subjects are marked as required, show both in the same frame and make their "
+    "physical interaction visible; style must not add characters, props, or story. Then specify only what helps this "
+    "frame: a purposeful viewpoint and relative placement or scale; useful depth layers or negative space; a light "
+    "source and direction with a visible effect; one primary medium with two or three observable surface or mark cues. "
+    "When a resolved style treatment is supplied separately, do not restate its descriptor or influence list. "
+    "Use style composition only when the request leaves framing open. Keep secondary details functional. Avoid generic "
+    "quality slogans, contradictory style stacks, and pseudo-text. Write one concise natural English scene prompt."
+)
+
+IMAGE_PROMPT_QUALITY_CLAUSE = (
+    "Preserve the requested cast, action, and framing. Keep the main relationship readable through viewpoint and "
+    "relative scale; make light direction and material cues physically coherent. Style must not add characters or props."
+)
+
+
+def include_image_prompt_quality_clause(
+    prompt: object,
+    goal: GoalRequest,
+    *,
+    image_generation: bool = False,
+) -> str:
+    prompt_text = str(prompt or "").strip()
+    if goal.media_type in _ISOLATED_STICKER_TYPES or goal.media_type == "game_sprite":
+        return prompt_text
+    if goal.media_type != "image" and not image_generation:
+        return prompt_text
+    if IMAGE_PROMPT_QUALITY_CLAUSE.casefold() in prompt_text.casefold():
+        return prompt_text
+    return "\n".join(part for part in (prompt_text, IMAGE_PROMPT_QUALITY_CLAUSE) if part)
+
+
 LONG_VIDEO_SYSTEM_PROMPT = """
 You write image and video prompts that follow the user's brief and selected style.
 Derive the setting, objects, actors, and actions from this run's brief and source material.
 Visual style controls medium, surface, color, light, composition, and motion treatment;
-it does not supply a story, setting, prop, task, or character anatomy. Preserve the selected
-characters' canonical identities and essential source context while applying that treatment.
+it never changes the requested cast, action, setting, or explicit framing, and it never adds a story,
+prop, task, or character anatomy. Use style composition only when the brief leaves framing open.
+Preserve the selected characters' canonical identities and essential source context while applying that treatment.
 Use source material as context and keep every reported actor, location, cause, and
 outcome tied to its source. When the user requests a causal story, follow that direction.
 For video, make visible physical action and purposeful camera movement the default.
@@ -86,8 +121,8 @@ framing, one motivated camera move or intentional lock, what that choice reveals
 resulting composition. Character-led scenes show anticipation, action with follow-through,
 and a brief reaction; one or two fitting secondary motions can reinforce the action. Vary
 the pace so both movement and reaction are easy to read. Describe the selected style through
-its medium and surface, palette and light, composition, and motion or transition behavior;
-keep those visible rules consistent across shots. Keep the action consistent with the request
+its medium and surface, palette and light, optional composition guidance, and motion or transition behavior;
+keep those visible rules consistent across shots without overriding requested framing. Keep the action consistent with the request
 and facts. Describe the opening keyframe as one frozen instant. Describe temporal action and
 camera movement in the video prompt. Preserve deliberately still or contemplative briefs.
 For image-only requests, follow the requested composition, action, pacing, text, and
@@ -184,7 +219,26 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
         )
         if part
     )
+    visual_prompt = include_visual_style_profile(visual_prompt, goal)
+    visual_prompt = include_image_prompt_quality_clause(visual_prompt, goal)
     video_prompt = apply_video_motion_direction(visual_prompt, goal.media_type)
+    opening_frame_prompt = "\n".join(
+        part
+        for part in (
+            str(goal.prompt or "").strip(),
+            f"Character reference: {subject_anchor}" if subject_anchor else "",
+            _style_directive(selected_style),
+            style_profile_direction(goal, include_motion=False),
+            news_anchor,
+        )
+        if part
+    )
+    opening_frame_prompt = include_visual_style_profile(
+        opening_frame_prompt, goal, image_generation=True
+    )
+    opening_frame_prompt = include_image_prompt_quality_clause(
+        opening_frame_prompt, goal, image_generation=True
+    )
     return {
         "creative_brief": "\n".join(
             part
@@ -195,7 +249,9 @@ def build_goal_brief(goal: GoalRequest, selected_style: str, idea_variants: list
             if part
         ),
         "prompt": video_prompt,
-        "opening_keyframe_prompt": apply_video_opening_frame_direction(visual_prompt, goal.media_type),
+        "opening_keyframe_prompt": apply_video_opening_frame_direction(
+            opening_frame_prompt, goal.media_type
+        ),
         "negative_prompt": ", ".join(
             part
             for part in (
@@ -539,16 +595,20 @@ def _subject_anchor_clause(goal: GoalRequest) -> str:
     return "; ".join(clauses)
 
 
-def style_profile_direction(goal: GoalRequest) -> str:
+def style_profile_direction(
+    goal: GoalRequest, *, include_motion: bool | None = None
+) -> str:
     profile = goal.constraints.get("visual_style_profile")
     isolated_subject = goal.media_type in _ISOLATED_STICKER_TYPES
     if isolated_subject and isinstance(profile, dict):
         # Scene composition and unstructured exclusions can prohibit the very
         # isolation that sticker renderers require.
         profile = {key: profile.get(key) for key in ("prompt", "palette", "motion")}
+    if include_motion is None:
+        include_motion = goal.media_type != "image"
     direction = visual_style_profile_direction(
         profile,
-        include_motion=goal.media_type != "image",
+        include_motion=include_motion,
     )
     if isolated_subject and direction:
         return (
@@ -560,28 +620,33 @@ def style_profile_direction(goal: GoalRequest) -> str:
     return direction
 
 
-def include_visual_style_profile(prompt: object, goal: GoalRequest) -> str:
-    """Keep the selected reference-derived rules on the final renderer prompt."""
+def include_visual_style_profile(
+    prompt: object, goal: GoalRequest, *, image_generation: bool = False
+) -> str:
+    """Apply the selected reference-derived style after the requested scene is established."""
 
     prompt_text = str(prompt or "").strip()
-    direction = style_profile_direction(goal)
+    direction = style_profile_direction(
+        goal, include_motion=not image_generation
+    )
     if not direction:
         return prompt_text
-    priority_label = (
-        "Selected subject rendering rules:"
+    treatment_label = (
+        "Selected subject rendering rules: "
         if goal.media_type in _ISOLATED_STICKER_TYPES
-        else "Selected visual style rules take priority over conflicting scene details:"
+        else "Selected visual style is a rendering treatment; preserve the requested cast, action, setting, and framing. "
+        "Use its composition only when framing is unspecified, and do not let it add characters or props: "
     )
     normalized_prompt = prompt_text.casefold()
-    if normalized_prompt.startswith(priority_label.casefold()) and direction.casefold() in normalized_prompt:
+    if normalized_prompt.endswith(f"{treatment_label}{direction}".casefold()):
         return prompt_text
     if direction.casefold() in normalized_prompt:
         prompt_text = re.sub(re.escape(direction), "", prompt_text, flags=re.IGNORECASE).strip()
     return "\n".join(
         part
         for part in (
-            f"{priority_label} {direction}",
             prompt_text,
+            f"{treatment_label}{direction}",
         )
         if part
     )

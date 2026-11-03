@@ -1,17 +1,6 @@
 from __future__ import annotations
 
 
-PAPER_STORYBOOK_ART_DIRECTION = (
-    "Default illustration art direction: use a coherent handcrafted treatment whose surface and marks match the "
-    "selected medium, with confident contours when appropriate, dimensional shadows, and a specific scene "
-    "environment that grounds the characters' action. "
-    "Keep the characters and their physical interaction dominant; use a readable foreground, middle distance, "
-    "and background instead of blank paper. Match composition, color, face, and body posture to the emotion. "
-    "For comedy, use vivid contrast, a strong diagonal silhouette, exaggerated body acting, clear physical "
-    "contact, and open laughing or startled expressions. For tenderness or sadness, bring the characters "
-    "closer and let posture and light carry the feeling without forcing a smile. Preserve the requested subject "
-    "and honor an explicitly requested medium, palette, or isolated background."
-)
 PAPER_STORYBOOK_SUBJECT_DIRECTION = (
     "Default subject art direction: render the subject itself as a refined handcrafted illustration in the "
     "selected medium, with surface detail and mark quality suited to that medium, nuanced light and soft "
@@ -22,11 +11,11 @@ PAPER_STORYBOOK_SUBJECT_DIRECTION = (
 )
 
 
-def apply_paper_storybook_art_direction(prompt: str, *, isolated_subject: bool = False) -> str:
-    """Add the shared visual direction while preserving cutout background contracts."""
+def apply_isolated_subject_art_direction(prompt: str) -> str:
+    """Add the cutout finish without introducing a scene or changing its background contract."""
 
     normalized = str(prompt or "").strip()
-    direction = PAPER_STORYBOOK_SUBJECT_DIRECTION if isolated_subject else PAPER_STORYBOOK_ART_DIRECTION
+    direction = PAPER_STORYBOOK_SUBJECT_DIRECTION
     if direction in normalized:
         return normalized
     return "\n".join(part for part in (normalized, direction) if part)

@@ -149,16 +149,42 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             tool_name="asset.ensure_workflow_ready",
             stage="assets",
         ),
+    ]
+    if keyframe_candidate_count > 1:
+        nodes.append(
+            ExecutionNode(
+                node_id="native-opening-frame-prompt-variants",
+                skill_name="agent.image.prompt_variants",
+                inputs={
+                    "prompt_key": "opening_keyframe_prompt",
+                    "prompt_role": "Native H3 opening frame",
+                    "variant_count": min(keyframe_candidate_count, 6),
+                },
+                depends_on=["native-story-prompt"],
+                tags=["creative", "image", "first-frame", "native-h3"],
+                stage="prompting",
+            )
+        )
+        opening_skill = "media.image.render_batch"
+        opening_inputs["image_count"] = keyframe_candidate_count
+        opening_dependencies = [
+            "native-opening-frame-prompt-variants",
+            "native-image-asset-check",
+        ]
+    else:
+        opening_skill = "media.image.generate_keyframe"
+        opening_dependencies = ["native-story-prompt", "native-image-asset-check"]
+    nodes.append(
         ExecutionNode(
             node_id="native-opening-keyframe",
-            skill_name="media.image.generate_keyframe",
+            skill_name=opening_skill,
             inputs=opening_inputs,
-            depends_on=["native-story-prompt", "native-image-asset-check"],
+            depends_on=opening_dependencies,
             tags=["render", "image", "continuity", "native-h3"],
             tool_name="comfy.workflow.text_to_image",
             stage="render",
-        ),
-    ]
+        )
+    )
     if refine_manifest:
         nodes.append(
             ExecutionNode(

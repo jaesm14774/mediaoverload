@@ -255,10 +255,10 @@ class CreativeProfileTests(unittest.TestCase):
                 if media_type == "text2img2video":
                     self.assertIn(profile["prompt"], brief["opening_keyframe_prompt"])
 
-    def test_user_selects_a_reference_style_when_renderer_prompt_is_built_then_style_rules_precede_scene_details(
+    def test_user_selects_a_reference_style_when_renderer_prompt_is_built_then_scene_details_remain_authoritative(
         self,
     ) -> None:
-        """User Given a selected reference style and a scene with conflicting background details When the final renderer prompt is built Then the style rules appear before the scene details."""
+        """User Given a selected reference style and explicit scene framing When the final renderer prompt is built Then the scene comes first and style composition is subordinate."""
         pastel = {"label": "pastel illustration", "prompt": "thin warm-gray pencil outlines and pale gouache fills"}
         scene_prompt = "Kirby kneels beside the pot while a leafy garden fills the background."
         prompt_with_existing_direction = "\n".join(
@@ -276,10 +276,8 @@ class CreativeProfileTests(unittest.TestCase):
 
         renderer_prompt = include_visual_style_profile(prompt_with_existing_direction, goal)
 
-        self.assertLess(
-            renderer_prompt.index("Selected visual style rules"),
-            renderer_prompt.index("Kirby kneels"),
-        )
+        self.assertLess(renderer_prompt.index("Kirby kneels"), renderer_prompt.index("Selected visual style is a rendering treatment"))
+        self.assertIn("Use its composition only when framing is unspecified", renderer_prompt)
         self.assertEqual(
             renderer_prompt.count(visual_style_profile_direction(pastel, include_motion=False)),
             1,

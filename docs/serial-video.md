@@ -195,6 +195,20 @@ serial_video_mysql_password=<your-generated-password>
 
 `series.lifecycle_status` 儲存 `active`、`completed` 或 `discarded`，另有 `lifecycle_note` 和 `lifecycle_updated_at` 記錄創作者決定。自動續集只查詢 active 系列，且要求該系列最新集為 ready。
 
+### 清理已結束系列的本機媒體
+
+可手動預覽並清理已標記為 `completed` 或 `discarded` 的系列媒體。從 repo 根目錄執行：
+
+~~~powershell
+python scripts/cleanup_serial_video_media.py
+~~~
+
+預設只列出影片、片段、影格、參考圖片和音訊檔，不會刪除。確認清單後加上 `--delete` 才會刪除；故事、角色卡、分鏡等文字檔和 MySQL 紀錄會保留。預設媒體根目錄是 serial CLI 的 `agentic/output/`，自訂輸出目錄可用 `--output-dir` 指定，但必須位於 repo 內。
+
+`discarded` 系列可直接清理。`completed` 系列若仍有可恢復的 blocked 集數，或 ready 集數沒有每個已記錄平台的成功發布 receipt，腳本會保留整個系列的媒體，讓發布重試仍可使用原檔。`active` 系列永遠不會列入清理；若結束系列媒體也被其他系列的資料庫紀錄引用，也會保留該檔。
+
+掛載點檢查支援 Windows 和 Linux；其他作業系統會安全停止清理，避免把未辨識的掛載樹當成系列檔案刪除。
+
 從 repo 根目錄檢查資料表與每集發布狀態：
 
 ~~~powershell
@@ -286,6 +300,8 @@ serial_video:
 每集送 Discord 審核、核准狀態並完成發布流程後，才會開始下一集。自動策略先查找目前格式的最新失敗集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若片段審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若續集尚無下一集大綱，系統會先依完整故事路線和人審核准狀態產生大綱，等待 Discord 接受後才產片。若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
 
 使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
+
+每張首輪候選圖依角色卡的固定外觀錨點生成：單一角色、正面略帶四分之三角度、依角色形態完整入鏡、素色背景，沿用角色設定檔的美術風格。Discord 審核時對照輪廓、臉部或頭部特徵、配色、服裝或身體表面和標誌細節，只接受完全符合的一張；若候選圖都不符合就拒絕，避免把錯誤設計鎖成後續各集的身份參考。接受後，選定圖片的 SHA-256 會和角色卡一起保存。
 
 ## 產生新集
 

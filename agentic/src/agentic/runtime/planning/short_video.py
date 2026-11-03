@@ -82,25 +82,54 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
                 tool_name="asset.ensure_workflow_ready",
                 stage="assets",
             ),
-            ExecutionNode(
-                node_id="render-image",
-                skill_name="image.render",
-                inputs={
-                    "workflow_name": image_manifest.name,
-                    "width": image_width,
-                    "height": image_height,
-                    "image_count": image_count,
-                },
-                depends_on=["idea-brief", "image-asset-check"],
-                tags=["render", "image"],
-                tool_name="comfy.workflow.text_to_image",
-                stage="render",
-            ),
         ]
     )
-    image_render_node = nodes[-1]
+    if image_count > 1:
+        nodes.append(
+            ExecutionNode(
+                node_id="opening-frame-prompt-variants",
+                skill_name="agent.image.prompt_variants",
+                inputs={
+                    "prompt_key": "opening_keyframe_prompt",
+                    "prompt_role": "Text2Image2Video opening frame",
+                    "variant_count": min(image_count, 6),
+                },
+                depends_on=["idea-brief"],
+                tags=["creative", "image", "first-frame"],
+                stage="prompting",
+            )
+        )
+        render_skill = "media.image.render_batch"
+        render_inputs = {
+            "workflow_name": image_manifest.name,
+            "width": image_width,
+            "height": image_height,
+            "image_count": image_count,
+            "suffix": "text2img2video_opening",
+        }
+        render_dependencies = ["opening-frame-prompt-variants", "image-asset-check"]
+    else:
+        render_skill = "image.render"
+        render_inputs = {
+            "workflow_name": image_manifest.name,
+            "width": image_width,
+            "height": image_height,
+            "image_count": image_count,
+        }
+        render_dependencies = ["idea-brief", "image-asset-check"]
     if goal.constraints.get("seed") is not None:
-        image_render_node.inputs["seed"] = int(goal.constraints["seed"])
+        render_inputs["seed"] = int(goal.constraints["seed"])
+    nodes.append(
+        ExecutionNode(
+            node_id="render-image",
+            skill_name=render_skill,
+            inputs=render_inputs,
+            depends_on=render_dependencies,
+            tags=["render", "image"],
+            tool_name="comfy.workflow.text_to_image",
+            stage="render",
+        )
+    )
     if use_upscale_for_i2v:
         nodes.extend(
             [
@@ -298,20 +327,39 @@ def build_text2img2video(context: PlanningContext, goal: GoalRequest) -> Executi
                     stage="review",
                 ),
                 ExecutionNode(
+                    node_id="review-opening-frame-prompt-variants",
+                    skill_name="agent.image.prompt_variants",
+                    inputs={
+                        "source_node": "idea-brief",
+                        "motion_prompt_node": "review-refine-prompt",
+                        "prompt_key": "opening_keyframe_prompt",
+                        "prompt_role": "Text2Image2Video reviewed opening frame",
+                        "variant_count": min(image_count, 6),
+                        "review_guidance": review_notes,
+                    },
+                    depends_on=["idea-brief", "review-refine-prompt"],
+                    tags=["review", "creative", "image", "retry"],
+                    stage="review",
+                ),
+                ExecutionNode(
                     node_id="review-render-image",
-                    skill_name="image.render",
+                    skill_name="media.image.render_batch",
                     inputs={
                         "workflow_name": image_manifest.name,
                         "width": image_width,
                         "height": image_height,
                         "image_count": image_count,
+                        "suffix": "text2img2video_review_opening",
                         **(
                             {"seed": int(goal.constraints["seed"])}
                             if goal.constraints.get("seed") is not None
                             else {}
                         ),
                     },
-                    depends_on=["review-refine-prompt", "image-asset-check"],
+                    depends_on=[
+                        "review-opening-frame-prompt-variants",
+                        "image-asset-check",
+                    ],
                     tags=["render", "image", "retry"],
                     tool_name="comfy.workflow.text_to_image",
                     stage="render",
@@ -548,19 +596,57 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             tags=["assets"],
             stage="assets",
         ),
+    ]
+    if pre_video_review and image_count > 1:
+        nodes.append(
+            ExecutionNode(
+                node_id="opening-frame-prompt-variants",
+                skill_name="agent.image.prompt_variants",
+                inputs={
+                    "prompt_key": "opening_keyframe_prompt",
+                    "prompt_role": "Text2Video opening frame",
+                    "variant_count": min(image_count, 6),
+                },
+                depends_on=["idea-brief"],
+                tags=["creative", "image", "first-frame"],
+                stage="prompting",
+            )
+        )
+        render_skill = "media.image.render_batch"
+        render_dependencies = [
+            "opening-frame-prompt-variants",
+            "image-asset-check",
+        ]
+        render_inputs = {
+            "workflow_name": image_manifest.name,
+            "width": context.canvas_dimensions(goal, image_manifest)[0],
+            "height": context.canvas_dimensions(goal, image_manifest)[1],
+            "image_count": image_count,
+            "suffix": "text2video_opening",
+        }
+    else:
+        render_skill = "image.render"
+        render_dependencies = ["idea-brief", "image-asset-check"]
+        render_inputs = {
+            "workflow_name": image_manifest.name,
+            "width": context.canvas_dimensions(goal, image_manifest)[0],
+            "height": context.canvas_dimensions(goal, image_manifest)[1],
+            "image_count": image_count,
+            **({"prompt_key": "opening_keyframe_prompt"} if pre_video_review else {}),
+        }
+    if goal.constraints.get("seed") is not None:
+        render_inputs["seed"] = int(goal.constraints["seed"])
+    nodes.append(
         ExecutionNode(
             node_id="render-image",
-            skill_name="image.render",
-            inputs={
-                "workflow_name": image_manifest.name,
-                "width": context.canvas_dimensions(goal, image_manifest)[0],
-                "height": context.canvas_dimensions(goal, image_manifest)[1],
-                "image_count": image_count,
-            },
-            depends_on=["idea-brief", "image-asset-check"],
+            skill_name=render_skill,
+            inputs=render_inputs,
+            depends_on=render_dependencies,
             tags=["render", "image"],
             stage="render",
-        ),
+        )
+    )
+    nodes.append(
         ExecutionNode(
             node_id="video-asset-check",
             skill_name="media.ensure_workflow",
@@ -570,8 +656,8 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             depends_on=["render-image"],
             tags=["assets"],
             stage="assets",
-        ),
-    ]
+        )
+    )
     if stage_review_enabled:
         nodes.append(
             ExecutionNode(
@@ -673,15 +759,39 @@ def build_text2video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                     stage="review",
                 ),
                 ExecutionNode(
+                    node_id="review-opening-frame-prompt-variants",
+                    skill_name="agent.image.prompt_variants",
+                    inputs={
+                        "source_node": "idea-brief",
+                        "motion_prompt_node": "review-refine-prompt",
+                        "prompt_key": "opening_keyframe_prompt",
+                        "prompt_role": "Text2Video reviewed opening frame",
+                        "variant_count": min(image_count, 6),
+                        "review_guidance": review_notes,
+                    },
+                    depends_on=["idea-brief", "review-refine-prompt"],
+                    tags=["review", "creative", "image", "retry"],
+                    stage="review",
+                ),
+                ExecutionNode(
                     node_id="review-render-image",
-                    skill_name="image.render",
+                    skill_name="media.image.render_batch",
                     inputs={
                         "workflow_name": image_manifest.name,
                         "width": context.canvas_dimensions(goal, image_manifest)[0],
                         "height": context.canvas_dimensions(goal, image_manifest)[1],
                         "image_count": image_count,
+                        "suffix": "text2video_review_opening",
+                        **(
+                            {"seed": int(goal.constraints["seed"])}
+                            if goal.constraints.get("seed") is not None
+                            else {}
+                        ),
                     },
-                    depends_on=["review-refine-prompt", "image-asset-check"],
+                    depends_on=[
+                        "review-opening-frame-prompt-variants",
+                        "image-asset-check",
+                    ],
                     tags=["render", "image", "retry"],
                     stage="render",
                 ),

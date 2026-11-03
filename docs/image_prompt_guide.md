@@ -2,11 +2,17 @@
 
 ## Acceptance scenario
 
-User wants a simple visual style with depth and atmosphere.
+User Given a creator submits a text2img request in a selected visual medium When MediaOverload expands the image prompt Then the final prompt preserves the requested subject, action, and style while specifying a clear focal hierarchy, purposeful use of space, useful foreground, midground, and background depth, directional light, and observable material cues without relying on generic quality slogans.
 
-Given an illustration has one main idea and needs open space for reading,
-When its background is generated,
-Then the composition keeps a clear focal hierarchy and restrained palette while retaining a tactile surface, layered setting, atmospheric light, and a few story-relevant details; open space is not a blank or solid-color field.
+User Given a creator requests a defined cast, action, or framing with a selected visual style When MediaOverload composes the renderer prompt Then the scene contract stays authoritative, style changes only the rendering treatment, optional style composition applies only when framing is unspecified, and the prompt describes one decisive image with concrete viewpoint, light, and medium-specific surface cues.
+
+User Given a video strategy generates a still image or opening keyframe When MediaOverload composes both prompts Then the still follows the scene-first cast, framing, light, and material contract while temporal movement stays in the video prompt.
+
+User Given a creator requests a text2img image set When MediaOverload expands and renders the request Then it creates four to six self-contained prompts that keep the same requested subject, action, and style while changing the visual presentation enough to read as distinct compositions, and renders one image for each prompt.
+
+User Given an image-to-video strategy creates multiple opening-frame candidates When MediaOverload prepares and renders those candidates Then each frame uses its own composition prompt for the same cast and story state, the single downstream motion prompt remains independent, and the existing review selects among the rendered frames.
+
+User Given a video request includes a negative prompt When distinct opening-frame prompts are expanded and rendered Then every candidate retains that negative prompt alongside its own composition.
 
 本指南提供可重複使用的構圖與提示原則。參考素材裡的「直接複製」、解析度口號與品牌／工作室風格不會自動變成 runtime 指示。creative 欄位遵守 English-only contract；解說使用繁體中文，英文範本可交給影像模型。
 
@@ -282,28 +288,25 @@ explicitly required.
 - 條目 32：sketch-to-reality 的「忠實」包含錯誤比例與笨拙受力，不能
   把塗鴉美化成普通可愛模型。
 
-## 7. Repo 落地
+## 7. Runtime integration
 
-這次只做窄幅、可驗證的 prompt contract 更新：
+收集資料夾用來辨認可泛化的畫面手法，不會把其中的角色、場景或品牌搬進新圖。本次檢查的 `krea2_turbo` 工作流只接收文字提示，沒有 conditioning image 輸入；因此 runtime 把範本中的畫面主張、角色關係、視角、光線與媒材線索轉成提示規則。場景與選角先建立，風格只處理渲染；風格內的構圖提示僅在請求沒有指定構圖時採用。
 
-- agentic/src/agentic/runtime/prompting.py
-  - 新增 IMAGE_PROMPT_CONTRACT，供 LLM 生成 image prompt 與 opening
-    keyframe 時使用。
-  - image 類型的 fallback action 改成 decisive visual state；quality
-    clause 加入單一主機制、留白與可觀察材質要求。
-- agentic/src/agentic/runtime/llm_engine.py
-  - expand_goal() 與 compose_prompt() 都注入同一份 image contract，
-    避免 LLM route 和 fallback route 的學習規則分裂。
-- configs/characters/kirby.yaml
-  - 早期試用的 generation.visual_style_contract 已從 runtime 移除；still/opening
-    keyframe 的風格與構圖回到每次生成明確提供的 style/story prompt，不另加自動美感 gate。
-- output/prompt_library_eval/2026-09-01/accepted/
-  - 只保留七個 strict 90+ 案例的 copied PNG；被淘汰候選未進入 repo
-    accepted folder，也未進 guide。
+- `agentic/src/agentic/runtime/prompting.py`
+  - 定義 `IMAGE_PROMPT_CONTRACT` 與 `IMAGE_PROMPT_QUALITY_CLAUSE`。
+  - `build_goal_brief()` 在 `image` 的 template fallback 加入畫面品質要求，並將參考風格附在場景描述之後。
+- `agentic/src/agentic/runtime/prompt_tasks/scenes.py`
+  - `expand_goal()` 與 `compose_prompt()` 的 image 請求都使用相同 contract；影片請求只把此 contract 套用到 opening keyframe，時間動作仍留在 video prompt。必要角色會被提示在同一畫面形成可見互動，風格不能新增角色或道具。
+  - LLM 產生的 image prompt 與 `expand_goal()` 的 template fallback 都會附上精簡品質要求。
+- 一般 text2img 會先展開 4–6 份完整 prompt，每份保留相同題材、角色和動作，改變構圖、視角、景深或焦點路徑，再由 `media.image.render_batch` 每份渲染一張。每個變體會檢查必須出現的主體名稱；LLM 不可用時使用六種明確構圖方向的模板。
+- Text2Image2Video、啟用首幀審核的 Text2Video，以及 Native H3 Story／FL2VA 在產生多張首幀候選時，會用同一個 `agent.image.prompt_variants` 為候選各寫一份構圖 prompt，再交給 `media.image.render_batch`。變體維持相同角色、場景與凍結起始狀態；既有影片 prompt 繼續單獨描述後續動作。審核重試會沿用這個首幀流程並套用審核意見。
+- Native H3 L2VA 的文字生圖圖像是末幀生成的身份來源，Ref2VA 的自動生圖圖像是參考素材；兩者不當成影片首幀候選處理。
+- `agentic/src/agentic/skills/comfy_image.py`、`agentic/src/agentic/skills/agent_primitives.py` 與 `agentic/src/agentic/skills/motion_comic.py`
+  - 所有 runtime 的文字生圖入口（含影片首幀、原生 H3 keyframe、motion-comic panels 與 story-card 背景）會把精簡品質要求附在實際靜態圖 prompt；品質要求不強迫三層景深或單一光源，`sticker_pack`、`animated_sticker`、`game_sprite` 保留各自的素材規格，影片 motion prompt 維持獨立。
+- `agentic/src/agentic/runtime/illustration_style.py`
+  - 一般圖片不再無條件追加通用 storybook 風格段落；只有貼圖隔離主體保留其去背輪廓與背景規格。媒材與情緒由當次 brief 和選定風格決定。
 
-這些改動沒有移除既有 Ollama／OpenRouter 設定，也沒有改變角色選擇、
-社群發布或 video temporal contract。Image guide 是新增的可讀文件，
-runtime 只吸收已驗證的泛化規則。
+提示規則讓畫面要求更具體，但成品仍需實際生成並人工檢視；不以提示詞本身宣稱視覺品質已達標。
 
 ## 8. 每次生成前後的最小檢查
 

@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from agentic.runtime.llm_client import PromptClient
+from agentic.runtime.serial_paths import serial_series_artifact_root
 
 
-SERIAL_CHARACTER_SYSTEM_PROMPT = """你是動畫短劇的角色設計師。只能依據已核准的故事與創作者偏好設計角色，不可更換指定主角或改寫故事。角色卡須明確列出跨集不可改變的外觀識別特徵，並讓每項都能從參考圖辨認。
+SERIAL_CHARACTER_SYSTEM_PROMPT = """你是動畫短劇的角色設計師。只能依據已核准的故事與創作者偏好設計角色，不可更換指定主角或改寫故事。把跨集固定的外觀和逐集變動的行動分開。角色卡須清楚寫出可從參考圖辨認、後續各集都要維持的外觀錨點，例如輪廓、臉部或頭部特徵、主要配色、服裝和標誌配件；不要把表情、姿勢或本集狀態混成固定外觀。
 
-使用繁體中文寫一份簡短、可審核的角色卡，並提供一段可直接交給圖片生成器的單人全身角色參考圖提示。參考圖要有簡潔背景、清楚可辨的角色特徵，不放故事場景或文字。"""
+使用繁體中文寫一份簡短、可審核的角色卡，並提供一段可直接交給圖片生成器的單人全身角色參考圖提示。參考圖提示只呈現固定角色設計，不描述故事場景或本集動作；清楚指定可辨識的視角、完整取景、簡潔背景，並要求保留角色卡中的外觀錨點。"""
 
 
 def build_serial_character_prompts(
@@ -81,19 +82,51 @@ def generate_serial_character_card(
     )
 
 
+def build_serial_character_reference_prompt(
+    *,
+    character_name: str,
+    character_card: str,
+) -> str:
+    """Build the first reusable identity image prompt from a character-card draft."""
+    name = str(character_name or "").strip()
+    card = str(character_card or "").strip()
+    if not name:
+        raise ValueError("A character name is required for its identity reference image.")
+    if not card:
+        raise ValueError("A character card is required for its identity reference image.")
+
+    marker = "角色參考圖提示"
+    image_prompt = card.split(marker, 1)[-1].strip(" \r\n：:")
+    if not image_prompt:
+        image_prompt = card
+
+    return "\n".join(
+        [
+            f"為新系列主角 {name} 製作第一張固定身份參考圖。這張圖會在後續集數反覆作為角色外觀依據，優先呈現清楚、穩定、容易辨認的角色設計。",
+            "",
+            "角色卡草案（外觀錨點以此為準）：",
+            card,
+            "",
+            "圖片提示草案：",
+            image_prompt,
+            "",
+            "只使用角色卡中的跨集固定外觀資訊設計造型。性格、故事功能、本集行動或情緒變化不要轉成動作、表情或額外道具。",
+            "生成要求：只畫一個角色、單一畫面與單一自然站姿，表情中性；採正面略帶四分之三角度，依角色形態完整入鏡，不裁切頭部、身體或肢體。臉部或主要辨識區域、服裝或身體表面、標誌特徵清楚可見。使用簡潔、無文字的素色背景與均勻光線，沿用角色設定檔的既有美術風格。",
+            "嚴格保留角色卡中的固定輪廓、臉部或頭部特徵、配色、服裝或身體表面、材質與標誌配件；各特徵在同一角色身上必須一致。未描述的外觀保持簡單中性，不自行新增醒目細節。",
+            "這是單張影片角色參考圖，不是轉面表、多格拼版、角色群像或故事插圖；不要加入其他人物、場景、標籤、標誌、文字、邊框或水印。",
+        ]
+    )
+
+
 def serial_character_artifact_path(
     output_root: Path,
     series_id: str,
     character_card_id: str,
 ) -> Path:
-    raw_series_id = str(series_id or "").strip()
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_series_id).strip(".-_") or "series"
-    slug = slug[:48]
-    identity = hashlib.sha256(raw_series_id.encode("utf-8")).hexdigest()[:10]
     card_id = re.sub(r"[^A-Fa-f0-9]", "", str(character_card_id or ""))
     if len(card_id) != 32:
         raise ValueError("A character card ID must contain 32 hexadecimal characters.")
-    return Path(output_root) / "serial_series" / f"{slug}-{identity}" / "character" / f"{card_id}.md"
+    return serial_series_artifact_root(output_root, series_id) / "character" / f"{card_id}.md"
 
 
 def serialize_reference_assets(paths: list[str | Path]) -> list[dict[str, Any]]:

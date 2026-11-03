@@ -11,7 +11,11 @@ from PIL import Image
 from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.motion_comics import validate_motion_comic_story
-from agentic.runtime.prompting import include_visual_style_profile, selected_role_description
+from agentic.runtime.prompting import (
+    include_image_prompt_quality_clause,
+    include_visual_style_profile,
+    selected_role_description,
+)
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import build_run_dir
 from agentic.tools.motion_comic_adapter import compose_pages, load_recipe, render_pages
@@ -70,21 +74,25 @@ class MotionComicSkills:
         )
         panel_style = profile_label or story["visual_style"]
         for index, panel in enumerate(story["panels"]):
+            panel_prompt = "\n".join(
+                (
+                    panel["image_prompt"],
+                    "Visible evidence: " + panel["visible_state"],
+                    panel_style,
+                    "Resolved subject identity: "
+                    + selected_role_description(context.plan.goal),
+                    "Show only this panel's current prop state. No text, speech bubbles, borders or watermark.",
+                )
+            )
+            panel_prompt = include_visual_style_profile(
+                panel_prompt, context.plan.goal, image_generation=True
+            )
+            panel_prompt = include_image_prompt_quality_clause(
+                panel_prompt, context.plan.goal, image_generation=True
+            )
             payload = {
                 "workflow_name": context.node.inputs["workflow_name"],
-                "prompt": include_visual_style_profile(
-                    "\n".join(
-                        (
-                            panel["image_prompt"],
-                            "Visible evidence: " + panel["visible_state"],
-                            panel_style,
-                            "Resolved subject identity: "
-                            + selected_role_description(context.plan.goal),
-                            "Show only this panel's current prop state. No text, speech bubbles, borders or watermark.",
-                        )
-                    ),
-                    context.plan.goal,
-                ),
+                "prompt": panel_prompt,
                 "width": int(config["image_width"]),
                 "height": int(config["image_height"]),
                 "steps": int(config["steps"]),

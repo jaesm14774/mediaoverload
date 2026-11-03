@@ -999,13 +999,14 @@ def _resolve_serial_character_reference_paths(
     )
     from agentic.app.character_workflow import run_character_workflow
 
-    marker = "角色參考圖提示"
-    reference_prompt = card_text.split(marker, 1)[-1].strip(" \r\n：:")
-    if not reference_prompt:
-        reference_prompt = card_text
-    reference_prompt = (
-        f"為固定主角 {character_name} 產生單人全身角色參考圖。只呈現角色，不放故事場景、文字或其他人物。\n"
-        f"核准的角色外觀描述：\n{reference_prompt}"
+    from agentic.runtime.serial_character import (
+        build_serial_character_reference_prompt,
+    )
+    from agentic.runtime.serial_paths import serial_series_artifact_root
+
+    reference_prompt = build_serial_character_reference_prompt(
+        character_name=character_name,
+        character_card=card_text,
     )
     production_config = (
         Path(args.character_config).expanduser().resolve()
@@ -1015,7 +1016,9 @@ def _resolve_serial_character_reference_paths(
     if not production_config.is_file():
         return [], f"Character production profile does not exist: {production_config}"
 
-    reference_output = output_root / "serial_series" / series_id / "character_references"
+    reference_output = (
+        serial_series_artifact_root(output_root, series_id) / "character_references"
+    )
     reference_output.mkdir(parents=True, exist_ok=True)
     reference_request = CharacterWorkflowRequest(
         repo_root=REPO_ROOT,
@@ -1245,7 +1248,12 @@ def _run_serial_new_series_onboarding(
 
     card_review = review_stage(
         stage="character",
-        summary=f"【角色與參考圖審核】請確認附件中的 {character_name} 角色設定，並從 {len(reference_paths)} 張候選圖中選一張作為角色參考圖。接受後會繼續首集大綱。",
+        summary=(
+            f"【角色與參考圖審核】請對照角色卡，檢查 {character_name} 的輪廓、臉部或頭部特徵、配色、"
+            "服裝或身體表面和標誌細節是否清楚一致，且完整入鏡；只選完全符合的一張。"
+            "若候選圖都不符合，請拒絕，不要勉強鎖定。接受後，所選圖片的 SHA-256 會成為後續各集固定使用的身份參考，"
+            "接著繼續首集大綱。"
+        ),
         document_path=card_path,
         media_paths=reference_paths,
     )

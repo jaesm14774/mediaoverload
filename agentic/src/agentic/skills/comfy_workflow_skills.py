@@ -24,7 +24,9 @@ class ComfyWorkflowSkills:
         prompt = include_role_description(
             context.node.inputs.get("prompt") or self._resolve_prompt(context), context.plan.goal
         )
-        prompt = include_visual_style_profile(prompt, context.plan.goal)
+        prompt = include_visual_style_profile(
+            prompt, context.plan.goal, image_generation=True
+        )
         negative_prompt = context.node.inputs.get("negative_prompt") or self._resolve_negative_prompt(context)
         result = self.tools.call(
             "comfy.workflow.image_to_image",

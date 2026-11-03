@@ -3,8 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentic.runtime.contracts import SkillContext, SkillResult
-from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
-from agentic.runtime.prompting import include_role_description, include_visual_style_profile
+from agentic.runtime.illustration_style import apply_isolated_subject_art_direction
+from agentic.runtime.prompting import (
+    include_image_prompt_quality_clause,
+    include_role_description,
+    include_visual_style_profile,
+)
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.skills.shared import asset_check_result, build_run_dir
 
@@ -87,18 +91,24 @@ class ComfyImageSkills:
         )
         for dependency in reversed(context.node.depends_on):
             dependency_output = context.state[dependency]
-            prompt_key = "opening_keyframe_prompt" if uses_opening_frame else "prompt"
+            prompt_key = str(
+                context.node.inputs.get("prompt_key")
+                or ("opening_keyframe_prompt" if uses_opening_frame else "prompt")
+            )
             prompt = dependency_output.get(prompt_key)
             if not isinstance(prompt, str) or not prompt:
                 prompt = dependency_output.get("prompt")
             if isinstance(prompt, str) and prompt:
                 if not renders_native_h3_keyframe:
                     prompt = include_role_description(prompt, context.plan.goal)
-                prompt = apply_paper_storybook_art_direction(
-                    prompt,
-                    isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
+                if media_type in {"sticker_pack", "animated_sticker"}:
+                    prompt = apply_isolated_subject_art_direction(prompt)
+                prompt = include_visual_style_profile(
+                    prompt, context.plan.goal, image_generation=True
                 )
-                prompt = include_visual_style_profile(prompt, context.plan.goal)
+                prompt = include_image_prompt_quality_clause(
+                    prompt, context.plan.goal, image_generation=True
+                )
                 return {
                     "prompt": prompt,
                     "negative_prompt": str(dependency_output.get("negative_prompt", "")),
@@ -106,11 +116,14 @@ class ComfyImageSkills:
         prompt = str(context.plan.goal.prompt or "")
         if not renders_native_h3_keyframe:
             prompt = include_role_description(prompt, context.plan.goal)
-        prompt = apply_paper_storybook_art_direction(
-            prompt,
-            isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
+        if media_type in {"sticker_pack", "animated_sticker"}:
+            prompt = apply_isolated_subject_art_direction(prompt)
+        prompt = include_visual_style_profile(
+            prompt, context.plan.goal, image_generation=True
         )
-        prompt = include_visual_style_profile(prompt, context.plan.goal)
+        prompt = include_image_prompt_quality_clause(
+            prompt, context.plan.goal, image_generation=True
+        )
         return {"prompt": prompt, "negative_prompt": ""}
 
     def _build_run_dir(self, prompt: str) -> Path:

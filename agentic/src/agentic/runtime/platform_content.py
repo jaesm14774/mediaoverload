@@ -6,6 +6,7 @@ from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.post_strategy import resolve_post_strategy
+from agentic.runtime.platform_limits import THREADS_TEXT_MAX
 
 
 PLATFORM_STRATEGY_VERSION = "2026-10-31.v3"
@@ -15,7 +16,6 @@ YOUTUBE_TITLE_MAX = 100
 YOUTUBE_DESCRIPTION_MAX = 5000
 FACEBOOK_CAPTION_MAX = 600
 FACEBOOK_HASHTAG_MAX = 5
-THREADS_TEXT_MAX = 500
 THREADS_CAROUSEL_MIN_ITEMS = 2
 THREADS_CAROUSEL_MAX_ITEMS = 20
 YOUTUBE_TAG_MAX = 12
@@ -320,10 +320,9 @@ def _build_threads_package(
         if len(media_paths) > 1 and len(supported_paths) == len(media_paths)
         else "unsupported_media"
     )
-    text = "\n".join(part for part in (caption, hashtags) if part)
+    threads_hashtags = _fit_threads_hashtags(caption, hashtags)
+    text = "\n".join(part for part in (caption, threads_hashtags) if part)
     issues: list[str] = []
-    if not caption:
-        issues.append("caption_required")
     if not media_paths:
         issues.append("caption_and_media_required")
     elif len(supported_paths) != len(media_paths):
@@ -338,12 +337,12 @@ def _build_threads_package(
         THREADS_CAROUSEL_MIN_ITEMS <= len(media_paths) <= THREADS_CAROUSEL_MAX_ITEMS
         and len(supported_paths) == len(media_paths)
     )
-    platform_ready = bool(caption) and platform_eligible and len(text) <= THREADS_TEXT_MAX
+    platform_ready = platform_eligible and len(text) <= THREADS_TEXT_MAX
     return {
         "format": format_name,
         "metadata_source": "derived",
         "caption": caption,
-        "hashtags": hashtags,
+        "hashtags": threads_hashtags,
         "character_count": len(text),
         "content_strategy": {
             "strategy_version": PLATFORM_STRATEGY_VERSION,
@@ -363,12 +362,21 @@ def _build_threads_package(
             "has_media": bool(media_paths),
             "is_platform_eligible": platform_eligible,
             "is_platform_publish_ready": platform_ready,
-            "is_publish_ready": bool(caption) and bool(media_paths),
+            "is_publish_ready": bool(media_paths),
             "issues": issues,
             "warnings": [],
-            "caption_character_count": len(text),
+            "caption_character_count": len(caption),
         },
     }
+
+
+def _fit_threads_hashtags(caption: str, hashtags: str) -> str:
+    tags = [f"#{token}" for token in _hashtag_tokens(hashtags)]
+    while tags and len(
+        "\n".join(part for part in (caption, " ".join(tags)) if part)
+    ) > THREADS_TEXT_MAX:
+        tags.pop()
+    return " ".join(tags)
 
 
 def _youtube_title(answer_line: str, prompt: str) -> str:

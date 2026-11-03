@@ -12,6 +12,18 @@
 
 ### User Given a new series is selected When its story, character reference, and episode outline reach human review Then each review happens in Discord and an accepted decision continues the same serial run through video generation
 
+### User Given a new series has a drafted character card When its initial reference candidates are generated and reviewed Then every candidate is a standalone full-body image in the character profile's visual style, clearly shows the card's stable silhouette, identifying face or head features, palette, clothing or body surface, and signature details against a simple background, and the creator can reject all candidates rather than lock a weak match; the accepted image's exact SHA-256 remains the identity reference for later episodes
+
+### User Given an active series has unapproved character-reference candidates and another series is completed When the creator previews or deletes the completed series' media Then the active series' pending candidates are never listed or removed, even when its ID matches the completed series' artifact-folder name
+
+### User Given a completed series artifact directory is a junction to another active series' directory When cleanup scans the completed series Then it skips the linked tree and only considers files resolved inside the completed series' own canonical artifact directory
+
+### User Given an active series has unapproved candidate images and a completed series has a database path to one of those files When cleanup processes the completed series Then every file under the active series' canonical artifact directory remains protected regardless of which series owns the database row
+
+### User Given cleanup has collected a canonical media path When an ancestor changes to a junction before deletion revalidates it Then cleanup skips the path instead of following the new target
+
+### User Given a series artifact directory contains a self-referential link or a link outside its canonical root When cleanup scans its media Then traversal terminates and only collects regular media files resolved inside that series' canonical root
+
 ### User Given a creator starts serial video with a selected character When the series story is drafted Then that selected character is the protagonist and directly drives the story
 
 ### User Given no complexity is specified When the series story and episode outline are drafted Then the result is a simple short drama with one clear goal, one main obstacle, a small cast, and an easy-to-follow resolution
@@ -225,6 +237,7 @@ User Given a publication attempt has a reported-success receipt for one platform
 5. [comic-maker](https://github.com/AskAillex/comic-maker) has a clear local story → editable JSON → ComfyUI image panels → assembly sequence and repeats character descriptions. Borrow the explicit staged workflow and inspectable plan. Its image panels, seed-family strategy, and CBZ assembly do not satisfy video continuity.
 6. [Comic_Studio](https://github.com/CallmeTruong/Comic_Studio) uses staged planning, storyboard validation, rendered-page vision QA, and bounded retries. Borrow validation and QA as separate gates. Do not add LangGraph or use comic-page review as evidence for rendered video acceptance.
 7. [MangaNinjia](https://github.com/ali-vilab/MangaNinjia) is a reference-following line-art colorization implementation with a non-commercial license. It is image-specific and not a source of video continuation evidence; do not integrate its model or code.
+8. [H3-Character-Sheet-Designer](https://github.com/ukr8b3g-cmyk/H3-Character-Sheet-Designer) separates selected camera views and part-scoped appearance instructions, uses a deterministic prompt/layout compiler, and documents that prompt coordinates are guidance rather than hard image constraints. Borrow its explicit view and identity-part instructions and its caution about unseen details. MediaOverload's first character image has no conditioning reference yet and becomes a video identity input, so keep each candidate a single clean full-body view instead of sending a multi-panel sheet into later video generation.
 
 These repositories inform planning and reference handling only. Continuity claims require an actual ComfyUI/GPU render and visual inspection of the resulting videos.
 
@@ -272,3 +285,13 @@ Local tests can prove the CLI contract, MySQL state transitions, lineage invalid
 # User Given a character card draft When the creator approves its text and selected reference image Then the approved card and exact reference image SHA are saved before production series creation
 # User Given an approved story and character When an episode outline is drafted Then it connects the episode to the series arc and waits for human approval before video generation
 # User Given an approved episode outline When serial generation starts Then the approved outline, story version, character card and reference image are the inputs to the existing segment review and accepted-tail flow
+
+User Given a completed series artifact directory or one of its parents below the media root is a filesystem mount point, including a same-filesystem bind mount, When cleanup previews or deletes its media, Then it skips the mount point and never traverses or removes files from the mounted tree.
+
+User Given cleanup has collected a media path and a mount is attached below the media root before deletion, When cleanup revalidates the path, Then it skips the path and leaves the mounted tree untouched.
+
+User Given an eligible series database path points to media below a mounted directory, When cleanup collects database paths, Then it excludes that media from both preview and deletion candidates.
+
+User Given an eligible series contains a file mounted from another path, When cleanup scans or collects database paths, Then it excludes the mounted file itself from preview and deletion candidates.
+
+User Given the serial CLI used its default output directory, When cleanup runs without an output-directory override, Then it inspects the same `agentic/output/` tree used by that CLI.
