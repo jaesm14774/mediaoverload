@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agentic.runtime.contracts import MIN_VIDEO_DURATION_SECONDS, SkillContext, SkillResult
-from agentic.runtime.illustration_style import apply_paper_storybook_art_direction
+from agentic.runtime.illustration_style import apply_isolated_subject_art_direction
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.minimax_prompting import format_h3_video_prompt
@@ -18,6 +18,7 @@ from agentic.runtime.story_cards import (
     validate_story_card_payload,
 )
 from agentic.runtime.prompting import (
+    include_image_prompt_quality_clause,
     include_visual_style_profile,
     include_role_description,
     style_profile_avoidance,
@@ -53,6 +54,7 @@ class AgentPlanningSkills:
             selected_style,
             idea_variants,
             reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
+            prompt_variant_count=int(context.node.inputs.get("prompt_variant_count", 6)),
         )
         reference_directive = format_reference_video_directive(reference_analysis, max_chars=2200)
         if reference_directive and reference_directive not in str(outputs.get("creative_brief") or ""):
@@ -63,6 +65,41 @@ class AgentPlanningSkills:
             status="success",
             outputs=outputs,
             logs=["Expanded the goal into an agent-ready brief."],
+        )
+
+    def expand_image_prompt_variants(self, context: SkillContext) -> SkillResult:
+        source_node = str(
+            context.node.inputs.get("source_node")
+            or (context.node.depends_on[0] if context.node.depends_on else "")
+        )
+        source = context.state.node_outputs.get(source_node, {}) if source_node else {}
+        if not isinstance(source, dict):
+            raise ValueError("Opening-frame prompt source must be an object.")
+        prompt_key = str(context.node.inputs.get("prompt_key") or "opening_keyframe_prompt")
+        base_prompt = str(source.get(prompt_key) or "").strip()
+        if not base_prompt:
+            raise ValueError(f"Opening-frame source is missing {prompt_key!r}.")
+        motion_node = str(context.node.inputs.get("motion_prompt_node") or source_node)
+        motion_source = context.state.node_outputs.get(motion_node, {})
+        related_motion_prompt = (
+            str(motion_source.get("prompt") or "")
+            if isinstance(motion_source, dict)
+            else ""
+        )
+        outputs = self.prompt_engine.expand_image_prompt_variants(
+            context.plan.goal,
+            base_prompt,
+            int(context.node.inputs.get("variant_count", 6)),
+            prompt_role=str(context.node.inputs.get("prompt_role") or "opening frame"),
+            related_motion_prompt=related_motion_prompt,
+            review_guidance=str(context.node.inputs.get("review_guidance") or ""),
+        )
+        outputs["negative_prompt"] = str(source.get("negative_prompt") or "")
+        return SkillResult(
+            status="success",
+            outputs=outputs,
+            metrics={"prompt_count": len(outputs.get("prompt_sets", []))},
+            logs=["Prepared distinct still compositions for the video opening frame."],
         )
 
     def compose_prompt(self, context: SkillContext) -> SkillResult:
@@ -433,11 +470,14 @@ class AgentMediaSkills:
 
         def apply_art_direction(prompt: str) -> str:
             prompt = include_role_description(prompt, context.plan.goal)
-            prompt = apply_paper_storybook_art_direction(
-                prompt,
-                isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
+            if media_type in {"sticker_pack", "animated_sticker"}:
+                prompt = apply_isolated_subject_art_direction(prompt)
+            prompt = include_visual_style_profile(
+                prompt, context.plan.goal, image_generation=True
             )
-            return include_visual_style_profile(prompt, context.plan.goal)
+            return include_image_prompt_quality_clause(
+                prompt, context.plan.goal, image_generation=True
+            )
 
         use_prior_frame = bool(context.node.inputs.get("use_prior_frame", True))
         prior_frame_path = context.node.inputs.get("prior_frame_path") if use_prior_frame else None
@@ -679,6 +719,8 @@ class AgentMediaSkills:
 
     def render_image_batch(self, context: SkillContext) -> SkillResult:
         prompt_sets = list(context.state[context.node.depends_on[0]].get("prompt_sets", []))
+        if not prompt_sets:
+            raise ValueError("Image batch rendering requires at least one prompt variant.")
         workflow_name = str(context.node.inputs["workflow_name"])
         width = int(context.node.inputs.get("width", 1024))
         height = int(context.node.inputs.get("height", 1024))
@@ -688,39 +730,71 @@ class AgentMediaSkills:
             or context.plan.goal.constraints.get("images_per_prompt")
             or 1
         )
+        requested_image_count = context.node.inputs.get("image_count")
+        if requested_image_count is not None:
+            requested_image_count = max(1, int(requested_image_count))
+            if requested_image_count < len(prompt_sets):
+                raise ValueError(
+                    "Image batch candidate count cannot be smaller than its prompt count."
+                )
+            base_count, extra_count = divmod(requested_image_count, len(prompt_sets))
+            image_counts = [
+                base_count + (1 if index < extra_count else 0)
+                for index in range(len(prompt_sets))
+            ]
+        else:
+            image_counts = [images_per_prompt] * len(prompt_sets)
         media_type = str(context.plan.goal.media_type or "").strip().lower()
+        native_h3_keyframe = media_type in {
+            "native_h3_story",
+            "native_h3_fl2va_story",
+        }
         run_dir = self._build_run_dir(context.plan.goal.prompt, str(context.node.inputs.get("suffix", "batch_images")))
         saved_files: list[str] = []
         item_runs: list[dict[str, str]] = []
-        for index, prompt_set in enumerate(prompt_sets, start=1):
+        seed_value = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
+        seed_base = int(seed_value) if seed_value is not None else None
+        rendered_count = 0
+        for index, (prompt_set, prompt_image_count) in enumerate(
+            zip(prompt_sets, image_counts, strict=True), start=1
+        ):
             label = slug_path_component(
                 prompt_set.get("label", f"item_{index:02d}"),
                 default=f"item-{index:02d}",
             )
             item_dir = run_dir / label
-            prompt = include_role_description(prompt_set["prompt"], context.plan.goal)
-            prompt = apply_paper_storybook_art_direction(
-                prompt,
-                isolated_subject=media_type in {"sticker_pack", "animated_sticker"},
+            prompt = str(prompt_set["prompt"])
+            if not native_h3_keyframe:
+                prompt = include_role_description(prompt, context.plan.goal)
+            if media_type in {"sticker_pack", "animated_sticker"}:
+                prompt = apply_isolated_subject_art_direction(prompt)
+            prompt = include_visual_style_profile(
+                prompt, context.plan.goal, image_generation=True
             )
-            prompt = include_visual_style_profile(prompt, context.plan.goal)
+            prompt = include_image_prompt_quality_clause(
+                prompt, context.plan.goal, image_generation=True
+            )
+            render_payload = {
+                "workflow_name": workflow_name,
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "width": width,
+                "height": height,
+                "image_count": prompt_image_count,
+                "run_dir": str(item_dir),
+            }
+            if seed_base is not None:
+                render_payload["seed"] = (seed_base + rendered_count) % (2**64)
             result = self.tools.call(
-                "comfy.workflow.text_to_image",
-                {
-                    "workflow_name": workflow_name,
-                    "prompt": prompt,
-                    "negative_prompt": negative_prompt,
-                    "width": width,
-                    "height": height,
-                    "image_count": images_per_prompt,
-                    "run_dir": str(item_dir),
-                },
+                "comfy.workflow.text_to_image", render_payload
             )
             generated = [str(path) for path in result.get("saved_files", [])]
             saved_files.extend(generated)
+            rendered_count += prompt_image_count
             item_runs.append(
                 {
                     "label": label,
+                    "presentation": str(prompt_set.get("presentation", "")),
                     "prompt": prompt,
                     "expression": str(prompt_set.get("expression", "")),
                     "run_dir": str(item_dir),
@@ -757,6 +831,9 @@ class AgentMediaSkills:
         for index, page in enumerate(story["pages"], start=1):
             page_dir = run_dir / f"page_{index:02d}"
             background_prompt = include_visual_style_profile(page["background_prompt"], image_goal)
+            background_prompt = include_image_prompt_quality_clause(
+                background_prompt, image_goal, image_generation=True
+            )
             page_seed = seed_base + (index * 1009)
             payload: dict[str, object] = {
                 "workflow_name": workflow_name,
@@ -1645,6 +1722,7 @@ def register_agent_primitive_skills(
     planning = AgentPlanningSkills(prompt_engine=prompt_engine)
     media = AgentMediaSkills(tool_registry, output_root, prompt_engine=prompt_engine)
     skill_registry.register("agent.goal.expand", planning.expand_goal, "Expand a goal into an agent-ready brief")
+    skill_registry.register("agent.image.prompt_variants", planning.expand_image_prompt_variants, "Write distinct compositions for one still image")
     skill_registry.register("agent.prompt.compose", planning.compose_prompt, "Compose a reusable prompt bundle")
     skill_registry.register("agent.story.segment", planning.segment_story, "Break a story into reusable segments")
     skill_registry.register("agent.segment.prepare", planning.prepare_segment, "Prepare one segment prompt bundle")

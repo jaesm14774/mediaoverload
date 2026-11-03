@@ -12,8 +12,8 @@ generation:
     enabled: true
     story_complexity: random
     story_complexity_weights:
-      simple: 9
-      cinematic: 1
+      simple: 7
+      cinematic: 3
     series_selection_weights:
       new: 0.5
       continue: 0.5
@@ -184,19 +184,19 @@ generation:
     # Keep image-to-video renders within this workflow's frame limit.
     max_i2v_frames: 240
   generation_type_weights:
-    serial_video: 40
-    text2img: 1
-    text2image2video: 1
-    native_h3_story: 1
-    native_h3_t2v_story: 1
-    native_h3_fl2va_story: 1
-    native_h3_l2va_story: 1
-    native_h3_ref2va: 1
-    text2image2native_h3_ref2va: 1
-    sticker_pack: 3
-    story_card: 2
-    motion_comic: 2
-    game_sprite: 3
+    serial_video: 5
+    text2img: 5
+    text2image2video: 0.2
+    native_h3_story: 0.2
+    native_h3_t2v_story: 0.2
+    native_h3_fl2va_story: 0.2
+    native_h3_l2va_story: 0.2
+    native_h3_ref2va: 0.2
+    text2image2native_h3_ref2va: 0.2
+    sticker_pack: 1
+    story_card: 1
+    motion_comic: 1
+    game_sprite: 1
 
 social_media:
   # Hashtags are generated from the final article and visible media.

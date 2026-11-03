@@ -95,9 +95,35 @@ class LLMPromptEngine:
         selected_style: str,
         idea_variants: list[dict[str, Any]],
         reference_analysis: dict[str, Any] | None = None,
+        prompt_variant_count: int = 6,
     ) -> dict[str, Any]:
         return scenes.expand_goal(
-            self.client, goal, selected_style, idea_variants, reference_analysis
+            self.client,
+            goal,
+            selected_style,
+            idea_variants,
+            reference_analysis,
+            prompt_variant_count,
+        )
+
+    def expand_image_prompt_variants(
+        self,
+        goal: GoalRequest,
+        base_prompt: str,
+        variant_count: int,
+        *,
+        prompt_role: str = "opening frame",
+        related_motion_prompt: str = "",
+        review_guidance: str = "",
+    ) -> dict[str, Any]:
+        return scenes.expand_image_prompt_variants(
+            self.client,
+            goal,
+            base_prompt,
+            variant_count,
+            prompt_role=prompt_role,
+            related_motion_prompt=related_motion_prompt,
+            review_guidance=review_guidance,
         )
 
     def compose_prompt(

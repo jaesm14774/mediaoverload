@@ -7,6 +7,7 @@ import os
 from typing import Any
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.post_strategy import resolve_post_strategy
+from agentic.runtime.platform_limits import THREADS_TEXT_MAX
 from agentic.runtime.llm_client import PromptClient
 
 
@@ -15,7 +16,7 @@ BLOCKED_HASHTAG_KEYS = frozenset(
 )
 
 
-SOCIAL_CAPTION_SYSTEM_PROMPT = """
+SOCIAL_CAPTION_SYSTEM_PROMPT = f"""
 You are a social editor, not an alt-text writer. Turn source material and visual
 evidence into a post with a clear editorial point that earns attention and invites
 a real response. Strong writing can improve the chance that people stop, read, and
@@ -69,8 +70,12 @@ Editorial shape:
 Platform and discovery rules:
 - Write a distinct native caption for every requested platform. Preserve one
   factual core and editorial point while adapting the opening, pacing, and close.
-- Keep Threads text and hashtags together within its 500-character limit. For
-  YouTube, make the opening and title derived downstream specific and informative;
+- When Threads is requested, keep the caption and hashtags together within
+  {THREADS_TEXT_MAX} characters, including the line break between them. There is no
+  minimum caption length; do not pad the copy to meet a character target. Use only
+  relevant hashtags that fit the remaining space, removing less relevant tags when
+  needed.
+- For YouTube, make the opening and title derived downstream specific and informative;
   use topic words naturally rather than stuffing tags. For Instagram and Facebook,
   put the hook before the fold and keep paragraphs easy to scan.
 - When the topic is clear, usually return four or five genuinely relevant,

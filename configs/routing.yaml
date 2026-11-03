@@ -352,8 +352,8 @@ routing:
         max: 1
     text2img:
       image_count:
-        min: 1
-        max: 4
+        min: 6
+        max: 6
       video_count:
         min: 1
         max: 1
@@ -1060,7 +1060,7 @@ routing:
           - "這不是重做構圖的 workflow，應放在成品後段而不是創作前段。"
     count_guidance:
       text2img:
-        image_count_rule: "單張主視覺預設 1；若需求包含 variants、options、AB test、挑圖，可提高到 2-4。"
+        image_count_rule: "固定產生六張候選圖，交由使用者挑選要採用的主視覺。"
       text2video:
         image_count_rule: "若需要先做 ideation 或 cover review 可產生 2-4 張；這些圖片不會成為 T2V 的 conditioning。"
         video_count_rule: "單一需求預設 1；只有要不同 motion 版本時再增加到 2-4。"

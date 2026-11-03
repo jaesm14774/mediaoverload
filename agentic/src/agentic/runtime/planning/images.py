@@ -16,7 +16,8 @@ from agentic.runtime.planning.common import PlanningContext
 def build_image(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
     workflow_manifest = context.pick_goal_workflow(goal)
     width, height = context.canvas_dimensions(goal, workflow_manifest)
-    image_count = context.constraint_int(goal, "image_count", 1)
+    image_count = context.constraint_int(goal, "image_count", 6)
+    prompt_variant_count = max(4, min(6, image_count))
     bool(goal.constraints.get("stage_probe_auto_select", False))
     nodes = [
         ExecutionNode(
@@ -25,6 +26,7 @@ def build_image(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
             inputs={
                 "prompt": goal.prompt,
                 "style": goal.style,
+                "prompt_variant_count": prompt_variant_count,
                 "idea_variants": context.idea_director.generate_variations(goal),
             },
             tags=["creative"],
@@ -40,12 +42,13 @@ def build_image(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
         ),
         ExecutionNode(
             node_id="render-image",
-            skill_name="image.render",
+            skill_name="media.image.render_batch",
             inputs={
                 "workflow_name": workflow_manifest.name,
                 "width": width,
                 "height": height,
-                "image_count": image_count,
+                "images_per_prompt": 1,
+                "suffix": "text2img_variants",
             },
             depends_on=["idea-brief", "asset-check"],
             tags=["render"],
@@ -78,6 +81,7 @@ def build_image(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
         "graph_overview": [node.node_id for node in nodes],
         "width": width,
         "height": height,
+        "prompt_variant_count": prompt_variant_count,
         "stage_probe_auto_select": bool(
             goal.constraints.get("stage_probe_auto_select", False)
         ),

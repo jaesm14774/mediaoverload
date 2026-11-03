@@ -19,9 +19,12 @@ from agentic.video_directing import (
     requires_video_motion_direction,
 )
 from agentic.runtime.prompting import (
+    IMAGE_PROMPT_CONTRACT,
     LONG_VIDEO_SYSTEM_PROMPT,
     build_autonomous_scene_prompt,
     build_goal_brief,
+    include_image_prompt_quality_clause,
+    include_visual_style_profile,
     news_grounding_anchor_clause,
     build_story_segments,
     style_profile_avoidance,
@@ -33,45 +36,70 @@ from agentic.runtime.news_grounding import is_usable_news_selection
 
 
 def _goal_subject_instruction(goal: GoalRequest) -> str:
-    """Describe selected subjects as references without turning them into a gate."""
+    """Give the prompt writer the selected cast and its visible interaction contract."""
 
     context = goal.constraints.get("subject_context")
     context = dict(context) if isinstance(context, dict) else {}
-    subject_names = [
-        str(item.get("name") or "").strip()
+    subjects = [
+        item
         for item in (context.get("subjects") or [])
         if isinstance(item, dict) and str(item.get("name") or "").strip()
     ]
-    profile = dict(
-        context.get("character_profile")
-        or goal.constraints.get("character_profile")
-        or {}
-    )
-    if not profile and subject_names:
+    character = str(goal.constraints.get("character") or "").strip()
+    if not subjects:
         profile = dict(
-            next(
-                (
-                    item.get("profile")
-                    for item in (context.get("subjects") or [])
-                    if isinstance(item, dict)
-                    and str(item.get("name") or "").strip() == subject_names[0]
-                ),
-                {},
-            )
+            context.get("character_profile")
+            or goal.constraints.get("character_profile")
             or {}
         )
-    profile_details = "; ".join(
-        part
-        for part in (
-            str(profile.get("role_description") or "").strip(),
-            str(profile.get("keywords") or "").strip(),
+        details = "; ".join(
+            part
+            for part in (
+                str(profile.get("role_description") or "").strip(),
+                str(profile.get("keywords") or "").strip(),
+            )
+            if part
         )
-        if part
+        return "; ".join(part for part in (character, details) if part)
+
+    cast = []
+    for subject in subjects:
+        name = str(subject.get("name") or "").strip()
+        role = str(subject.get("role") or "subject").strip()
+        profile = dict(subject.get("profile") or {})
+        details = "; ".join(
+            part
+            for part in (
+                str(profile.get("role_description") or "").strip(),
+                str(profile.get("keywords") or "").strip(),
+            )
+            if part
+        )
+        detail_clause = f" ({details})" if details else ""
+        cast.append(f"{role}: {name}{detail_clause}")
+
+    contract = dict(context.get("interaction_contract") or {})
+    if bool(contract.get("required")):
+        return (
+            "Selected cast (exactly these required subjects): "
+            + "; ".join(cast)
+            + ". Keep both in the same readable frame, show their physical interaction, preserve their roles and identities, "
+            "and add no other characters."
+        )
+
+    selected_names = {
+        str(subject.get("name") or "").strip().casefold() for subject in subjects
+    }
+    extra_cast_allowed = contract.get("unexpected_extra_subjects", True)
+    if character and character.casefold() not in selected_names:
+        cast.append(f"configured character: {character}")
+    cast_policy = (
+        "Keep these selected identities as the scene anchors; add other characters only "
+        "when the creative brief names them."
+        if extra_cast_allowed
+        else "This is the full cast; do not add other characters."
     )
-    character = str(goal.constraints.get("character") or "").strip()
-    return "; ".join(
-        part for part in (", ".join(subject_names), character, profile_details) if part
-    )
+    return f"Selected cast: {'; '.join(cast)}. {cast_policy}"
 
 
 SCENE_RESPONSE_CONTRACT = (
@@ -79,6 +107,57 @@ SCENE_RESPONSE_CONTRACT = (
     "Describe the subjects, appearance, setting, style, action, visible result, camera and optional sound. "
     "Include no nested JSON, alternatives, markdown, analysis, explanations, source records, "
     "or advice about writing prompts. Apply all writing guidance without copying it into prompt.\n\n"
+)
+
+IMAGE_VARIANT_RESPONSE_CONTRACT = (
+    "Return exactly the requested number of image prompt variants. Each prompt must be a complete, standalone scene description. "
+    "All variants must preserve the exact same requested and selected subject identities, their defining physical traits, action, "
+    "setting, visual medium, and style. Name every required subject in every prompt; never substitute a generic person or mascot. "
+    "Make the presentations visibly distinct at thumbnail size by changing composition, camera viewpoint or crop, subject placement, "
+    "depth staging, or focal path. Do not change the story or invent props, characters, crowds, or actions. Preserve any explicitly requested "
+    "framing or layout; when a dimension is locked, create variation through the dimensions the request leaves open. "
+    "Give each item a short unique label and a presentation description that names its compositional approach."
+)
+
+OPENING_FRAME_VARIANT_GUIDANCE = (
+    "These are still-image prompts for alternate compositions of one exact video opening frame. "
+    "Keep the same frozen story state and initial pose in every variant. The related motion prompt describes what begins after this frame; "
+    "use it only to keep the still aligned with that action, and do not depict later moments or write a motion timeline. "
+    "Vary only the visual presentation through composition, camera viewpoint or crop, subject placement, depth staging, light direction, or focal path. "
+    "Preserve all explicit framing and layout constraints from the user's request."
+)
+
+IMAGE_FALLBACK_PRESENTATIONS = (
+    (
+        "environmental_establishing",
+        "wide environmental establishing composition",
+        "Favor an environmental establishing composition with strong foreground-to-background depth. If the request explicitly fixes framing, preserve it and express scale through the depth layers inside that frame.",
+    ),
+    (
+        "intimate_gesture",
+        "intimate gesture and tactile detail",
+        "Favor an intimate view of the decisive gesture and tactile surface detail while keeping every required subject and interaction readable. If the request fixes the crop, preserve it and prioritize the gesture within it.",
+    ),
+    (
+        "low_viewpoint_scale",
+        "low viewpoint with a foreground scale cue",
+        "Favor a low viewpoint, clear silhouette, and foreground scale cue. If the request fixes the viewpoint, preserve it and establish scale through relative size and overlap.",
+    ),
+    (
+        "elevated_spatial_view",
+        "elevated oblique view emphasizing spatial relationships",
+        "Favor an elevated oblique viewpoint that makes the subjects' spatial relationship easy to read. If the request fixes the viewpoint, preserve it and strengthen spatial separation within that view.",
+    ),
+    (
+        "asymmetric_focal_path",
+        "asymmetric placement with a diagonal focal path",
+        "Favor asymmetric subject placement, a diagonal focal path, and deliberate negative space. If the request fixes the layout, preserve it and emphasize the focal path within that layout.",
+    ),
+    (
+        "luminous_layered_depth",
+        "luminous layered depth and foreground framing",
+        "Favor luminous side or rim light, layered atmospheric depth, and a foreground frame. If the request fixes the light or framing, preserve it and create separation through value and material contrast.",
+    ),
 )
 
 H3_SEGMENT_RESPONSE_CONTRACT = (
@@ -105,7 +184,9 @@ H3_INITIAL_ACTION_CONTRACT = (
     "asks for stillness or slow pacing. Style controls medium, line, surface, and palette; its motion language may "
     "shape secondary texture, but must not slow, replace, or contradict requested subject action. Do not invent "
     "anatomy, props, locations, or a second action. Keep the opening_keyframe_prompt as one frozen loaded pose "
-    "that sets up the same action. Keep meaningful subject or camera motion through most of the segment, reach "
+    "that sets up the same action and follows the still-image composition, lighting, and material contract. "
+    "Apply that still-image contract only to opening_keyframe_prompt; keep prompt motion-only. "
+    "Keep meaningful subject or camera motion through most of the segment, reach "
     "the resolved endpoint only in the final tenth, and use only a brief final hold. Do not settle early or leave a "
     "long static tail. Apply this contract without copying it into prompt."
 )
@@ -117,6 +198,108 @@ def validate_scene_response(payload: Any) -> dict[str, Any]:
             "prompt response must be an object with a scene description string."
         )
     payload["prompt"] = require_h3_prompt(payload.get("prompt"))
+    return payload
+
+
+def _normalize_prompt_variant_count(value: object) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        count = 6
+    return max(4, min(6, count))
+
+
+def _normalize_composition_variant_count(value: object) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        count = 6
+    return max(1, min(6, count))
+
+
+def _build_fallback_image_prompt_sets(
+    prompt: str, variant_count: int
+) -> list[dict[str, str]]:
+    return [
+        {
+            "label": label,
+            "presentation": presentation,
+            "prompt": f"{prompt.rstrip().rstrip('.')}. {direction}",
+        }
+        for label, presentation, direction in IMAGE_FALLBACK_PRESENTATIONS[
+            :variant_count
+        ]
+    ]
+
+
+def _required_image_subject_names(goal: GoalRequest) -> list[str]:
+    subject_context = goal.constraints.get("subject_context")
+    subjects = (
+        dict(subject_context or {}).get("subjects") or []
+        if isinstance(subject_context, dict)
+        else []
+    )
+    names = [
+        str(subject.get("name") or "").strip()
+        for subject in subjects
+        if isinstance(subject, dict) and str(subject.get("name") or "").strip()
+    ]
+    if names:
+        return names
+    return [
+        part.split(":", 1)[0].strip()
+        for part in str(goal.constraints.get("character") or "").split(";")
+        if part.split(":", 1)[0].strip()
+    ]
+
+
+def _validate_image_prompt_set(
+    payload: Any,
+    expected_count: int,
+    required_subject_names: list[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("image prompt response must be an object.")
+    prompt_sets = payload.get("prompt_sets")
+    if not isinstance(prompt_sets, list) or len(prompt_sets) != expected_count:
+        raise ValueError(
+            f"image prompt response must contain exactly {expected_count} variants."
+        )
+    labels: set[str] = set()
+    presentations: set[str] = set()
+    prompts: set[str] = set()
+    for index, prompt_set in enumerate(prompt_sets, start=1):
+        if not isinstance(prompt_set, dict):
+            raise ValueError(f"image prompt variant {index} must be an object.")
+        label = str(prompt_set.get("label") or "").strip()
+        presentation = str(prompt_set.get("presentation") or "").strip()
+        if not label or not presentation:
+            raise ValueError(
+                f"image prompt variant {index} needs a label and presentation."
+            )
+        prompt = require_h3_prompt(prompt_set.get("prompt"))
+        missing_subjects = [
+            name
+            for name in required_subject_names or []
+            if name.casefold() not in prompt.casefold()
+        ]
+        if missing_subjects:
+            raise ValueError(
+                f"image prompt variant {index} omits required subjects: "
+                + ", ".join(missing_subjects)
+            )
+        label_key = label.casefold()
+        presentation_key = re.sub(r"\s+", " ", presentation.casefold())
+        prompt_key = re.sub(r"\s+", " ", prompt.casefold())
+        if label_key in labels or presentation_key in presentations or prompt_key in prompts:
+            raise ValueError("image prompt variants must have unique presentations and prompts.")
+        labels.add(label_key)
+        presentations.add(presentation_key)
+        prompts.add(prompt_key)
+        prompt_set.update(
+            {"label": label, "presentation": presentation, "prompt": prompt}
+        )
+    payload["prompt_sets"] = prompt_sets
     return payload
 
 
@@ -339,8 +522,15 @@ def expand_goal(
     selected_style: str,
     idea_variants: list[dict[str, Any]],
     reference_analysis: dict[str, Any] | None = None,
+    prompt_variant_count: int = 6,
 ) -> dict[str, Any]:
     fallback = build_goal_brief(goal, selected_style, idea_variants)
+    image_prompt_request = goal.media_type == "image"
+    prompt_variant_count = (
+        _normalize_prompt_variant_count(prompt_variant_count)
+        if image_prompt_request
+        else 0
+    )
     video_request = requires_video_motion_direction(goal.media_type)
     reference_directive = format_reference_video_directive(
         reference_analysis, max_chars=2200
@@ -385,16 +575,110 @@ def expand_goal(
             f"{fallback['creative_brief']}\n{reference_motion_directive}"
         )
         fallback["prompt"] = f"{fallback['prompt']}, {reference_motion_directive}"
+    still_prompt_contract = ""
+    if goal.media_type == "image":
+        still_prompt_contract = IMAGE_PROMPT_CONTRACT
+    elif video_request and goal.media_type not in {
+        "sticker_pack",
+        "animated_sticker",
+        "game_sprite",
+    }:
+        still_prompt_contract = (
+            "Apply this still-image contract only to opening_keyframe_prompt; keep prompt motion-only. "
+            + IMAGE_PROMPT_CONTRACT
+        )
+    style_treatment = (
+        f"Selected video rendering treatment (for prompt only): {style_profile_direction(goal)}"
+        if video_request
+        else f"Selected rendering treatment: {style_profile_direction(goal, include_motion=False)}"
+    )
+    keyframe_treatment = (
+        f"Still-image rendering treatment for opening_keyframe_prompt only: "
+        f"{style_profile_direction(goal, include_motion=False)}"
+        if still_prompt_contract and video_request
+        else ""
+    )
+    if image_prompt_request:
+        fallback["prompt_sets"] = _build_fallback_image_prompt_sets(
+            fallback["prompt"], prompt_variant_count
+        )
     try:
         manager = client.require_manager()
+        if image_prompt_request:
+            response_contract = IMAGE_VARIANT_RESPONSE_CONTRACT
+            response_schema = {
+                "type": "object",
+                "properties": {
+                    "creative_brief": {"type": "string"},
+                    "prompt_sets": {
+                        "type": "array",
+                        "minItems": prompt_variant_count,
+                        "maxItems": prompt_variant_count,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "presentation": {"type": "string"},
+                                "prompt": {"type": "string"},
+                            },
+                            "required": ["label", "presentation", "prompt"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["creative_brief", "prompt_sets"],
+                "additionalProperties": False,
+            }
+
+            required_subject_names = _required_image_subject_names(goal)
+
+            def validate_response(payload: Any) -> dict[str, Any]:
+                return _validate_image_prompt_set(
+                    payload, prompt_variant_count, required_subject_names
+                )
+
+            response_prompt = (
+                f"Return JSON with keys: creative_brief and prompt_sets. Include exactly "
+                f"{prompt_variant_count} prompt_sets, each with label, presentation, and prompt."
+            )
+            variant_guidance = (
+                "Required cast and identity details: "
+                + _goal_subject_instruction(goal)
+                + ". Repeat the exact name and distinguishing traits of every required subject in every prompt. Keep the same decisive action, "
+                "cast, setting, and style in every prompt. Make the presentations meaningfully different at thumbnail size by changing "
+                "composition, camera viewpoint or crop, subject placement, depth staging, or focal path; each prompt must be independently usable. "
+                "Do not substitute a human or generic mascot, add spectators, or invent any character or prop. If the user explicitly fixes a "
+                "dimension, preserve it and vary other dimensions. Do not create alternate stories."
+            )
+        else:
+            response_contract = (
+                H3_INITIAL_ACTION_CONTRACT if video_request else SCENE_RESPONSE_CONTRACT
+            )
+            response_schema = {
+                "type": "object",
+                "properties": {
+                    "creative_brief": {"type": "string"},
+                    "prompt": {"type": "string"},
+                    "opening_keyframe_prompt": {"type": "string"},
+                },
+                "required": ["creative_brief", "prompt"],
+                "additionalProperties": False,
+            }
+            validate_response = validate_scene_response
+            response_prompt = (
+                "Return JSON with keys: creative_brief, prompt, opening_keyframe_prompt."
+            )
+            variant_guidance = ""
         user_prompt = "\n".join(
             [
                 f"Goal: {goal.prompt}",
                 f"Media type: {goal.media_type}",
-                f"Style: {selected_style}",
-                f"Resolved visual style rules: {style_profile_direction(goal)}",
                 f"Character: {goal.constraints.get('character', '')}",
                 _goal_subject_instruction(goal),
+                still_prompt_contract,
+                style_treatment,
+                keyframe_treatment,
+                f"Style: {selected_style}",
                 f"Duration seconds: {goal.duration_seconds}",
                 f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
                 reference_directive,
@@ -404,8 +688,10 @@ def expand_goal(
                     if reference_images
                     else "No reference-video keyframes were supplied."
                 ),
-                "Return JSON with keys: creative_brief, prompt, opening_keyframe_prompt.",
-                "Follow the user's requested subject, scene, action, style, composition, and text where specified.",
+                response_prompt,
+                variant_guidance,
+                "Preserve the requested scene, cast, action, setting, text, and explicit framing. "
+                "Style controls rendering only; its composition is a fallback only when framing is unspecified.",
                 (
                     "Write prompt as a motion-only timeline for H3 I2VA; the selected image will be the exact opening frame. "
                     "Do not restate the image's pose, composition, appearance, colors, or existing objects. Begin with the first visible movement, "
@@ -427,37 +713,126 @@ def expand_goal(
             LONG_VIDEO_SYSTEM_PROMPT,
             user_prompt,
             schema_name="goal_brief",
-            output_contract=H3_INITIAL_ACTION_CONTRACT if video_request else SCENE_RESPONSE_CONTRACT,
-            validate_response=validate_scene_response,
-            schema={
-                "type": "object",
-                "properties": {
-                    "creative_brief": {"type": "string"},
-                    "prompt": {"type": "string"},
-                    "opening_keyframe_prompt": {"type": "string"},
-                },
-                "required": ["creative_brief", "prompt"],
-                "additionalProperties": False,
-            },
+            output_contract=response_contract,
+            validate_response=validate_response,
+            schema=response_schema,
             images=reference_images or None,
         )
-        fallback.update(
-            {
-                "creative_brief": str(
-                    payload.get("creative_brief") or fallback["creative_brief"]
-                ),
-                "prompt": require_h3_prompt(payload.get("prompt")),
-                "opening_keyframe_prompt": apply_video_opening_frame_direction(
-                    str(
-                        payload.get("opening_keyframe_prompt")
-                        or fallback.get("opening_keyframe_prompt")
-                        or fallback["prompt"]
+        fallback["creative_brief"] = str(
+            payload.get("creative_brief") or fallback["creative_brief"]
+        )
+        if image_prompt_request:
+            fallback["prompt_sets"] = payload["prompt_sets"]
+            fallback["prompt"] = fallback["prompt_sets"][0]["prompt"]
+            fallback["opening_keyframe_prompt"] = fallback["prompt"]
+        else:
+            fallback.update(
+                {
+                    "prompt": require_h3_prompt(payload.get("prompt")),
+                    "opening_keyframe_prompt": apply_video_opening_frame_direction(
+                        str(
+                            payload.get("opening_keyframe_prompt")
+                            or fallback.get("opening_keyframe_prompt")
+                            or fallback["prompt"]
+                        ),
+                        goal.media_type,
                     ),
-                    goal.media_type,
-                ),
-            }
+                }
+            )
+        fallback["prompt"] = include_image_prompt_quality_clause(
+            fallback["prompt"], goal
         )
         return client.mark_payload(fallback)
+    except Exception as exc:
+        return client.template_fallback(fallback, exc)
+
+
+def expand_image_prompt_variants(
+    client: PromptClient,
+    goal: GoalRequest,
+    base_prompt: str,
+    variant_count: int,
+    *,
+    prompt_role: str = "opening frame",
+    related_motion_prompt: str = "",
+    review_guidance: str = "",
+) -> dict[str, Any]:
+    """Write distinct still compositions without changing the underlying scene."""
+    count = _normalize_composition_variant_count(variant_count)
+    base_prompt = require_h3_prompt(base_prompt)
+    fallback_sets = _build_fallback_image_prompt_sets(base_prompt, count)
+    fallback: dict[str, Any] = {
+        "prompt": fallback_sets[0]["prompt"],
+        "prompt_sets": fallback_sets,
+    }
+    try:
+        manager = client.require_manager()
+        schema = {
+            "type": "object",
+            "properties": {
+                "prompt_sets": {
+                    "type": "array",
+                    "minItems": count,
+                    "maxItems": count,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string"},
+                            "presentation": {"type": "string"},
+                            "prompt": {"type": "string"},
+                        },
+                        "required": ["label", "presentation", "prompt"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["prompt_sets"],
+            "additionalProperties": False,
+        }
+        required_subject_names = _required_image_subject_names(goal)
+
+        def validate_response(payload: Any) -> dict[str, Any]:
+            return _validate_image_prompt_set(
+                payload, count, required_subject_names
+            )
+
+        user_prompt = "\n".join(
+            [
+                f"Goal: {goal.prompt}",
+                f"Prompt role: {prompt_role}",
+                f"Base still prompt: {base_prompt}",
+                (
+                    f"Related motion prompt for continuity only: {related_motion_prompt}"
+                    if related_motion_prompt
+                    else "No separate motion prompt was supplied."
+                ),
+                f"Selected style: {goal.style}",
+                _goal_subject_instruction(goal),
+                f"Review guidance for these still compositions: {review_guidance}",
+                f"Return exactly {count} complete, standalone image prompts in prompt_sets.",
+                IMAGE_VARIANT_RESPONSE_CONTRACT,
+                OPENING_FRAME_VARIANT_GUIDANCE,
+                "Repeat the exact required subject names and identity details in every prompt. "
+                "Do not change the decisive action, cast, setting, medium, or style, and do not add characters, props, or story events.",
+            ]
+        )
+        payload = client.generate_json(
+            manager,
+            LONG_VIDEO_SYSTEM_PROMPT,
+            user_prompt,
+            schema_name="opening_frame_prompt_variants",
+            output_contract=(
+                IMAGE_VARIANT_RESPONSE_CONTRACT
+                + " Each prompt describes one frozen image, never video movement."
+            ),
+            validate_response=validate_response,
+            schema=schema,
+        )
+        result = {
+            "prompt_sets": payload["prompt_sets"],
+            "prompt": payload["prompt_sets"][0]["prompt"],
+        }
+        return client.mark_payload(result)
     except Exception as exc:
         return client.template_fallback(fallback, exc)
 
@@ -473,9 +848,7 @@ def compose_prompt(
 ) -> dict[str, Any]:
     fallback = {
         "prompt": ", ".join(
-            part
-            for part in (prefix, prompt, style, style_profile_direction(goal), suffix)
-            if part
+            part for part in (prefix, prompt, style, suffix) if part
         ),
         "negative_prompt": ", ".join(
             part
@@ -483,21 +856,27 @@ def compose_prompt(
             if part
         ),
     }
+    fallback["prompt"] = include_image_prompt_quality_clause(
+        include_visual_style_profile(fallback["prompt"], goal), goal
+    )
     manager = client.require_manager()
     user_prompt = "\n".join(
         [
             f"Goal: {goal.prompt}",
             f"Media type: {goal.media_type}",
             f"Base prompt: {prompt}",
+            _goal_subject_instruction(goal),
+            IMAGE_PROMPT_CONTRACT if goal.media_type == "image" else "",
+            f"Selected rendering treatment: {style_profile_direction(goal)}",
             f"Style: {style}",
-            f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Prefix: {prefix}",
             f"Suffix: {suffix}",
             f"Character: {goal.constraints.get('character', '')}",
-            _goal_subject_instruction(goal),
             f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
             "Return JSON with key: prompt.",
-            "Write a natural prompt that follows the user's brief, base prompt, and style.",
+            "Preserve the requested scene, cast, action, setting, and explicit framing. "
+            "Style controls rendering only; its composition is a fallback only when framing is unspecified.",
+            "Write one natural concise prompt that follows the user's brief and base scene.",
             "When a prior or first frame is supplied, use it as the opening state and describe any requested motion from there.",
             "When using news context, keep factual claims accurate while following the user's requested visual treatment.",
         ]
@@ -521,7 +900,9 @@ def compose_prompt(
         )
         return client.mark_payload(
             {
-                "prompt": require_h3_prompt(payload.get("prompt")),
+                "prompt": include_image_prompt_quality_clause(
+                    require_h3_prompt(payload.get("prompt")), goal
+                ),
                 "negative_prompt": fallback["negative_prompt"],
             }
         )

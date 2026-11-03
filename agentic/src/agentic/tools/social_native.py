@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 from dotenv import dotenv_values, load_dotenv
 
+from agentic.runtime.platform_limits import THREADS_TEXT_MAX
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.threads_oauth import (
     ThreadsOAuthError,
@@ -1103,7 +1104,7 @@ class InstagramGraphPlatform(BaseConfigPlatform):
 class ThreadsPlatform(BaseConfigPlatform):
     GRAPH_API_BASE = "https://graph.threads.net"
     GRAPH_API_VERSION = "v1.0"
-    CAPTION_MAX = 500
+    CAPTION_MAX = THREADS_TEXT_MAX
     CONTAINER_POLL_SECONDS = 2
     CONTAINER_TIMEOUT_SECONDS = 300
     CAROUSEL_MIN_ITEMS = 2
