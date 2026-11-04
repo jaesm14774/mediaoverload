@@ -87,6 +87,31 @@ atlas contains exactly 16 sampled frames. These checks are deterministic;
 visual review of the resulting atlas is still recommended for art quality,
 silhouette readability, and game feel.
 
+## Skill-effect motion
+
+`game_sprite` treats the character, theme, and style as references for one
+playable skill animation. A quiet or static brief supplies its mood and visual
+design; it does not leave the character idle. The video prompt asks for a
+single action with visible anticipation, charge, release, impact or effect
+peak, and recovery. The character's pose and the effect must change together:
+the VFX originates from a visible source, travels or expands with the action,
+then resolves with a contact cue and follow-through. A brief held impact pose
+can sell force; long idle holds and camera-only movement cannot substitute for
+the skill animation. The prompt also keeps the character large and readable in
+the keyframe, with room for the effect to move.
+
+**User Given** a game-sprite request whose scene or style is quiet or static,
+**When** the motion plan and clip are generated, **Then** the scene is re-staged
+as one readable skill effect with distinct preparation, charge, release,
+impact or peak, and recovery phases in the 16-frame atlas; each phase changes
+the character pose or visible effect, and the requested identity and visual
+style remain recognizable. A still character with only camera or background
+movement does not satisfy this scenario.
+
+This is a generation prompt contract, not proof of a provider's output. The
+manifest and deterministic packaging QA do not establish that the skill is
+readable or sufficiently animated; review the resulting atlas and animation.
+
 ## Output checks
 
 The packager checks frame count, configured cell and atlas dimensions, binary

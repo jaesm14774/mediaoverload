@@ -187,7 +187,12 @@ class AssetRegistry:
             h3_mode = values.get("conditioning", {}).get("h3_mode")
             if h3_mode:
                 from agentic.assets.minimax_h3 import h3_requirements
-                values["required_assets"] = h3_requirements(h3_mode, values["recommended_defaults"].get("model_profile", "q4"))
+                defaults = values["recommended_defaults"]
+                values["required_assets"] = h3_requirements(
+                    h3_mode,
+                    defaults.get("model_profile", "q4"),
+                    defaults.get("adapter_profile"),
+                )
             manifests[stem] = _synthetic_manifest(stem, rel, values)
         return manifests
 
@@ -400,6 +405,9 @@ class AssetRegistry:
     def _candidate_asset_paths(self, manifest: WorkflowManifest, requirement: AssetRequirement) -> list[Path]:
         target_dirs = (Path(requirement.target_dir), *[Path(item) for item in requirement.alternate_target_dirs])
         extra_roots = [Path(item) for item in manifest.asset_extra_roots]
+        configured_extra_root = os.environ.get("COMFYUI_ASSET_EXTRA_ROOT", "").strip()
+        if configured_extra_root:
+            extra_roots.append(Path(configured_extra_root))
         bases = self._dedupe_search_bases([self.asset_root, *extra_roots])
         unique_dirs: list[Path] = []
         seen: set[str] = set()

@@ -12,6 +12,7 @@ from agentic.runtime.prompting import (
     build_animated_sticker_motion_prompt,
     build_dynamic_sprite_motion_fallback,
     build_game_sprite_reference_context,
+    compile_dynamic_sprite_image_prompt,
     compile_dynamic_sprite_video_prompt,
     dynamic_sprite_frame_map,
     normalize_dynamic_sprite_beats,
@@ -380,12 +381,14 @@ def build_dynamic_sprite_motion_plan(
         for part in (
             f"Creative request: {goal.prompt}",
             f"Subject reference: {goal.constraints.get('character') or ''}",
-            f"Style: {goal.style}",
-            f"Style guidance: {style_profile_direction(goal)}",
+            f"Style references (compatible palette, lighting, and materials only): {goal.style}",
+            f"Style guidance (visual only): {style_profile_direction(goal, include_motion=False)}",
+            f"Mandatory game-sprite visual contract: {reference_context['visual_contract']}",
             f"Reference notes (optional): {reference_context['prompt_text'] if reference_context['references'] else ''}",
             f"The render uses a {target_duration_seconds:g}-second clip sampled into a 4x4 frame atlas.",
+            "Design one playable skill effect, even when the source scene is quiet or static. Preserve its character and style as references, then stage five visibly different phases: anticipation, charge, release, impact or effect peak, and recovery. The character pose and VFX must change together; no idle-only or camera-only motion.",
             "Do not impose a flat, monochrome, or chroma-key background; use any setting and colors that support the request.",
-            "Return JSON with image_prompt and video_prompt. Other descriptive fields are optional.",
+            "Return JSON with image_prompt and video_prompt, plus exactly five ordered beats for the same phases.",
         )
         if part
     )
@@ -401,7 +404,24 @@ def build_dynamic_sprite_motion_plan(
                 "properties": {
                     "image_prompt": {"type": "string"},
                     "video_prompt": {"type": "string"},
-                    "beats": {"type": "array", "items": {"type": "object"}},
+                    "beats": {
+                        "type": "array",
+                        "minItems": 5,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "purpose": {"type": "string"},
+                                "action": {"type": "string"},
+                                "body_change": {"type": "string"},
+                                "spatial_change": {"type": "string"},
+                                "cause": {"type": "string"},
+                                "transition": {"type": "string"},
+                            },
+                            "required": ["purpose", "action"],
+                            "additionalProperties": True,
+                        },
+                    },
                     "animation_kind": {"type": "string"},
                     "fps": {"type": "number"},
                     "negative_prompt": {"type": "string"},
@@ -416,13 +436,25 @@ def build_dynamic_sprite_motion_plan(
         beats = normalize_dynamic_sprite_beats(
             payload.get("beats"), list(fallback.get("beats") or [])
         )
+        phases = ("anticipation", "charge", "release", "impact_or_peak", "recovery")
+        if len(beats) != len(phases):
+            beats = list(fallback.get("beats") or [])
+        else:
+            for beat, phase in zip(beats, phases):
+                beat["purpose"] = phase
         creative_video_prompt = str(
             payload.get("video_prompt") or fallback["creative_video_prompt"]
         ).strip()
+        creative_image_prompt = str(payload.get("image_prompt") or "").strip()
+        image_prompt = (
+            compile_dynamic_sprite_image_prompt(
+                creative_image_prompt, reference_context["visual_contract"]
+            )
+            if creative_image_prompt
+            else str(fallback["image_prompt"])
+        )
         animation_kind = str(
-            goal.constraints.get("sprite_animation_kind")
-            or payload.get("animation_kind")
-            or fallback.get("animation_kind")
+            goal.constraints.get("sprite_animation_kind") or "one_shot"
         ).strip()
         if animation_kind not in {"periodic", "one_shot"}:
             animation_kind = "one_shot"
@@ -432,12 +464,12 @@ def build_dynamic_sprite_motion_plan(
                 payload.get("motion_name") or fallback["motion_name"]
             ).strip(),
             "motion_plan_mode": "direct_prompt",
-            "image_prompt": str(
-                payload.get("image_prompt") or fallback["image_prompt"]
-            ).strip(),
+            "image_prompt": image_prompt,
             "creative_video_prompt": creative_video_prompt,
             "beats": beats,
-            "video_prompt": compile_dynamic_sprite_video_prompt(creative_video_prompt),
+            "video_prompt": compile_dynamic_sprite_video_prompt(
+                creative_video_prompt, reference_context["visual_contract"]
+            ),
             "negative_prompt": str(goal.constraints.get("negative_prompt") or ""),
             "animation_kind": animation_kind,
             "fps": max(4.0, min(24.0, float(payload.get("fps", fallback["fps"])))),
@@ -452,7 +484,8 @@ def build_dynamic_sprite_motion_plan(
         fallback["action_references"] = reference_context["references"]
         fallback["video_duration_seconds"] = target_duration_seconds
         fallback["video_prompt"] = compile_dynamic_sprite_video_prompt(
-            str(fallback.get("creative_video_prompt") or goal.prompt)
+            str(fallback.get("creative_video_prompt") or goal.prompt),
+            reference_context["visual_contract"],
         )
         return client.template_fallback(
             fallback, exc, fallback_reason="json_parse_failed"
