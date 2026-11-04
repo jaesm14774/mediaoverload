@@ -123,6 +123,29 @@ workflows:
       allowed_modes:
       - t2va
 
+  minimax_h3_pika_turbo_t2va.json:
+    summary: MiniMax H3 T2VA using the Pika H3 Flex Turbo 4-step FL2VA adapter
+    media_types:
+    - text2video
+    - long_video
+    recommended_defaults:
+      width: 832
+      height: 480
+      length: 124
+      frame_rate: 24
+      steps: 4
+      model_profile: q4
+      adapter_profile: pika_h3_flex_turbo_4step_fl2va
+    conditioning:
+      provider: comfyui
+      recipes:
+        t2v:
+          continuation: none
+          render_tool: comfy.render_h3
+      h3_mode: t2va
+      allowed_modes:
+      - t2va
+
   minimax_h3_i2va.json:
     summary: MiniMax H3 I2VA through ComfyUI with native stereo audio
     media_types:
