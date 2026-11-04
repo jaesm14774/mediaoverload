@@ -11,22 +11,7 @@ TEXT_ENCODERS = {
     "q4": ("qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf", 14_576_977_888),
     "q2": ("qwen3vl-32B-MiniMax-H3-Q2_K.gguf", 8_487_968_160),
 }
-ADAPTERS = {
-    "pika_h3_flex_turbo_4step_fl2va": {
-        "name": "pika_h3_flex_turbo_4step_fl2va.safetensors",
-        "size": 3_912_311_400,
-        "target_dir": "ComfyUI/models/loras",
-        "source": "https://huggingface.co/Pika-Labs/Pika-H3-Flex-Turbo-LoRA/resolve/dcacd93a50f714ba1cd61c7ca2cc5f65e9a1ec60/pika_h3_flex_turbo_4step_fl2va.safetensors",
-        "sha256": "8b0b5d2c53e435e637ed80afeff540135b90603ae53906f6aa8e66066776179d",
-    }
-}
-
-
-def h3_requirements(
-    mode: str,
-    profile: str = "q4",
-    adapter_profile: str | None = None,
-) -> list[dict[str, Any]]:
+def h3_requirements(mode: str, profile: str = "q4") -> list[dict[str, Any]]:
     if profile not in TEXT_ENCODERS:
         raise ValueError(f"Unsupported H3 model_profile: {profile}; choose q4 or q2")
     architecture = "ref2va" if mode == "ref2va" else "fl2va"
@@ -36,7 +21,7 @@ def h3_requirements(
         ("minimax_h3_video_vae_fp16.safetensors", 5_207_808_496, "video_vae", "vae"),
         ("minimax_h3_audio_vae_fp32.safetensors", 605_254_808, "audio_vae", "vae"),
     ]
-    requirements = [
+    return [
         {
             "name": name,
             "kind": kind,
@@ -45,19 +30,3 @@ def h3_requirements(
         }
         for name, size, kind, directory in models
     ]
-    if adapter_profile:
-        try:
-            adapter = ADAPTERS[adapter_profile]
-        except KeyError:
-            raise ValueError(f"Unsupported H3 adapter_profile: {adapter_profile}") from None
-        requirements.append(
-            {
-                "name": adapter["name"],
-                "kind": "lora",
-                "target_dir": adapter["target_dir"],
-                "source": adapter["source"],
-                "expected_size": adapter["size"],
-                "sha256": adapter["sha256"],
-            }
-        )
-    return requirements

@@ -79,7 +79,6 @@ class WorkflowManifest:
     summary: str
     required_assets: list[AssetRequirement] = field(default_factory=list)
     recommended_defaults: dict[str, Any] = field(default_factory=dict)
-    asset_extra_roots: list[str] = field(default_factory=list)
     conditioning: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,14 +91,11 @@ class WorkflowManifest:
             "recommended_defaults": self.recommended_defaults,
             "conditioning": self.conditioning,
         }
-        if self.asset_extra_roots:
-            payload["asset_extra_roots"] = list(self.asset_extra_roots)
         return payload
 
 
 _WORKFLOW_RECOMMENDED_DEFAULTS: dict[str, dict[str, Any]] = {
     "krea2_turbo": {"width": 1024, "height": 576, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple"},
-    "krea2_turbo_img2img": {"steps": 8, "cfg": 1.0, "denoise": 0.25, "sampler_name": "euler", "scheduler": "simple"},
     "flux3_image_klein_img2img": {"steps": 16, "cfg": 1.0, "denoise": 1.0, "sampler_name": "euler", "scheduler": "simple"},
     "anima_anime": {"width": 1024, "height": 1024, "steps": 25, "cfg": 3.5},
 
@@ -137,7 +133,7 @@ def _infer_media_types(stem: str) -> list[str]:
     ]
     if "upscal" in lower or "tile" in lower:
         return ["image_upscale"]
-    if "i2i" in lower or "img2img" in lower or lower == "image_to_image":
+    if "i2i" in lower or "img2img" in lower:
         return ["image_refine"]
     if "i2v" in lower:
         return ["image_to_video", "image_to_video_audio", "long_video"]
@@ -163,7 +159,6 @@ def _synthetic_manifest(
         summary=str(values.get("summary") or ""),
         required_assets=required_assets,
         recommended_defaults=dict(values.get("recommended_defaults") or _WORKFLOW_RECOMMENDED_DEFAULTS.get(name, {})),
-        asset_extra_roots=[],
         conditioning=dict(values.get("conditioning") or {}),
     )
 
@@ -189,9 +184,7 @@ class AssetRegistry:
                 from agentic.assets.minimax_h3 import h3_requirements
                 defaults = values["recommended_defaults"]
                 values["required_assets"] = h3_requirements(
-                    h3_mode,
-                    defaults.get("model_profile", "q4"),
-                    defaults.get("adapter_profile"),
+                    h3_mode, defaults.get("model_profile", "q4")
                 )
             manifests[stem] = _synthetic_manifest(stem, rel, values)
         return manifests
@@ -404,11 +397,7 @@ class AssetRegistry:
 
     def _candidate_asset_paths(self, manifest: WorkflowManifest, requirement: AssetRequirement) -> list[Path]:
         target_dirs = (Path(requirement.target_dir), *[Path(item) for item in requirement.alternate_target_dirs])
-        extra_roots = [Path(item) for item in manifest.asset_extra_roots]
-        configured_extra_root = os.environ.get("COMFYUI_ASSET_EXTRA_ROOT", "").strip()
-        if configured_extra_root:
-            extra_roots.append(Path(configured_extra_root))
-        bases = self._dedupe_search_bases([self.asset_root, *extra_roots])
+        bases = self._dedupe_search_bases([self.asset_root])
         unique_dirs: list[Path] = []
         seen: set[str] = set()
         for base in bases:

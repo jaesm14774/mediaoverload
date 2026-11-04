@@ -93,11 +93,10 @@ def load_global_social_config(repo_root: Path) -> dict[str, Any]:
 
 def _normalize_platform_configs(
     repo_root: Path, raw_platforms: Any
-) -> tuple[dict[str, dict[str, Any]], dict[str, str], list[str]]:
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
     if not isinstance(raw_platforms, dict):
-        return {}, {}, []
+        return {}, []
     configs: dict[str, dict[str, Any]] = {}
-    aliases: dict[str, str] = {}
     skipped: list[str] = []
     for platform_name, platform_config in raw_platforms.items():
         if not isinstance(platform_config, dict) or not bool(
@@ -105,9 +104,6 @@ def _normalize_platform_configs(
         ):
             continue
         normalized = str(platform_name).lower().strip()
-        if normalized == "instagram":
-            aliases[normalized] = "instagram_graph"
-            normalized = "instagram_graph"
         if normalized not in SUPPORTED_PUBLISH_PLATFORMS:
             skipped.append(str(platform_name))
             continue
@@ -117,7 +113,7 @@ def _normalize_platform_configs(
                 _resolve_repo_path(repo_root, str(resolved["config_folder_path"]))
             )
         configs[normalized] = resolved
-    return configs, aliases, skipped
+    return configs, skipped
 
 
 def _merge_social_media_config(
@@ -211,6 +207,3 @@ def _resolve_repo_path(repo_root: Path, raw_path: str) -> Path:
         return path
     return repo_root / path
 
-
-def _is_media_file(path: str) -> bool:
-    return Path(path).suffix.lower() in MEDIA_EXTENSIONS

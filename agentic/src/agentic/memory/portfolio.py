@@ -37,24 +37,3 @@ class PortfolioMemory:
         }
         with self.storage_path.open("a", encoding="utf-8") as fp:
             fp.write(f"{json.dumps(entry)}\n")
-
-    def load_recent(self, limit: int = 20) -> list[PortfolioRecord]:
-        if not self.storage_path.exists():
-            return []
-        records: list[PortfolioRecord] = []
-        with self.storage_path.open("r", encoding="utf-8") as fp:
-            for line in fp:
-                line = line.strip()
-                if not line:
-                    continue
-                data = json.loads(line)
-                records.append(
-                    PortfolioRecord(
-                        goal_signature=data["goal_signature"],
-                        workflow_name=data["workflow_name"],
-                        status=data["status"],
-                        metrics=data.get("metrics", {}),
-                        notes=data.get("notes", []),
-                    )
-                )
-        return records[-limit:]

@@ -224,7 +224,7 @@ def build_text2img2img(context: PlanningContext, goal: GoalRequest) -> Execution
     refine_manifest = context.manifest_from_goal_constraints(
         goal,
         *context.DEFAULT_REFINE_WORKFLOWS,
-        constraint_keys=("refine_workflow_name", "transition_workflow_name"),
+        constraint_keys=("refine_workflow_name",),
         allowed_media_types={"image_refine"},
     )
     image_count = context.constraint_int(goal, "image_count", 1)

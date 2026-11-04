@@ -183,8 +183,7 @@ def prepare_publish_caption(
                 "additionalProperties": False,
             },
             # Rotate through the verified provider pool before stopping.
-            # A free-pool 429 is often model-specific; limiting this call
-            # to one candidate made the publish gate fail unnecessarily.
+            # A free-pool 429 is often model-specific, so allow every candidate.
             max_retries=max(1, publish_max_retries),
             request_timeout=float(
                 os.environ.get("AGENTIC_PUBLISH_CAPTION_TIMEOUT_SECONDS", "60")

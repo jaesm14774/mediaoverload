@@ -113,8 +113,7 @@ def build_h3_workflow(template: dict[str, Any], mode: str | H3Mode,
     if not (1 <= length <= 362 and 1 <= steps <= 32 and fps == 24):
         raise ValueError("H3 supports 1-362 delivered frames, 1-32 steps and 24 fps in this workflow")
     profile = str(payload.get("model_profile") or "q4")
-    adapter_profile = str(payload.get("adapter_profile") or "") or None
-    requirements = h3_requirements(mode.value, profile, adapter_profile)
+    requirements = h3_requirements(mode.value, profile)
     graph = json.loads(json.dumps(template))
     graph["1"]["inputs"]["unet_name"] = DIFFUSION_MODELS["ref2va" if mode is H3Mode.REF2VA else "fl2va"][0]
     graph["2"]["inputs"]["clip_name"] = TEXT_ENCODERS[profile][0]

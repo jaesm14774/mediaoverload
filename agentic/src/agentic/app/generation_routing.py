@@ -142,9 +142,8 @@ def _asset_qualified_workflow_candidates(
             )
         except (KeyError, OSError, ValueError):
             continue
-        # An empty asset manifest means "unverified", not "ready". Treating
-        # it as ready made stage weights select workflow JSONs whose model
-        # files are not installed on the active ComfyUI host.
+        # An empty asset manifest means "unverified", not "ready"; otherwise
+        # weights could select workflows whose models are not installed.
         if not isinstance(statuses, list) or not statuses:
             continue
         if all(
@@ -233,7 +232,6 @@ def _route_generation_from_character_config(
             "image_workflow_name",
             "video_workflow_name",
             "refine_workflow_name",
-            "transition_workflow_name",
             "upscale_workflow_name",
         ):
             candidates = list(

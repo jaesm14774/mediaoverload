@@ -20,4 +20,4 @@ python scripts/style_picker.py
 
 圖片直接引用原圖庫的公開預覽，因此看圖需要連線；風格資料與已儲存的 random 清單可離線使用。預覽未載入時仍能查看風格文字與操作勾選。
 
-來源：[matplinta / Krea 2 Style Library](https://github.com/matplinta/t2i-krea-2-style-library)。2026-10-15 匯入 288 筆描述及 2,304 筆預覽路徑，來源與原始資料 SHA-256 記錄於 catalog。預覽是原作者的生成範例，不代表本機已重跑。這是 prompt style library，並非載入 Style Reference LoRA 或 Krea 雲端 moodboard conditioning。
+來源：[matplinta / Krea 2 Style Library](https://github.com/matplinta/t2i-krea-2-style-library)。已匯入 288 筆描述及 2,304 筆預覽路徑，來源與原始資料 SHA-256 記錄於 catalog。預覽是原作者的生成範例，不代表本機已重跑。這是 prompt style library，並非載入 Style Reference LoRA 或 Krea 雲端 moodboard conditioning。

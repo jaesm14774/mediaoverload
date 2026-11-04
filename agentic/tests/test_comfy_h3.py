@@ -15,49 +15,6 @@ from agentic.tools.comfy_h3 import ComfyH3Toolset, build_h3_workflow, deliver_vi
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_user_given_pika_turbo_when_preparing_native_480p_t2va_then_uses_its_q4_adapter_recipe():
-    """User Given a Pika Turbo T2VA request When its native 480p recipe is prepared Then the Q4 base, four-step adapter, prompt, seed, and canvas are retained."""
-    registry = AssetRegistry(REPO)
-    manifest = registry.get_manifest("minimax_h3_pika_turbo_t2va")
-    defaults = manifest.recommended_defaults
-    prompt = "A red paper boat drifts through a rain-fed city gutter at blue hour, passing yellow leaves."
-    graph, evidence = build_h3_workflow(
-        registry.load_workflow_template(manifest),
-        "t2va",
-        {
-            "prompt": prompt,
-            "width": defaults["width"],
-            "height": defaults["height"],
-            "length": 124,
-            "fps": 24,
-            "steps": defaults["steps"],
-            "seed": 10303,
-            "model_profile": defaults["model_profile"],
-            "adapter_profile": defaults["adapter_profile"],
-        },
-    )
-
-    assert (defaults["width"], defaults["height"]) == (832, 480)
-    assert defaults["steps"] == 4
-    assert defaults["adapter_profile"] == "pika_h3_flex_turbo_4step_fl2va"
-    assert graph["5"]["inputs"]["width"] == 832
-    assert graph["5"]["inputs"]["height"] == 480
-    assert graph["5"]["inputs"]["length"] == 124
-    assert graph["5"]["inputs"]["prompt"] == prompt
-    assert graph["1"]["inputs"]["unet_name"] == "minimax_h3_fl2va_pruned_fp8_Q4_0.gguf"
-    assert graph["2"]["inputs"]["clip_name"] == "qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf"
-    assert graph["8"]["inputs"]["sampler_name"] == "res_multistep"
-    assert graph["9"]["inputs"]["noise_seed"] == 10303
-    assert len(graph["7"]["inputs"]["sigmas"].split(",")) == defaults["steps"] + 1
-    assert graph["6"]["inputs"]["shift_video"] == 6.0
-    assert graph["6"]["inputs"]["shift_audio"] == 3.0
-
-    adapter = next(node for node in graph.values() if node["class_type"] == "LoraLoaderModelOnly")
-    assert adapter["inputs"]["lora_name"] == "pika_h3_flex_turbo_4step_fl2va.safetensors"
-    assert adapter["inputs"]["strength_model"] == 1.0
-    assert any(asset["name"] == adapter["inputs"]["lora_name"] for asset in evidence["required_assets"])
-
-
 @pytest.mark.parametrize("mode", ["t2va", "i2va", "fl2va", "l2va", "ref2va"])
 def test_user_given_an_h3_mode_when_prepared_then_its_prompt_and_conditioning_contract_are_kept(tmp_path: Path, mode: str):
     """User Given a valid scene and real conditioning images When a Comfy H3 request is prepared Then only the selected mode's anchors or references are connected and the full scene is retained."""

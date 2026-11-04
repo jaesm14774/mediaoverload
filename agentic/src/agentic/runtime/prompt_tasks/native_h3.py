@@ -806,7 +806,6 @@ def normalize_native_h3_story_payload(
                 continue
             normalized_shot = dict(shot)
             raw_time = normalized_shot.get("time")
-            # Normalize time aliases so the app can assign renderer timing.
             if (
                 not str(raw_time or "").strip()
                 and str(normalized_shot.get("time_range") or "").strip()

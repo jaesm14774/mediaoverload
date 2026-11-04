@@ -94,8 +94,8 @@ def test_user_given_a_video_with_a_pan_request_when_the_edit_is_rendered_then_th
     media = FFmpegAdapter().probe_media(result["video_path"])
     first_frame = root / "first.png"
     last_frame = root / "last.png"
-    FFmpegAdapter().extract_frame_at(result["video_path"], str(first_frame), 0.1)
-    FFmpegAdapter().extract_frame_at(result["video_path"], str(last_frame), 1.4)
+    FFmpegAdapter().extract_frames_at(result["video_path"], [str(first_frame)], [0.1])
+    FFmpegAdapter().extract_frames_at(result["video_path"], [str(last_frame)], [1.4])
     with Image.open(first_frame) as first_image:
         first_means = ImageStat.Stat(first_image.convert("RGB")).mean
     with Image.open(last_frame) as last_image:
@@ -130,7 +130,7 @@ def test_user_given_multiple_clips_when_using_cut_or_separate_audio_settings_the
     timestamps = (0.5, 1.5, 2.5) if cuts else (0.5, 1.25, 2.0)
     for channel, timestamp in enumerate(timestamps):
         frame = root / f"beat-{channel}.png"
-        FFmpegAdapter().extract_frame_at(result["video_path"], str(frame), timestamp)
+        FFmpegAdapter().extract_frames_at(result["video_path"], [str(frame)], [timestamp])
         with Image.open(frame) as image:
             means = ImageStat.Stat(image.convert("RGB")).mean
         assert means[channel] > max(means[(channel + 1) % 3], means[(channel + 2) % 3]) * 1.4

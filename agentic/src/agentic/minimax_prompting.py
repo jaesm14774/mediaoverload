@@ -141,7 +141,6 @@ def compose_minimax_h3_prompt(
     non_diegetic_music: str = "N/A",
     render_mode: str = "",
     prior_frame: bool = False,
-    continuity_rules: Sequence[Any] = (),
     subject_context: Mapping[str, Any] | None = None,
     media_type: str | None = None,
 ) -> str:

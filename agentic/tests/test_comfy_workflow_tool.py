@@ -332,7 +332,7 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
             workflow_path.write_text("{}", encoding="utf-8")
             spec = ComfyWorkflowSpec(
                 name="comfy.workflow.image_to_image",
-                workflow_name="krea2_turbo_img2img",
+                workflow_name="flux3_image_klein_img2img",
                 output_folder="img2img",
                 file_prefix="story_card",
                 denoise_binding=NodeBinding(kind="denoise", node_type="KSampler", input_key="denoise"),

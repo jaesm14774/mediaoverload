@@ -124,7 +124,7 @@ class SocialServiceTools:
                     **global_additional_params,
                 }
             else:
-                # Preserve the existing explicit platform-bundle override path.
+                # Explicit platform-bundle values override node parameters.
                 platform_additional_params = {
                     **global_additional_params,
                     **bundle_additional_params,

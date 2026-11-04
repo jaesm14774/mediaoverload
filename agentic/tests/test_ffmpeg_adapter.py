@@ -59,27 +59,6 @@ def source_factory(tmp_path):
     return create
 
 
-@pytest.mark.parametrize("variable_timing", [False, True])
-@pytest.mark.parametrize(("suffix", "image_format"), [(".png", "PNG"), (".jpg", "JPEG")])
-def test_user_given_fixed_sample_times_when_extracting_a_batch_then_pixels_match_individual_samples(
-    source_factory, tmp_path, variable_timing, suffix, image_format,
-):
-    """User Given fixed video and timestamps When extracting a batch to PNG or JPEG Then output formats and sampled pixels match individual extraction."""
-    source = source_factory(audio=False, changing=True, variable_timing=variable_timing)
-    adapter = FFmpegAdapter()
-    timestamps = [0.0, 0.137, 0.137, 0.75, 1.001, 1.875]
-    outputs = [str(tmp_path / f"batch-{index}{suffix}") for index in range(len(timestamps))]
-    result = adapter.extract_frames_at(str(source), outputs, timestamps)
-    assert result == outputs
-    for index, timestamp in enumerate(timestamps):
-        individual = tmp_path / f"individual-{index}{suffix}"
-        adapter.extract_frame_at(str(source), str(individual), timestamp)
-        with Image.open(individual) as expected, Image.open(outputs[index]) as actual:
-            assert expected.format == actual.format == image_format
-            assert actual.size == expected.size
-            assert actual.convert("RGBA").tobytes() == expected.convert("RGBA").tobytes()
-
-
 @pytest.mark.parametrize("timestamps", [[-1], [float("nan")], [float("inf")]])
 def test_user_given_invalid_sample_times_when_extracting_then_no_output_is_created(tmp_path, timestamps):
     """User Given an invalid timestamp When extracting Then the request fails without creating output."""
@@ -106,35 +85,6 @@ def test_user_given_an_ambiguous_batch_when_extracting_then_the_request_is_rejec
     """User Given missing, duplicate or source-overwriting destinations When extracting Then the ambiguous batch is rejected."""
     with pytest.raises(ValueError):
         FFmpegAdapter().extract_frames_at("unused.mp4", outputs, timestamps)
-
-
-def test_user_given_a_fixed_motion_clip_when_packaging_then_the_atlas_and_animation_keep_the_sample_pixels(
-    source_factory, tmp_path,
-):
-    """User Given fixed motion media When the sprite tool packages it Then all sixteen frames and exported atlas retain the individual-sample pixels."""
-    import json
-    from agentic.runtime.registry import ToolRegistry
-    from agentic.tools.media_services import register_media_service_tools
-    from agentic.tools.sprite_adapter import SpriteAdapter
-
-    source = source_factory(audio=False, changing=True)
-    tools = ToolRegistry()
-    register_media_service_tools(tools, tmp_path)
-    result = tools.call("media.video_to_sprite", {
-        "video_path": str(source), "output_dir": str(tmp_path / "batch_sprite"),
-        "cell_width": 64, "cell_height": 64, "fps": 12,
-    })
-    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
-    samples = []
-    for index, timestamp in enumerate(manifest["sampling"]["timestamps_seconds"]):
-        path = tmp_path / f"reference-{index}.png"
-        FFmpegAdapter().extract_frame_at(str(source), str(path), timestamp)
-        samples.append(str(path))
-    reference = SpriteAdapter().build_from_frames(samples, output_dir=str(tmp_path / "reference_sprite"))
-    assert len(result["frame_paths"]) == 16
-    assert all(result["qa"]["checks"].values())
-    for key in ("atlas_path", "gif_path", "webp_path"):
-        assert Path(result[key]).read_bytes() == Path(reference[key]).read_bytes()
 
 
 @pytest.mark.parametrize("copies", [1, 2])

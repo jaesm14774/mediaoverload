@@ -216,7 +216,6 @@ class RoutingContractTests(unittest.TestCase):
                 "image_workflow_name": "",
                 "video_workflow_name": "minimax_h3_t2va",
                 "refine_workflow_name": "",
-                "transition_workflow_name": "",
                 "upscale_workflow_name": "",
             },
             "count_plan": {

@@ -58,29 +58,6 @@ VIDEO_SEGMENT_DIRECTION_FIELDS = (
 )
 
 
-def format_segment_direction(segment: dict[str, object]) -> str:
-    lines = [
-        f"{label}: {' '.join(str(segment.get(key) or '').split())}"
-        for key, label in VIDEO_SEGMENT_DIRECTION_FIELDS
-        if " ".join(str(segment.get(key) or "").split())
-    ]
-    return "Shot-specific directing notes:\n" + "\n".join(lines) if lines else ""
-
-
-def apply_segment_video_direction(
-    prompt: str,
-    segment: dict[str, object],
-    media_type: str,
-) -> str:
-    prompt_text = apply_video_motion_direction(prompt, media_type)
-    if not requires_video_motion_direction(media_type):
-        return prompt_text
-    notes = format_segment_direction(segment)
-    if notes and "shot-specific directing notes:" not in prompt_text.casefold():
-        prompt_text = f"{prompt_text}\n\n{notes}"
-    return prompt_text
-
-
 def requires_video_motion_direction(media_type: str) -> bool:
     normalized = str(media_type or "").strip().casefold()
     return (

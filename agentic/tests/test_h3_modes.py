@@ -448,8 +448,9 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(calls[0][0], "comfy.workflow.text_to_image")
         self.assertNotIn("image_path", calls[0][1])
-        for key in ("prompt", "composition", "palette", "motion", "avoid"):
+        for key in ("prompt", "composition", "palette", "avoid"):
             self.assertIn(profile[key], calls[0][1]["prompt"])
+        self.assertNotIn(profile["motion"], calls[0][1]["prompt"])
 
     def test_kirby_batch_keeps_every_candidate_when_identity_dq_would_reject_one(self) -> None:
         class FakeTools:

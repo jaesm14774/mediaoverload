@@ -47,15 +47,6 @@ routing:
       kirby_keyframe_anima: 1
     refine_workflow_name:
       flux3_image_klein_img2img: 3
-      krea2_turbo_img2img: 3
-      image_to_image: 2
-      kirby_continuity_img2img: 1
-      kirby_identity_img2img: 1
-    transition_workflow_name:
-      krea2_turbo_img2img: 3
-      image_to_image: 2
-      kirby_continuity_img2img: 1
-      kirby_identity_img2img: 1
     video_workflow_name:
       minimax_h3_i2va: 3
       minimax_h3_t2va: 3
@@ -841,12 +832,6 @@ routing:
         - semantic prompt understanding
         - clean 2D illustration
         - 16:9 keyframe
-      krea2_turbo_img2img:
-        - Kirby identity continuity
-        - preserve composition
-        - subtle redraw
-        - image refinement
-        - low denoise
       flux3_image_klein_img2img:
         - story landing frame
         - preserve character identity from a reference image
@@ -885,23 +870,6 @@ routing:
         - approved first frame
         - direct Anima render
         - story keyframe candidates
-      image_to_image:
-        - preserve composition
-        - refine existing image
-        - redraw with same layout
-        - fix anatomy
-      kirby_continuity_img2img:
-        - Kirby continuity frame
-        - subtle prior-frame adjustment
-        - use previous frame as context
-        - low-denoise img2img
-        - story frame refinement
-      kirby_identity_img2img:
-        - Kirby identity refinement
-        - stronger redraw
-        - character appearance reference
-        - anime consistency
-        - keyframe cleanup
       minimax_h3_t2va:
         - text to video
         - prompt driven video
@@ -946,13 +914,6 @@ routing:
         tradeoffs:
           - "Krea 2 Turbo 是 T2I，不是原生 T2V；影片仍由 MiniMax H3 I2V 或純 T2V workflow 完成。"
           - "Q4_0 GGUF 是 8GB GPU 的可行起點，會比官方 FP8／BF16 有較明顯的量化取捨；需以本機實際 render 驗證品質。"
-      krea2_turbo_img2img:
-        summary: "Krea 2 Turbo 低 denoise img2img workflow，用於 Kirby 首幀審核後的 continuity／identity 微調。"
-        strengths:
-          - "沿用相同 Krea 2 Turbo、Qwen3-VL 4B 與 VAE，提供首幀與修圖階段的低 VRAM 連續性選項；Anima、Nova 與混合 workflow 仍保留作為其他候選。"
-          - "預設 8 steps、Euler、simple、CFG 1 與 denoise 0.25，偏向保留輸入構圖，而非重新生成另一個角色。"
-        tradeoffs:
-          - "這是影像修正階段，不是影片生成；過高 denoise 仍可能改變角色身份或構圖。"
       flux3_image_klein_img2img:
         summary: "FLUX 3 Image Klein reference-conditioned img2img，用於把 Krea2 起始圖轉成內容不同但角色與畫風連續的落點關鍵圖；主要接在 image edit、FL2VA、L2VA 與長影片轉場。"
         strengths:
@@ -991,24 +952,6 @@ routing:
           - "直接產生 landscape keyframe，可接 H3 I2V。"
         tradeoffs:
           - "需要 Anima 資產，Krea2 是目前已完成本機 live 驗證的首選。"
-      image_to_image:
-        summary: "通用 img2img refine workflow，保留給需要明顯構圖與細節重繪的需求。"
-        strengths:
-          - "可保留輸入構圖並做中度風格與細節修正。"
-        tradeoffs:
-          - "不是 Krea2 identity continuity 的低 denoise 預設。"
-      kirby_continuity_img2img:
-        summary: "Kirby 低 denoise continuity workflow，保留前一幀身份與構圖。"
-        strengths:
-          - "適合故事段落間的連續性修正。"
-        tradeoffs:
-          - "需要 Anima 資產，Krea2 img2img 是本機已驗證替代方案。"
-      kirby_identity_img2img:
-        summary: "Kirby identity refine workflow，保留作為較強角色修正候選。"
-        strengths:
-          - "比 continuity 路線允許更多身份細節重繪。"
-        tradeoffs:
-          - "需要 Anima 資產，較高 denoise 可能改變原始構圖。"
       minimax_h3_fl2va:
         summary: "MiniMax H3 低 VRAM 15 秒影像條件 workflow；ComfyUI 依策略綁定首幀、尾幀或兩者。"
         strengths:

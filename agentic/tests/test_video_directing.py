@@ -7,7 +7,6 @@ from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.prompting import build_goal_brief
 from agentic.video_directing import (
     VIDEO_MOTION_DIRECTION_MARKER,
-    apply_segment_video_direction,
     apply_video_motion_direction,
     apply_video_opening_frame_direction,
 )
@@ -107,16 +106,6 @@ class VideoDirectingTests(unittest.TestCase):
 
         self.assertEqual(apply_video_motion_direction(source, "text2image"), source)
         self.assertEqual(apply_video_opening_frame_direction(source, "text2image"), source)
-
-    def test_user_still_image_with_segment_metadata_keeps_video_camera_direction_out(self) -> None:
-        """User wants a still image. Given a segment includes optional camera metadata, When its image prompt is built, Then time-based directions stay out."""
-        prompt = apply_segment_video_direction(
-            "Kirby beside a paper lantern.",
-            {"camera": "track beside Kirby", "action": "Kirby hops"},
-            "text2image",
-        )
-
-        self.assertEqual(prompt, "Kirby beside a paper lantern.")
 
     def test_user_text_to_video_brief_separates_action_from_opening_still(self) -> None:
         """User wants an action-led clip. Given a video goal, When expanded, Then motion and keyframe directions stay separate."""

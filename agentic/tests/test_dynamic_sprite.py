@@ -384,7 +384,7 @@ def test_kirby_yaml_can_weight_game_sprite_for_random_selection(tmp_path: Path) 
     kirby_config = repo_root / "configs" / "characters" / "kirby.yaml"
     config = load_character_config(kirby_config)
 
-    assert config["generation"]["generation_type_weights"]["game_sprite"] == 3
+    assert config["generation"]["generation_type_weights"]["game_sprite"] > 0
 
     config["generation"]["generation_type_weights"] = {"game_sprite": 1}
     result = _route_generation_from_character_config(

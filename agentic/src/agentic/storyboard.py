@@ -21,23 +21,6 @@ class StoryboardError(ValueError):
     """Raised when a reusable story preset cannot produce a valid story plan."""
 
 
-_NATIVE_STORY_STOPWORDS = {
-    "the", "and", "that", "this", "with", "from", "into", "while", "before", "after",
-    "then", "than", "for", "its", "their", "they", "them", "only", "must", "will",
-    "not", "one", "same", "story", "scene", "shot", "kirby", "protagonist", "original",
-    "danger", "problem", "thing", "place", "becomes", "become", "begins", "begin",
-}
-
-def _native_story_terms(value: Any) -> set[str]:
-    tokens = re.findall(r"[a-z][a-z0-9'-]{2,}|[\u4e00-\u9fff]{2,}", str(value or "").lower())
-    return {token for token in tokens if token not in _NATIVE_STORY_STOPWORDS}
-
-
-def native_surface_variation(creative_brief: str) -> str:
-    """Pass the user's creative direction through without content filtering."""
-    return re.sub(r"\s+", " ", str(creative_brief or "")).strip()
-
-
 def resolve_storyboard_path(path_or_name: str | Path) -> Path:
     raw = str(path_or_name).strip()
     if not raw:

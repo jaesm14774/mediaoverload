@@ -668,7 +668,6 @@ def render_story_card_images(
             body_start = max(int(height * 0.31), title_y + int(height * 0.04))
         else:
             # Keep each continuation page in the same upper reading band.
-            # Vertical centering pushed the copy into the character's stage.
             body_start = int(height * 0.25)
         footer_y = int(height * 0.93)
         body_end = footer_y - int(height * 0.04)

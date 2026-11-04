@@ -118,7 +118,7 @@ def test_user_given_story_cards_when_llm_routes_then_unrelated_video_counts_are_
     # chat_completion interface is exercised over HTTP by provider contract tests.
     class RouteModel:
         def chat_completion(self, messages, **kwargs):
-            return '{"generation_type":"story_card","workflow_plan":{"image_workflow_name":"krea2_turbo","video_workflow_name":"","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"review_selection_limit":1},"reason":"written story cards"}'
+            return '{"generation_type":"story_card","workflow_plan":{"image_workflow_name":"krea2_turbo","video_workflow_name":"","refine_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"review_selection_limit":1},"reason":"written story cards"}'
 
     class RouteManager:
         text_model = RouteModel()

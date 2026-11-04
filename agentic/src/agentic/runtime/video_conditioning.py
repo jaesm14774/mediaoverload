@@ -94,10 +94,6 @@ class WorkflowCapability:
             recipes=recipes,
         )
 
-    def supports(self, recipe_name: str) -> bool:
-        return str(recipe_name) in self.recipes
-
-
 @dataclass(frozen=True, slots=True)
 class ConditioningPlan:
     """Logical segment inputs resolved by the planner before rendering."""

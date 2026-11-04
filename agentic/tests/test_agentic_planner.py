@@ -415,7 +415,7 @@ class AgenticPlannerTests(unittest.TestCase):
             style="anime key visual",
             constraints={
                 "image_workflow_name": "krea2_turbo",
-                "refine_workflow_name": "krea2_turbo_img2img",
+                "refine_workflow_name": "flux3_image_klein_img2img",
                 "image_count": 4,
                 "stage_probe_auto_select": True,
             },

@@ -257,29 +257,6 @@ class AgenticComfyCommunicator:
             # Cleanup must never hide the original generation failure.
             return
 
-    def list_available_models(self) -> dict[str, list[str]]:
-        """Query ComfyUI for installed models/LoRAs by inspecting loader node options."""
-        loader_map = {
-            "checkpoints": "CheckpointLoaderSimple",
-            "loras": "LoraLoader",
-            "unets": "UnetLoaderGGUF",
-            "vaes": "VAELoader",
-            "upscale_models": "UpscaleModelLoader",
-        }
-        result: dict[str, list[str]] = {}
-        for key, node_class in loader_map.items():
-            try:
-                info = self.get_object_info(node_class)
-                node_info = info.get(node_class, {})
-                required = node_info.get("input", {}).get("required", {})
-                for _input_name, input_spec in required.items():
-                    if isinstance(input_spec, list) and input_spec and isinstance(input_spec[0], list):
-                        result[key] = list(input_spec[0])
-                        break
-            except Exception:
-                pass
-        return result
-
     def wait_for_completion(
         self,
         prompt_id: str,

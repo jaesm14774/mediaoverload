@@ -15,15 +15,13 @@ user prompt -> Krea 2 Turbo -> six still candidates -> human review
 
 ## Production image recipes
 
-Both `configs/workflow/krea2_turbo.json` and
-`configs/workflow/krea2_turbo_img2img.json` now use:
+`configs/workflow/krea2_turbo.json` uses:
 
 - Stock ComfyUI `UNETLoader` with `Krea2-Turbo-W4A4-noLowRank.safetensors`.
 - Native ConvRot W4A4 quantized operations and ComfyUI dynamic VRAM loading.
 - `CLIPLoaderGGUF` with `Qwen3VL-4B-Instruct-Q4_K_M.gguf`, type `krea2`.
 - `qwen_image_vae.safetensors`.
 - 8 steps, Euler/simple, CFG 1, zeroed negative conditioning.
-- T2I denoise 1; continuity img2img denoise 0.25.
 
 The W4A4 checkpoint is the community quantization of Krea 2 Turbo. The
 ComfyUI installation must support native `convrot_w4a4` operations. Verify its
@@ -72,8 +70,7 @@ Compare the same canvas, steps, prompt, conditioning and delivered outputs. Keep
 
 Krea remains the first candidate for image-assisted stages. Existing Anima,
 Nova, hybrid Nova/Z-Image and character-specific candidates remain separately
-selectable when their assets are ready. Pure `z_image` and
-`z_image_i2i_anime` workflows remain retired.
+selectable when their assets are ready.
 
 ## Primary references
 

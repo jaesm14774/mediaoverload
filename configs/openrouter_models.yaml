@@ -31,5 +31,3 @@ vision:
   - id: qwen/qwen3.8-27b:free
     mode: structured
 
-# The pool intentionally follows the active env file, including models that were
-# previously excluded from an older smoke-test snapshot.

@@ -29,8 +29,6 @@ from agentic.tools.comfy_workflow_tool import register_comfy_workflow_tools
 from agentic.tools.media_services import register_media_service_tools
 
 
-# Krea2 is the first live-verified candidate; retained non-pure-Z image
-# workflows remain available for explicit/asset-complete comparisons.
 IMAGE_WORKFLOW_CANDIDATES = (
     "krea2_turbo",
     "nova-anime-xl",
@@ -149,7 +147,7 @@ def _run_mode(
     profile = dict(MODE_PROFILES[mode])
     if smoke:
         # Keep the exact workflow and conditioning contract while bounding
-        # GPU time for a strategy-matrix regression run.
+        # GPU time for a regression run.
         profile["length"] = min(int(profile["length"]), 124)
         profile["duration"] = float(profile["length"]) / CANVAS["frame_rate"]
     contract = mode_contract(mode.value)

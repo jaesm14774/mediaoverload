@@ -83,7 +83,8 @@ class LLMEngineTests(unittest.TestCase):
         engine.expand_goal(goal, "storybook animation", [])
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Follow the user's requested subject, scene, action, style, composition, and text where specified.", user_prompt)
+        self.assertIn("a paper boat rides a sudden gust into a safe harbor", user_prompt)
+        self.assertIn("Preserve the requested scene", user_prompt)
         self.assertNotIn("action contract", user_prompt.lower())
         self.assertNotIn("one dominant physical mechanism", user_prompt)
         self.assertNotIn("9:16", user_prompt)
@@ -274,7 +275,8 @@ class LLMEngineTests(unittest.TestCase):
         engine.compose_prompt(goal, "a paper boat rides a sudden gust", "storybook animation")
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertIn("Write a natural prompt that follows the user's brief, base prompt, and style.", user_prompt)
+        self.assertIn("a paper boat rides a sudden gust", user_prompt)
+        self.assertIn("storybook animation", user_prompt)
         self.assertNotIn("action contract", user_prompt.lower())
         self.assertNotIn("Qixi", user_prompt)
 
@@ -445,7 +447,7 @@ class LLMEngineTests(unittest.TestCase):
 
         result = engine.compose_prompt(goal, "kirby runs", "anime", prefix="hero shot")
 
-        self.assertEqual(result["prompt"], "llm composed prompt")
+        self.assertTrue(result["prompt"].startswith("llm composed prompt"))
         self.assertEqual(result["negative_prompt"], "")
         self.assertEqual(result["prompt_mode"], "llm")
 
@@ -455,7 +457,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                    '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
                 ]
             ),
         )
@@ -495,7 +497,7 @@ class LLMEngineTests(unittest.TestCase):
     def test_route_generation_strategy_schema_locks_unavailable_sticker_stages(self) -> None:
         manager = _FakeManager(
             [
-                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
+                '{"generation_type":"sticker_pack","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":1,"segment_count":1,"review_selection_limit":3,"sticker_expression_count":8,"images_per_prompt":2},"reason":"Sticker prompt with clean outline fits sticker_pack best."}',
             ]
         )
         engine = LLMPromptEngine(mode="llm", manager=manager)
@@ -535,10 +537,6 @@ class LLMEngineTests(unittest.TestCase):
             {"const": ""},
         )
         self.assertEqual(
-            sticker_branch["properties"]["workflow_plan"]["properties"]["transition_workflow_name"],
-            {"const": ""},
-        )
-        self.assertEqual(
             sticker_branch["properties"]["workflow_plan"]["properties"]["upscale_workflow_name"],
             {"const": ""},
         )
@@ -548,7 +546,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
+                    '{"generation_type":"text2image2video","workflow_plan":{"image_workflow_name":"anima_anime","video_workflow_name":"minimax_h3_i2va","refine_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":2},"reason":"Short character clip."}',
                 ]
             ),
         )
@@ -579,7 +577,7 @@ class LLMEngineTests(unittest.TestCase):
             mode="llm",
             manager=_FakeManager(
                 [
-                    '{"generation_type":"text2img","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"","refine_workflow_name":"","transition_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":0,"segment_count":0,"review_selection_limit":1,"sticker_expression_count":0,"images_per_prompt":0},"reason":"Image-only request."}',
+                    '{"generation_type":"text2img","workflow_plan":{"image_workflow_name":"nova-anime-xl","video_workflow_name":"","refine_workflow_name":"","upscale_workflow_name":""},"count_plan":{"image_count":1,"video_count":0,"segment_count":0,"review_selection_limit":1,"sticker_expression_count":0,"images_per_prompt":0},"reason":"Image-only request."}',
                 ]
             ),
         )

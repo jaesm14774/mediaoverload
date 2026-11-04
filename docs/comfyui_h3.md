@@ -18,7 +18,7 @@ Krea 生圖、修圖與 H3 影片共用同一個 ComfyUI HTTP 服務。應用程
 
 ComfyUI 需要原生 H3 conditioning／audio-video 節點及新版 ComfyUI-GGUF 的 `UnetLoaderGGUFDynamicVRAM`、`CLIPLoaderGGUFDynamicVRAM`。執行前只查詢本次 workflow graph 使用的節點型別；缺少節點時直接回報，不切換其他 loader 或模型。
 
-FL2VA Q4 diffusion 用於 T2VA、I2VA、FL2VA 與 L2VA；Ref2VA 使用其專用 Q4 diffusion。既有 `q4`／`q2` profile 指定 Qwen3-VL 32B text encoder 的量化版本，diffusion 仍為 Q4。video VAE 使用 FP16、audio VAE 使用 ComfyUI 的 fused FP32 權重。資產大小與相對目錄由 `agentic/assets/minimax_h3.py` 宣告。
+FL2VA Q4 diffusion 用於 T2VA、I2VA、FL2VA 與 L2VA；Ref2VA 使用其專用 Q4 diffusion。既有 `q4`／`q2` profile 指定 Qwen3-VL 32B text encoder 的量化版本，diffusion 仍為 Q4。video VAE 使用 FP16、audio VAE 使用 ComfyUI 的 fused FP32 權重。資產大小與相對目錄由 `agentic/src/agentic/assets/minimax_h3.py` 宣告。
 
 低顯存服務建議啟用 BF16 diffusion/text 與 SageAttention，並保留動態顯存管理。這些是 ComfyUI 服務的啟動設定，應依已安裝版本與硬體驗證，不由排程程式啟動或修改另一個 GPU 環境。
 

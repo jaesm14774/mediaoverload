@@ -579,10 +579,6 @@ class SerialVideoStore:
             for path in cls._identity_paths(paths)
         ]
 
-    @staticmethod
-    def _row(row: dict[str, Any] | None) -> dict[str, Any] | None:
-        return dict(row) if row is not None else None
-
     def _active_identity_files(
         self, connection: _MySQLSession, series_id: str
     ) -> list[dict[str, str]]:

@@ -101,34 +101,6 @@ class MotionGraphicsPlan:
         return asdict(self)
 
 
-def render_motion_graphics_frames(
-    plan: MotionGraphicsPlan,
-    output_dir: Path,
-    *,
-    width: int,
-    height: int,
-    fps: float,
-    frame_count: int,
-) -> list[Path]:
-    _validate_motion_graphics_frame_request(width, height, fps, frame_count)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    for frame_index, rgba in enumerate(
-        iter_motion_graphics_rgba_frames(
-            plan,
-            width=width,
-            height=height,
-            fps=fps,
-            frame_count=frame_count,
-        )
-    ):
-        layer = Image.frombytes("RGBA", (width, height), rgba)
-        path = output_dir / f"frame_{frame_index:06d}.png"
-        layer.save(path, format="PNG", optimize=True)
-        paths.append(path)
-    return paths
-
-
 def iter_motion_graphics_rgba_frames(
     plan: MotionGraphicsPlan,
     *,

@@ -135,8 +135,11 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
             SkillContext(plan=plan, node=node, state=state)
         )
 
-        for rule in profile.values():
-            self.assertIn(rule, bundle["prompt"])
+        for key, rule in profile.items():
+            if key == "motion":
+                self.assertNotIn(rule, bundle["prompt"])
+            else:
+                self.assertIn(rule, bundle["prompt"])
 
     def test_user_given_i2v_image_prompt_when_render_bundle_is_built_then_no_action_lock_is_added(self) -> None:
         """User: Given an I2V opening prompt, When the shared art direction is applied, Then its wording stays intact without an action lock."""
