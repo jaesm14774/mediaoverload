@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import unittest
 from pathlib import Path
 
@@ -13,18 +12,15 @@ from agentic.runtime.contracts import GoalRequest
 class ImageConditioningWorkflowTests(unittest.TestCase):
 
 
-    def test_krea2_keyframe_and_identity_workflows_are_registered(self) -> None:
+    def test_keyframe_and_reference_edit_workflows_are_registered(self) -> None:
         """User Given image-assisted H3 When workflows are resolved Then opening
-        and continuity recipes validate and continuity preserves source content.
+        and reference-edit recipes validate.
         """
         repo_root = Path(__file__).resolve().parents[2]
         registry = AssetRegistry(repo_root / "agentic", asset_root=repo_root)
-        for workflow_name in ("krea2_turbo", "krea2_turbo_img2img"):
+        for workflow_name in ("krea2_turbo", "flux3_image_klein_img2img"):
             validation = registry.validate_workflow(workflow_name)
             self.assertTrue(validation["valid"], validation)
-        continuity = json.loads((repo_root / "configs" / "workflow" / "krea2_turbo_img2img.json").read_text(encoding="utf-8"))
-        self.assertGreater(continuity["9"]["inputs"]["denoise"], 0)
-        self.assertLess(continuity["9"]["inputs"]["denoise"], 1)
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):

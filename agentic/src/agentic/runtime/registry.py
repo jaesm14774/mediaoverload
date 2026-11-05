@@ -60,20 +60,6 @@ class SkillRegistry:
     def list_names(self) -> list[str]:
         return sorted(self._skills)
 
-    def describe(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "name": item.name,
-                "description": item.description,
-                "stage": item.stage,
-                "tags": list(item.tags),
-                "tool_names": list(item.tool_names),
-                "metadata": item.metadata,
-            }
-            for item in sorted(self._skills.values(), key=lambda entry: entry.name)
-        ]
-
-
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
@@ -104,16 +90,3 @@ class ToolRegistry:
 
     def list_names(self) -> list[str]:
         return sorted(self._tools)
-
-    def describe(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "name": item.name,
-                "description": item.description,
-                "kind": item.kind,
-                "tags": list(item.tags),
-                "metadata": item.metadata,
-            }
-            for item in sorted(self._tools.values(), key=lambda entry: entry.name)
-        ]
-

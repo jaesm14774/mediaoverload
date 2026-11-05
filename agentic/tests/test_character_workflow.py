@@ -702,7 +702,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "image_workflow_name": "nova-anime-xl",
                     "video_workflow_name": "minimax_h3_i2va",
                     "refine_workflow_name": "",
-                    "transition_workflow_name": "",
                     "upscale_workflow_name": "",
                 },
                 "count_plan": {
@@ -951,7 +950,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "image_workflow_name": "nova-anime-xl",
                     "video_workflow_name": "minimax_h3_t2va",
                     "refine_workflow_name": "",
-                    "transition_workflow_name": "",
                     "upscale_workflow_name": "",
                 },
                 "count_plan": {
@@ -1014,7 +1012,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "image_workflow_name": "",
                     "video_workflow_name": "minimax_h3_t2va",
                     "refine_workflow_name": "",
-                    "transition_workflow_name": "",
                     "upscale_workflow_name": "",
                 },
                 "count_plan": {
@@ -1261,7 +1258,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "image_workflow_name": "nova-anime-xl",
                     "video_workflow_name": "minimax_h3_t2va",
                     "refine_workflow_name": "",
-                    "transition_workflow_name": "",
                     "upscale_workflow_name": "",
                 },
                 "count_plan": {
@@ -1340,7 +1336,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                         "generation": {"output_dir": "/app/output"},
                         "social_media": {
                             "platforms": {
-                                "instagram": {
+                                "instagram_graph": {
                                     "config_folder_path": "configs/social_media/credentials/kirby",
                                     "enabled": True,
                                 },
@@ -1371,7 +1367,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                         "image_workflow_name": "nova-anime-xl",
                         "video_workflow_name": "minimax_h3_t2va",
                         "refine_workflow_name": "",
-                        "transition_workflow_name": "",
                         "upscale_workflow_name": "",
                     },
                     "count_plan": {
@@ -1395,7 +1390,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         self.assertEqual(payload["constraints"]["platforms"], ["instagram_graph", "twitter"])
-        self.assertEqual(payload["constraints"]["platform_aliases"]["instagram"], "instagram_graph")
         self.assertEqual(payload["constraints"]["skipped_platforms"], ["mastodon"])
         self.assertNotIn("facebook", payload["constraints"]["platform_configs"])
         self.assertEqual(
@@ -1412,7 +1406,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
                     "image_workflow_name": "nova-anime-xl",
                         "video_workflow_name": "minimax_h3_i2va",
                     "refine_workflow_name": "",
-                    "transition_workflow_name": "",
                     "upscale_workflow_name": "Tile Upscaler SDXL",
                 },
                 "count_plan": {

@@ -25,7 +25,7 @@ from agentic.runtime.prompting import include_visual_style_profile
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
 from agentic.runtime.serial_video import store_from_constraints
-from agentic.skills.shared import build_run_dir, resolve_dependency_value, slug_path_component
+from agentic.skills.shared import build_run_dir, slug_path_component
 from agentic.storyboard import (
     format_native_h3_keyframe_prompt,
     format_native_h3_prompt,
@@ -1091,11 +1091,6 @@ class LongVideoSkills:
 
     def _build_run_dir(self, prompt: str, suffix: str) -> Path:
         return build_run_dir(self.output_root, prompt, suffix, default_slug="longvideo")
-
-    @staticmethod
-    def _optional_dependency_value(context: SkillContext, keys: tuple[str, ...]) -> str | None:
-        return resolve_dependency_value(context, keys)
-
 
 def register_longvideo_skills(
     skill_registry: SkillRegistry,

@@ -26,7 +26,7 @@ CLI 的 `main()` 會先建立 goal 和 plan，印出 `=== PLAN ===`；程式只�
 
 ## 從一筆 run 開始排查
 
-角色流程將媒體寫入 `output/<character>/`（角色設定或 `--output-dir` 可改位置；解析規則見 [`character_config.py`](../../agentic/src/agentic/app/character_config.py#L198)），並將每次 run 的追蹤資料放在 `logs/runs/<run_id>/`。直接 Agentic CLI 的預設媒體根目錄和 portfolio 摘要則在 `agentic/output/` 與 `agentic/logs/`；不要用角色目錄的慣例去猜直接 CLI 的產物位置。細節見[README 的產物表](../../README.md#設定與產物)和 [`RunRecorder`](../../agentic/src/agentic/runtime/observability.py#L36)。
+角色流程將媒體寫入 `output/<character>/`（角色設定或 `--output-dir` 可改位置；解析規則見 [`character_config.py`](../../agentic/src/agentic/app/character_config.py)），並將每次 run 的追蹤資料放在 `logs/runs/<run_id>/`。直接 Agentic CLI 的預設媒體根目錄和 portfolio 摘要則在 `agentic/output/` 與 `agentic/logs/`；不要用角色目錄的慣例去猜直接 CLI 的產物位置。細節見[README 的產物表](../../README.md#設定與產物)和 [`RunRecorder`](../../agentic/src/agentic/runtime/observability.py)。
 
 | 你看到的情況 | 先看什麼 | 能回答什麼／下一步 |
 | --- | --- | --- |
@@ -36,9 +36,9 @@ CLI 的 `main()` 會先建立 goal 和 plan，印出 `=== PLAN ===`；程式只�
 | 必要 Discord 審查被阻擋 | node 輸出的 `review_mode`、`fallback_reason`；輸出目錄的 `review_sessions/` 記錄；依核准途徑確認 bot／channel／reviewer 存取 | 當必要 final review 未能啟動，程式會停止在審查關卡。不要以自動候選排序當成人工核准。中途審查的傳輸失敗行為則依該策略的 `pre_video_review_failure_policy`。 |
 | workflow 報告缺少資產或 ComfyUI 節點失敗 | 對應 node 的 workflow 名稱、資產檢查輸出與 ComfyUI 診斷；再對照 `configs/workflow/` 的 JSON 和 metadata | 確認本機設定路徑與實際 ComfyUI 環境是否一致。repo 不能證明遠端 ComfyUI 的模型已安裝；不要自行清除模型或工作佇列。 |
 
-`events.jsonl` 依時間記錄 run 與 node 事件；`nodes/` 保存 skill 輸出、metrics 和 logs；`llm/` 保存 LLM 呼叫資料；`run_manifest.json` 彙整最終狀態和路徑。LLM 記錄包含送出的 `messages` 和原始回應欄位，可能帶有 prompt 或引用內容，應依可能敏感的工作內容限制存取和分享；格式見 [`RunRecorder.record_llm_call()`](../../agentic/src/agentic/runtime/observability.py#L71)。repo 沒有寫明保留天數；在 owner 確認政策前，不要清理 run logs、review sessions 或輸出媒體。
+`events.jsonl` 依時間記錄 run 與 node 事件；`nodes/` 保存 skill 輸出、metrics 和 logs；`llm/` 保存 LLM 呼叫資料；`run_manifest.json` 彙整最終狀態和路徑。LLM 記錄包含送出的 `messages` 和原始回應欄位，可能帶有 prompt 或引用內容，應依可能敏感的工作內容限制存取和分享；格式見 [`RunRecorder.start_llm_call()`](../../agentic/src/agentic/runtime/observability.py)。repo 沒有寫明保留天數；在 owner 確認政策前，不要清理 run logs、review sessions 或輸出媒體。
 
-若 Discord 顯示「重新生成」，[`run_character_session()`](../../agentic/src/agentic/app/character_session.py#L14) 會停止本輪並從頭建立另一個完整 run；若舊請求有固定 `--seed`，新 run 會清除該固定 seed。新 run 有新 ID，舊 run 證據不會被當成本輪結果。先從回傳 JSON 確認新 run ID 與狀態，避免把舊訊息或產物當成新結果。
+若 Discord 顯示「重新生成」，[`run_character_session()`](../../agentic/src/agentic/app/character_session.py) 會停止本輪並從頭建立另一個完整 run；若舊請求有固定 `--seed`，新 run 會清除該固定 seed。新 run 有新 ID，舊 run 證據不會被當成本輪結果。先從回傳 JSON 確認新 run ID 與狀態，避免把舊訊息或產物當成新結果。
 
 ## 修改前先追影響鏈
 
@@ -55,7 +55,7 @@ repo README 提供 Ruff、非 integration pytest 和 integration test collection
 
 ## 排程與正式環境邊界
 
-[`scheduler/scheduler.py`](../../scheduler/scheduler.py#L106) 讀取 `SCHEDULER_*` 設定，可依 daily 或 interval 觸發角色工作流；工作註冊入口在 [`register_jobs()`](../../scheduler/scheduler.py#L216)，而 [`docker-compose.yml`](../../docker-compose.yml) 定義 `media-scheduler` 容器範例。repo 也提供範例環境檔，但不能由此判斷目前 scheduler 是否啟用、執行在哪一台主機、使用哪一份 env，或是否有另一套部署方式。使用者也無法由 repo 得知當前排程是否正在執行。
+[`scheduler/scheduler.py`](../../scheduler/scheduler.py) 讀取 `SCHEDULER_*` 設定，可依 daily 或 interval 觸發角色工作流；工作註冊入口在 [`register_jobs()`](../../scheduler/scheduler.py)，而 [`docker-compose.yml`](../../docker-compose.yml) 定義 `media-scheduler` 容器範例。repo 也提供範例環境檔，但不能由此判斷目前 scheduler 是否啟用、執行在哪一台主機、使用哪一份 env，或是否有另一套部署方式。使用者也無法由 repo 得知當前排程是否正在執行。
 
 | 待確認資訊 | 為何影響安全接手 | repo 內目前可確認的線索 | 確認前的做法 |
 | --- | --- | --- | --- |

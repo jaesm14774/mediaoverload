@@ -56,37 +56,3 @@ LLM 的 `continuity` 是規劃／審查資料，不拼回圖片提示，以免�
 角色與道具延續，以及字幕閱讀節奏。生成摘要保持 `awaiting_review`，
 不把一次 LLM 或 FFmpeg 成功當作品質通過。
 上例的 `--no-publish` 只生成，沒有呼叫 Discord 或社群派送。
-
-## 固定素材比較
-
-`scripts/run_motion_comic_experiment.py` 是配對實驗入口，仍要求已存在的 `--story`。
-這是為了把來源圖、文字、時長、尺寸與 FPS 固定，只比較漫畫和單圖剪輯呈現。
-可以將正式策略自動保存的 `story.json` 交給它：
-
-```powershell
-python scripts/run_motion_comic_experiment.py --story "output/<生成目錄>/<comic目錄>/story.json" --output-dir output/comic_pair_01 --repeats 3 --warmup 1
-```
-
-輸出目錄必須新建，既有結果不覆寫。計時不包括共用圖片與 LLM 生成。
-正式策略與配對實驗共用同一合成器；效率與觀感結論需各自的實際紀錄支持。
-
-## 2026-10-11 驗證邊界
-
-本機完整驗收為 696 passed、1 skipped、2 deselected，Ruff 通過。
-另外量測既有 CLI 子程序驗收並合併完整測試資料，新策略五個模組的實際分支
-覆蓋為 57／62（91.94%）；合併報告是 `coverage_with_children.json`。
-新策略本機驗收使用符合真實 provider 契約的替身，以及真實 Pillow／FFmpeg；
-涵蓋無故事檔、無題材、隨機路由、社群文案素材準備、非法故事、缺圖／壞圖與
-共用狀態污染結尾的回歸。沒有以這些本機案例宣稱 GPU 品質通過。
-
-另跑三輪真實 LLM／ComfyUI，自動保存故事與三張插畫、九秒 MP4。
-最後一輪證據在 `output/motion_comic_automatic_final_20261011/validation_summary.json`，
-逐格檢視紀錄在同目錄的 `perceptual_review.json`。
-前兩輪分別有重複盤子與結尾蛋糕未消失的問題，保留原始結果；最後一輪
-已呈現承諾、較小的剩餘蛋糕與空盤結尾，但第二格的預定缺口不夠明確。
-這是基本敘事可見的篩選結果，仍待使用者審查。
-
-主題、角色、Krea workflow、steps、seed、尺寸與 FPS 固定，但每輪重寫 LLM 故事，
-並非只改單一圖片提示的嚴格配對；沒有宣稱全面品質提升或效率提升。
-合成器抽出共用後，兩種版型共六頁與先前接受的頁面逐像素相同。
-MySQL 角色選取、Discord、實際社群派送與 Docker 排程未在本輪驗證。

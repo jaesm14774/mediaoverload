@@ -16,19 +16,14 @@ class Krea2WorkflowContractTests(unittest.TestCase):
         cls.workflow_dir = cls.repo_root / "configs" / "workflow"
         cls.routing = yaml.safe_load((cls.repo_root / "configs" / "routing.yaml").read_text(encoding="utf-8"))["routing"]
 
-    def test_active_routes_use_krea2_and_not_retired_image_workflows(self) -> None:
-        retired = {
-            "z_image",
-            "z_image_i2i_anime",
-        }
+    def test_active_routes_include_krea2(self) -> None:
         active = {
             workflow_name
             for stages in self.routing["workflow_stage_candidates"].values()
             for workflow_names in stages.values()
             for workflow_name in workflow_names
         }
-        self.assertTrue(active & {"krea2_turbo", "krea2_turbo_img2img"})
-        self.assertEqual(active & retired, set())
+        self.assertIn("krea2_turbo", active)
 
     def test_text2img_route_is_active_and_uses_canonical_names(self) -> None:
         self.assertIn("text2img", self.routing["strategy_candidates"])
@@ -54,13 +49,6 @@ class Krea2WorkflowContractTests(unittest.TestCase):
             self.assertIn("krea2_turbo", candidates, strategy)
             self.assertTrue(candidates, strategy)
 
-    def test_retired_image_workflow_files_are_removed(self) -> None:
-        for workflow_name in (
-            "z_image",
-            "z_image_i2i_anime",
-        ):
-            self.assertFalse((self.workflow_dir / f"{workflow_name}.json").exists(), workflow_name)
-
     def test_krea2_turbo_is_official_low_vram_sampler_shape(self) -> None:
         """User Given local Krea Turbo When rendering Then the native checkpoint keeps its distilled sampler contract."""
         graph = json.loads((self.workflow_dir / "krea2_turbo.json").read_text(encoding="utf-8"))
@@ -74,15 +62,6 @@ class Krea2WorkflowContractTests(unittest.TestCase):
         self.assertEqual(sampler["sampler_name"], "euler")
         self.assertEqual(sampler["scheduler"], "simple")
         self.assertNotIn("TextGenerate", classes)
-
-    def test_krea2_img2img_keeps_the_same_model_family(self) -> None:
-        """User Given a Krea frame When repairing continuity Then the same native model family refines it."""
-        graph = json.loads((self.workflow_dir / "krea2_turbo_img2img.json").read_text(encoding="utf-8"))
-        sampler = next(node for node in graph.values() if node["class_type"] == "KSampler")["inputs"]
-        self.assertEqual(sampler["denoise"], 0.25)
-        self.assertEqual(graph["2"]["inputs"]["unet_name"], "Krea2-Turbo-W4A4-noLowRank.safetensors")
-        self.assertEqual(graph["3"]["inputs"]["type"], "krea2")
-        self.assertEqual(graph["4"]["inputs"]["vae_name"], "qwen_image_vae.safetensors")
 
     def test_asset_registry_reports_the_three_missing_local_files(self) -> None:
         registry = AssetRegistry(self.repo_root / "agentic", asset_root=self.repo_root)

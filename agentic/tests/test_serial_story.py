@@ -1,9 +1,6 @@
-from types import SimpleNamespace
 
-from agentic.runtime.llm_client import PromptClient
 from agentic.runtime.serial_story import (
     build_serial_story_prompts,
-    generate_serial_story_treatment,
 )
 
 
@@ -60,25 +57,6 @@ def test_user_given_a_simple_serial_story_request_when_treatment_prompt_is_built
     assert "每次執行製作幾集是兩回事" in user_prompt
     assert "跨集保持一致" in user_prompt
     assert "最後一集必須收束主線" in user_prompt
-
-
-def test_user_given_the_story_writer_returns_a_complete_treatment_when_called_then_the_plain_text_is_kept_without_structured_output_options():
-    """User Given a text model returns a Traditional Chinese story treatment When serial story generation runs Then the exact readable text is returned without requesting a JSON schema."""
-    treatment = "# 星港的回聲\n\n主角從失敗中找到新的方法，最後讓港口恢復生機。"
-    model = TextModel(treatment)
-    client = PromptClient(mode="llm", manager=SimpleNamespace(text_model=model))
-
-    generated = generate_serial_story_treatment(
-        client,
-        user_idea="A lighthouse keeper helps a lost cloud.",
-        news_context=None,
-        news_mode="none",
-    )
-
-    assert generated == treatment
-    assert "完整系列故事" in model.messages[1]["content"]
-    assert "response_format" not in model.options
-    assert "_response_validator" not in model.options
 
 
 def test_user_given_random_news_inspiration_has_no_eligible_source_when_building_a_story_prompt_then_it_fails_without_improvising():

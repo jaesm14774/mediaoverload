@@ -158,11 +158,8 @@ class AgentPlanningSkills:
         segment_index = int(context.node.inputs["segment_index"])
         segment = context.state["script-plan"]["segments"][segment_index]
         previous_segment = context.state["script-plan"]["segments"][segment_index - 1] if segment_index > 0 else None
-        # Only a review node may inject a revision direction.  The ordinary
-        # idea-brief dependency also exposes ``prompt``; treating that as a
-        # review direction duplicated the entire expanded long-video brief in
-        # every keyframe prompt and caused image models to render contact
-        # sheets/storyboards instead of a single frame.
+        # Only a review node may inject a revision direction. The idea-brief
+        # dependency also exposes ``prompt``, which must not enter keyframes.
         review_direction = self._resolve_first_value(context, ("revised_prompt",))
         outputs = self.prompt_engine.prepare_segment(
             context.plan.goal,

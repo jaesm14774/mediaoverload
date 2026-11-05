@@ -40,10 +40,6 @@ The output summary records source and result media metadata, selected node setti
 
 ComfyUI retains uploaded source videos and per-chunk output files in its input and output directories. Apply the server's retention policy to keep repeated long-video runs from accumulating files.
 
-## Validation performed
-
-On 2026-10-16, a 12-frame clip with AAC audio completed end to end in 7.4 seconds and produced 512x288, 48 FPS, 24 frames, and a 0.5-second result with its audio intact. A real 640x360 H3 render with 362 frames and stereo AAC completed in 12 chunks in 82.1 seconds on the RTX 4060. Its output probe reported 1280x720, 48 FPS, 724 frames, 15.083 seconds, and the original two audio channels and duration. Three matched scene frames were visually checked at the beginning, middle, and end; the scene composition and subjects remained intact after upscaling.
-
 ## Validation
 
 Acceptance scenarios: [NVIDIA VFX post-process acceptance](nvidia_vfx_postprocess_acceptance.md).

@@ -1078,41 +1078,6 @@ class AgentSocialSkills:
         return selected
 
     @staticmethod
-    def _story_review_summary(context: SkillContext) -> str:
-        """Return the audience-facing story summary for frame review messages."""
-        story_output = context.state.node_outputs.get("native-story-prompt", {})
-        storyboard = story_output.get("generated_storyboard", {}) if isinstance(story_output, dict) else {}
-        if not isinstance(storyboard, dict):
-            storyboard = {}
-        spine = storyboard.get("story_spine", {})
-        if not isinstance(spine, dict):
-            spine = {}
-        name = str(storyboard.get("name") or "").strip()
-        premise = str(spine.get("premise") or "").strip()
-        objective = str(spine.get("objective") or "").strip()
-        if name and premise:
-            summary = f"{name}: {premise}"
-        else:
-            summary = premise or objective
-        if not summary:
-            segment_output = context.state.node_outputs.get("script-plan", {})
-            segments = segment_output.get("segments", []) if isinstance(segment_output, dict) else []
-            segments = [item for item in segments if isinstance(item, dict)]
-            if segments:
-                first = str(segments[0].get("visual") or segments[0].get("narration") or "").strip()
-                last = str(segments[-1].get("end_state") or segments[-1].get("effect") or "").strip()
-                if first and last:
-                    summary = f"{first}；最後必須到達：{last}"
-                else:
-                    summary = first or last
-        if not summary:
-            goal_prompt = str(getattr(context.plan.goal, "prompt", "") or "").strip()
-            summary = goal_prompt
-        if not summary:
-            summary = "未提供故事摘要"
-        return textwrap.shorten(" ".join(summary.split()), width=280, placeholder="...")
-
-    @staticmethod
     def _infer_review_scope(media_paths: list[str]) -> str:
         if media_paths and all(Path(path).suffix.lower() in VIDEO_REVIEW_EXTENSIONS for path in media_paths):
             return "final_video"

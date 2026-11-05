@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
-from typing import Any
 
-from agentic.runtime.llm_client import PromptClient
 from agentic.runtime.serial_paths import serial_series_artifact_root
 
 
@@ -60,28 +57,6 @@ def build_serial_character_prompts(
     return SERIAL_CHARACTER_SYSTEM_PROMPT, prompt
 
 
-def generate_serial_character_card(
-    client: PromptClient,
-    *,
-    approved_story: str,
-    user_preferences: str = "",
-    character_name: str = "",
-    complexity: str = "simple",
-) -> str:
-    system_prompt, user_prompt = build_serial_character_prompts(
-        approved_story=approved_story,
-        user_preferences=user_preferences,
-        character_name=character_name,
-        complexity=complexity,
-    )
-    return client.generate_text(
-        system_prompt,
-        user_prompt,
-        step_name="serial_series_character_card",
-        language_contract="請使用自然、易讀的繁體中文。",
-    )
-
-
 def build_serial_character_reference_prompt(
     *,
     character_name: str,
@@ -128,21 +103,3 @@ def serial_character_artifact_path(
         raise ValueError("A character card ID must contain 32 hexadecimal characters.")
     return serial_series_artifact_root(output_root, series_id) / "character" / f"{card_id}.md"
 
-
-def serialize_reference_assets(paths: list[str | Path]) -> list[dict[str, Any]]:
-    """Resolve approved reference image files and calculate their exact content hashes."""
-    if not paths:
-        raise ValueError("Approving a character card requires at least one selected reference image.")
-    assets: list[dict[str, Any]] = []
-    seen: set[Path] = set()
-    for value in paths:
-        path = Path(value).expanduser().resolve(strict=True)
-        if not path.is_file():
-            raise ValueError(f"Character reference is not a regular file: {path}")
-        if path in seen:
-            continue
-        seen.add(path)
-        with path.open("rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        assets.append({"path": str(path), "sha256": digest})
-    return assets

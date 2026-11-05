@@ -110,36 +110,6 @@ class FFmpegAdapter:
             raise ValueError("Frame output must be different from source video")
         return timestamps, destinations, suffix
 
-    def extract_frame_at(self, video_path: str, output_path: str, timestamp_seconds: float) -> str:
-        """Extract one deterministic review frame at a bounded timestamp."""
-
-        self._ensure_binaries()
-        timestamp = float(timestamp_seconds)
-        if not math.isfinite(timestamp) or timestamp < 0:
-            raise ValueError("timestamp_seconds must be finite and non-negative")
-        self._ensure_parent(output_path)
-        self._run(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                video_path,
-                "-ss",
-                f"{timestamp:.6f}",
-                "-frames:v",
-                "1",
-                "-vf",
-                "format=yuvj420p",
-                "-q:v",
-                "2",
-                "-y",
-                output_path,
-            ]
-        )
-        return output_path
-
     def probe_media(self, media_path: str) -> dict[str, object]:
         self._ensure_binaries()
         raw = self._run_capture(
@@ -770,73 +740,6 @@ class FFmpegAdapter:
             command.extend(["-t", f"{duration:.12g}"])
         command.extend(["-y", output_path])
         self._run(command)
-        return output_path
-
-    def overlay_png_sequence(
-        self,
-        *,
-        video_path: str,
-        frame_pattern: str,
-        output_path: str,
-        fps: float,
-        frame_count: int,
-    ) -> str:
-        """Composite an RGBA PNG sequence over a video while copying its audio stream."""
-
-        self._ensure_binaries()
-        frame_rate = float(fps)
-        count = int(frame_count)
-        if not math.isfinite(frame_rate) or frame_rate <= 0:
-            raise ValueError("fps must be finite and greater than zero")
-        if count <= 0:
-            raise ValueError("frame_count must be greater than zero")
-        if not Path(video_path).is_file():
-            raise FileNotFoundError(f"Input video does not exist: {video_path}")
-        if not Path(frame_pattern).parent.is_dir():
-            raise FileNotFoundError(f"PNG sequence directory does not exist: {Path(frame_pattern).parent}")
-        self._ensure_parent(output_path)
-        if os.path.abspath(video_path) == os.path.abspath(output_path):
-            raise ValueError("output_path must be different from video_path")
-        self._run(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-framerate",
-                f"{frame_rate:.12g}",
-                "-start_number",
-                "0",
-                "-i",
-                frame_pattern,
-                "-i",
-                video_path,
-                "-filter_complex",
-                "[1:v:0][0:v:0]overlay=eof_action=pass:shortest=1:format=auto[v]",
-                "-map",
-                "[v]",
-                "-map",
-                "1:a?",
-                "-frames:v",
-                str(count),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "17",
-                "-pix_fmt",
-                "yuv420p",
-                "-vsync",
-                "cfr",
-                "-c:a",
-                "copy",
-                "-movflags",
-                "+faststart",
-                "-y",
-                output_path,
-            ]
-        )
         return output_path
 
     def overlay_rgba_frames(

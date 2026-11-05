@@ -7,11 +7,9 @@ from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
 from agentic.video_directing import (
-    apply_segment_video_direction,
     apply_video_motion_direction,
     apply_video_opening_frame_direction,
 )
-from agentic.minimax_prompting import compose_minimax_h3_prompt
 
 
 _ISOLATED_STICKER_TYPES = frozenset({"sticker_pack", "animated_sticker"})
@@ -323,66 +321,6 @@ def validate_story_segments(
     return segments
 
 
-def build_segment_prompt(goal: GoalRequest, segment: dict[str, Any], prior_frame: str | None = None) -> dict[str, Any]:
-    prompt = "\n".join(
-        part
-        for part in (
-            str(segment.get("visual") or goal.prompt or "").strip(),
-            f"Style: {goal.style}" if goal.style else "",
-            style_profile_direction(goal),
-        )
-        if part
-    )
-    prompt = apply_segment_video_direction(prompt, segment, goal.media_type)
-    outputs = {
-        "segment_id": segment["segment_id"],
-        "prompt": prompt,
-        "narration": str(segment.get("narration", "")),
-        "subject_context": _subject_context(goal),
-    }
-    if prior_frame:
-        outputs["prior_frame_path"] = prior_frame
-    return outputs
-
-
-def build_minimax_h3_prompt(
-    goal: GoalRequest,
-    segment: dict[str, Any],
-    prior_frame: str | None = None,
-) -> dict[str, Any]:
-    """Build an H3 prompt from the current segment and optional audio direction."""
-    base = build_segment_prompt(goal, segment, prior_frame=prior_frame)
-    character = _subject_names(goal) or "the main character"
-    audio_direction = str(goal.constraints.get("h3_audio_direction") or "").strip()
-    duration = max(10, int(goal.duration_seconds or 10))
-    raw_shots = segment.get("shots")
-    shots = [dict(item) for item in raw_shots if isinstance(item, dict)] if isinstance(raw_shots, list) else []
-    prompt = compose_minimax_h3_prompt(
-        duration_seconds=duration,
-        character=character,
-        style=goal.style,
-        base_prompt=base["prompt"],
-        story_spine=segment.get("story_spine") if isinstance(segment.get("story_spine"), dict) else {},
-        shots=shots,
-        overall_soundscape=audio_direction
-        or "Sound follows the scene's visible physical actions and setting.",
-        non_diegetic_music=str(
-            goal.constraints.get("h3_non_diegetic_music") or "N/A"
-        ),
-        render_mode="image_to_video" if prior_frame else "text_to_video",
-        prior_frame=bool(prior_frame),
-        subject_context=_subject_context(goal),
-        media_type=goal.media_type,
-    )
-    return {
-        **base,
-        "prompt": prompt,
-        "audio_direction": audio_direction,
-        "prompt_format": "minimax_h3_context_ir_local",
-        "subject_context": _subject_context(goal),
-    }
-
-
 def build_sticker_prompt(character: str, expression: str, prompt_prefix: str, style: str) -> str:
     return ", ".join(
         part
@@ -661,20 +599,6 @@ def _subject_context(goal: GoalRequest) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
-def _interaction_required(goal: GoalRequest) -> bool:
-    return bool(_subject_context(goal).get("interaction_contract", {}).get("required", False))
-
-
-def _subject_names(goal: GoalRequest) -> str:
-    subjects = list(_subject_context(goal).get("subjects") or [])
-    names = [str(item.get("name") or "").strip() for item in subjects if isinstance(item, dict)]
-    names = [name for name in names if name]
-    if not names:
-        character = str(goal.constraints.get("character", "") or "").strip()
-        return character
-    return " and ".join(names)
-
-
 def _subject_anchor_clause(goal: GoalRequest) -> str:
     context = _subject_context(goal)
     subjects = list(context.get("subjects") or [])
@@ -744,7 +668,7 @@ def include_visual_style_profile(
 
     prompt_text = str(prompt or "").strip()
     direction = style_profile_direction(
-        goal, include_motion=not image_generation
+        goal, include_motion=False if image_generation else None
     )
     if not direction:
         return prompt_text
@@ -830,16 +754,6 @@ def news_grounding_anchor_clause(news_context: dict[str, Any]) -> str:
         "Treat the headline as planning context, never as text to draw. Never render readable headlines, "
         "article text, logos, or unsupported named people."
     )
-
-
-def _segment_motif_clause(motif_pool: list[str], index: int) -> str:
-    if not motif_pool:
-        return ""
-    primary = motif_pool[index % len(motif_pool)]
-    secondary = motif_pool[(index + 1) % len(motif_pool)] if len(motif_pool) > 1 else ""
-    if secondary and secondary != primary:
-        return f"motif focus: {primary}, supported by {secondary}"
-    return f"motif focus: {primary}"
 
 
 def _visual_motif_pool(news_context: dict[str, Any]) -> list[str]:

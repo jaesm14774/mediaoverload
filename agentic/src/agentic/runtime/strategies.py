@@ -12,7 +12,6 @@ WORKFLOW_STAGE_KEYS = (
     "image_workflow_name",
     "video_workflow_name",
     "refine_workflow_name",
-    "transition_workflow_name",
     "upscale_workflow_name",
 )
 

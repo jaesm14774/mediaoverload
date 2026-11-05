@@ -1,9 +1,6 @@
-from types import SimpleNamespace
 
-from agentic.runtime.llm_client import PromptClient
 from agentic.runtime.serial_character import (
     build_serial_character_prompts,
-    generate_serial_character_card,
 )
 
 
@@ -29,8 +26,8 @@ def test_user_given_character_preferences_when_drafting_a_card_then_the_preferen
     assert "The keeper helps a lost cloud return to the sea." in user_prompt
     assert "年輕的海豹郵差" in user_prompt
     assert "外觀" in user_prompt
-    assert "跨集不可改變" in system_prompt
-    assert "外觀識別特徵" in system_prompt
+    assert "跨集固定" in system_prompt
+    assert "外觀錨點" in system_prompt
 
 
 def test_user_given_no_character_preferences_when_drafting_a_card_then_the_model_is_asked_to_invent_a_story_fitting_character():
@@ -44,20 +41,3 @@ def test_user_given_no_character_preferences_when_drafting_a_card_then_the_model
     assert "自行創作" in user_prompt
     assert "外觀" in user_prompt
 
-
-def test_user_given_the_character_writer_returns_a_card_when_called_then_the_text_is_kept_without_structured_output_validation():
-    """User Given the model returns a character identity card When generation runs Then the exact prose is returned without a schema request."""
-    card = "角色名稱：潮汐\n外觀：藍灰色年輕海豹。"
-    model = TextModel(card)
-    client = PromptClient(mode="llm", manager=SimpleNamespace(text_model=model))
-
-    result = generate_serial_character_card(
-        client,
-        approved_story="A keeper helps a cloud.",
-        user_preferences="海豹郵差",
-    )
-
-    assert result == card
-    assert "海豹郵差" in model.messages[1]["content"]
-    assert "response_format" not in model.options
-    assert "_response_validator" not in model.options

@@ -8,7 +8,6 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def generate_session() -> None:
     print("=== Instagram Graph 設定工具 ===")
-    print("舊 private session 流程已淘汰，請改用 instagram_graph.env。")
 
     credentials_root = ROOT_DIR / "configs" / "social_media" / "credentials"
     credentials_root.mkdir(parents=True, exist_ok=True)

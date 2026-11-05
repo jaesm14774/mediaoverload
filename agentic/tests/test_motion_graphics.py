@@ -14,7 +14,7 @@ from agentic.assets.registry import AssetRegistry
 from agentic.app.character_payload import build_goal_payload_from_character_config
 from agentic.app.character_publishing import collect_media_paths_from_run_result
 from agentic.runtime.contracts import ExecutionNode, ExecutionPlan, GoalRequest, RunState, SkillContext
-from agentic.runtime.motion_graphics import MotionGraphicsPlan, render_motion_graphics_frames
+from agentic.runtime.motion_graphics import MotionGraphicsPlan, iter_motion_graphics_rgba_frames
 from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import ToolRegistry
 from agentic.skills.motion_graphics import MotionGraphicsSkills
@@ -80,23 +80,16 @@ class MotionGraphicsTests(unittest.TestCase):
             }
         )
 
-        with tempfile.TemporaryDirectory() as temp:
-            frames = render_motion_graphics_frames(
-                plan,
-                Path(temp),
-                width=320,
-                height=240,
-                fps=24,
-                frame_count=12,
+        frames = list(
+            iter_motion_graphics_rgba_frames(
+                plan, width=320, height=240, fps=24, frame_count=12
             )
+        )
 
-            with Image.open(frames[0]) as inactive:
-                self.assertEqual(inactive.mode, "RGBA")
-                self.assertEqual(inactive.size, (320, 240))
-                self.assertEqual(inactive.getchannel("A").getbbox(), None)
-            with Image.open(frames[6]) as active:
-                self.assertEqual(active.mode, "RGBA")
-                self.assertIsNotNone(active.getchannel("A").getbbox())
+        inactive = Image.frombytes("RGBA", (320, 240), frames[0])
+        self.assertEqual(inactive.getchannel("A").getbbox(), None)
+        active = Image.frombytes("RGBA", (320, 240), frames[6])
+        self.assertIsNotNone(active.getchannel("A").getbbox())
 
     def test_user_given_caption_defaults_and_lowercase_color_when_parsed_then_values_are_normalized(self) -> None:
         """User Given an incomplete optional caption with lowercase hex color When parsed Then defaults and text/color normalization are preserved."""

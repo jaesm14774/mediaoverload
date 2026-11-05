@@ -351,7 +351,7 @@ def build_goal_payload_from_character_config(
         raise ValueError(
             "reference_video_max_keyframes must be an integer between 2 and 20"
         )
-    platform_configs, platform_aliases, skipped_platforms = _normalize_platform_configs(
+    platform_configs, skipped_platforms = _normalize_platform_configs(
         repo_root,
         social_media.get("platforms"),
     )
@@ -359,8 +359,6 @@ def build_goal_payload_from_character_config(
         selected_platforms: list[str] = []
         for requested in publish_platforms:
             normalized = str(requested).lower().strip()
-            if normalized == "instagram":
-                normalized = "instagram_graph"
             if normalized not in SUPPORTED_PUBLISH_PLATFORMS:
                 raise ValueError(f"Unsupported publish platform: {requested}")
             if normalized not in selected_platforms:
@@ -649,9 +647,6 @@ def build_goal_payload_from_character_config(
         "refine_workflow_name": routing.get("workflow_plan", {}).get(
             "refine_workflow_name", ""
         ),
-        "transition_workflow_name": routing.get("workflow_plan", {}).get(
-            "transition_workflow_name", ""
-        ),
         "upscale_workflow_name": routing.get("workflow_plan", {}).get(
             "upscale_workflow_name", ""
         ),
@@ -676,7 +671,6 @@ def build_goal_payload_from_character_config(
         "generation_type_candidates": routing.get("generation_type_candidates", []),
         "count_policies": routing.get("count_policies", {}),
         "publish_after_generate": publish_after_generate,
-        "platform_aliases": platform_aliases,
         "skipped_platforms": skipped_platforms,
         "prompt_source": autonomous_prompt.get("source", "user"),
         "prompt_mode": autonomous_prompt.get("prompt_mode", "user"),

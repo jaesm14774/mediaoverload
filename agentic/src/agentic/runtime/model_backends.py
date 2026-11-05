@@ -354,7 +354,6 @@ class FallbackChatModel:
 
 
 OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
-    # Providers use the shared Chat Completions request/response contract.
     "openai": {
         "base_url": "https://api.openai.com/v1",
         "api_key_env": ("OPENAI_API_KEY",),
@@ -374,9 +373,6 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_env": ("GROQ_API_KEY",),
-        # Groq retired llama-3.3-70b-versatile in the current runtime window;
-        # keep the text default aligned with the supported qwen fallback that
-        # is already used by the vision route.
         "text_model": "qwen/qwen3.8-27b",
         "vision_model": "qwen/qwen3.8-27b",
         "supports_vision": True,
@@ -1095,20 +1091,6 @@ class OpenRouterModel(OpenAICompatibleModel):
             _deadline=_deadline,
             **kwargs,
         )
-
-    @classmethod
-    def get_random_free_text_model(cls) -> str:
-        try:
-            return random.choice(static_openrouter_models("text"))
-        except (RuntimeError, ValueError):
-            return random.choice(DEFAULT_STATIC_MODEL_POOLS["text"])
-
-    @classmethod
-    def get_random_free_vision_model(cls) -> str:
-        try:
-            return random.choice(static_openrouter_models("vision"))
-        except (RuntimeError, ValueError):
-            return random.choice(DEFAULT_STATIC_MODEL_POOLS["vision"])
 
 class OpenRouterRotatingModel:
     """同一請求內：單一 model 重試後仍失敗則換池中下一個 model。"""

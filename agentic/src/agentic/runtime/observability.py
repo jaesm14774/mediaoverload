@@ -68,39 +68,6 @@ class RunRecorder:
             with self.events_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
 
-    def record_llm_call(
-        self,
-        *,
-        schema_name: str,
-        attempt: int,
-        messages: list[dict[str, Any]],
-        schema: dict[str, Any],
-        response: Any = None,
-        parsed_payload: Any = None,
-        error: str = "",
-        model: str = "text",
-        model_id: str = "",
-        images: list[str] | None = None,
-        response_format_used: bool = True,
-    ) -> Path:
-        call_path = self.start_llm_call(
-            schema_name=schema_name,
-            attempt=attempt,
-            messages=messages,
-            schema=schema,
-            model=model,
-            model_id=model_id,
-            images=images,
-            response_format_used=response_format_used,
-        )
-        self.complete_llm_call(
-            call_path,
-            response=response,
-            parsed_payload=parsed_payload,
-            error=error,
-        )
-        return call_path
-
     def start_llm_call(
         self,
         *,

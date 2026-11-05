@@ -1,4 +1,3 @@
-import glob
 import os
 from pathlib import Path
 
@@ -54,7 +53,6 @@ class ImageConverter:
         else:
             output_path = original_path.parent / f"{original_path.stem}.jpg"
             
-        # 如果檔案已存在，加上數字後綴
         counter = 1
         while output_path.exists():
             output_path = output_path.parent / f"{original_path.stem}_{counter}.jpg"
@@ -70,16 +68,13 @@ class ImageConverter:
         max_size = 1440
         min_size = 320
 
-        # 檢查是否需要調整尺寸
         if width > max_size or height > max_size:
-            # 等比例縮小
             ratio = min(max_size/width, max_size/height)
             new_width = int(width * ratio)
             new_height = int(height * ratio)
             return new_width, new_height
             
         elif width < min_size or height < min_size:
-            # 等比例放大
             ratio = max(min_size/width, min_size/height)
             new_width = int(width * ratio)
             new_height = int(height * ratio)
@@ -100,34 +95,26 @@ class ImageConverter:
         :return: 轉換後的檔案路徑，失敗則返回 None
         """
         try:
-            # 檢查檔案是否存在
             if not os.path.exists(input_path):
                 print(f"找不到檔案: {input_path}")
                 return None
 
-            # 檢查檔案格式
             file_ext = os.path.splitext(input_path)[1].lower()
             if file_ext not in self.supported_formats:
                 print(f"不支援的檔案格式: {file_ext}")
                 return None
 
-            # 開啟圖片
             with Image.open(input_path) as img:
-                # 保存原始 EXIF 資料
                 exif_data = _load_exif(img, preserve_exif)
 
-                # 轉換色彩模式
                 img = _to_rgb(img)
 
-                # 檢查並調整尺寸
                 new_size = self._check_image_size(img)
                 if new_size != img.size:
                     img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-                # 生成輸出路徑
                 output_path = self._get_output_path(input_path, output_dir)
 
-                # 儲存圖片
                 save_kwargs = {
                     'quality': self.quality, 
                     'optimize': True
@@ -143,57 +130,3 @@ class ImageConverter:
         except Exception as e:  # noqa: BLE001 - the public conversion contract returns None on failure.
             print(f"轉換圖片時發生錯誤: {e!s}")
             return None
-
-    def batch_convert(self, 
-                     input_paths: list[str],
-                     output_dir: str | None = None) -> list[str]:
-        """
-        批次轉換多張圖片
-        
-        :param input_paths: 輸入圖片路徑列表
-        :param output_dir: 輸出目錄（可選）
-        :return: 成功轉換的檔案路徑列表
-        """
-        converted_paths = []
-        
-        for input_path in input_paths:
-            result = self.convert_to_jpg(input_path, output_dir)
-            if result:
-                converted_paths.append(result)
-                
-        return converted_paths
-
-
-class ImageProcessor:
-    """處理圖片相關操作的類別"""
-    def __init__(self, image_folder: str):
-        if not os.path.exists(image_folder):
-            os.mkdir(image_folder)
-            
-        self.image_folder = image_folder
-        
-    def get_image_files(self) -> list[str]:
-        """取得資料夾下所有圖片檔案"""
-        types = ('*.png', '*.jpg', '*.jpeg')
-        image_files = []
-        for pattern in types:
-            image_files.extend(glob.glob(f'{self.image_folder}/{pattern}'))
-        return image_files
-
-    def main_process(self):
-        # 建立轉換器實例
-        converter = ImageConverter(quality=95)
-        
-        # 取得所有圖片檔案
-        image_files = self.get_image_files()
-        
-        # 只有成功產生 JPG 後才刪除來源，失敗時保留原始資料。
-        for path in image_files:
-            if (
-                not path.lower().endswith('.jpg')
-                and converter.convert_to_jpg(path, output_dir=self.image_folder)
-            ):
-                os.remove(path)
-        
-        # 更新轉換後的檔案清單
-        return self.get_image_files()

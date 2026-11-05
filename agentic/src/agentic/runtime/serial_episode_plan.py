@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Sequence
 
-from agentic.runtime.llm_client import PromptClient
 
 
 SERIAL_EPISODE_PLAN_SYSTEM_PROMPT = """你是動畫短劇編劇。已核准的系列故事與角色卡是依據；本集方向只補充重點，不可更換主角或推翻設定。
@@ -103,36 +102,6 @@ def build_serial_episode_outline_prompts(
             ]
         )
     return SERIAL_EPISODE_PLAN_SYSTEM_PROMPT, "\n".join(prompt_parts)
-
-
-def generate_serial_episode_outline(
-    client: PromptClient,
-    *,
-    approved_story: str,
-    approved_character: str,
-    episode_number: int,
-    episode_topic: str,
-    episode_direction: str = "",
-    previous_episode_summaries: Sequence[str] = (),
-    approved_story_state: str = "",
-    complexity: str = "simple",
-) -> str:
-    system_prompt, user_prompt = build_serial_episode_outline_prompts(
-        approved_story=approved_story,
-        approved_character=approved_character,
-        episode_number=episode_number,
-        episode_topic=episode_topic,
-        episode_direction=episode_direction,
-        previous_episode_summaries=previous_episode_summaries,
-        approved_story_state=approved_story_state,
-        complexity=complexity,
-    )
-    return client.generate_text(
-        system_prompt,
-        user_prompt,
-        step_name="serial_episode_story_scenes_shots",
-        language_contract="請使用自然、易讀的繁體中文。",
-    )
 
 
 def serial_episode_outline_artifact_path(

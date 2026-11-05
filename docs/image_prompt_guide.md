@@ -18,31 +18,17 @@ User Given a video request includes a negative prompt When distinct opening-fram
 
 ## 1. 使用範圍與驗收
 
-素材整理出的機制是創作參考，不能替代目前模型的成品驗收。對實際生成結果檢查：主要機制是否可見、構圖是否可讀、角色與材質是否正確，以及是否有生成瑕疵。模型或工作流改變後須重新看圖，不沿用以前的品質分數。
+這些機制是創作參考，不能替代目前模型的成品驗收。對實際生成結果檢查：主要機制是否可見、構圖是否可讀、角色與材質是否正確，以及是否有生成瑕疵。模型或工作流改變後須重新看圖，不沿用以前的品質分數。
 
-## 2. 39 組素材的機制地圖
+## 2. 提示詞原則
 
-| 條目 | 研究到的核心機制 | 使用時的硬條件 |
-| --- | --- | --- |
-| 1–5 東方美學與節慶 | 服裝混合、文化閘門、節慶競速、墨色變形、花朵形御守 | 先鎖物件輪廓、材料與色溫分區；文化角色需要可辨識的職能道具，不靠抽象標籤 |
-| 6–12 Q版與療癒 | 蠟筆堡壘、光雲擁抱、雨窗孤獨、心形軌跡、UI 隱喻、極簡線條、角色堆疊 | 觸感材質、單一情緒、留白與可讀表情優先；多角色只在「壓縮／堆疊」本身是笑點時啟用 |
-| 13–19 荒謬日常 | 正經上班反差、物件功能失控、微小焦慮災難化、情緒量測、誤解四格、袋中擠壓、自戀購物 | 讓一個普通物件承擔一個失控機制；四格或圖表需先指定版面方向與比例；文字不是可靠的笑點載體 |
-| 20–24 變身與史詩 | 能力變身、三段因果、巨型地標睡姿、節慶騎乘、史前競速混亂 | 變身必須保留基礎輪廓並說清「前狀態 → 轉換 → 後狀態」；史詩背景不能吃掉可愛主體 |
-| 25–29 微縮與立體 | 浮空剖面方塊、附著城市、盲盒工廠、葉脈葉雕、球體瑜伽 | 明確指定 containment、attachment、layer order 與支撐關係；每個小區域要有不同 value/material zone |
-| 30–34 動態短影音 | DJ 突變、夾爪反向劫持、塗鴉實體化、同步舞、天空翻滾 | 靜態首幀只凍結最能證明機制的瞬間；反轉需要 opposing vectors、受力／位移與結果同時可見 |
-| 35–39 海報與排版 | 四季／烘焙日曆、上下雙媒材海報、版畫、紙雕燈箱 | 版面方向、分割比例、文字是否必要、層數與同一材料系統都要明寫；layout geometry 是內容，不是裝飾 |
-
-這張地圖是機制索引；具體構圖是否成立，要以當次生成結果與人工審閱判斷。
-
-## 3. 提示詞原則
-
-### 3.0 簡單是層級清楚，不是背景空白
+### 2.0 簡單是層級清楚，不是背景空白
 
 「簡單」應減少互相競爭的主題與焦點，不應抹掉場景、色彩、材質或空氣感。一般插畫可以保留一個主視覺、克制的配色和大量留白，同時用紙張肌理、前中後景、光線變化及少量環境線索建立意境。只有去背素材或明確要求隔離主體時，才使用純色底。
 
 這套預設延伸到一般生圖、輪播圖與影片關鍵影格。貼圖和 sprite 仍保留透明底或色鍵底的技術規格，但主體本身延續細膩的水彩、粉彩與手繪質感。
 
-### 3.1 一個 visual thesis
+### 2.1 一個 visual thesis
 
 先問：「觀眾在一秒內應該讀到哪一個關係？」例如：
 
@@ -54,7 +40,7 @@ User Given a video request includes a negative prompt When distinct opening-fram
 提示詞要把主體、主機制、情緒／結果綁在同一個畫面關係中。不要用
 「可愛、夢幻、震撼、精緻」代替畫面語意。
 
-### 3.2 把抽象情緒翻成可見物理
+### 2.2 把抽象情緒翻成可見物理
 
 不要只寫 lonely、cozy、funny。改寫成：
 
@@ -67,14 +53,14 @@ User Given a video request includes a negative prompt When distinct opening-fram
 - affectionate → a large simple trajectory or gesture that remains readable
   against negative space.
 
-### 3.3 具體化瞬間，而不是物件清單
+### 2.3 具體化瞬間，而不是物件清單
 
 靜態 image 也需要一個 decisive visual state。使用「剛發生／正在承受／
 已經造成結果」的瞬間，讓物件之間有接觸、拉力、壓縮、流動、遮蔽或
 附著關係。這個方法同時適用於 I2V opening keyframe；時間軸留給 video
 prompt，不要把多個後續鏡頭塞進首幀。
 
-### 3.4 先寫幾何，再寫風格
+### 2.4 先寫幾何，再寫風格
 
 下列關係若是笑點，就必須明寫：
 
@@ -89,7 +75,7 @@ prompt，不要把多個後續鏡頭塞進首幀。
 「大型、微型、剖面、雙欄」等名詞本身不夠；要寫出誰包住誰、誰支撐誰、
 哪一邊在上、力往哪裡走。
 
-### 3.5 一個 medium contract
+### 2.5 一個 medium contract
 
 先選一個主要媒材，再用可觀察的表面線索證明它：
 
@@ -103,20 +89,20 @@ prompt，不要把多個後續鏡頭塞進首幀。
 做混合媒材，必須寫清楚 transition boundary，以及每個區域保留哪一套
 材料規則。
 
-### 3.6 用留白和 focal path 控制可讀性
+### 2.6 用留白和 focal path 控制可讀性
 
 主笑點越簡單，越需要留白、視線路徑與尺寸層級。用物理線索帶視線：
 心形軌跡、咖啡液對角線、葉脈、拱門透視、方塊剖面邊緣、布料的拉力。
 細節只在主路徑讀完之後補上；不要讓每一個角落都變成同等強度的
 spectacle。
 
-### 3.7 次要細節要有工作
+### 2.7 次要細節要有工作
 
 每個 secondary detail 至少要做到一件事：交代尺度、支持材料、放大情緒、
 或完成笑點結果。例如便利袋底部的 spilled milk tea 與 rolling boba
 不是裝飾，而是「擠壓逃脫已造成後果」的證據。無法支持主讀的細節刪除。
 
-### 3.8 Negative constraints 要針對失敗模式
+### 2.8 Negative constraints 要針對失敗模式
 
 泛用的 high quality 不如具體的：
 
@@ -130,7 +116,7 @@ spectacle。
 
 Avoid list 應短而有因果，避免塞滿互相矛盾的風格形容詞。
 
-## 4. 可直接套用的 English prompt formula
+## 3. 可直接套用的 English prompt formula
 
 ~~~text
 Use case: <illustration-story|stylized-concept|photorealistic-natural|ads-marketing>
@@ -152,14 +138,11 @@ Avoid: <short list of likely visual failures>
 的關係。對 image-to-video，這一欄只描述首幀的動作 onset；後續
 anticipation、contact、reaction、settle 應寫入 video prompt。
 
-## 5. 已通過案例的可泛化配方
+## 4. 已通過案例的可泛化配方
 
-下列是只從 strict 90+ accepted set 提取的配方，不是複製某一張圖的
-角色、標誌或品牌。
+下列配方可泛化，不複製某一張圖的角色、標誌或品牌。
 
 ### A. Craft object + miniature center
-
-來源條目 5，三位 reviewer 分數為 95、92、94，平均 94，最低 92。
 
 ~~~text
 Make one ordinary craft object extraordinary through its silhouette first:
@@ -175,8 +158,6 @@ dew only after the object structure is clear.
 
 ### B. Minimal gesture + oversized negative-space shape
 
-來源條目 9，分數為 95、94、94，平均 94，最低 94。
-
 ~~~text
 Keep the thrower tiny in the lower edge of a vertical picture-book frame. Make
 the trajectory itself the main subject: a paper plane leaves a dotted heart
@@ -190,8 +171,6 @@ icons.
 不要依賴紙飛機上的字來完成情緒。
 
 ### C. Serious framing + one ordinary function failure
-
-來源條目 14，分數為 93、90、91，平均 91，最低 90。
 
 ~~~text
 Photograph one ordinary office object as if it were a serious corporate
@@ -207,8 +186,6 @@ and its immediate consequence, not added as unrelated explosions.
 
 ### D. Declared multiplicity + pressure evidence
 
-來源條目 18，分數為 93、92、94，平均 93，最低 92。
-
 ~~~text
 Declare multiplicity as the joke, then cap the count. One translucent container
 is stretched nearly to its limit; the main face is compressed at the opening,
@@ -223,8 +200,6 @@ pose distinct enough to read.
 
 ### E. Coherent cutaway + value-separated zones
 
-來源條目 25，分數為 96、90、95，平均 94，最低 90。
-
 ~~~text
 Use one clean floating cube as the only world boundary. State the surface level,
 the geological cutaway, and each underground chamber. Separate each zone by
@@ -237,8 +212,6 @@ hidden world in one glance. Every detail must belong to a specific layer.
 不是固定海島、寶箱或水晶。
 
 ### F. Host material as the credibility anchor
-
-來源條目 28，分數為 96、91、92，平均 93，最低 91。
 
 ~~~text
 Preserve the complete outer silhouette of one natural host object. Carve a
@@ -253,8 +226,6 @@ floating fragment or a second host object.
 
 ### G. Design sheet with restrained callouts
 
-來源條目 1，分數為 96、93、93，平均 94，最低 93。
-
 ~~~text
 Center one hero silhouette in a restrained design-sheet layout. Use a small
 number of peripheral callout boxes to prove fabric, ornament, palette, and
@@ -267,30 +238,30 @@ explicitly required.
 保留的是：主輪廓、少量 callout、導線系統與比例反差；不要讓 callout
 變成一張文字密集的資訊圖。
 
-## 6. 淘汰案例轉成的防錯規則
+## 5. 防錯規則
 
 這些規則不是負面評分清單，而是下一輪 prompt 的早期檢查：
 
-- 條目 31：反向劫持若是笑點，首幀必須同時顯示 opposing vectors、
+- 反向劫持若是笑點，首幀必須同時顯示 opposing vectors、
   cable slack/strain、機器失控方向；「被夾起來」不是「帶走夾爪」。
-- 條目 37：split poster 必須明寫 upper/lower 或 left/right、各自比例、
+- split poster 必須明寫 upper/lower 或 left/right、各自比例、
   共用姿態與 crop；layout orientation 錯了就是機制失敗。
-- 條目 39：若宣稱 strict paper-cut，角色、燈具、景物都必須在同一種
+- 若宣稱 strict paper-cut，角色、燈具、景物都必須在同一種
   matte paper vocabulary；金屬、玻璃、立體塑膠會破壞材料 contract。
-- 條目 2：文化職能若重要，要放進可辨識道具與動作；宏偉背景不能代替
+- 文化職能若重要，要放進可辨識道具與動作；宏偉背景不能代替
   guardian role。
-- 條目 8：若需要 warm/cool tension，暖光要真的落在主體，不只是背景
+- 若需要 warm/cool tension，暖光要真的落在主體，不只是背景
   有一個粉紅色角色。
-- 條目 16：測量笑點依賴儀器規格時，要讓量測系統本身可辨識；若不需要
+- 測量笑點依賴儀器規格時，要讓量測系統本身可辨識；若不需要
   文字，就改用明確 gauge、needle、droplet count 等無字視覺證據。
-- 條目 22：95/5 scale joke 要真的接近 95/5；宏偉背景不能只寫在描述，
+- 95/5 scale joke 要真的接近 95/5；宏偉背景不能只寫在描述，
   必須指定主體佔比、位置與可讀對比。
-- 條目 32：sketch-to-reality 的「忠實」包含錯誤比例與笨拙受力，不能
+- sketch-to-reality 的「忠實」包含錯誤比例與笨拙受力，不能
   把塗鴉美化成普通可愛模型。
 
-## 7. Runtime integration
+## 6. Runtime integration
 
-收集資料夾用來辨認可泛化的畫面手法，不會把其中的角色、場景或品牌搬進新圖。本次檢查的 `krea2_turbo` 工作流只接收文字提示，沒有 conditioning image 輸入；因此 runtime 把範本中的畫面主張、角色關係、視角、光線與媒材線索轉成提示規則。場景與選角先建立，風格只處理渲染；風格內的構圖提示僅在請求沒有指定構圖時採用。
+`krea2_turbo` 工作流只接收文字提示，沒有 conditioning image 輸入；因此 runtime 把範本中的畫面主張、角色關係、視角、光線與媒材線索轉成提示規則。場景與選角先建立，風格只處理渲染；風格內的構圖提示僅在請求沒有指定構圖時採用。
 
 - `agentic/src/agentic/runtime/prompting.py`
   - 定義 `IMAGE_PROMPT_CONTRACT` 與 `IMAGE_PROMPT_QUALITY_CLAUSE`。
@@ -308,7 +279,7 @@ explicitly required.
 
 提示規則讓畫面要求更具體，但成品仍需實際生成並人工檢視；不以提示詞本身宣稱視覺品質已達標。
 
-## 8. 每次生成前後的最小檢查
+## 7. 每次生成前後的最小檢查
 
 ### Before generation
 

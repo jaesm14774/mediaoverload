@@ -342,8 +342,8 @@ def test_user_given_still_comic_panels_when_composed_then_each_panel_moves_slowl
     for index, (start, end) in enumerate(sample_times):
         first = tmp_path / f"panel-{index + 1}-start.png"
         last = tmp_path / f"panel-{index + 1}-end.png"
-        renderer.extract_frame_at(result["video_path"], str(first), start)
-        renderer.extract_frame_at(result["video_path"], str(last), end)
+        renderer.extract_frames_at(result["video_path"], [str(first)], [start])
+        renderer.extract_frames_at(result["video_path"], [str(last)], [end])
         with Image.open(first) as start_frame, Image.open(last) as end_frame:
             assert ImageChops.difference(start_frame.convert("RGB"), end_frame.convert("RGB")).getbbox() is not None
 

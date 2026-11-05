@@ -12,7 +12,7 @@
 | `Qwen3VL-4B-Instruct-Q4_K_M.gguf` | `ComfyUI/models/clip` | [Hugging Face 檔案](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf) |
 | `qwen_image_vae.safetensors` | `ComfyUI/models/vae` | [Hugging Face 檔案](https://huggingface.co/Comfy-Org/Krea-2/resolve/main/vae/qwen_image_vae.safetensors) |
 
-這些資產供 `krea2_turbo.json` 和 `krea2_turbo_img2img.json` 共用。
+這些資產供 `krea2_turbo.json` 使用。
 
 ## FLUX 3 Image Klein
 

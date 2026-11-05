@@ -14,7 +14,7 @@ class H3ModeContractTests(unittest.TestCase):
         self.assertTrue(mode_contract(H3Mode.I2VA).requires_first_frame)
         self.assertTrue(mode_contract("fl2va").requires_last_frame)
         self.assertTrue(mode_contract("l2va").requires_last_frame)
-        self.assertTrue(mode_contract("ref2va").allows_reference_videos)
+        self.assertEqual(mode_contract("ref2va").render_mode, "reference_to_video")
 
     def test_contract_rejects_reusing_the_wrong_frame_inputs(self) -> None:
         with self.assertRaises(ValueError):

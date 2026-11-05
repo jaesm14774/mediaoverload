@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from agentic.runtime.llm_client import PromptClient
 
 
 SERIAL_STORY_SYSTEM_PROMPT = """你是動畫短劇編劇。依創作者選擇的複雜度，寫出容易理解、能直接改編成短動畫的故事提案。
@@ -113,30 +112,6 @@ def build_serial_story_prompts(
             ]
         )
     return SERIAL_STORY_SYSTEM_PROMPT, "\n".join(prompt_parts)
-
-
-def generate_serial_story_treatment(
-    client: PromptClient,
-    *,
-    user_idea: str,
-    news_context: dict[str, Any] | None,
-    news_mode: str,
-    character_name: str = "",
-    complexity: str = "simple",
-) -> str:
-    system_prompt, user_prompt = build_serial_story_prompts(
-        user_idea,
-        news_context,
-        news_mode=news_mode,
-        character_name=character_name,
-        complexity=complexity,
-    )
-    return client.generate_text(
-        system_prompt,
-        user_prompt,
-        step_name="serial_series_story_treatment",
-        language_contract="請使用自然、易讀的繁體中文。",
-    )
 
 
 def serial_story_artifact_path(

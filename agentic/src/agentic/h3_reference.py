@@ -13,7 +13,6 @@ from typing import Any, Iterable, Mapping
 
 MAX_REFERENCE_IMAGES = 9
 MAX_REFERENCE_VIDEOS = 3
-REFERENCE_TYPES = {"image", "video"}
 REFERENCE_ROLES = {
     "identity",
     "motion",

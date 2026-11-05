@@ -122,6 +122,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native-story-prompt",
             "native-image-asset-check",
             "native-video-asset-check",
+            "native-opening-frame-prompt-variants",
             "native-opening-keyframe",
             "native-opening-review",
             "native-keyframe-source-check",
@@ -133,7 +134,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             "native-h3-package",
         ]
         if "native-h3-canvas" in node_ids:
-            expected_node_ids.insert(7, "native-h3-canvas")
+            expected_node_ids.insert(8, "native-h3-canvas")
         self.assertEqual(
             node_ids,
             expected_node_ids,

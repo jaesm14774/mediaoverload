@@ -23,8 +23,6 @@ class H3ModeContract:
     workflow_name: str
     requires_first_frame: bool = False
     requires_last_frame: bool = False
-    allows_reference_images: bool = False
-    allows_reference_videos: bool = False
 
 
 MODE_CONTRACTS: dict[H3Mode, H3ModeContract] = {
@@ -61,8 +59,6 @@ MODE_CONTRACTS: dict[H3Mode, H3ModeContract] = {
         generation_type="native_h3_ref2va",
         render_mode="reference_to_video",
         workflow_name="minimax_h3_ref2va",
-        allows_reference_images=True,
-        allows_reference_videos=True,
     ),
 }
 
