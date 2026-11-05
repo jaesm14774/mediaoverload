@@ -70,20 +70,30 @@ def _visual_identity_phrase(identity: str) -> str:
 
 
 IMAGE_PROMPT_CONTRACT = (
-    "For an image request, describe one finished frame and one visual thesis: a decisive visible state plus the "
-    "relationship or result that makes it matter. Treat the requested and selected cast, action, setting, and any "
-    "explicit framing as fixed. If two subjects are marked as required, show both in the same frame and make their "
-    "physical interaction visible; style must not add characters, props, or story. Then specify only what helps this "
-    "frame: a purposeful viewpoint and relative placement or scale; useful depth layers or negative space; a light "
-    "source and direction with a visible effect; one primary medium with two or three observable surface or mark cues. "
-    "When a resolved style treatment is supplied separately, do not restate its descriptor or influence list. "
-    "Use style composition only when the request leaves framing open. Keep secondary details functional. Avoid generic "
-    "quality slogans, contradictory style stacks, and pseudo-text. Write one concise natural English scene prompt."
+    "For an image request, write one finished illustration prompt in four parts. "
+    "1) Medium: one sentence naming the selected medium with two or three observable surface cues such as paper tooth, "
+    "pigment bloom, pencil outline, or brush texture; use photographic camera language only when the selected style is "
+    "photographic. "
+    "2) Concept: the single clearest idea of the brief as one charming visual metaphor rather than a literal report: the "
+    "character nests inside, becomes part of, or is sized against the key object of the story, for example resting in a "
+    "cup, tucked into a sleeve, or plugged into a socket as if it were the thing the story is about; treat the requested and selected cast, action, setting, and explicit "
+    "framing as fixed, and show every required subject in the same frame with a visible interaction. "
+    "3) Scale: the world is the main subject. Unless a close-up is requested, each named character is small and simple, "
+    "about one fifth to one third of the frame height, placed off-center and grounded by contact, shadow, or overlap. "
+    "Name each character once by identity, without long anatomy lists. "
+    "4) Space: one focal gesture, generous open space or quiet background around it, and a gentle warm light with a "
+    "visible effect. "
+    "Constraints are stated positively because the renderer ignores negative prompts: exactly the named characters and "
+    "no duplicates; leave out signs, price tags, labels, captions, numbers, and screens unless the brief needs one, and then "
+    "draw it as an abstract shape or simple icon with no writing. "
+    "Do not restate a separately supplied style descriptor or influence list. Use style composition only when the "
+    "request leaves framing open. Write one concise natural English scene prompt."
 )
 
 IMAGE_PROMPT_QUALITY_CLAUSE = (
-    "Preserve the requested cast, action, and framing. Keep the main relationship readable through viewpoint and "
-    "relative scale; make light direction and material cues physically coherent. Style must not add characters or props."
+    "Preserve the requested cast, action, and framing. Keep each named character small and simple inside a larger "
+    "world with open space around one focal gesture; show only the named characters, once each, with no writing, "
+    "numbers, or price tags; any sign, paper, or screen is an abstract shape or simple icon. Style must not add characters or props."
 )
 
 
@@ -112,13 +122,12 @@ prop, task, or character anatomy. Use style composition only when the brief leav
 Preserve the selected characters' canonical identities and essential source context while applying that treatment.
 Use source material as context and keep every reported actor, location, cause, and
 outcome tied to its source. When the user requests a causal story, follow that direction.
-For video, make visible physical action and purposeful camera movement the default.
-Use the supplied image as the opening instant, then show how the subject and important
-props move, what changes, and how the action resolves. For each shot, name its opening
-framing, one motivated camera move or intentional lock, what that choice reveals, and the
-resulting composition. Character-led scenes show anticipation, action with follow-through,
-and a brief reaction; one or two fitting secondary motions can reinforce the action. Vary
-the pace so both movement and reaction are easy to read. Describe the selected style through
+For video, default to lively, continuous character action with a steady camera: at most one slow gentle push-in,
+no pan, orbit, or cut. Use the supplied image as the opening instant and keep its illustrated look unchanged; the
+character moves energetically through the whole clip, with anticipation, a big action with stretch and squash,
+and the same action chained into two or three connected moves, while the props and scene elements respond on
+every beat. Do not freeze, hold a long pose, or add a second goal. Move the camera further only when the brief asks
+for it, and then name one move and what it reveals. Describe the selected style through
 its medium and surface, palette and light, optional composition guidance, and motion or transition behavior;
 keep those visible rules consistent across shots without overriding requested framing. Keep the action consistent with the request
 and facts. Describe the opening keyframe as one frozen instant. Describe temporal action and

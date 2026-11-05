@@ -159,7 +159,7 @@ class LLMEngineTests(unittest.TestCase):
         self.assertIn("the selected image will be the exact opening frame", user_prompt)
         self.assertIn("Begin the action in the first tenth", user_prompt)
         self.assertIn("reach the resolved endpoint only in the final tenth", user_prompt)
-        self.assertIn("Do not settle early or leave a long static tail", user_prompt)
+        self.assertIn("the character is still moving in the last frame", user_prompt)
         self.assertIn("Style controls medium, line, surface, and palette", user_prompt)
         self.assertIn("do not let style-profile motion language slow or replace", user_prompt)
         self.assertIn("Do not invent anatomy, props, locations", user_prompt)

@@ -38,6 +38,16 @@ These are prompt-planning constraints, not a guarantee from H3. Review every seg
 
 For `longvideo_review_policy: every_segment` with human review enabled, each rendered segment is inspected technically and then presented for explicit acceptance. The accepted review output supplies the video path for tail-frame extraction, and all segment acceptances gate final assembly; rejection or unavailable review blocks the sequence. The normal final-video review remains a separate decision. Segment acceptance authorizes that take as a continuity source; it does not establish that the whole video is visually successful or ready to publish.
 
+## Lively loop direction (collection reference videos)
+
+The reference clips in the collection are 4–9 second flat illustrated loops. Two same-seed, same-keyframe H3 I2VA comparisons (121 frames, 512x640, rain-puddle keyframe) set the direction:
+
+- The earlier direction (anticipation, goal, strong camera dolly, reaction) had plenty of energy but dollied until the character filled the frame, so the picture no longer matched the keyframe.
+- A strictly locked camera with "one small action, then settle" kept the look, but the character acted once and the clip stayed static for the remaining 60%, which the user judged too still.
+- Continuous action fixed it: constant energetic motion through the last frame, with a locked camera or one slow gentle push-in of about 15%, kept both the energy and the painted look. A push-in plus a longer "performance arc" prompt overshot the zoom and made the character jump less, so the arc wording is not used.
+
+`VIDEO_MOTION_DIRECTION` and `VIDEO_OPENING_FRAME_DIRECTION` in `agentic/src/agentic/video_directing.py` therefore default to: at most one slow gentle push-in (no pan, orbit, or cut), unchanged illustrated look, constant energetic character motion (anticipation, a big action with stretch and squash, the same action chained into two or three connected moves, expression change), props and existing scene elements responding on every beat, still moving in the last frame, and no second goal or subplot. The vision writer is told to start with a motion verb and never describe the picture as it stands; without that, a calm keyframe produced a still description. The opening keyframe shows the character small with open space so nothing crops when it jumps. A brief that explicitly asks for camera movement or stillness still overrides this. Rendering one 5-second clip took about 11 minutes on the local 8 GB GPU.
+
 ## Review and limits
 
 Local contracts verify which prompt and image paths reach the ComfyUI boundary. They do not prove visual quality. Review the generated video for identity, image adherence, visible action, endpoint continuity, and audible scene response. The official MiniMax prompt skill and ComfyUI H3 documentation are the format sources:

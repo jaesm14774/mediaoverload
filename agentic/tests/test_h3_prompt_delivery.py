@@ -219,8 +219,8 @@ def test_user_given_conditioning_images_and_scene_draft_when_h3_prompt_is_prepar
     assert "first-frame input" in str(vision_model.calls[0]["messages"][1]["content"])
     assert "interpret those poses as successive views of the same subject" in str(vision_model.calls[0]["messages"][1]["content"])
     assert "ordered chain of positive physical-action beats" in str(vision_model.calls[0]["messages"][1]["content"])
-    assert "From the first moment" in str(vision_model.calls[0]["messages"][1]["content"])
-    assert "reach the resolved endpoint only in the final tenth" in str(vision_model.calls[0]["messages"][1]["content"])
+    assert "one slow gentle push-in" in str(vision_model.calls[0]["messages"][1]["content"])
+    assert "still moving in the last frame" in str(vision_model.calls[0]["messages"][1]["content"])
 
 
 def test_user_given_later_episode_plan_when_vision_prompt_repeats_prior_prop_then_h3_prompt_keeps_new_action_primary() -> None:

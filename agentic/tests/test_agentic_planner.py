@@ -321,7 +321,7 @@ class AgenticPlannerTests(unittest.TestCase):
         result = AgentPlanningSkills(prompt_engine=FakePromptEngine()).prepare_segment(SkillContext(plan, node, state))
 
         self.assertIn("Opening-frame action staging:", result.outputs["opening_keyframe_prompt"])
-        self.assertIn("split second before movement begins", result.outputs["opening_keyframe_prompt"])
+        self.assertIn("split second before the action begins", result.outputs["opening_keyframe_prompt"])
         self.assertIn("leans forward, then springs over the puddle", result.outputs["opening_keyframe_prompt"])
 
     def test_segment_prepare_appends_only_explicit_review_revision(self) -> None:

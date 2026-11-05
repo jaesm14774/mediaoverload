@@ -651,8 +651,9 @@ class AgentMediaSkills:
             )
             i2va_description = (
                 "The attached image is the exact opening frame. Preserve its visible subject identity, "
-                "pose, silhouette, colors, composition, and existing props. Continue immediately from "
-                "this frame through the following motion: "
+                "pose, silhouette, colors, composition, and existing props. Keep the frame's look "
+                "unchanged, with no morphing or new objects, and use at most one slow gentle push-in with no pan or cut. "
+                "Continue immediately from this frame through the following motion: "
                 f"{raw_prompt}"
             )
             prompt = format_h3_video_prompt(

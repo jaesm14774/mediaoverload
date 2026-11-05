@@ -278,3 +278,28 @@ def test_user_given_an_ambiguous_style_source_when_starting_a_run_then_configura
     config["style"] = style
     with pytest.raises(ValueError):
         resolve_creative_profile(config, style_library=library)
+
+
+PHOTO_OR_RENDER_CATEGORIES = {"Photography", "3D & Render", "Commercial & Editorial"}
+
+
+def test_user_given_the_default_style_pool_when_a_style_is_drawn_then_it_is_a_hand_made_illustration_treatment():
+    """User Given the saved style selection When any style can be drawn at random Then it is a hand-made illustration, painting, or mixed-media treatment and never a photo or 3D-render genre, and the six collection families stay available."""
+    library = StyleLibrary()
+    state = library.snapshot()
+    by_id = {style["id"]: style for style in state["styles"]}
+    enabled = set(state["enabled_ids"])
+    assert set(CHARACTER_STYLE_IDS) <= enabled
+    for style_id in enabled - {"photographic_character_fusion"}:
+        assert not PHOTO_OR_RENDER_CATEGORIES & set(by_id[style_id]["categories"]), style_id
+
+
+@pytest.mark.parametrize("media_type", ["image", "text2img2video"])
+def test_user_given_an_image_request_when_the_render_prompt_is_built_then_characters_stay_small_in_a_larger_world(media_type):
+    """User Given an image or video-opening request When the renderer prompt is built Then it keeps named characters small inside a larger world, with constraints stated positively because the renderer ignores negative prompts."""
+    goal = GoalRequest(prompt="Magolor watches a train depart.", media_type=media_type, style="storybook_watercolor", constraints={})
+    brief = build_goal_brief(goal, "storybook_watercolor", [])
+    render_prompt = brief["prompt"] if media_type == "image" else brief["opening_keyframe_prompt"]
+    folded = render_prompt.casefold()
+    assert "small" in folded and "larger world" in folded
+    assert "only the named characters" in folded
