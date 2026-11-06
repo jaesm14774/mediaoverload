@@ -874,8 +874,7 @@ def _resolve_duration_seconds(
         return max(MIN_VIDEO_DURATION_SECONDS, requested or 10)
     if config_generation_type == "game_sprite":
         sprite_config = dict((generation or {}).get("game_sprite", {}) or {})
-        configured_duration = int(sprite_config.get("duration_seconds", 10))
-        return max(MIN_VIDEO_DURATION_SECONDS, requested or configured_duration)
+        return requested or int(sprite_config.get("duration_seconds", 5))
     if config_generation_type == "motion_comic":
         comic_config = dict((generation or {}).get("motion_comic", {}) or {})
         return max(

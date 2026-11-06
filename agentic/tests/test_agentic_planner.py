@@ -528,36 +528,6 @@ class AgenticPlannerTests(unittest.TestCase):
         )
         self.assertTrue(plan.metadata["review_loop_enabled"])
 
-    def test_user_given_a_game_sprite_request_when_its_motion_video_is_planned_then_it_uses_automatic_pacing(self) -> None:
-        """User Given a game-sprite request When its motion video is planned Then that video uses the shared automatic pacing stage before sprite extraction."""
-        goal = self.planner.create_goal(
-            prompt="A tiny fox hops over a puddle",
-            media_type="game_sprite",
-            duration_seconds=10,
-            style="pixel art",
-            constraints={},
-        )
-
-        plan = self.planner.build_plan(goal)
-        by_id = {node.node_id: node for node in plan.nodes}
-
-        self.assertEqual(
-            by_id["sprite-motion-editorial-pacing"].depends_on,
-            ["sprite-motion-video"],
-        )
-        self.assertIn(
-            "sprite-motion-editorial-pacing",
-            by_id["sprite-motion-nvidia-vfx"].depends_on,
-        )
-        self.assertEqual(
-            by_id["sprite-package"].inputs["video_node"],
-            "sprite-motion-nvidia-vfx",
-        )
-
-
-
-
-
     def test_carousel_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
             prompt="robot chef travel diary in rainy taipei",

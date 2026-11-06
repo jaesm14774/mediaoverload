@@ -809,9 +809,11 @@ class AgentSocialSkills:
                     or policy.allow_regenerate_review
                 ),
                 regenerate_current_segment=policy.segment_acceptance_review,
-                allow_series_lifecycle_choice=(
+                allow_series_completion=(
                     policy.review_phase == "serial_final_publish"
                 ),
+                allow_series_discard=policy.review_phase
+                in {"segment_acceptance", "serial_final_publish"},
             )
         return caption_bundle, decision
 
@@ -1488,11 +1490,30 @@ def _serial_review_selected_paths(outputs: dict[str, Any]) -> list[str]:
     return [str(item) for item in selected if item]
 
 
-def _serial_final_review_disposition(outputs: dict[str, Any]) -> str:
+def _serial_review_disposition(outputs: dict[str, Any]) -> str:
     review_delivery = outputs.get("review_delivery") or {}
     if not isinstance(review_delivery, dict):
         return ""
     return str(review_delivery.get("series_disposition") or "").strip().lower()
+
+
+def _close_series_after_review(
+    serial_store: Any,
+    constraints: dict[str, Any],
+    series_disposition: str,
+    *,
+    reviewed: str,
+) -> None:
+    if series_disposition not in {"completed", "discarded"}:
+        return
+    serial_store.set_series_lifecycle_status(
+        str(constraints.get("series_id") or ""),
+        series_disposition,
+        note=(
+            f"Creator selected {series_disposition} after reviewing {reviewed} of "
+            f"episode {constraints.get('serial_episode_number')}"
+        ),
+    )
 
 
 def _classify_serial_final_review(
@@ -1533,7 +1554,7 @@ def _record_serial_final_publication_review(
     outputs = dict(result.outputs)
     selected_paths = _serial_review_selected_paths(outputs)
     review_mode = str(outputs.get("review_mode") or "").strip().lower()
-    series_disposition = _serial_final_review_disposition(outputs)
+    series_disposition = _serial_review_disposition(outputs)
     decision = _classify_serial_final_review(
         result,
         outputs,
@@ -1569,15 +1590,9 @@ def _record_serial_final_publication_review(
             "series_disposition": series_disposition,
         },
     )
-    if series_disposition in {"completed", "discarded"}:
-        serial_store.set_series_lifecycle_status(
-            str(constraints.get("series_id") or ""),
-            series_disposition,
-            note=(
-                f"Creator selected {series_disposition} after reviewing episode "
-                f"{constraints.get('serial_episode_number')}"
-            ),
-        )
+    _close_series_after_review(
+        serial_store, constraints, series_disposition, reviewed="the final video"
+    )
     outputs["publication_attempt_number"] = publication_attempt["attempt_number"]
     result.outputs = outputs
     return selected_paths
@@ -1623,9 +1638,10 @@ def _record_serial_segment_review(
         review_mode=review_mode,
         selected_paths=selected_paths,
     )
+    segment_number = int(context.node.inputs.get("segment_index", 0)) + 1
     serial_store.record_review(
         episode_id,
-        int(context.node.inputs.get("segment_index", 0)) + 1,
+        segment_number,
         decision,
         reviewed_path,
         {
@@ -1637,6 +1653,12 @@ def _record_serial_segment_review(
             "selected_paths": selected_paths,
             "result_status": result.status,
         },
+    )
+    _close_series_after_review(
+        serial_store,
+        constraints,
+        _serial_review_disposition(outputs),
+        reviewed=f"segment {segment_number}",
     )
 
 

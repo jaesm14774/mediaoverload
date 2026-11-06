@@ -59,12 +59,14 @@ generation:
       catalog: krea2
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: flux3_image_klein_img2img
+  # Keeps its own portrait page (576x1024) and ignores the selected run
+  # canvas; the compositor only accepts portrait pages.
   motion_comic:
     duration_seconds: 10
     fps: 24
     steps: 8
-    # Writing-first Traditional-Chinese story cards. Every page uses the
-    # selected run canvas before Pillow places text.
+  # Writing-first Traditional-Chinese story cards. Every page uses the
+  # selected run canvas before Pillow places text.
   story_card:
     page_stage:
       workflow_name: krea2_turbo
@@ -82,12 +84,14 @@ generation:
     keyframe_workflow_name: krea2_turbo
     video_workflow_name: minimax_h3_i2va
     h3_model_profile: q4
-    duration_seconds: 10
-    video_length: 240
+    # The atlas keeps 16 frames at 128x128, so the clip only needs a short run
+    # on a small canvas. H3 rounds 5 seconds up to 124 frames.
+    duration_seconds: 5
+    video_max_edge: 384
     video_steps: 16
     fps: 12
-    cell_width: 64
-    cell_height: 64
+    cell_width: 128
+    cell_height: 128
   native_h3_story:
     storyboard_path: configs/storyboards/native_h3_15s.yaml
     duration_seconds: 15
@@ -186,13 +190,13 @@ generation:
   generation_type_weights:
     serial_video: 5
     text2img: 5
-    text2image2video: 0.2
-    native_h3_story: 0.2
-    native_h3_t2v_story: 0.2
-    native_h3_fl2va_story: 0.2
-    native_h3_l2va_story: 0.2
-    native_h3_ref2va: 0.2
-    text2image2native_h3_ref2va: 0.2
+    text2image2video: 0.1
+    native_h3_story: 0.1
+    native_h3_t2v_story: 0.1
+    native_h3_fl2va_story: 0.1
+    native_h3_l2va_story: 0.1
+    native_h3_ref2va: 0.1
+    text2image2native_h3_ref2va: 0.1
     sticker_pack: 1
     story_card: 1
     motion_comic: 1

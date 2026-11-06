@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agentic.runtime.contracts import GoalRequest
+from agentic.video_directing import VIDEO_MOTION_DIRECTION
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.llm_client import PromptGenerationError
 from agentic.runtime.prompt_requests import GenerationRoutingRequest, JsonChatRequest
@@ -313,10 +314,10 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(segments[0]["effect"], "the hero lands safely and blinks with delight")
         story_prompt = manager.text_model.calls[0]["messages"][1]["content"]
         self.assertIn("each segment must include action, cause, effect, camera", story_prompt.casefold())
-        self.assertIn("use one continuous move or a locked shot", story_prompt.casefold())
-        self.assertIn("pan and tilt change camera direction, not subject distance or scale", story_prompt.casefold())
-        self.assertIn("show the result before any close-up reaction", story_prompt.casefold())
-        self.assertIn("keep the face and every story-critical object within frame with clear edge margins", story_prompt.casefold())
+        self.assertIn("a locked camera or the single slow push-in", story_prompt.casefold())
+        self.assertIn("never plans a pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane", story_prompt.casefold())
+        self.assertIn(VIDEO_MOTION_DIRECTION.casefold(), story_prompt.casefold())
+        self.assertIn("every story-critical object within frame with clear edge margins", story_prompt.casefold())
         self.assertIn("one visible goal, one obstacle, and one turn that changes the outcome", story_prompt.casefold())
         self.assertIn("stable visible rules for medium and surface, palette and light, and motion or transitions", story_prompt.casefold())
 
@@ -847,9 +848,25 @@ class LLMEngineTests(unittest.TestCase):
             style="LINE sticker",
         )
 
-        self.assertEqual(result["prompt_sets"][0]["prompt"], "kirby joyful prompt")
+        self.assertIn("kirby joyful prompt", result["prompt_sets"][0]["prompt"])
         self.assertEqual(result["prompt_sets"][1]["expression"], "sleepy yawn")
         self.assertEqual(result["prompt_mode"], "llm")
+
+    def test_user_given_scenic_sticker_prompts_when_the_set_is_built_then_every_sticker_is_one_subject_on_a_plain_backdrop(self) -> None:
+        """User Given a model that writes a whole scene into each sticker prompt When the prompt set is built Then every prompt, model-written or template, still demands one isolated subject with a white die-cut outline on a plain backdrop."""
+        scenic = '{"prompt_sets": [{"label": "sticker_01", "expression": "wave", "prompt": "Kirby waves above a busy parking lot with cars and scooters"}]}'
+        for response in (scenic, "not json"):
+            engine = LLMPromptEngine(mode="llm", manager=_FakeManager([response]))
+            goal = GoalRequest(prompt="parking lot", media_type="sticker_pack", style="sticker")
+
+            result = engine.build_sticker_prompt_set(
+                goal, expressions=["wave"], character="Kirby", prompt_prefix="parking lot", style="LINE sticker"
+            )
+
+            prompt = result["prompt_sets"][0]["prompt"].casefold()
+            self.assertIn("one isolated subject", prompt)
+            self.assertIn("white die-cut outline", prompt)
+            self.assertIn("plain", prompt)
 
     def test_prepare_segment_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(

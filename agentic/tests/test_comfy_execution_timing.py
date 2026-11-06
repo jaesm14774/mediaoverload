@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -99,6 +100,67 @@ class _HistoryCompletedWebsocket(_CompletedWebsocket):
             return super().recv()
         self.clock.advance(2.5)
         raise websocket.WebSocketTimeoutException("terminal event missing")
+
+
+class ComfySubmitTimeoutTests(unittest.TestCase):
+    def test_user_given_comfy_is_slow_to_acknowledge_a_prompt_when_the_submit_times_out_then_the_orphaned_job_is_interrupted(self) -> None:
+        """User Given ComfyUI accepts a prompt but is too busy to acknowledge it in time When the submit times out Then the failure names the submit and the job the client can no longer wait for is interrupted instead of burning the GPU."""
+        accepted_ids: list[str] = []
+        interrupts: list[str] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length)
+                if self.path == "/prompt":
+                    accepted_ids.append(json.loads(body)["prompt_id"])
+                    time.sleep(1.0)  # busy server: accepted, acknowledged too late
+                    return
+                if self.path == "/interrupt":
+                    interrupts.append("interrupt")
+                    self.send_response(200)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_error(404)
+
+            def do_GET(self) -> None:
+                if self.path == "/queue" and accepted_ids:
+                    body = json.dumps(
+                        {"queue_running": [[0, accepted_ids[0]]], "queue_pending": []}
+                    ).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_error(404)
+
+            def log_message(self, *_args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=server.server_port)
+        communicator.ws = _CompletedWebsocket(_FakeClock())  # type: ignore[assignment]
+        communicator.submit_timeout = 0.2
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                success, messages = communicator.process_workflow(
+                    workflow={"text": {"class_type": "PrimitiveString", "inputs": {"value": "x"}}},
+                    updates=[],
+                    output_path=directory,
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+        self.assertFalse(success)
+        self.assertIn("/prompt", messages[0])
+        self.assertEqual(len(interrupts), 1)
 
 
 class ComfyExecutionTimingTests(unittest.TestCase):

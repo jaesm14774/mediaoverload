@@ -1297,13 +1297,13 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
             class UnavailableDiscordReview:
                 review_scope = ""
-                allow_series_lifecycle_choice = False
+                allow_series_completion = False
+                allow_series_discard = False
 
                 def review_candidates(self, **request: object) -> HumanReviewDecision:
                     self.review_scope = str(request.get("review_scope") or "")
-                    self.allow_series_lifecycle_choice = bool(
-                        request.get("allow_series_lifecycle_choice")
-                    )
+                    self.allow_series_completion = bool(request.get("allow_series_completion"))
+                    self.allow_series_discard = bool(request.get("allow_series_discard"))
                     return HumanReviewDecision(
                         status="skipped",
                         selected_paths=[],
@@ -1365,8 +1365,213 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(publications[0]["status"], "review_unavailable")
             self.assertEqual(publications[0]["review_decision"], "unavailable")
             self.assertEqual(discord_review.review_scope, "final_media")
-            self.assertTrue(discord_review.allow_series_lifecycle_choice)
+            self.assertTrue(discord_review.allow_series_completion)
+            self.assertTrue(discord_review.allow_series_discard)
             self.assertEqual(Path(publications[0]["media_path"]).resolve(), video.resolve())
+
+    def _review_first_segment(
+        self,
+        root: Path,
+        store: SerialVideoStore,
+        series_id: str,
+        decision: HumanReviewDecision,
+    ) -> tuple[SkillResult, dict[str, object], dict[str, object]]:
+        """Render and QA segment one, then run the registered Discord segment review with a scripted creator decision."""
+        identity = _write_reference(root / f"{series_id}-identity.png", b"identity")
+        context = store.prepare_series_context(series_id, "Hero", [identity])
+        episode = store.start_episode(context, "A hero follows a glowing flower", topic="守護星花")
+        store.record_plan(
+            episode["episode_id"],
+            segment_count=2,
+            plan_payload={"goal": {"duration_seconds": 20}},
+        )
+        render_id = store.begin_render(
+            episode["episode_id"],
+            1,
+            workflow_name="minimax_h3_ref2va",
+            h3_mode="ref2va",
+            conditioning_paths=[identity],
+        )
+        segment_video = _write_video(root / f"{series_id}-segment-1.mp4", "red")
+        store.complete_render(render_id, segment_video)
+        store.record_technical_qa(episode["episode_id"], 1, segment_video, True, {"passed": True})
+
+        class ScriptedDiscordReview:
+            request: dict[str, object] = {}
+
+            def review_candidates(self, **request: object) -> HumanReviewDecision:
+                self.request = request
+                return decision
+
+        discord_review = ScriptedDiscordReview()
+        skill_registry = SkillRegistry()
+        tool_registry = ToolRegistry()
+        register_media_service_tools(tool_registry, root)
+        register_agent_social_skills(
+            skill_registry, tool_registry, root, discord_review=discord_review
+        )
+        goal = GoalRequest(
+            prompt="A hero follows a glowing flower",
+            media_type="long_video",
+            constraints={
+                "serial_mode": True,
+                "serial_database_name": store.database_name,
+                "series_id": series_id,
+                "serial_episode_id": episode["episode_id"],
+                "serial_episode_number": 1,
+            },
+        )
+        review_context = SkillContext(
+            plan=ExecutionPlan(goal=goal, workflow_name="serial_long_video", nodes=[]),
+            node=ExecutionNode(
+                node_id="segment-1-review",
+                skill_name="review.assets.select",
+                inputs={
+                    "limit": 1,
+                    "review_all_candidates": True,
+                    "review_scope": "final_video",
+                    "review_phase": "segment_acceptance",
+                    "segment_index": 0,
+                    "require_human_review": True,
+                    "media_paths": [str(segment_video)],
+                },
+            ),
+            state=RunState(goal={}, metadata={}),
+        )
+        result = skill_registry.get("review.assets.select").handler(review_context)
+        return result, dict(discord_review.request), episode
+
+    def test_user_given_an_unsatisfying_first_segment_when_the_creator_discards_the_series_in_discord_then_it_is_never_resumed(self) -> None:
+        """User Given segment one of a new episode awaits review When the creator discards the series instead of finishing it Then the series is discarded and the next automatic run no longer resumes this episode."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = f"discard-at-segment-{uuid.uuid4().hex[:12]}"
+
+            result, request, _episode = self._review_first_segment(
+                root,
+                store,
+                series_id,
+                HumanReviewDecision(
+                    status="rejected",
+                    selected_paths=[],
+                    edited_text="",
+                    reviewer="creator",
+                    review_mode="discord",
+                    delivery={"status": "decision_received", "series_disposition": "discarded"},
+                ),
+            )
+
+            lifecycle = self._mysql_one(
+                store, "SELECT lifecycle_status FROM series WHERE series_id = ?", (series_id,)
+            )["lifecycle_status"]
+            self.assertTrue(request["allow_series_discard"])
+            self.assertFalse(request["allow_series_completion"])
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(lifecycle, "discarded")
+            self.assertEqual(store.list_auto_resume_candidates("Hero"), [])
+
+    def test_user_given_an_unsatisfying_first_segment_when_the_creator_only_rejects_it_then_the_series_stays_resumable(self) -> None:
+        """User Given segment one of a new episode awaits review When the creator rejects the segment without discarding the series Then the series stays active and the next automatic run resumes this episode."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = f"reject-at-segment-{uuid.uuid4().hex[:12]}"
+
+            result, _request, episode = self._review_first_segment(
+                root,
+                store,
+                series_id,
+                HumanReviewDecision(
+                    status="rejected",
+                    selected_paths=[],
+                    edited_text="",
+                    reviewer="creator",
+                    review_mode="discord",
+                    delivery={"status": "decision_received", "series_disposition": ""},
+                ),
+            )
+
+            lifecycle = self._mysql_one(
+                store, "SELECT lifecycle_status FROM series WHERE series_id = ?", (series_id,)
+            )["lifecycle_status"]
+            resumable = [row["blocked_episode_id"] for row in store.list_auto_resume_candidates("Hero")]
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(lifecycle, "active")
+            self.assertEqual(resumable, [episode["episode_id"]])
+
+    def test_user_given_a_new_series_story_when_the_creator_discards_it_in_discord_then_onboarding_stops_without_creating_a_production_series(self) -> None:
+        """User Given a pending story draft for a series that has not started production When the creator discards the series Then the draft is rejected, onboarding stops at the story stage, and no production series is created."""
+        store = self._new_store()
+        series_id = f"discard-at-story-{uuid.uuid4().hex[:12]}"
+        draft = store.save_series_story_draft(series_id, "A keeper guides a cloud home.")
+
+        blocked = _record_serial_story_review(
+            store,
+            series_id,
+            str(draft["story_plan_id"]),
+            "A keeper guides a cloud home.",
+            HumanReviewDecision(
+                status="rejected",
+                selected_paths=[],
+                edited_text="",
+                reviewer="creator",
+                review_mode="discord",
+                delivery={"status": "decision_received", "series_disposition": "discarded"},
+            ),
+        )
+
+        self.assertEqual(blocked["onboarding_stage"], "story")
+        self.assertEqual(store.get_series_story_plan(str(draft["story_plan_id"]))["status"], "rejected")
+        self.assertIsNone(store.get_production_series_character_name(series_id))
+
+    def test_user_given_an_active_series_when_the_creator_discards_its_next_episode_outline_then_the_series_is_closed_as_discarded(self) -> None:
+        """User Given an active production series with a pending next-episode outline When the creator discards the series while reviewing that outline Then the outline is rejected and the series lifecycle becomes discarded."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            series_id = f"discard-at-outline-{uuid.uuid4().hex[:12]}"
+            _seed_accepted_existing_episode(store, root, series_id)
+            story = store.save_series_story_draft(series_id, "A keeper guides a cloud home.")
+            approved_story = store.record_series_story_decision(
+                str(story["story_plan_id"]),
+                "accepted",
+                reviewed_treatment="A keeper guides a cloud home.",
+            )
+            card = store.save_series_character_card_draft(
+                series_id, str(approved_story["story_plan_id"]), "Blue-gray seal post carrier."
+            )
+            store.record_series_character_card_decision(
+                str(card["character_card_id"]),
+                "accepted",
+                character_name="Hero",
+                reviewed_card="Hero is a blue-gray seal post carrier.",
+                reference_paths=[root / f"{series_id}-identity.png"],
+            )
+            outline = store.save_series_episode_outline_draft(
+                series_id, 2, "The lighthouse goes dark", "Hero clears salt from the lantern."
+            )
+
+            blocked = _record_serial_episode_outline_review(
+                store,
+                series_id,
+                str(outline["outline_id"]),
+                "Hero clears salt from the lantern.",
+                HumanReviewDecision(
+                    status="rejected",
+                    selected_paths=[],
+                    edited_text="",
+                    reviewer="creator",
+                    review_mode="discord",
+                    delivery={"status": "decision_received", "series_disposition": "discarded"},
+                ),
+            )
+
+            lifecycle = self._mysql_one(
+                store, "SELECT lifecycle_status FROM series WHERE series_id = ?", (series_id,)
+            )["lifecycle_status"]
+            self.assertEqual(blocked["onboarding_stage"], "episode_outline")
+            self.assertEqual(lifecycle, "discarded")
 
     def test_user_given_a_planned_episode_when_publication_is_requested_then_no_publication_attempt_is_created(self) -> None:
         """User Given a planned episode without final QA When publication is requested Then the runtime refuses to open Discord approval or create delivery rows."""

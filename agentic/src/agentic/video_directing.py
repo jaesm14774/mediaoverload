@@ -12,6 +12,9 @@ VIDEO_MOTION_DIRECTION = (
     "scene's existing elements, such as ripples, rain, leaves, or a swaying umbrella, respond on every beat. The character "
     "is still moving in the last frame. The action stays inside the visible scene: the character bounces, hops, or "
     "moves around within the frame and never travels to a new place that the opening frame does not show. "
+    "The character keeps the same size and faces the camera: its hops and moves go up, down, and side to side, "
+    "never toward or away from the camera, so it never shrinks into the distance or turns its back. "
+    "Any sign, board, paper, or screen in the scene stays blank or shows only a simple icon, with no writing. "
     "Do not add a second goal, obstacle, or subplot. "
     "Ground the action in the brief and the character identity."
 )

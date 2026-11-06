@@ -158,19 +158,18 @@ DEFAULT_GAME_SPRITE_VISUAL_CONTRACT = (
 
 
 DYNAMIC_SPRITE_SYSTEM_PROMPT = (
-    "Turn the user's character, theme, and visual style into one playable game-skill effect animation. "
-    "A quiet, static, or cinematic source brief is visual inspiration, not permission to leave the "
-    "character idle: reinterpret it as the setting and mood for a clear ability action. Choreograph "
-    "five readable phases in order: anticipation, charge, release, impact or effect peak, and recovery. "
-    "The body must visibly brace, lean, recoil, dash, cast, or follow through as the ability changes; "
-    "the VFX must originate at a visible body part, weapon, or prop, then travel or expand and resolve. "
-    "Show a brief held contact pose and a target or environment reaction when the ability implies one. "
-    "Keep the character large, consistent, and readable; preserve room along the effect path. Use a "
-    "fixed camera, with no long idle holds, ambient flicker as the only motion, or camera-only drift. "
-    "The configured game-sprite visual contract is mandatory; selected styles may guide compatible "
-    "palette, lighting, and materials but cannot replace its game-art rendering or clear silhouette. "
-    "Keep the request's identity and theme, and do not impose a flat, monochrome, or chroma-key "
-    "background unless requested. Return concise image and video prompts plus exactly five ordered beats."
+    "You write prompts for one small 2D game-skill sprite animation. image_prompt describes one still "
+    "frame: exactly one character (the requested subject, never a duplicate or a second character), "
+    "full body, centered, in the pose just before the action, with at most one small prop and no "
+    "description of any backdrop, ground, shadow, or scenery (a plain backdrop is added later). Never describe a sprite sheet, storyboard, panels, key frames, or several "
+    "poses in image_prompt. video_prompt is one short paragraph of plain motion for that same frame, "
+    "under 70 words: one skill with anticipation, charge, release, impact, and recovery, where the pose "
+    "and a visible effect that starts at the character change together; fixed camera, no new "
+    "characters, no cuts. A long news or theme brief must be reduced to one visual motif; drop every "
+    "other element, because the sprite is read at thumbnail size. Never mention frames, atlas, grid, "
+    "fps, seconds, loops, or the rendering pipeline. The configured game-sprite visual contract is "
+    "mandatory; selected styles may only guide palette and materials and cannot replace its game-art "
+    "rendering. Return image_prompt, video_prompt, and exactly five ordered beats."
 )
 
 def build_game_sprite_reference_context(
@@ -451,55 +450,58 @@ def dynamic_sprite_frame_map(beats: list[dict[str, Any]], frame_count: int = 16)
     return output
 
 
+SPRITE_BACKDROP_CLAUSE = (
+    "a perfectly flat, solid, pure green (#00FF00) backdrop that fills the whole frame, with no ground, "
+    "shadow, scenery, gradient, texture, or border"
+)
+
+
 def compile_dynamic_sprite_image_prompt(
     creative_prompt: str, visual_contract: str = ""
 ) -> str:
-    """Keep the generated keyframe useful as the start of a readable skill animation."""
+    """Bracket the creative text with the one-character, green-backdrop contract so a scenic idea cannot survive."""
     prompt = str(creative_prompt or "").strip()
-    keyframe_contract = (
-        "Game-sprite keyframe for a one-shot skill effect: show the full character large enough to "
-        "read clearly, in a poised pre-action stance with the casting limb, weapon, or effect source "
-        "visible. Leave open space along the ability's likely path. Keep the background subordinate "
-        "to the character and effect. Preserve the requested identity and theme; selected style may "
-        "guide compatible palette, lighting, and materials only."
+    subject_contract = (
+        "One game sprite keyframe of exactly one character, full body, centered in a single frame and "
+        "large, about two thirds of the frame height, in the pose just before a skill with its effect source visible; never a sprite sheet, "
+        f"storyboard, collage, panels, duplicate characters, or several poses; set on {SPRITE_BACKDROP_CLAUSE}."
     )
     configured_contract = str(visual_contract or "").strip()
-    contract_clause = (
-        f"Required game-sprite visual contract: {configured_contract}"
-        if configured_contract
-        else ""
+    contract_clause = f"Required rendering: {configured_contract}" if configured_contract else ""
+    closing_reminder = (
+        f"Final check: exactly one character, centered, on {SPRITE_BACKDROP_CLAUSE}; "
+        "no green on the character or its effect."
     )
-    parts = [prompt.rstrip(". ") + "." if prompt else "", keyframe_contract, contract_clause]
+    parts = [
+        subject_contract,
+        contract_clause,
+        f"Character and theme (palette and materials only): {prompt.rstrip('. ')}." if prompt else "",
+        closing_reminder,
+    ]
     return " ".join(part for part in parts if part)
 
 
 def compile_dynamic_sprite_video_prompt(
     creative_prompt: str, visual_contract: str = ""
 ) -> str:
-    """Add the minimum gameplay choreography contract around the creative direction."""
+    """Add a short choreography contract; the text encoder reads every word of it."""
     prompt = str(creative_prompt or "").strip()
     action_contract = (
-        "GAMEPLAY ANIMATION CONTRACT: Treat the creative brief as character, theme, and style "
-        "reference; reinterpret any still or quiet wording as mood, not as a motionless pose. Make one "
-        "continuous one-shot skill effect, with visible action throughout the clip and a fixed camera. "
-        "Use this timing: 0–15% anticipation with a weight shift and wind-up; 15–35% charge with energy "
-        "gathering at a visible source; 35–60% a fast release that travels or expands along a clear "
-        "path; 60–72% a brief held impact or effect peak with a readable target or environment reaction; "
-        "72–100% follow-through, recoil, particle dissipation, and a stable end pose. Change the body "
-        "silhouette with the force in every phase. Layer the effect behind and in front of the character "
-        "where useful, keep the face and body readable, and let anticipation cause release and release "
-        "cause impact. Do not substitute slow camera movement, background flicker, idle bobbing, or long "
-        "holds for ability animation; only the brief impact pose may hold."
+        "One continuous one-shot skill with a fixed camera and only the single character from the "
+        "first frame: anticipation with a wind-up, charge at a visible source, a fast release along a "
+        "clear path, a brief held impact, then recoil and a stable end pose. The body silhouette "
+        "changes with the force in every phase; no cuts, no new characters, no camera drift, no idle "
+        "holds. The character stays at the same position in the frame, the effect stays compact "
+        "around it and never covers its face, and nothing leaves the frame. The flat pure green backdrop stays solid and unchanged for the whole clip, with no "
+        "green in the character or its effects."
     )
     configured_contract = str(visual_contract or "").strip()
     art_contract = (
-        "REQUIRED GAME-SPRITE ART DIRECTION (takes priority over conflicting style references): "
-        f"{configured_contract}. Apply the requested style only through compatible palette, lighting, "
-        "and materials; keep the game-art rendering and clean readable silhouette."
+        f"Rendering takes priority over style references: {configured_contract}"
         if configured_contract
         else ""
     )
-    return "\n\n".join(part for part in (prompt, art_contract, action_contract) if part)
+    return " ".join(part for part in (prompt, art_contract, action_contract) if part)
 
 
 def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
@@ -525,12 +527,7 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
     )
     configured_fps = float(goal.constraints.get("sprite_fps") or 12)
     fps = min(24.0, max(4.0, configured_fps))
-    configured_duration = float(
-        goal.duration_seconds
-        or goal.constraints.get("sprite_duration_seconds")
-        or 10
-    )
-    video_duration = max(10.0, configured_duration)
+    video_duration = float(goal.duration_seconds)
     beats = _dynamic_sprite_fallback_beats(request)
     creative_prompt = (
         f"{request}; character identity and theme: {character}; style references "

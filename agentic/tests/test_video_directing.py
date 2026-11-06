@@ -26,6 +26,21 @@ class VideoDirectingTests(unittest.TestCase):
         self.assertIn("no pan, orbit, or cut", result)
         self.assertEqual(apply_video_motion_direction(result, "text2img2video"), result)
 
+    def test_user_video_keeps_the_character_visible_at_one_size_while_it_hops(self) -> None:
+        """User wants to see the character the whole clip. Given a hopping character, When directed, Then hops stay up-and-down or sideways at a steady size facing the camera and never run into the distance."""
+        result = apply_video_motion_direction("Waddle Dee hops along the plaza.", "text2img2video").casefold()
+
+        self.assertIn("same size", result)
+        self.assertIn("never toward or away from the camera", result)
+        self.assertIn("faces the camera", result)
+
+    def test_user_video_has_no_writing_on_signs_boards_or_screens(self) -> None:
+        """User wants clean pictures. Given a brief with a traffic sign, When directed, Then signs, boards, papers, and screens stay blank or show a simple icon so no garbled lettering appears."""
+        result = apply_video_motion_direction("Dedede stands by a diversion sign.", "text2img2video").casefold()
+
+        self.assertIn("sign, board, paper, or screen", result)
+        self.assertIn("no writing", result)
+
     def test_user_video_keeps_the_illustrated_look_without_extra_story(self) -> None:
         """User wants the picture to stay itself. Given a character clip, When directed, Then the painted look holds, nothing morphs or is added, and no second subplot appears."""
         result = apply_video_motion_direction("Kirby hops through a puddle.", "text2img2video")

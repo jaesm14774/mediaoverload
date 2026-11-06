@@ -40,7 +40,7 @@ def test_user_given_sprite_prompt_when_planned_then_direct_prompt_and_render_met
     assert plan["grid"] == {"rows": 4, "columns": 4}
     assert len(plan["frame_map"]) == 16
     assert plan["beats"][0]["action"] == goal.prompt
-    assert plan["video_duration_seconds"] >= 10.0
+    assert plan["video_duration_seconds"] > 0
     assert "chroma_color" not in plan
     assert "background_color" not in plan
     assert "chroma_threshold" not in plan
@@ -134,13 +134,123 @@ def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() 
 
     prompt = str(manager.text_model.calls[0]["messages"][1]["content"])
     assert "Optional inspiration notes" in prompt
-    assert "Do not impose a flat, monochrome, or chroma-key background" in prompt
+    assert "chroma-key" not in prompt.casefold()
+    assert "atlas" not in prompt.casefold()
+    assert "-second clip" not in prompt.casefold()
     assert "do not assign or register abilities" not in prompt
     assert "action_reference_pack" in plan
     assert "chroma_color" not in plan
     assert "chroma_threshold" not in plan
     assert len(plan["action_references"]) == 8
     assert "idle, walk, jump, attack" not in prompt.lower()
+
+
+def test_user_given_a_crowded_news_scene_when_sprite_prompts_are_requested_then_the_model_is_told_to_draw_one_character_in_one_frame() -> None:
+    """User Given a news scene with several props When the sprite prompts are requested Then the model must reduce it to one character, one motif and one still frame."""
+
+    class FakeTextModel:
+        def __init__(self) -> None:
+            self.calls: list[list[dict]] = []
+
+        def chat_completion(self, messages: list[dict], **_kwargs: object) -> str:
+            self.calls.append(messages)
+            return json.dumps({"image_prompt": "Kirby stands ready", "video_prompt": "Kirby leaps."})
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.text_model = FakeTextModel()
+
+    manager = FakeManager()
+    LLMPromptEngine(mode="llm", manager=manager).build_dynamic_sprite_motion_plan(
+        GoalRequest(
+            prompt="Kirby casts a ballot beside a flag, a gift box and a shaken building",
+            media_type="game_sprite",
+            style="watercolor",
+            constraints={"character": "Kirby"},
+        )
+    )
+
+    system_prompt = str(manager.text_model.calls[0][0]["content"]).casefold()
+    assert "exactly one character" in system_prompt
+    assert "one still frame" in system_prompt
+    assert "storyboard" in system_prompt  # named so that it is forbidden
+    assert "one visual motif" in system_prompt
+
+
+def test_user_given_a_model_keyframe_prompt_when_compiled_then_single_subject_and_game_art_lead_the_prompt() -> None:
+    """User Given a model keyframe prompt that mixes in a style When it is compiled Then the one-character game-art contract precedes the creative text so the style cannot turn it into a sheet or a painting."""
+
+    from agentic.runtime.prompting import compile_dynamic_sprite_image_prompt
+
+    compiled = compile_dynamic_sprite_image_prompt(
+        "Kirby in watercolor beside a ballot box", "Crisp 2D pixel-art game asset"
+    ).casefold()
+
+    assert "exactly one character" in compiled
+    assert "sprite sheet" in compiled and "never" in compiled
+    creative = compiled.index("kirby in watercolor")
+    assert compiled.index("exactly one character") < creative
+    assert compiled.index("crisp 2d pixel-art game asset") < creative
+
+
+def test_user_given_a_keyframe_prompt_when_compiled_then_the_backdrop_is_a_flat_green_the_pipeline_can_cut_out() -> None:
+    """User Given any creative keyframe text When it is compiled Then the leading and closing clauses both demand one character on a flat pure-green backdrop so a scenic idea cannot survive."""
+
+    from agentic.runtime.prompting import compile_dynamic_sprite_image_prompt
+
+    compiled = compile_dynamic_sprite_image_prompt(
+        "Kirby stands at the torn edge of a photograph of a building", "Crisp 2D pixel-art game asset"
+    ).casefold()
+
+    creative = compiled.index("kirby stands at the torn edge")
+    assert "flat" in compiled[:creative] and "green" in compiled[:creative]
+    assert "two thirds of the frame height" in compiled[:creative]
+    assert "green" in compiled[creative + 30 :]
+
+
+def test_user_given_a_video_prompt_when_compiled_then_the_green_backdrop_must_stay_unchanged() -> None:
+    """User Given a motion prompt When it is compiled Then the clip is told to keep the green backdrop solid so every frame can be cut out."""
+
+    from agentic.runtime.prompting import compile_dynamic_sprite_video_prompt
+
+    compiled = compile_dynamic_sprite_video_prompt("Kirby spins", "Crisp 2D pixel-art game asset").casefold()
+
+    assert "green" in compiled and "unchanged" in compiled
+    assert "same position" in compiled and "never covers" in compiled
+
+
+def test_user_given_a_photographic_news_run_when_sprite_prompts_are_requested_then_the_model_sees_the_headline_motif_but_no_photo_style() -> None:
+    """User Given a news run whose random style is photographic When sprite prompts are requested Then the model receives the headline and subject but no photographic style direction."""
+
+    class FakeTextModel:
+        def __init__(self) -> None:
+            self.calls: list[list[dict]] = []
+
+        def chat_completion(self, messages: list[dict], **_kwargs: object) -> str:
+            self.calls.append(messages)
+            return json.dumps({"image_prompt": "Kirby stands ready", "video_prompt": "Kirby leaps."})
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.text_model = FakeTextModel()
+
+    manager = FakeManager()
+    LLMPromptEngine(mode="llm", manager=manager).build_dynamic_sprite_motion_plan(
+        GoalRequest(
+            prompt="A real photograph of a modern building with a tiny drawn character at its torn edge",
+            media_type="game_sprite",
+            style="photograph with a tiny drawn character",
+            constraints={
+                "character": "Kirby",
+                "news_context": {"title": "Typhoon turns away from the coast", "keyword": "typhoon"},
+            },
+        )
+    )
+
+    user_prompt = str(manager.text_model.calls[0][1]["content"]).casefold()
+    assert "typhoon turns away from the coast" in user_prompt
+    assert "kirby" in user_prompt
+    assert "photograph" not in user_prompt
 
 
 def test_template_motion_plan_includes_selected_subject_as_reference_context() -> None:
@@ -290,7 +400,12 @@ def test_game_sprite_plan_has_no_human_review_or_fixed_action_nodes() -> None:
         "sprite-package",
     } <= node_ids
     video_node = next(node for node in plan.nodes if node.node_id == "sprite-motion-video")
-    assert video_node.inputs["length"] >= 240
+    # A 16-frame atlas does not need a ten-second clip or a full-size canvas.
+    assert video_node.inputs["length"] < 240
+    assert max(video_node.inputs["width"], video_node.inputs["height"]) <= 640
+    assert not {"sprite-motion-editorial-pacing", "sprite-motion-nvidia-vfx"} & node_ids
+    package_node = next(node for node in plan.nodes if node.node_id == "sprite-package")
+    assert package_node.inputs["video_node"] == "sprite-motion-video"
 
 
 def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
@@ -353,16 +468,23 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
 
     assert payload["source_generation_type"] == "game_sprite"
     assert payload["media_type"] == "game_sprite"
-    assert payload["duration_seconds"] == 10
-    assert payload["constraints"]["sprite_video_length"] == 240
+    assert payload["duration_seconds"] == 5
+    assert payload["constraints"]["sprite_video_length"] == 120
     assert "sprite_chroma_color" not in payload["constraints"]
     assert "sprite_chroma_threshold" not in payload["constraints"]
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
     assert payload["constraints"]["video_workflow_name"] == "minimax_h3_i2va"
     assert payload["constraints"]["sprite_source_width"] == payload["constraints"]["canvas_width"]
     assert payload["constraints"]["sprite_source_height"] == payload["constraints"]["canvas_height"]
-    assert payload["constraints"]["sprite_video_width"] == payload["constraints"]["canvas_width"]
-    assert payload["constraints"]["sprite_video_height"] == payload["constraints"]["canvas_height"]
+    video_width = payload["constraints"]["sprite_video_width"]
+    video_height = payload["constraints"]["sprite_video_height"]
+    canvas_width = payload["constraints"]["canvas_width"]
+    canvas_height = payload["constraints"]["canvas_height"]
+    assert min(video_width, video_height) >= 256
+    assert video_width % 32 == 0 and video_height % 32 == 0
+    assert video_width * video_height < canvas_width * canvas_height
+    # The clip keeps the keyframe's shape; H3 stretches a mismatched first frame.
+    assert abs(video_width / video_height - canvas_width / canvas_height) < 0.1
     assert payload["constraints"]["sprite_h3_model_profile"] == "q4"
     assert payload["constraints"]["strategy_context"]["reference_pack_version"] == "game_sprite_action_references_v1"
     assert len(payload["constraints"]["strategy_context"]["creative_inspiration"]) == 25
@@ -402,104 +524,118 @@ def test_kirby_yaml_can_weight_game_sprite_for_random_selection(tmp_path: Path) 
     assert result["selection_source"] == "weighted_random"
 
 
-def test_sprite_adapter_builds_4x4_atlas_with_background_preserved(tmp_path: Path) -> None:
-    """User Given sixteen generated frames When packaging runs Then their backgrounds remain visible in the atlas and animation."""
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    source_paths = []
-    for index in range(16):
-        image = Image.new("RGB", (128, 96), (255, 0, 255))
+def _green_backdrop_frames(directory: Path, backdrops: list[tuple[int, int, int]]) -> list[str]:
+    directory.mkdir()
+    paths = []
+    for index, backdrop in enumerate(backdrops):
+        image = Image.new("RGB", (128, 96), backdrop)
         draw = ImageDraw.Draw(image)
-        left = 18 + index * 4
-        draw.ellipse((left, 30, left + 28, 58), fill=(30, 180, 255))
-        path = source_dir / f"frame-{index:02d}.png"
+        left = 30 + index * 2
+        draw.ellipse((left, 24, left + 44, 70), fill=(250, 150, 190), outline=(120, 30, 70), width=2)
+        draw.ellipse((left + 12, 38, left + 18, 48), fill=(20, 20, 60))
+        path = directory / f"frame-{index + 1:02d}.png"
         image.save(path)
-        source_paths.append(str(path))
+        paths.append(str(path))
+    return paths
+
+
+def test_user_given_a_character_on_a_flat_green_backdrop_when_packaged_then_the_sprite_is_a_transparent_pixel_art_atlas(
+    tmp_path: Path,
+) -> None:
+    """User Given sixteen frames of one character on a flat green backdrop When packaging runs Then the atlas shows only the character on transparency with a small palette and the preview is enlarged without blur."""
+    paths = _green_backdrop_frames(tmp_path / "source", [(0, 255, 0)] * 16)
 
     result = SpriteAdapter().build_from_frames(
-        source_paths,
-        output_dir=str(tmp_path / "sprite"),
-        cell_width=32,
-        cell_height=32,
-        fps=12,
-        loop=True,
+        paths, output_dir=str(tmp_path / "sprite"), cell_width=32, cell_height=32, fps=12, loop=True
     )
 
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     atlas = Image.open(result["atlas_path"])
     gif = Image.open(result["gif_path"])
+    first_cell = atlas.crop((0, 0, 32, 32))
+    opaque_colors = {
+        pixel[:3] for pixel in first_cell.getdata() if pixel[3] == 255
+    } | {pixel[:3] for pixel in atlas.getdata() if pixel[3] == 255}
 
     assert manifest["grid"] == {"rows": 4, "columns": 4}
     assert manifest["frame_count"] == 16
     assert manifest["alpha"] == "binary"
     assert manifest["qa"]["passed"] is True
     assert atlas.size == (128, 128)
-    assert atlas.mode == "RGBA"
-    assert atlas.getpixel((16, 16)) == (255, 0, 255, 255)
+    assert first_cell.getpixel((0, 0))[3] == 0
+    assert first_cell.getchannel("A").getbbox() is not None
+    assert not any(color[1] > 200 and color[0] < 80 for color in opaque_colors)
+    assert len(opaque_colors) <= 32
     assert gif.n_frames == 16
     assert gif.info["loop"] == 0
-    assert gif.convert("RGBA").getpixel((16, 16))[3] == 255
-    assert manifest["background_mode"] == "preserved"
+    assert gif.size[0] > 32 and gif.size[1] > 32
+    assert gif.convert("RGBA").getpixel((0, 0))[3] == 0
 
 
-def test_user_given_varied_backgrounds_and_a_solid_red_frame_when_packaged_then_all_frames_remain_visible(tmp_path: Path) -> None:
-    """User Given varied backgrounds and one solid red frame When packaging runs Then every frame remains visible without chroma removal."""
-    source_dir = tmp_path / "varied-backgrounds"
-    source_dir.mkdir()
-    source_paths = []
-    for index in range(16):
-        image = Image.new("RGB", (128, 96), (224, 14, 0) if index == 4 else (20, 70, 180))
-        draw = ImageDraw.Draw(image)
-        if index != 4:
-            draw.rectangle((0, 0, 63, 47), fill=(20, 180, 45))
-            draw.rectangle((64, 0, 127, 47), fill=(230, 180, 30))
-            draw.rectangle((0, 48, 63, 95), fill=(150, 40, 170))
-            draw.ellipse((48, 30, 80, 66), fill=(240, 240, 245))
-        path = source_dir / f"frame-{index + 1:02d}.png"
-        image.save(path)
-        source_paths.append(str(path))
+def test_user_given_a_backdrop_whose_green_drifts_between_frames_when_packaged_then_every_frame_is_cut_out(
+    tmp_path: Path,
+) -> None:
+    """User Given a video whose green backdrop shifts shade from frame to frame When packaging runs Then no frame keeps a backdrop."""
+    shades = [(32, 180, 48), (60, 225, 90), (0, 255, 0), (20, 200, 30)] * 4
+    paths = _green_backdrop_frames(tmp_path / "drift", shades)
 
     result = SpriteAdapter().build_from_frames(
-        source_paths,
-        output_dir=str(tmp_path / "varied-output"),
-        cell_width=32,
-        cell_height=32,
+        paths, output_dir=str(tmp_path / "drift-output"), cell_width=64, cell_height=64
+    )
+
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    for record in manifest["frames"]:
+        frame = Image.open(record["path"]).convert("RGBA")
+        assert frame.getpixel((1, 1))[3] == 0
+        assert frame.getpixel((32, 32))[3] == 255
+    assert all(check for check in result["qa"]["checks"].values())
+
+
+def test_user_given_one_screen_filling_burst_when_packaged_then_the_character_stays_large_in_the_other_frames(
+    tmp_path: Path,
+) -> None:
+    """User Given a skill where one frame flashes a screen-filling burst When packaging runs Then the character keeps a readable size in the ordinary frames instead of shrinking to fit the burst."""
+    directory = tmp_path / "burst"
+    directory.mkdir()
+    paths = []
+    for index in range(16):
+        image = Image.new("RGB", (192, 192), (0, 255, 0))
+        draw = ImageDraw.Draw(image)
+        if index == 9:
+            draw.ellipse((4, 4, 188, 188), fill=(255, 140, 40))
+        draw.ellipse((78, 80, 118, 120), fill=(250, 150, 190), outline=(120, 30, 70), width=2)
+        path = directory / f"frame-{index + 1:02d}.png"
+        image.save(path)
+        paths.append(str(path))
+
+    result = SpriteAdapter().build_from_frames(
+        paths, output_dir=str(tmp_path / "burst-output"), cell_width=128, cell_height=128
+    )
+
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    ordinary = Image.open(manifest["frames"][0]["path"]).convert("RGBA")
+    bbox = ordinary.getchannel("A").getbbox()
+    assert bbox is not None
+    assert (bbox[2] - bbox[0]) >= 0.5 * 128
+
+
+def test_user_given_a_frame_without_any_green_backdrop_when_packaged_then_it_stays_visible(
+    tmp_path: Path,
+) -> None:
+    """User Given one solid red frame among green-backdrop frames When packaging runs Then the red frame is not erased."""
+    source_dir = tmp_path / "varied"
+    paths = _green_backdrop_frames(source_dir, [(0, 255, 0)] * 16)
+    Image.new("RGB", (128, 96), (224, 14, 0)).save(paths[4])
+
+    result = SpriteAdapter().build_from_frames(
+        paths, output_dir=str(tmp_path / "varied-output"), cell_width=32, cell_height=32
     )
 
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     fifth_frame = Image.open(manifest["frames"][4]["path"]).convert("RGBA")
     assert result["qa"]["passed"] is True
-    assert fifth_frame.getpixel((16, 16)) == (224, 14, 0, 255)
+    assert fifth_frame.getpixel((16, 16))[3] == 255
     assert len(manifest["frames"]) == 16
-
-
-def test_sprite_adapter_preserves_h3_shifted_backgrounds(tmp_path: Path) -> None:
-    source_dir = tmp_path / "shifted-background"
-    source_dir.mkdir()
-    source_paths = []
-    for index in range(16):
-        background = (32, 180, 48) if index % 2 else (168, 54, 42)
-        image = Image.new("RGB", (128, 96), background)
-        draw = ImageDraw.Draw(image)
-        left = 24 + index * 3
-        draw.ellipse((left, 28, left + 30, 58), fill=(30, 160, 240))
-        path = source_dir / f"frame-{index:02d}.png"
-        image.save(path)
-        source_paths.append(str(path))
-
-    result = SpriteAdapter().build_from_frames(
-        source_paths,
-        output_dir=str(tmp_path / "shifted-output"),
-        cell_width=64,
-        cell_height=64,
-    )
-
-    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
-    first = Image.open(manifest["frames"][0]["path"]).convert("RGBA")
-    second = Image.open(manifest["frames"][1]["path"]).convert("RGBA")
-    assert first.getpixel((6, 15)) == (168, 54, 42, 255)
-    assert second.getpixel((6, 15)) == (32, 180, 48, 255)
-    assert all(check for check in result["qa"]["checks"].values())
 
 
 def test_user_given_sprite_touches_a_non_floor_edge_when_packaged_then_discord_can_review_it(tmp_path: Path) -> None:

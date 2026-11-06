@@ -26,8 +26,9 @@ freely decide the motion.
 
 The system records optional motion notes when the prompt model supplies them.
 They do not need a fixed beat count or causal structure, and the system does
-not rewrite them through an identity or scene repair pass. Backgrounds may be
-colorful or detailed; packaging preserves them instead of requiring a color key.
+not rewrite them through an identity or scene repair pass. Packaging preserves
+the generated background instead of requiring a color key, but the keyframe
+prompt asks for a plain backdrop because the cell is read at thumbnail size.
 
 The reference pack is sampled per request and recorded in the motion plan for
 lineage. Nothing is written back to the strategy config, and no character is
@@ -56,6 +57,39 @@ atlas cell settings. The mode uses Krea for one clean source image,
 MiniMax H3 I2V for the continuous clip, then samples that clip into 16 frames
 in one decode pass. The manifest records the exact interval-midpoint sample
 times under `sampling.timestamps_seconds`.
+
+## Packaging
+
+The keyframe is rendered on a flat green backdrop and the clip keeps it. The
+packager cuts the backdrop out of every frame (green must lead red and blue,
+which tolerates the shade drift video models add), crops all frames to one
+shared box so the scale never changes, downsamples with premultiplied box
+resampling, and quantizes every frame to one 32-colour palette. The atlas and
+frames are transparent PNGs; `animation.gif` and `animation.webp` are
+enlarged with nearest-neighbour to about 384 pixels so the pixels stay crisp.
+A frame with no green backdrop is kept whole instead of being erased.
+
+## Render budget
+
+The atlas keeps 16 frames at 128x128, so the H3 clip is sized for that, not for
+a finished video. Measured runs spent 12 to 58 minutes in the H3 stage and
+under two minutes everywhere else, because the clip was 10 seconds
+(243 frames) at the full keyframe canvas.
+
+- `generation.game_sprite.duration_seconds` sets the clip length (default 5,
+  which H3 rounds up to 124 frames). `game_sprite` is exempt from the
+  ten-second minimum that applies to other video routes.
+- `generation.game_sprite.video_max_edge` (default 384) caps the clip canvas.
+  The clip keeps the keyframe's aspect ratio, aligned to 32 pixels, and never
+  drops below H3's 256-pixel minimum edge. The Krea keyframe still renders at
+  the full run canvas.
+- The route has no editorial-pacing or NVIDIA upscale/frame-generation node.
+  Pacing exists to keep audio in sync and the upscale feeds 128x128 cells, so
+  both cost minutes and VRAM swaps for no visible gain.
+
+Lower `duration_seconds` or `video_max_edge` for speed; raise them if motion
+or detail in the 128x128 cells looks too coarse. Review a rendered atlas after
+changing either value.
 
 ## Random route selection
 
@@ -86,6 +120,26 @@ stable cell size. It rejects fully transparent source frames. The exported
 atlas contains exactly 16 sampled frames. These checks are deterministic;
 visual review of the resulting atlas is still recommended for art quality,
 silhouette readability, and game feel.
+
+## One character per keyframe
+
+A run once produced a five-panel storyboard with five cropped copies of the
+character, and the atlas sampled that. The cause was the prompt, which asked
+the model to stage five phases and mentioned the atlas and a ten-second clip.
+Now:
+
+- The model is told to write one still frame with exactly one character, at
+  most one prop, and one visual motif from a crowded news brief. It is not told
+  about the atlas, frame count, fps, or clip length.
+- The compiled keyframe prompt starts with the one-character, no-sheet,
+  plain-backdrop contract and the pixel-art rendering contract. The scene and
+  style come last and only supply palette and materials, so a painterly style
+  cannot override the game-art look.
+- The video prompt is one short paragraph plus a compact choreography
+  contract, because the H3 text encoder reads every word.
+
+These are prompt contracts, not guarantees. Krea can still ignore them, so
+review the keyframe before trusting the atlas.
 
 ## Skill-effect motion
 

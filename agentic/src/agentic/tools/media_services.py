@@ -284,8 +284,8 @@ class MediaServiceTools:
         return self._sprite_service().video_to_sprite(
             video_path=str(payload["video_path"]),
             output_dir=str(payload["output_dir"]),
-            cell_width=int(payload.get("cell_width", 64)),
-            cell_height=int(payload.get("cell_height", 64)),
+            cell_width=int(payload.get("cell_width", 128)),
+            cell_height=int(payload.get("cell_height", 128)),
             fps=float(payload.get("fps", 12)),
             loop=bool(payload.get("loop", True)),
             frame_map=payload.get("frame_map") if isinstance(payload.get("frame_map"), list) else None,

@@ -28,6 +28,9 @@ from agentic.runtime.story_cards import (
 from agentic.runtime.llm_client import PromptClient, PromptGenerationError
 
 
+MAX_WRITER_REPAIRS = 2
+
+
 def build_story_card(client: PromptClient, goal: GoalRequest) -> dict[str, Any]:
     """Choose a source-backed angle, then write the complete card before human review."""
 
@@ -68,11 +71,10 @@ def build_story_card(client: PromptClient, goal: GoalRequest) -> dict[str, Any]:
     )
     page_min_chars = 1
     text_schema = {"type": "string", "minLength": 1}
-    page_text_schema = {
-        "type": "string",
-        "minLength": page_min_chars,
-        "maxLength": max_chars,
-    }
+    # No maxLength: constrained decoding stops exactly at the cap and cuts a
+    # sentence in half. validate_story_card_payload enforces the limit and the
+    # writer repairs an overlong page.
+    page_text_schema = {"type": "string", "minLength": page_min_chars}
     brief_text_schema = {**text_schema, "maxLength": 360}
     brief_properties = {
         key: {**brief_text_schema, "description": description}
@@ -99,7 +101,11 @@ def build_story_card(client: PromptClient, goal: GoalRequest) -> dict[str, Any]:
             "properties": {
                 "field": {
                     "type": "string",
-                    "enum": ["title", "summary", "content", "supplied_text"],
+                    "enum": [
+                        key
+                        for key in ("title", "summary", "content", "supplied_text")
+                        if source.get(key)
+                    ],
                 },
                 "source_signal": {
                     **text_schema,
@@ -128,7 +134,7 @@ def build_story_card(client: PromptClient, goal: GoalRequest) -> dict[str, Any]:
     schema = {
         "type": "object",
         "properties": {
-            "title": {**text_schema, "maxLength": STORY_CARD_MAX_TITLE_CHARS},
+            "title": text_schema,
             "pages": {
                 "type": "array",
                 "minItems": page_count or STORY_CARD_PAGE_COUNT_MIN,
@@ -275,34 +281,34 @@ def build_story_card(client: PromptClient, goal: GoalRequest) -> dict[str, Any]:
             }
 
         writer_passes = 1
-        try:
-            candidate = build_candidate(final)
-            normalized = validate_story_card_payload(
-                candidate, expected_page_count=page_count
-            )
-        except ValueError as validation_error:
-            # Some providers ignore JSON-schema structure and length constraints. Give the
-            # same writer one focused contract repair before failing the run; this is
-            # formatting recovery, not a second editorial opinion or quality gate.
-            repaired = client.generate_json(
-                manager,
-                STORY_CARD_WRITE_PROMPT,
-                user_prompt
-                + "\n上一次回應沒有符合字卡契約，請保留原本真正有意思的內容後重新分頁。"
-                + f"每頁最多{max_chars}字，正文以22–32字為目標並保留完整句尾。需修正的硬性契約：{validation_error}"
-                + "只回傳修正後的 title 和 pages JSON，不要解釋修改。\n"
-                + json.dumps(final, ensure_ascii=False),
-                schema_name="story_card_write",
-                language_contract="",
-                schema=schema,
-                max_retries=1,
-                repair_attempts=1,
-            )
-            candidate = build_candidate(repaired)
-            normalized = validate_story_card_payload(
-                candidate, expected_page_count=page_count
-            )
-            writer_passes = 2
+        draft = final
+        while True:
+            try:
+                normalized = validate_story_card_payload(
+                    build_candidate(draft), expected_page_count=page_count
+                )
+                break
+            except ValueError as validation_error:
+                if writer_passes > MAX_WRITER_REPAIRS:
+                    raise
+                # Some providers ignore JSON-schema structure and length constraints. Give the
+                # same writer focused contract repairs before failing the run; this is
+                # formatting recovery, not a second editorial opinion or quality gate.
+                draft = client.generate_json(
+                    manager,
+                    STORY_CARD_WRITE_PROMPT,
+                    user_prompt
+                    + "\n上一次回應沒有符合字卡契約，請保留原本真正有意思的內容後重新分頁。"
+                    + f"每頁最多{max_chars}字，正文以22–32字為目標並保留完整句尾。需修正的硬性契約：{validation_error}"
+                    + "只回傳修正後的 title 和 pages JSON，不要解釋修改。\n"
+                    + json.dumps(draft, ensure_ascii=False),
+                    schema_name="story_card_write",
+                    language_contract="",
+                    schema=schema,
+                    max_retries=1,
+                    repair_attempts=1,
+                )
+                writer_passes += 1
         if normalized["contains_simplified_characters"]:
             raise ValueError("Story-card final text must use Traditional Chinese")
         normalized["source_context"] = source

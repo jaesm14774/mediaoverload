@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from agentic.runtime.contracts import (
-    MIN_VIDEO_DURATION_SECONDS,
     ExecutionNode,
     ExecutionPlan,
     GoalRequest,
@@ -117,29 +116,21 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
         image_height = int(goal.constraints["sprite_source_height"])
     video_defaults = dict(video_manifest.recommended_defaults or {})
     video_width = int(
-        goal.constraints.get("canvas_width")
-        or goal.constraints.get("sprite_video_width")
+        goal.constraints.get("sprite_video_width")
+        or goal.constraints.get("canvas_width")
         or video_defaults.get("width", 608)
     )
     video_height = int(
-        goal.constraints.get("canvas_height")
-        or goal.constraints.get("sprite_video_height")
+        goal.constraints.get("sprite_video_height")
+        or goal.constraints.get("canvas_height")
         or video_defaults.get("height", 352)
     )
-    target_duration_seconds = max(
-        MIN_VIDEO_DURATION_SECONDS,
-        int(goal.duration_seconds or MIN_VIDEO_DURATION_SECONDS),
-    )
-    video_length = max(
-        round(MIN_VIDEO_DURATION_SECONDS * 24),
-        int(
-            goal.constraints.get("sprite_video_length")
-            or round(target_duration_seconds * 24)
-        ),
+    video_length = int(
+        goal.constraints.get("sprite_video_length") or round(goal.duration_seconds * 24)
     )
     video_steps = int(goal.constraints.get("sprite_video_steps") or 16)
-    cell_width = context.constraint_int(goal, "sprite_cell_width", 64)
-    cell_height = context.constraint_int(goal, "sprite_cell_height", 64)
+    cell_width = context.constraint_int(goal, "sprite_cell_width", 128)
+    cell_height = context.constraint_int(goal, "sprite_cell_height", 128)
     nodes = [
         ExecutionNode(
             node_id="sprite-motion-plan",
@@ -212,17 +203,7 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
             stage="render",
         ),
     ]
-    sprite_video_node = context.append_editorial_pacing_node(
-        nodes,
-        source_node="sprite-motion-video",
-        node_id="sprite-motion-editorial-pacing",
-    )
-    sprite_video_node = context.append_nvidia_vfx_postprocess_node(
-        goal,
-        nodes,
-        source_node=sprite_video_node,
-        node_id="sprite-motion-nvidia-vfx",
-    )
+    sprite_video_node = "sprite-motion-video"
     nodes.append(
         ExecutionNode(
             node_id="sprite-package",

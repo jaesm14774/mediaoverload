@@ -1059,13 +1059,24 @@ def _resolve_serial_character_reference_paths(
 
 
 def _serial_onboarding_review_blocked(
+    serial_store: SerialVideoStore,
     series_id: str,
     stage: str,
     decision: HumanReviewDecision,
 ) -> dict[str, object] | None:
     if decision.review_mode == "discord" and decision.status == "approved":
         return None
-    if decision.status == "rejected":
+    if str((decision.delivery or {}).get("series_disposition") or "") == "discarded":
+        # A series still in onboarding has no production record to close; its rejected
+        # draft already keeps it from resuming. Only a started series needs closing.
+        if serial_store.get_production_series_character_name(series_id) is not None:
+            serial_store.set_series_lifecycle_status(
+                series_id,
+                "discarded",
+                note=f"Creator discarded the series while reviewing the {stage}",
+            )
+        reason = "The creator discarded this series in Discord; no later stage was started."
+    elif decision.status == "rejected":
         reason = "The creator rejected this draft in Discord; no later stage was started."
     else:
         reason = decision.fallback_reason or "Required Discord review did not complete; the draft remains unapproved."
@@ -1079,7 +1090,9 @@ def _record_serial_story_review(
     reviewed_story: str,
     decision: HumanReviewDecision,
 ) -> dict[str, object] | None:
-    blocked = _serial_onboarding_review_blocked(series_id, "story", decision)
+    blocked = _serial_onboarding_review_blocked(
+        serial_store, series_id, "story", decision
+    )
     if blocked is not None:
         if decision.status == "rejected":
             serial_store.record_series_story_decision(
@@ -1103,7 +1116,9 @@ def _record_serial_character_review(
     reviewed_card: str,
     decision: HumanReviewDecision,
 ) -> dict[str, object] | None:
-    blocked = _serial_onboarding_review_blocked(series_id, "character", decision)
+    blocked = _serial_onboarding_review_blocked(
+        serial_store, series_id, "character", decision
+    )
     if blocked is not None:
         if decision.status == "rejected":
             serial_store.record_series_character_card_decision(
@@ -1136,7 +1151,9 @@ def _record_serial_episode_outline_review(
     reviewed_outline: str,
     decision: HumanReviewDecision,
 ) -> dict[str, object] | None:
-    blocked = _serial_onboarding_review_blocked(series_id, "episode_outline", decision)
+    blocked = _serial_onboarding_review_blocked(
+        serial_store, series_id, "episode_outline", decision
+    )
     if blocked is not None:
         if decision.status == "rejected":
             serial_store.record_series_episode_outline_decision(
@@ -1168,6 +1185,27 @@ def _serial_first_episode_argv(argv: Sequence[str]) -> list[str]:
             continue
         filtered.append(item)
     return filtered
+
+
+def _canonical_character_look(args: argparse.Namespace, character_name: str) -> str:
+    """Return the character library's appearance text for a configured group character."""
+    from agentic.app.character_config import load_character_config
+    from agentic.tools.context_services import CharacterGroupSelectionService
+
+    config_path = (
+        Path(args.character_config).expanduser().resolve()
+        if args.character_config
+        else REPO_ROOT / "configs" / "characters" / f"{character_name.lower()}.yaml"
+    )
+    group_name = str(
+        (load_character_config(config_path).get("character") or {}).get("group_name") or ""
+    ).strip()
+    if not group_name:
+        return ""
+    selection = CharacterGroupSelectionService().select_named_character(
+        group_name, character_name
+    )
+    return str((selection.to_dict().get("selected_profile") or {}).get("role_description") or "").strip()
 
 
 def _run_serial_new_series_onboarding(
@@ -1208,6 +1246,7 @@ def _run_serial_new_series_onboarding(
             selection_required=bool(media_paths),
             selection_limit=1 if media_paths else None,
             review_scope=f"serial_{stage}",
+            allow_series_discard=True,
         )
 
     story = _run_serial_story_draft(args, project_root, emit=False)
@@ -1227,6 +1266,12 @@ def _run_serial_new_series_onboarding(
     args.serial_character_preferences = (
         f"主角固定為 {character_name}，不可更換角色或改成一般人類。"
     )
+    canonical_look = _canonical_character_look(args, character_name)
+    if canonical_look:
+        args.serial_character_preferences += (
+            f"\n{character_name} 是既有角色，外觀錨點必須逐項沿用以下設定，"
+            f"不可重新設計成其他生物、材質或加上新配件：{canonical_look}"
+        )
     character = _run_serial_character_draft(args, project_root, emit=False)
     card_text = str(character["character_card_text"])
     card_path = str(character["character_card_path"])
@@ -1486,31 +1531,20 @@ def _review_automatic_serial_outline(
         allow_asset_selection=False,
         allow_text_edit=False,
         review_scope="serial_episode_outline",
+        allow_series_discard=True,
     )
-    if outline_review.review_mode != "discord" or outline_review.status != "approved":
-        if outline_review.status == "rejected":
-            serial_store.record_series_episode_outline_decision(
-                str(outline["outline_id"]),
-                "rejected",
-                reviewer=outline_review.reviewer,
-            )
+    blocked = _record_serial_episode_outline_review(
+        serial_store,
+        str(args.series_id),
+        str(outline["outline_id"]),
+        str(outline["outline_text"]),
+        outline_review,
+    )
+    if blocked is not None:
         state.finished = True
-        state.result = _serial_onboarding_blocked(
-            series_id=str(args.series_id),
-            stage="episode_outline",
-            reason=(
-                outline_review.fallback_reason
-                or "The next episode outline did not receive human approval in Discord."
-            ),
-        )
+        state.result = blocked
         return None
 
-    approved_outline = serial_store.record_series_episode_outline_decision(
-        str(outline["outline_id"]),
-        "accepted",
-        reviewed_outline=str(outline["outline_text"]),
-        reviewer=outline_review.reviewer,
-    )
     prior_context = serial_context
     serial_context = serial_store.prepare_series_context(
         str(args.series_id),
@@ -1530,8 +1564,9 @@ def _review_automatic_serial_outline(
         "automation_source_episode_id",
     ):
         serial_context[key] = prior_context.get(key, "")
-    args.goal = str(approved_outline["reviewed_outline"])
-    args.episode_topic = str(approved_outline["episode_topic"])
+    approved_lineage = serial_context["onboarding_lineage"]
+    args.goal = str(approved_lineage["episode_outline"])
+    args.episode_topic = str(approved_lineage["episode_topic"])
     return serial_context
 
 

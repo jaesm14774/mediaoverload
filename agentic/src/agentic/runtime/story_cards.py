@@ -426,7 +426,7 @@ def validate_story_card_payload(
         visual_anchor = safe_news_visual_anchor(raw_page.get("visual_anchor"))
         if not text or not min_text_chars <= len(text) <= max_text_chars:
             raise ValueError(
-                f"Story-card page {index} text must contain {min_text_chars}-{max_text_chars} characters"
+                f"Story-card page {index} text must contain {min_text_chars}-{max_text_chars} characters (got {len(text)})"
             )
         if not _CJK_RE.search(text):
             raise ValueError(f"Story-card page {index} text must be Traditional Chinese prose")

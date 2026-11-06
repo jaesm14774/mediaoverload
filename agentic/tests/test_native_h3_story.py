@@ -2130,6 +2130,25 @@ class NativeH3KeyframePromptTests(unittest.TestCase):
         self.assertIn("Preserve each character's supplied appearance and face design", prompt)
         self.assertIn("keep the story's single news analogy visible and unbranded", prompt)
 
+    def test_user_given_a_native_story_request_when_the_storyboard_is_written_then_the_model_must_give_the_protagonist_a_vigorous_action_in_every_shot(self) -> None:
+        """User wants a lively clip. Given a native story request, When the storyboard prompt is sent, Then every shot needs a vigorous full-body action and standing, gazing, leaning or weather alone does not count."""
+        story = {"story_name": "The Loose Lantern", "style_description": "Soft pastel animation.", "native_shots": [{"time_range": "0-4s", "primary_action": "Kirby chases a loose lantern."}, {"time_range": "4-10s", "primary_action": "Kirby catches its cable."}, {"time_range": "10-15s", "primary_action": "Kirby anchors the lantern."}]}
+        manager = ScriptedLLMManager([{"story": story}], repeat_last=True)
+        LLMPromptEngine(mode="llm", manager=manager).generate_native_h3_storyboard(
+            character="Kirby",
+            style="pastel animation",
+            duration_seconds=15,
+            base_storyboard=load_storyboard(Path(__file__).resolve().parents[2] / "configs/storyboards/native_h3_15s.yaml"),
+            news_context={"title": "city lantern outage", "keyword": "canal safety"},
+        )
+
+        sent = " ".join(
+            str(request["messages"][1]["content"]) for request in manager.text_model.requests
+        ).casefold()
+        self.assertIn("vigorous full-body action", sent)
+        self.assertIn("standing, gazing, leaning, or weather alone never counts", sent)
+
+
 
 if __name__ == "__main__":
     unittest.main()

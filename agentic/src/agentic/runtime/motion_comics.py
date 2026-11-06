@@ -18,13 +18,22 @@ MOTION_COMIC_DEFAULTS = {
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
+# A caption that stops on a hyphen or dash was cut off mid-word by the writer.
+_CUT_OFF = re.compile(r"[-‐-―−]$")
+
+
 def validate_motion_comic_story(payload: Any) -> dict[str, Any]:
     """Reject incomplete stories before GPU work; this is not a pixel validator."""
     if not isinstance(payload, dict):
         raise ValueError("Motion comic story must be an object")
 
     def text(
-        source: dict, key: str, *, maximum: int | None = None, english: bool = False
+        source: dict,
+        key: str,
+        *,
+        maximum: int | None = None,
+        english: bool = False,
+        chinese: bool = False,
     ) -> str:
         value = source.get(key)
         if not isinstance(value, str) or not value.strip():
@@ -36,13 +45,17 @@ def validate_motion_comic_story(payload: Any) -> dict[str, Any]:
             )
         if english and _CJK.search(value):
             raise ValueError(f"Motion comic {key} must be English-only")
+        if chinese and not _CJK.search(value):
+            raise ValueError(f"Motion comic {key} must be written in Traditional Chinese")
+        if chinese and _CUT_OFF.search(value):
+            raise ValueError(f"Motion comic {key} must be a finished phrase, not cut off")
         return value
 
     panels = payload.get("panels")
     if not isinstance(panels, list) or len(panels) != 3:
         raise ValueError("Motion comic requires exactly three story beats")
     normalized = {
-        "title": text(payload, "title", maximum=12),
+        "title": text(payload, "title", maximum=12, chinese=True),
         "visual_style": text(payload, "visual_style", english=True),
         "continuity": text(payload, "continuity", english=True),
         "panels": [],
@@ -55,7 +68,7 @@ def validate_motion_comic_story(payload: Any) -> dict[str, Any]:
         normalized["panels"].append(
             {
                 "role": role,
-                "caption": text(panel, "caption", maximum=24),
+                "caption": text(panel, "caption", maximum=24, chinese=True),
                 "image_prompt": text(panel, "image_prompt", english=True),
                 "visible_state": text(panel, "visible_state", english=True),
                 "cause": text(panel, "cause", english=True),
