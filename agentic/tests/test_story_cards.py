@@ -142,6 +142,44 @@ class StoryCardContractTests(unittest.TestCase):
         self.assertIn('Kirby', result['pages'][1]['background_prompt'])
         self.assertIn('network gateway', result['pages'][1]['background_prompt'])
 
+    def test_user_given_an_article_without_a_summary_when_the_editorial_plan_is_requested_then_the_model_can_only_cite_fields_the_article_has(self) -> None:
+        """User Given a news article that has a title and body but no summary When the editorial plan is requested Then the schema offers only those fields as the evidence anchor so the run cannot fail on a missing source field."""
+        goal = self.make_goal(
+            news_context={"title": "媽祖園區啟用", "content": "彰化伸港福安宮新建媽祖園區將於11月11日舉辦落成啟用典禮。"},
+            story_card_page_count=2,
+        )
+        manager = ScriptedLLMManager([sample_plan(goal), sample_payload(goal, 2)], repeat_last=True)
+
+        LLMPromptEngine(mode="llm", manager=manager).build_story_card(goal)
+
+        plan_request = str(manager.text_model.requests[0]["messages"][-1]["content"])
+        self.assertIn('"enum": ["title", "content"]', plan_request)
+
+    def test_user_given_the_writer_schema_when_a_story_card_is_requested_then_text_length_is_judged_by_validation_not_by_decoder_truncation(self) -> None:
+        """User Given a story-card request When the writer schema is sent to the model Then title and page text carry no hard decoder length cap that would cut a sentence in half."""
+        goal = self.make_goal(news_context={"title": "媽祖園區啟用", "content": "彰化伸港福安宮新建媽祖園區將於11月11日舉辦落成啟用典禮。"}, story_card_page_count=2)
+        manager = ScriptedLLMManager([sample_plan(goal), sample_payload(goal, 2)], repeat_last=True)
+
+        LLMPromptEngine(mode="llm", manager=manager).build_story_card(goal)
+
+        writer_schema = manager.text_model.requests[1]["options"]["response_format"]["json_schema"]["schema"]
+        page_text = writer_schema["properties"]["pages"]["items"]["properties"]["text"]
+        self.assertNotIn("maxLength", writer_schema["properties"]["title"])
+        self.assertNotIn("maxLength", page_text)
+
+    def test_user_given_a_writer_that_stays_over_the_limit_after_one_repair_when_a_story_card_is_requested_then_a_further_repair_finishes_the_card(self) -> None:
+        """User Given a writer whose pages are still too long after the first repair When the story card is requested Then it is told how long the page is and gets another repair instead of failing the run."""
+        goal = self.make_goal(news_context={"title": "媽祖園區啟用", "content": "彰化伸港福安宮新建媽祖園區將於11月11日舉辦落成啟用典禮。"}, story_card_page_count=2)
+        too_long = sample_payload(goal, 2)
+        too_long["pages"][1]["text"] = "這是一頁刻意寫得太長的字卡，" * 5 + "要被請回去重寫。"
+        manager = ScriptedLLMManager([sample_plan(goal), too_long, too_long, sample_payload(goal, 2)], repeat_last=True)
+
+        result = LLMPromptEngine(mode="llm", manager=manager).build_story_card(goal)
+
+        self.assertEqual(result["writing_process"]["writer_passes"], 3)
+        repair_request = str(manager.text_model.requests[2]["messages"][-1]["content"])
+        self.assertIn("got ", repair_request)
+
     def test_user_given_editorial_plan_and_writer_pages_when_public_story_card_builder_runs_then_source_and_page_contracts_are_preserved(self) -> None:
         """User Given a valid editorial plan and two writer pages When the public story-card builder runs Then it preserves the source context, editorial brief, page order, and single-pass completion state."""
         goal = self.make_goal(

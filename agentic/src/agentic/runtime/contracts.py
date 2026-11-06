@@ -21,7 +21,6 @@ VIDEO_OUTPUT_MEDIA_TYPES = frozenset(
         "native_h3_l2va_story",
         "native_h3_ref2va",
         "text2image2native_h3_ref2va",
-        "game_sprite",
         "motion_comic",
         "image_to_video",
         "image_to_video_audio",

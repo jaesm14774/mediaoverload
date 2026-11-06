@@ -321,7 +321,7 @@ class AgenticPlannerTests(unittest.TestCase):
         result = AgentPlanningSkills(prompt_engine=FakePromptEngine()).prepare_segment(SkillContext(plan, node, state))
 
         self.assertIn("Opening-frame action staging:", result.outputs["opening_keyframe_prompt"])
-        self.assertIn("split second before movement begins", result.outputs["opening_keyframe_prompt"])
+        self.assertIn("split second before the action begins", result.outputs["opening_keyframe_prompt"])
         self.assertIn("leans forward, then springs over the puddle", result.outputs["opening_keyframe_prompt"])
 
     def test_segment_prepare_appends_only_explicit_review_revision(self) -> None:
@@ -527,36 +527,6 @@ class AgenticPlannerTests(unittest.TestCase):
             ["review-sticker-editorial-pacing"],
         )
         self.assertTrue(plan.metadata["review_loop_enabled"])
-
-    def test_user_given_a_game_sprite_request_when_its_motion_video_is_planned_then_it_uses_automatic_pacing(self) -> None:
-        """User Given a game-sprite request When its motion video is planned Then that video uses the shared automatic pacing stage before sprite extraction."""
-        goal = self.planner.create_goal(
-            prompt="A tiny fox hops over a puddle",
-            media_type="game_sprite",
-            duration_seconds=10,
-            style="pixel art",
-            constraints={},
-        )
-
-        plan = self.planner.build_plan(goal)
-        by_id = {node.node_id: node for node in plan.nodes}
-
-        self.assertEqual(
-            by_id["sprite-motion-editorial-pacing"].depends_on,
-            ["sprite-motion-video"],
-        )
-        self.assertIn(
-            "sprite-motion-editorial-pacing",
-            by_id["sprite-motion-nvidia-vfx"].depends_on,
-        )
-        self.assertEqual(
-            by_id["sprite-package"].inputs["video_node"],
-            "sprite-motion-nvidia-vfx",
-        )
-
-
-
-
 
     def test_carousel_plan_is_available(self) -> None:
         goal = self.planner.create_goal(

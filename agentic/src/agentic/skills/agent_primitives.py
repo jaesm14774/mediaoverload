@@ -651,8 +651,9 @@ class AgentMediaSkills:
             )
             i2va_description = (
                 "The attached image is the exact opening frame. Preserve its visible subject identity, "
-                "pose, silhouette, colors, composition, and existing props. Continue immediately from "
-                "this frame through the following motion: "
+                "pose, silhouette, colors, composition, and existing props. Keep the frame's look "
+                "unchanged, with no morphing or new objects, and use at most one slow gentle push-in with no pan or cut. "
+                "Continue immediately from this frame through the following motion: "
                 f"{raw_prompt}"
             )
             prompt = format_h3_video_prompt(
@@ -1522,8 +1523,8 @@ class AgentMediaSkills:
             {
                 "video_path": video_path,
                 "output_dir": str(run_dir),
-                "cell_width": int(context.node.inputs.get("cell_width", 64)),
-                "cell_height": int(context.node.inputs.get("cell_height", 64)),
+                "cell_width": int(context.node.inputs.get("cell_width", 128)),
+                "cell_height": int(context.node.inputs.get("cell_height", 128)),
                 "fps": float(context.node.inputs.get("fps", motion_plan.get("fps", 12))),
                 "loop": str(motion_plan.get("animation_kind") or "periodic") == "periodic",
                 "frame_map": motion_plan.get("frame_map", []),

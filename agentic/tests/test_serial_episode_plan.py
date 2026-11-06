@@ -36,3 +36,19 @@ def test_user_given_an_approved_story_and_character_when_planning_an_episode_the
     assert "道具變化" in prompt
     assert "結尾狀態" in prompt
 
+
+
+def test_user_given_a_cinematic_episode_when_planning_shots_then_the_outline_keeps_the_camera_steady():
+    """User Given a cinematic episode When its shot list is requested Then the prompt keeps the camera fixed with at most one slow push-in, so motion comes from the character rather than the camera."""
+    _, prompt = build_serial_episode_outline_prompts(
+        approved_story="A seal post carrier returns a lost cloud to its ocean home.",
+        approved_character="Tide is a blue-gray seal.",
+        episode_number=1,
+        episode_topic="The broken lighthouse signal",
+        episode_direction="Tide finds the blocked lantern.",
+        previous_episode_summaries=[],
+        complexity="cinematic",
+    )
+
+    assert "鏡頭固定" in prompt
+    assert "最多一次緩慢推近" in prompt

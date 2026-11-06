@@ -59,6 +59,21 @@ from agentic.app.generation_routing import (
 )
 
 
+H3_CANVAS_ALIGNMENT = 32
+H3_MIN_CANVAS_EDGE = 256
+
+
+def _fit_sprite_video_canvas(width: int, height: int, max_edge: int) -> tuple[int, int]:
+    """Shrink the clip canvas: sprite cells are tiny, so the H3 render only needs a small canvas."""
+    # H3 rejects edges under 256, so the short edge wins over the budget to keep the aspect ratio.
+    scale = max(min(1.0, max_edge / max(width, height)), H3_MIN_CANVAS_EDGE / min(width, height))
+
+    def align(edge: int) -> int:
+        return max(H3_MIN_CANVAS_EDGE, round(edge * scale / H3_CANVAS_ALIGNMENT) * H3_CANVAS_ALIGNMENT)
+
+    return align(width), align(height)
+
+
 def build_goal_payload_from_character_config(
     request: CharacterWorkflowRequest,
     *,
@@ -702,39 +717,28 @@ def build_goal_payload_from_character_config(
     if motion_graphics_requested:
         constraints["enable_motion_graphics"] = True
     if config_generation_type == "motion_comic":
-        motion_comic_config = dict(generation.get("motion_comic", {}) or {})
-        motion_comic_config["width"] = int(canvas_profile["width"])
-        motion_comic_config["height"] = int(canvas_profile["height"])
-        motion_comic_config["image_width"] = int(canvas_profile["width"])
-        motion_comic_config["image_height"] = int(canvas_profile["height"])
-        constraints["motion_comic"] = motion_comic_config
+        constraints["motion_comic"] = dict(generation.get("motion_comic", {}) or {})
     if config_generation_type == "game_sprite":
-        requested_sprite_length = (
-            max(1, round(float(duration_seconds) * 24.0))
-            if requested_duration_seconds is not None
-            else None
-        )
-        configured_sprite_length = int(
-            game_sprite_config.get(
-                "video_length", round(float(duration_seconds) * 24.0)
-            )
+        video_width, video_height = _fit_sprite_video_canvas(
+            int(canvas_profile["width"]),
+            int(canvas_profile["height"]),
+            int(game_sprite_config.get("video_max_edge", 384)),
         )
         constraints.update(
             {
                 "game_sprite": game_sprite_config,
                 "sprite_source_width": int(canvas_profile["width"]),
                 "sprite_source_height": int(canvas_profile["height"]),
-                "sprite_video_width": int(canvas_profile["width"]),
-                "sprite_video_height": int(canvas_profile["height"]),
-                "sprite_video_length": requested_sprite_length
-                or configured_sprite_length,
+                "sprite_video_width": video_width,
+                "sprite_video_height": video_height,
+                "sprite_video_length": round(float(duration_seconds) * 24.0),
                 "sprite_video_steps": int(game_sprite_config.get("video_steps", 16)),
                 "sprite_h3_model_profile": str(
                     game_sprite_config.get("h3_model_profile", "q2")
                 ),
                 "sprite_fps": float(game_sprite_config.get("fps", 12)),
-                "sprite_cell_width": int(game_sprite_config.get("cell_width", 64)),
-                "sprite_cell_height": int(game_sprite_config.get("cell_height", 64)),
+                "sprite_cell_width": int(game_sprite_config.get("cell_width", 128)),
+                "sprite_cell_height": int(game_sprite_config.get("cell_height", 128)),
             }
         )
     constraints.update(

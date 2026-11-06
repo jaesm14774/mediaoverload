@@ -16,6 +16,11 @@ from agentic.storyboard import merge_native_h3_storyboard
 from agentic.runtime.llm_client import PromptClient, PromptGenerationError
 
 
+NATIVE_H3_ACTIVE_PROTAGONIST = (
+    "In every shot the protagonist performs a vigorous full-body action (swing, hop, dash, spin, throw, catch, "
+    "push, or pull); standing, gazing, leaning, or weather alone never counts as the action, and the reaction to a "
+    "change comes after the character has acted."
+)
 _NATIVE_H3_CHAINING_VISUAL_GUIDANCE = (
     "When the selected primary news mechanism is combining or chaining actions, show two different, voluntary actions in order; the second "
     "must use or complete a visible result of the first. For a selected pair and a manipulable analogy, let both "
@@ -528,6 +533,7 @@ def generate_native_h3_storyboard(
     prompt_sections.extend(
         [
             f"Video action and camera direction: {VIDEO_MOTION_DIRECTION}",
+            NATIVE_H3_ACTIVE_PROTAGONIST,
             "In every native_shots entry, action describes visible movement through a changed result and camera describes the opening framing, one decisive motivated move or intentional lock, its relation to the action, what it reveals, and the ending composition. The final shot reaches its result before a brief resolved pose in the final tenth.",
         ]
     )

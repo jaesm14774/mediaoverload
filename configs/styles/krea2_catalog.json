@@ -5706,86 +5706,86 @@
     {
       "id": "storybook_watercolor",
       "order": 289,
-      "name": "warm textured-paper watercolor storybook",
-      "descriptor": "finished hand-painted storybook art on warm, visibly textured paper; transparent watercolor washes with soft pigment blooms, gentle granulation, feathered edges, and delicate colored-pencil or ink accents",
+      "name": "warm paper watercolor picture-book",
+      "descriptor": "hand-painted watercolor picture-book illustration on warm cream textured paper, soft pigment blooms, feathered edges and loose colored-pencil linework",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "compose like a carefully illustrated page with one readable focal gesture, natural asymmetry, and small environmental details; use open paper as intentional breathing room rather than unfinished space",
-      "palette": "luminous blue and teal, leaf green, warm cream, and restrained coral or ochre accents; preserve translucent pigment and clear light-dark separation instead of smooth digital gradients",
-      "motion": "in video, keep paper grain, contours, and pigment style steady through the source-defined action; use soft painted transitions and coherent secondary motion rather than sudden digital effects",
-      "avoid": "sterile vector fills, glossy 3D shading, unrequested empty white voids, rigid geometric edges, unrequested text, logos, watermarks, or interface overlays"
+      "composition": "a gently detailed world is the main subject and the character is small in it; one readable focal gesture, a diagonal path or layered foreground, and open paper around it as breathing room",
+      "palette": "warm cream, soft teal, leaf green and sky blue with one coral or ochre accent; translucent pigment with clear light and dark separation",
+      "motion": "in video, keep the paper grain and pigment look steady; lively continuous action with soft painted secondary motion such as drifting petals, rain, or ripples",
+      "avoid": "glossy 3D, smooth vector fills, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "soft_pastel_characters",
       "order": 290,
-      "name": "soft pastel hand-drawn characters",
-      "descriptor": "a small, airy 2D character illustration drawn with rounded simple forms, delicate thin warm-gray or muted-rose pencil outlines, soft colored-pencil or crayon marks, diluted gouache fills, subtle paper grain, and matte shading",
+      "name": "soft pastel hand-drawn vignette",
+      "descriptor": "soft hand-drawn pastel illustration on warm cream paper with thin muted-rose pencil outlines, crayon texture and diluted gouache fills, matte and airy",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "use a small, clearly readable focal group with generous open paper and simple spatial relationships; preserve the selected characters' recognizable faces and the scene's essential action and context; let the supplied brief and source determine the setting, objects, and poses",
-      "palette": "low-contrast powder pink, warm cream, muted butter yellow, pale peach, soft mint, sky blue, and lavender; use simple matte pastel fills, light pencil shading, and delicate facial lines rather than deep shadows",
-      "motion": "in video, use gentle, clearly readable timing for the source-defined action; preserve each selected character's identity, proportions, delicate outline weight, paper grain, and soft colors through movement and reaction",
-      "avoid": "cropped or obscured selected faces, unrequested props or characters, heavy black comic outlines, thick contour strokes, dramatic high-contrast lighting, deep hard shadows, glossy 3D, photoreal materials, cluttered props, unrequested text, logos, watermarks, or interface overlays"
+      "composition": "one simple cute vignette with the character small and round with simple dot eyes, generous empty cream paper, and a few tiny doodle sparkles or droplets",
+      "palette": "powder pink, butter yellow, pale peach, mint, sky blue, and lavender; low contrast with no deep shadows",
+      "motion": "in video, one gentle readable action with a soft bounce; keep the outline weight, paper grain, and soft colors identical throughout",
+      "avoid": "heavy black outlines, dramatic lighting, glossy 3D, photoreal materials, clutter, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "bold_cartoon_comic",
       "order": 291,
-      "name": "bold hand-inked cartoon and comic illustration",
-      "descriptor": "a fully illustrated 2D cartoon scene in which every character, prop, and background layer is drawn; confident variable-weight dark ink contours, clean cel-shaded color blocks, expressive poses, and controlled marker, pencil, or hand-drawn accent marks; no photographic or 3D surfaces",
+      "name": "bold flat-color cartoon",
+      "descriptor": "vivid flat-color cartoon illustration with thick confident dark outlines and chunky simple shapes, every element hand-drawn in the same ink-and-flat-color language",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "make a coherent full-frame composition around the source-defined setting and action; keep the focal gesture and spatial relationships readable, and draw all required scene details in the same hand-inked 2D language rather than as isolated stickers or cutouts",
-      "palette": "saturated coral, cyan, yellow, and violet accents against a deliberate supporting color; keep strong subject separation without flooding every surface with equal intensity",
-      "motion": "in video, show a readable anticipation, contact, and follow-through; use speed lines or impact marks sparingly and keep character linework, face, and colors consistent across frames",
-      "avoid": "blank white or cream backdrops, isolated stickers or cutouts, fake or unrequested lettering, random symbols, crowded panels, excessive motion lines, photographic or photorealistic background textures, realistic photography lighting, 3D rendering, unrequested logos, watermarks, or interface overlays"
+      "composition": "a saturated color-block background, one bold graphic idea, and a big expressive pose; the character is about half the frame height and the clear focal point",
+      "palette": "sky blue, violet, coral, and yellow color blocks with one deliberate supporting color",
+      "motion": "in video, readable anticipation, contact, and follow-through with a steady camera; keep line weight and flat colors consistent",
+      "avoid": "photographic textures, 3D rendering, crowded panels, speed-line overload, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "cinematic_painterly",
       "order": 292,
-      "name": "cinematic painterly fantasy key art",
-      "descriptor": "high-impact cinematic fantasy game key art as a hand-painted digital anime illustration, with broad directional brushwork, visible painterly texture, a forceful readable diagonal, deep high-contrast shadows, and a warm rim-lit focal action; keep the selected characters recognizable and the source-defined action readable; fully illustrated, not photorealistic or 3D",
+      "name": "luminous painterly poster",
+      "descriptor": "painterly digital illustration with visible brushstrokes, a glowing light source behind the character with a warm rim light, and swirling clouds or rain streaks",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "use dynamic framing suited to the source-defined scene, with a strong diagonal between its focal points; preserve the selected characters' faces, identities, and essential scene context; show the decisive action with layered depth and a forceful silhouette",
-      "palette": "use high-contrast deep cobalt, ink blue, violet, and teal shadows against concentrated cyan, warm gold, and coral highlights; give the selected subjects a crisp warm rim light, keep shadow detail legible, and reserve the brightest value for the scene's main action while preserving canonical character colors",
-      "motion": "in video, use a purposeful camera move or intentional lock that reveals the source-defined action; preserve each selected character's silhouette, brush texture, and directional rim light through the action and its held result instead of adding chaotic flashes",
-      "avoid": "selected characters hidden or replaced, essential faces or action cropped out, distant static postcard framing, evenly lit low-contrast pastel treatment, muddy shadow masses, indiscriminate neon bloom, competing focal effects, invented magic or props, flat clip-art shapes, unrequested text, logos, watermarks, or interface overlays"
+      "composition": "vertical poster composition; the character is small but luminous at the center of a vast glowing atmosphere with one strong diagonal or circular light shape",
+      "palette": "deep indigo and violet shadows with gold, cyan, and coral highlights; the brightest value sits on the main action",
+      "motion": "in video, a locked or very slow camera while light, clouds, and particles drift around one clear character action",
+      "avoid": "muddy shadows, indiscriminate neon bloom, flat clip-art shapes, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "stylized_3d_game",
       "order": 293,
-      "name": "polished stylized 3D game-world art",
-      "descriptor": "polished stylized 3D game illustration with rounded modeled forms, coherent tactile materials, appealing surface detail, soft global illumination, and readable contact shadows",
+      "name": "cozy painted game-world diorama",
+      "descriptor": "cozy stylized game-world illustration with rounded matte forms, soft global illumination, warm lamp light, and tactile painted materials",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "use a clear camera angle and coherent spatial depth for the source-defined setting; keep the selected characters and their main action large enough to read",
-      "palette": "use a coordinated, lively game palette with warm key light, cool environmental fill, and controlled emissive accents; distinguish material colors without making every surface glossy",
-      "motion": "in video, preserve model shape, material response, scale, and lighting while the character moves through the space with weight, contact, and a clear action-to-reaction beat",
-      "avoid": "flat sticker rendering, unrequested featureless white stages, excessive plastic gloss, unrequested game HUDs, fake text, unrequested logos, watermarks, or interface overlays"
+      "composition": "a detailed diorama-like environment seen from a gentle high angle, with the character small and readable inside it among glowing windows and layered props",
+      "palette": "warm lamp-lit yellows and oranges against cool blue shadows with a few lively accents",
+      "motion": "in video, a steady camera while the character moves through the space with weight and contact and the lamps flicker softly",
+      "avoid": "glossy plastic, flat stickers, game HUDs, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "photographic_character_fusion",
       "order": 294,
-      "name": "photographic scene with an integrated character",
-      "descriptor": "mixed-media editorial scene in which natural live-action photography is the dominant layer and a tiny, softly hand-drawn or gently rendered character is integrated into the real photographed space; retain visible photographic texture, depth, and natural imperfections",
+      "name": "photograph with a tiny drawn character",
+      "descriptor": "a real photograph of an everyday place whose lower part dissolves into blank cream paper, with a tiny pencil-and-watercolor drawn character interacting with the photograph's edge",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "unless the brief explicitly requests a close-up, use a wide environmental composition and let the photograph dominate the frame; keep the character small relative to the photographed scene, about 15 to 20 percent of frame height and smaller than nearby real objects; ground it on the photographed surface with matching scale, perspective, focus plane, and contact shadow; preserve generous negative space around the character",
-      "palette": "retain the photograph's natural exposure and color temperature, then pick up its ambient light and reflected color on the character while keeping the character clearly readable",
-      "motion": "in video, keep the photographic camera and environment coherent; give the character grounded contact, believable weight, and matching shadow, occlusion, reflections, and depth of field",
-      "avoid": "oversized toy-like character renders, synthetic studio backgrounds, pasted-on sticker edges, floating characters, mismatched perspective or lighting, incorrect scale, unrelated props, unrequested text, logos, watermarks, or interface overlays"
+      "composition": "the photograph fills the upper two thirds and the drawn character is about 15 percent of the frame height, grounded by a small cast shadow, with generous negative space around it",
+      "palette": "the photograph's natural color and exposure, with the character picking up its ambient light through soft pencil line and light watercolor",
+      "motion": "in video, keep the photographic camera and environment coherent while the drawn character moves with grounded contact, matching shadow, and depth",
+      "avoid": "oversized toy-like renders, synthetic studio backgrounds, sticker edges, floating characters, mismatched perspective, readable text, logos, watermarks, interface overlays"
     }
   ],
   "source": {

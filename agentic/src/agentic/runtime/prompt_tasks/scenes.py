@@ -109,55 +109,59 @@ SCENE_RESPONSE_CONTRACT = (
     "or advice about writing prompts. Apply all writing guidance without copying it into prompt.\n\n"
 )
 
-IMAGE_VARIANT_RESPONSE_CONTRACT = (
-    "Return exactly the requested number of image prompt variants. Each prompt must be a complete, standalone scene description. "
-    "All variants must preserve the exact same requested and selected subject identities, their defining physical traits, action, "
-    "setting, visual medium, and style. Name every required subject in every prompt; never substitute a generic person or mascot. "
-    "Make the presentations visibly distinct at thumbnail size by changing composition, camera viewpoint or crop, subject placement, "
-    "depth staging, or focal path. Do not change the story or invent props, characters, crowds, or actions. Preserve any explicitly requested "
-    "framing or layout; when a dimension is locked, create variation through the dimensions the request leaves open. "
-    "Give each item a short unique label and a presentation description that names its compositional approach."
-)
-
 OPENING_FRAME_VARIANT_GUIDANCE = (
     "These are still-image prompts for alternate compositions of one exact video opening frame. "
     "Keep the same frozen story state and initial pose in every variant. The related motion prompt describes what begins after this frame; "
     "use it only to keep the still aligned with that action, and do not depict later moments or write a motion timeline. "
-    "Vary only the visual presentation through composition, camera viewpoint or crop, subject placement, depth staging, light direction, or focal path. "
+    "Vary only the visual presentation through the layout idea, the viewing angle onto the scene, subject placement, depth staging, or focal path, keeping the character small in a larger world. "
     "Preserve all explicit framing and layout constraints from the user's request."
 )
 
 IMAGE_FALLBACK_PRESENTATIONS = (
     (
-        "environmental_establishing",
-        "wide environmental establishing composition",
-        "Favor an environmental establishing composition with strong foreground-to-background depth. If the request explicitly fixes framing, preserve it and express scale through the depth layers inside that frame.",
+        "tiny_in_vast_world",
+        "tiny character in a vast world",
+        "Favor a vast, gently detailed world with the character tiny near one edge and a large area of open sky or paper. If the request fixes the framing, preserve it and express scale through the depth layers inside that frame.",
     ),
     (
-        "intimate_gesture",
-        "intimate gesture and tactile detail",
-        "Favor an intimate view of the decisive gesture and tactile surface detail while keeping every required subject and interaction readable. If the request fixes the crop, preserve it and prioritize the gesture within it.",
+        "diagonal_flow",
+        "one diagonal path leading the eye",
+        "Favor one strong diagonal path such as a river, road, rope, or row of objects that leads from the foreground to the character at its far end, with quiet space on the other side. If the request fixes the layout, preserve it and emphasize the path within that layout.",
     ),
     (
-        "low_viewpoint_scale",
-        "low viewpoint with a foreground scale cue",
-        "Favor a low viewpoint, clear silhouette, and foreground scale cue. If the request fixes the viewpoint, preserve it and establish scale through relative size and overlap.",
+        "nested_in_object",
+        "character nested in or on a large familiar object",
+        "Favor a large familiar object that fills most of the frame and holds the character, so the object's scale tells the story. If the request fixes the framing, preserve it and let the nearest object carry the scale.",
     ),
     (
-        "elevated_spatial_view",
-        "elevated oblique view emphasizing spatial relationships",
-        "Favor an elevated oblique viewpoint that makes the subjects' spatial relationship easy to read. If the request fixes the viewpoint, preserve it and strengthen spatial separation within that view.",
+        "soft_vignette",
+        "soft-edged vignette on open paper",
+        "Favor a rounded, soft-edged vignette of the scene floating on open background, with a few small related details scattered just outside its edge. If the request fixes the layout, preserve it and keep the scene's edges soft.",
     ),
     (
-        "asymmetric_focal_path",
-        "asymmetric placement with a diagonal focal path",
-        "Favor asymmetric subject placement, a diagonal focal path, and deliberate negative space. If the request fixes the layout, preserve it and emphasize the focal path within that layout.",
+        "framed_through_opening",
+        "scene seen through a window, doorway, or foliage frame",
+        "Favor a layered foreground frame such as a window, doorway, or leaves, with the character small in the lit scene beyond it. If the request fixes the framing, preserve it and create separation through overlap and value contrast.",
     ),
     (
-        "luminous_layered_depth",
-        "luminous layered depth and foreground framing",
-        "Favor luminous side or rim light, layered atmospheric depth, and a foreground frame. If the request fixes the light or framing, preserve it and create separation through value and material contrast.",
+        "tabletop_from_above",
+        "tableau seen from above",
+        "Favor a viewpoint from above onto one surface where the character stands among a few related objects arranged with generous space between them. If the request fixes the viewpoint, preserve it and arrange the objects within it.",
     ),
+)
+
+IMAGE_VARIANT_RESPONSE_CONTRACT = (
+    "Return exactly the requested number of image prompt variants. Each prompt must be a complete, standalone scene description. "
+    "All variants must preserve the exact same requested and selected subject identities, their defining physical traits, action, "
+    "setting, visual medium, and style. Name every required subject in every prompt; never substitute a generic person or mascot. "
+    "Give every variant a different layout idea, chosen once each from this list: "
+    + "; ".join(presentation for _, presentation, _ in IMAGE_FALLBACK_PRESENTATIONS)
+    + ". Name the layout idea in the label and presentation, never a lens or camera-shot term such as low-angle, close-up, or "
+    "over-the-shoulder, and write the layout into the prompt so the six images differ at thumbnail size. "
+    "Keep every named character small and simple in a larger world with open space unless a close-up is explicitly requested. "
+    "Do not change the story or invent props, characters, crowds, or actions. Preserve any explicitly requested "
+    "framing or layout; when a dimension is locked, create variation through the dimensions the request leaves open. "
+    "Give each item a short unique label and a presentation description that names its compositional approach."
 )
 
 H3_SEGMENT_RESPONSE_CONTRACT = (
@@ -179,16 +183,17 @@ H3_INITIAL_ACTION_CONTRACT = (
     "Do not reverse who leads, follows, pursues, or flees. "
     "The selected image is the exact opening state and supplies the subject's visible identity, pose, style, "
     "composition, colors, setting, and existing props. Describe only what changes after that state: immediate "
-    "action onset, a chronological physical path, camera movement that supports that path, follow-through, and "
+    "action onset, a chronological physical path, follow-through, and "
     "the changed result or reaction. Keep the main character action clear and energetic unless the user explicitly "
     "asks for stillness or slow pacing. Style controls medium, line, surface, and palette; its motion language may "
     "shape secondary texture, but must not slow, replace, or contradict requested subject action. Do not invent "
     "anatomy, props, locations, or a second action. Keep the opening_keyframe_prompt as one frozen loaded pose "
     "that sets up the same action and follows the still-image composition, lighting, and material contract. "
     "Apply that still-image contract only to opening_keyframe_prompt; keep prompt motion-only. "
-    "Keep meaningful subject or camera motion through most of the segment, reach "
-    "the resolved endpoint only in the final tenth, and use only a brief final hold. Do not settle early or leave a "
-    "long static tail. Apply this contract without copying it into prompt."
+    "Keep the illustrated look unchanged and the camera to at most one slow gentle push-in. Start the action in the "
+    "first tenth and keep the character moving energetically through the whole clip, chaining two or three connected "
+    "moves with stretch and squash, still moving in the last frame. Apply this contract without "
+    "copying it into prompt."
 )
 
 
@@ -428,6 +433,8 @@ def generate_autonomous_scene_prompt(
                 (
                     f"Video action direction: {VIDEO_MOTION_DIRECTION}"
                     if requires_video_motion_direction(media_type)
+                    else IMAGE_PROMPT_CONTRACT
+                    if media_type == "image"
                     else ""
                 ),
                 (
@@ -695,9 +702,9 @@ def expand_goal(
                 (
                     "Write prompt as a motion-only timeline for H3 I2VA; the selected image will be the exact opening frame. "
                     "Do not restate the image's pose, composition, appearance, colors, or existing objects. Begin with the first visible movement, "
-                    "then describe one cause-driven action along a clear path, one motivated camera move that supports it, follow-through, "
+                    "then describe one cause-driven action along a clear path, follow-through, "
                     "and a visible changed result or reaction. Begin the action in the first tenth, reach the resolved endpoint only in the final tenth, "
-                    "and keep it moving through most of the shot. Do not settle early or leave a long static tail; end on a brief hold. "
+                    "and keep it moving through most of the shot. Do not settle early or leave a static tail; the character is still moving in the last frame. "
                     "Use energetic motion unless the user's request explicitly asks for stillness or slow pacing. Style controls medium, line, "
                     "surface, and palette; do not let style-profile motion language slow or replace the requested subject action. Do not invent "
                     "anatomy, props, locations, or a second action. The opening_keyframe_prompt describes one frozen loaded pose before this same action. "
@@ -960,18 +967,12 @@ def segment_story(
             "a clear payoff before a brief ending hold. Keep the subject's body, face, and goal readable. "
             "When the tone supports it, include a compact anticipation, action, follow-through, and charming "
             "reaction such as a blink, delighted glance, or proud bounce. Do not add cute business to solemn scenes. "
-            f"Each segment must include {direction_field_names}. The camera field names starting framing, one "
-            "motivated move or intentional lock, how it relates to the subject's path, what it reveals, and ending "
-            "framing. Keep camera terms distinct: pan/tilt rotates from a fixed point; dolly/truck/arc travels "
-            "through space and creates parallax; tracking/follow moves with the subject; zoom changes focal length. "
-            "Use one continuous move or a locked shot; name a separate shot if a second camera operation is needed. "
-            "Pan and tilt change camera direction, not subject distance or scale. A scale change requires a matching "
-            "camera translation, zoom, or physical subject travel, and the ending frame must follow from that move. "
-            "Keep the protagonist's expression and the visible result together at the payoff when both matter; "
-            "show the result before any close-up reaction. Keep the face and every story-critical object within "
-            "frame with clear edge margins during and after the move. If a close-up would crop the reaction or "
-            "result, stop wider or cut to a separate shot. Describe the selected style with stable visible rules "
-            "for medium and surface, palette and light, and motion or transitions; keep them consistent across shots."
+            f"Each segment must include {direction_field_names}. The camera field names the starting framing and either a locked camera or "
+            "the single slow push-in, and what stays in frame; it never plans a pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane. "
+            "Keep the protagonist's face and every story-critical object within frame with clear edge margins for the whole segment, "
+            "and show the visible result before any reaction. "
+            f"Video action and camera direction: {VIDEO_MOTION_DIRECTION} "
+            "Describe the selected style with stable visible rules for medium and surface, palette and light, and motion or transitions; keep them consistent across shots."
         )
     else:
         camera_contract = ""
@@ -1185,9 +1186,9 @@ def prepare_h3_segment(
         "Write the final scene prompt for MiniMax H3 after inspecting the attached conditioning image(s).",
         "Treat the visible image(s) as the source of truth for character identity and design, palette, art style, location, and important visible objects. The written draft supplies intended action and story meaning. When details conflict, preserve the image's identity and objects and adapt the action to them.",
         "For a comic page, contact sheet, collage, or other image with repeated depictions, interpret those poses as successive views of the same subject. Write one continuous scene with one instance of each requested character; do not turn gutters or repeated poses into extra characters or a persistent split-screen layout unless the brief explicitly asks for that. Keep the visible starting pose and subject-to-object relationship readable.",
-        "Keep one continuous shot with one main visible action and at most one motivated camera move. Describe the visible starting state, physical movement, and readable ending state. Keep the H3 scene concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft.",
-        "Write an ordered chain of positive physical-action beats, not a list of prohibitions: from the first moment name what moves, its target and path, the next connected movement, and the visible resulting state. Use 2–3 concrete action verbs; do not describe a static pose and expect H3 to infer movement.",
-        f"Segment duration: {float(duration_seconds):.2f} seconds. From the first moment, distribute the action and camera progression through the segment, and reach the resolved endpoint only in the final tenth before a brief hold. Do not hold the source pose for most of the clip or jump directly to the ending frame.",
+        "Keep one continuous shot with one main visible action and at most one slow gentle push-in; move the camera further only when the brief asks for it. Describe the visible starting state, physical movement, and readable ending state. Keep the H3 scene concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft.",
+        "Write an ordered chain of positive physical-action beats, not a list of prohibitions: from the first moment name what moves, its target and path, the next connected movement, and the visible resulting state. Use 2–3 concrete action verbs; do not describe a static pose and expect H3 to infer movement. Start the prompt with a motion verb for the character and never describe the picture as it stands; even when the image is calm or the draft has no action, give the character a lively physical action in its own scene, such as bouncing, hopping, swinging its feet, or reaching, chained into connected moves within the visible scene; the character never travels to a place the image does not show, and the camera only pushes in toward it rather than following it. When the draft's action needs a place or object the image does not show, such as a platform, a train, or a street, replace it with a lively action on the visible props, for example hopping on, around, or over the object it stands on.",
+        f"Segment duration: {float(duration_seconds):.2f} seconds. Start the action in the first moment and keep the character moving energetically through the whole segment: anticipation, a big action with stretch and squash, then the same action chained into two or three connected moves while props and scene elements respond on every beat, still moving in the last frame. Do not jump directly to the ending frame.",
         "Return only scene description in prompt, concrete environmental and physical-action sound in overall_soundscape, and an audience-only score in non_diegetic_music (or N/A). Do not put prompt-writing instructions, source analysis, or serialized objects inside prompt.",
         f"Character: {goal.constraints.get('character', '')}",
         f"Selected style: {goal.style}",

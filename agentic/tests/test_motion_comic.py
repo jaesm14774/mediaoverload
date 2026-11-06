@@ -257,6 +257,7 @@ def test_user_given_a_reference_derived_style_profile_when_motion_comic_renders_
     for record in panel_records:
         prompt = record["payload"]["prompt"]
         assert profile["label"] in prompt
+        assert "one single full-frame scene" in prompt.casefold()
         assert story_response()["visual_style"] not in prompt
         for key in ("prompt", "composition", "palette", "avoid"):
             assert profile[key] in prompt
@@ -295,6 +296,58 @@ def test_user_given_long_but_valid_captions_when_comic_uses_a_portrait_canvas_th
         canvas_width,
         canvas_height,
     )
+
+
+@pytest.mark.parametrize("canvas_id", ["landscape_16_9", "portrait_4_5", "square_1_1"])
+def test_user_given_any_run_canvas_when_character_routing_selects_motion_comic_then_the_comic_still_composes_a_portrait_video(
+    tmp_path, canvas_id
+):
+    """User Given a character run whose shared canvas is landscape, 4:5 or square When motion_comic is routed and run Then the comic keeps its own portrait page and a playable video is composed instead of failing the portrait canvas contract."""
+    config = yaml.safe_load(
+        (REPO / "configs/characters/kirby.yaml").read_text(encoding="utf-8")
+    )
+    config["generation"]["generation_type_weights"] = {"motion_comic": 1}
+    config["generation"]["subject_mode"] = "single"
+    config["generation"]["creative_profile"]["canvas"].update(
+        {"mode": "fixed", "fixed": canvas_id}
+    )
+    config["character"] = {"name": "Kirby"}
+    path = tmp_path / "character.yaml"
+    path.write_text(
+        yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    payload = build_goal_payload_from_character_config(
+        make_character_workflow_request(
+            REPO,
+            path,
+            prompt="A hero promises to take one mouthful",
+            rng=random.Random(610110),
+        )
+    )
+    assert payload["source_generation_type"] == "motion_comic"
+    planner, runner = runtime(tmp_path / "runtime")
+    plan = planner.build_plan(
+        GoalRequest(
+            **{
+                key: payload[key]
+                for key in (
+                    "prompt",
+                    "media_type",
+                    "duration_seconds",
+                    "style",
+                    "constraints",
+                )
+            }
+        )
+    )
+
+    result = runner.run(plan)
+
+    assert result.status == "success", result.to_dict()
+    probe = FFmpegAdapter().probe_media(
+        result.state["motion-comic-compose"]["final_video_path"]
+    )
+    assert probe["height"] >= 1.5 * probe["width"]
 
 
 def test_user_given_a_caption_with_a_latin_name_when_text_wraps_then_the_name_stays_intact_on_a_line():
@@ -399,6 +452,8 @@ def test_user_given_a_rendered_comic_when_preparing_social_review_then_only_the_
         "missing_beat",
         "wrong_order",
         "unsupported_caption",
+        "english_caption",
+        "caption_cut_off_mid_word",
         "non_english_direction",
         "missing_state",
     ],
@@ -414,6 +469,10 @@ def test_user_given_an_invalid_generated_story_when_the_strategy_runs_then_it_st
         response["panels"].reverse()
     elif damage == "unsupported_caption":
         response["panels"][0]["caption"] = "字" * 25
+    elif damage == "english_caption":
+        response["panels"][0]["caption"] = "Waddle Dee hops"
+    elif damage == "caption_cut_off_mid_word":
+        response["panels"][0]["caption"] = "一步一步朝巴士站前-"
     elif damage == "non_english_direction":
         response["panels"][0]["image_prompt"] = "角色吃蛋糕"
     else:

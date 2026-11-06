@@ -81,7 +81,7 @@ class MotionComicSkills:
                     panel_style,
                     "Resolved subject identity: "
                     + selected_role_description(context.plan.goal),
-                    "Show only this panel's current prop state. No text, speech bubbles, borders or watermark.",
+                    "Show only this panel's current prop state. One single full-frame scene with one copy of each character, never a grid, collage, or several small pictures. No text, speech bubbles, borders or watermark.",
                 )
             )
             panel_prompt = include_visual_style_profile(

@@ -20,7 +20,8 @@ def create_discord_review_view(
     selection_limit: int | None = None,
     allow_regenerate: bool = False,
     regenerate_current_segment: bool = False,
-    allow_series_lifecycle_choice: bool = False,
+    allow_series_completion: bool = False,
+    allow_series_discard: bool = False,
 ) -> View:
     def split_caption_hashtags(value: str) -> tuple[str, str]:
         content: list[str] = []
@@ -79,7 +80,8 @@ def create_discord_review_view(
             *,
             allow_regenerate: bool,
             regenerate_current_segment: bool,
-            allow_series_lifecycle_choice: bool,
+            allow_series_completion: bool,
+            allow_series_discard: bool,
         ) -> None:
             super().__init__(timeout=timeout)
             self.result: str | None = None
@@ -123,14 +125,18 @@ def create_discord_review_view(
                 if continue_button is not None:
                     continue_button.label = "重新生成本段"
 
-            if not allow_series_lifecycle_choice:
-                for label in ("完成系列並發布本集", "廢棄系列"):
-                    button = next(
-                        (item for item in self.children if getattr(item, "label", "") == label),
-                        None,
-                    )
-                    if button is not None:
-                        self.remove_item(button)
+            for label, allowed in (
+                ("完成系列並發布本集", allow_series_completion),
+                ("廢棄系列", allow_series_discard),
+            ):
+                if allowed:
+                    continue
+                button = next(
+                    (item for item in self.children if getattr(item, "label", "") == label),
+                    None,
+                )
+                if button is not None:
+                    self.remove_item(button)
 
             if allow_asset_selection:
                 selectable_files = self.files[:25]
@@ -345,5 +351,6 @@ def create_discord_review_view(
         timeout=timeout,
         allow_regenerate=allow_regenerate,
         regenerate_current_segment=regenerate_current_segment,
-        allow_series_lifecycle_choice=allow_series_lifecycle_choice,
+        allow_series_completion=allow_series_completion,
+        allow_series_discard=allow_series_discard,
     )

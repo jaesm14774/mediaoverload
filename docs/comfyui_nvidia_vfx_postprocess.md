@@ -34,7 +34,7 @@ HDR is not enabled. The project outputs SDR video, and the current node setup us
 
 ## Runtime behavior
 
-NVIDIA post-processing is enabled by default for generated video plans, including short videos, native H3, long videos, motion comics, and game sprites. For game sprites, it runs on the H3 animation before frame sampling and atlas packaging. Set `enable_nvidia_vfx_postprocess: false` in goal constraints to skip it explicitly. If ComfyUI or a required node is missing, the workflow fails with an installation/runtime error and keeps the upstream file available for diagnosis.
+NVIDIA post-processing is enabled by default for generated video plans, including short videos, native H3, long videos, and motion comics. Game sprites skip it because their output is 16 cells of 128x128. Set `enable_nvidia_vfx_postprocess: false` in goal constraints to skip it explicitly. If ComfyUI or a required node is missing, the workflow fails with an installation/runtime error and keeps the upstream file available for diagnosis.
 
 The output summary records source and result media metadata, selected node settings, chunk boundaries, processing time, and any error. QA, GIF preview, final review, and packaging consume the post-processed file.
 

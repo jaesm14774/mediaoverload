@@ -74,6 +74,9 @@ class AgenticComfyCommunicator:
         self._clock = clock or time.perf_counter
         configured_timeout = os.environ.get("COMFYUI_TIMEOUT_SECONDS", "3600")
         self.timeout = int(timeout if timeout is not None else configured_timeout)
+        # A busy ComfyUI (large model swaps, RTX video nodes) can accept a prompt
+        # long before its HTTP handler answers; a short limit orphans the job.
+        self.submit_timeout = 300.0
         self.ws: websocket.WebSocket | None = None
 
     def connect_websocket(self) -> None:
@@ -89,16 +92,22 @@ class AgenticComfyCommunicator:
             ping_timeout=10,
         )
 
-    def queue_prompt(self, prompt: dict[str, Any]) -> dict[str, Any]:
-        payload = json.dumps({"prompt": prompt, "client_id": self.client_id}).encode("utf-8")
+    def queue_prompt(self, prompt: dict[str, Any], prompt_id: str) -> dict[str, Any]:
+        payload = json.dumps(
+            {"prompt": prompt, "client_id": self.client_id, "prompt_id": prompt_id}
+        ).encode("utf-8")
         req = request.Request(f"http://{self.server_address}/prompt", data=payload)
         try:
-            with request.urlopen(req, timeout=30) as response:
+            with request.urlopen(req, timeout=self.submit_timeout) as response:
                 return json.loads(response.read())
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace").strip()
             detail = body[:4000] if body else "no response body"
             raise RuntimeError(f"ComfyUI /prompt HTTP {exc.code}: {detail}") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise RuntimeError(
+                f"ComfyUI did not acknowledge /prompt within {self.submit_timeout:g} seconds"
+            ) from exc
 
     def upload_image(
         self,
@@ -491,7 +500,8 @@ class AgenticComfyCommunicator:
         auto_close: bool = False,
         timing_sink: list[ComfyPromptTiming] | None = None,
     ) -> tuple[bool, list[str]]:
-        prompt_id = ""
+        # The id is chosen client-side so a lost /prompt response can still be cancelled.
+        prompt_id = str(uuid.uuid4())
         total_started = self._clock()
         phase_timings: ComfyPromptTiming = {
             "websocket_connect_seconds": 0.0,
@@ -535,7 +545,7 @@ class AgenticComfyCommunicator:
 
             phase_started = self._clock()
             try:
-                prompt_id = str(self.queue_prompt(workflow_copy)["prompt_id"])
+                prompt_id = str(self.queue_prompt(workflow_copy, prompt_id)["prompt_id"])
             finally:
                 phase_timings["queue_submit_seconds"] = (
                     self._clock() - phase_started

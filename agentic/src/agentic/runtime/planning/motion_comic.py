@@ -15,12 +15,6 @@ def build_motion_comic(context: PlanningContext, goal: GoalRequest) -> Execution
         **MOTION_COMIC_DEFAULTS,
         **dict(goal.constraints.get("motion_comic") or {}),
     }
-    if goal.constraints.get("canvas_width") is not None:
-        config["width"] = int(goal.constraints["canvas_width"])
-        config["image_width"] = int(goal.constraints["canvas_width"])
-    if goal.constraints.get("canvas_height") is not None:
-        config["height"] = int(goal.constraints["canvas_height"])
-        config["image_height"] = int(goal.constraints["canvas_height"])
     config["duration_seconds"] = max(
         goal.duration_seconds,
         int(config.get("duration_seconds") or MIN_VIDEO_DURATION_SECONDS),

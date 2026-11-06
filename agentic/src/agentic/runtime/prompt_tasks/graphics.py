@@ -24,6 +24,17 @@ from agentic.runtime.prompting import (
 from agentic.runtime.llm_client import PromptClient
 
 
+STICKER_FRAMING = (
+    "Sticker framing: one isolated subject with a thick white die-cut outline, centered and large on a "
+    "plain, flat, pale backdrop; the backdrop has no scenery, ground, crowd, or props beyond what the subject holds."
+)
+
+
+def _with_sticker_framing(prompt: str) -> str:
+    """A model that writes a scene into a sticker prompt must still get one isolated subject."""
+    return f"{prompt.rstrip()}\n{STICKER_FRAMING}"
+
+
 def sticker_expressions(
     client: PromptClient,
     goal: GoalRequest,
@@ -38,6 +49,7 @@ def sticker_expressions(
             f"Character: {character}",
             f"Theme/Context: {prompt}",
             f"Generate exactly {target_count} unique sticker expressions.",
+            "Each expression is only a pose and a facial emotion in under twelve words; never a location or scenery.",
             'Return JSON object with key "expressions" only.',
         ]
     )
@@ -89,16 +101,18 @@ def build_sticker_prompt_set(
         {
             "label": f"sticker_{index + 1:02d}",
             "expression": expression,
-            "prompt": include_role_description(
-                ", ".join(
-                    part
-                    for part in (
-                        build_sticker_prompt(character, expression, prompt_prefix, style),
-                        style_profile_direction(goal),
-                    )
-                    if part
-                ),
-                goal,
+            "prompt": _with_sticker_framing(
+                include_role_description(
+                    ", ".join(
+                        part
+                        for part in (
+                            build_sticker_prompt(character, expression, prompt_prefix, style),
+                            style_profile_direction(goal),
+                        )
+                        if part
+                    ),
+                    goal,
+                )
             ),
         }
         for index, expression in enumerate(expressions)
@@ -164,10 +178,11 @@ def build_sticker_prompt_set(
                         "expression": str(
                             item.get("expression") or base_item["expression"]
                         ),
-                        "prompt": include_role_description(
-                            item.get("prompt") or base_item["prompt"],
-                            goal,
-                        ),
+                        "prompt": _with_sticker_framing(
+                            include_role_description(item["prompt"], goal)
+                        )
+                        if item.get("prompt")
+                        else base_item["prompt"],
                     }
                 )
             while len(prompt_sets) < len(fallback_prompt_sets):
@@ -361,33 +376,31 @@ def review_motion_graphics_plan(
         raise client.generation_error("review_motion_graphics_plan", exc) from exc
 
 
+def _sprite_theme(goal: GoalRequest) -> str:
+    """A sprite reads at thumbnail size, so the theme is the headline, not the long scene brief."""
+    news = goal.constraints.get("news_context")
+    if isinstance(news, dict):
+        headline = str(news.get("title") or news.get("keyword") or "").strip()
+        if headline:
+            return headline
+    return str(goal.prompt or "").strip()
+
+
 def build_dynamic_sprite_motion_plan(
     client: PromptClient, goal: GoalRequest
 ) -> dict[str, Any]:
     """Build direct sprite prompts with only renderer-required metadata."""
     fallback = build_dynamic_sprite_motion_fallback(goal)
     reference_context = build_game_sprite_reference_context(goal)
-    target_duration_seconds = max(
-        10.0,
-        min(
-            362 / 24,
-            float(
-                goal.duration_seconds or fallback.get("video_duration_seconds") or 8.0
-            ),
-        ),
-    )
+    target_duration_seconds = min(362 / 24, float(goal.duration_seconds))
     user_prompt = "\n".join(
         part
         for part in (
-            f"Creative request: {goal.prompt}",
-            f"Subject reference: {goal.constraints.get('character') or ''}",
-            f"Style references (compatible palette, lighting, and materials only): {goal.style}",
-            f"Style guidance (visual only): {style_profile_direction(goal, include_motion=False)}",
+            f"Subject: {goal.constraints.get('character') or ''}",
+            f"Theme (reduce to one visual motif): {_sprite_theme(goal)}",
             f"Mandatory game-sprite visual contract: {reference_context['visual_contract']}",
             f"Reference notes (optional): {reference_context['prompt_text'] if reference_context['references'] else ''}",
-            f"The render uses a {target_duration_seconds:g}-second clip sampled into a 4x4 frame atlas.",
-            "Design one playable skill effect, even when the source scene is quiet or static. Preserve its character and style as references, then stage five visibly different phases: anticipation, charge, release, impact or effect peak, and recovery. The character pose and VFX must change together; no idle-only or camera-only motion.",
-            "Do not impose a flat, monochrome, or chroma-key background; use any setting and colors that support the request.",
+            "Reduce the request to one character action and at most one prop or symbol; drop the rest of the scene. Even when the source scene is quiet, stage one playable skill whose phases (anticipation, charge, release, impact or effect peak, recovery) change the pose and the effect together.",
             "Return JSON with image_prompt and video_prompt, plus exactly five ordered beats for the same phases.",
         )
         if part

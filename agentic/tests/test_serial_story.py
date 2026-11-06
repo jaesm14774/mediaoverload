@@ -59,6 +59,20 @@ def test_user_given_a_simple_serial_story_request_when_treatment_prompt_is_built
     assert "最後一集必須收束主線" in user_prompt
 
 
+def test_user_given_any_story_complexity_when_building_the_system_prompt_then_the_story_must_be_a_visible_physical_animation_not_a_procedural_drama():
+    """User Given a cinematic or simple request When the system prompt is built Then both tell the writer to keep the plot visual and out of legal, tax or paperwork drama."""
+    for complexity in ("simple", "cinematic"):
+        system_prompt, _ = build_serial_story_prompts(
+            "A lighthouse keeper helps a lost cloud.",
+            None,
+            news_mode="none",
+            complexity=complexity,
+        )
+
+        assert "動感" in system_prompt
+        assert "法律" in system_prompt and "稅務" in system_prompt
+
+
 def test_user_given_random_news_inspiration_has_no_eligible_source_when_building_a_story_prompt_then_it_fails_without_improvising():
     """User Given random-news inspiration is enabled but no source was selected When building the story prompt Then generation stops with an actionable error instead of silently switching to improvisation."""
     try:

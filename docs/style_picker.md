@@ -21,3 +21,5 @@ python scripts/style_picker.py
 圖片直接引用原圖庫的公開預覽，因此看圖需要連線；風格資料與已儲存的 random 清單可離線使用。預覽未載入時仍能查看風格文字與操作勾選。
 
 來源：[matplinta / Krea 2 Style Library](https://github.com/matplinta/t2i-krea-2-style-library)。已匯入 288 筆描述及 2,304 筆預覽路徑，來源與原始資料 SHA-256 記錄於 catalog。預覽是原作者的生成範例，不代表本機已重跑。這是 prompt style library，並非載入 Style Reference LoRA 或 Krea 雲端 moodboard conditioning。
+
+預設勾選清單只保留與收集資料夾一致的手繪、水彩、粉彩、厚塗與「照片加手繪小角色」風格（六個原有風格加 13 個插畫風格），攝影、HDR、自拍與 3D 渲染類風格預設取消；需要時可在頁面重新勾選。

@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 
@@ -16,13 +16,28 @@ from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 SPRITE_GRID_ROWS = 4
 SPRITE_GRID_COLS = 4
 SPRITE_FRAME_COUNT = SPRITE_GRID_ROWS * SPRITE_GRID_COLS
-SPRITE_DEFAULT_CELL_WIDTH = 64
-SPRITE_DEFAULT_CELL_HEIGHT = 64
+SPRITE_DEFAULT_CELL_WIDTH = 128
+SPRITE_DEFAULT_CELL_HEIGHT = 128
 SPRITE_DEFAULT_FPS = 12
+# The master image is rendered on a flat green backdrop. A pixel is backdrop
+# when green leads both red and blue by at least this much, which tolerates the
+# shade drift video models add without touching Kirby's pinks, reds, or blues.
+SPRITE_KEY_DOMINANCE = 40
+# A frame whose subject covers more than this multiple of the median area is an
+# outlier burst; it is cropped by the shared box rather than enlarging it.
+SPRITE_OUTLIER_AREA_RATIO = 1.5
+SPRITE_BOX_PADDING = 0.1
+# One palette across all frames keeps the sprite stable while it animates.
+SPRITE_PALETTE_COLORS = 32
+# Every logical sprite pixel is a block of this many cell pixels, so the sprite
+# reads as hard pixel clusters instead of a smoothed miniature.
+SPRITE_PIXEL_BLOCK = 2
+# Previews are enlarged with nearest-neighbor, never smoothed, to about this edge.
+SPRITE_PREVIEW_EDGE = 384
 
 
 class SpriteAdapter:
-    """Package sampled frames while preserving their backgrounds and alpha."""
+    """Cut the green backdrop out of sampled frames and pack a pixel-art atlas."""
 
     def __init__(self, ffmpeg: FFmpegAdapter | None = None) -> None:
         self.ffmpeg = ffmpeg or FFmpegAdapter()
@@ -116,15 +131,23 @@ class SpriteAdapter:
             if not source.is_file():
                 raise FileNotFoundError(f"Sprite frame does not exist: {source}")
             with Image.open(source) as image:
-                source_frames.append(_binary_alpha(image.convert("RGBA")))
-        shared_bbox = _union_bbox(source_frames)
+                source_frames.append(_key_out_green_backdrop(image.convert("RGBA")))
+        shared_bbox = _shared_bbox(source_frames)
         if shared_bbox is None:
             raise ValueError("Sprite source frames are fully transparent")
         normalized_frames: list[Image.Image] = []
         frame_records: list[dict[str, Any]] = []
         for index, frame_path in enumerate(frame_paths):
             source = Path(frame_path).resolve()
-            normalized = _fit_frame(source_frames[index], width, height, crop_bbox=shared_bbox)
+            normalized = _enlarge(
+                _fit_frame(
+                    source_frames[index],
+                    max(1, width // SPRITE_PIXEL_BLOCK),
+                    max(1, height // SPRITE_PIXEL_BLOCK),
+                    crop_bbox=shared_bbox,
+                ),
+                SPRITE_PIXEL_BLOCK,
+            )
             if _alpha_bbox(normalized) is None:
                 raise ValueError(f"Sprite source frame is fully transparent: {source}")
             frame_copy = normalized.copy()
@@ -144,6 +167,10 @@ class SpriteAdapter:
                 }
             )
 
+        normalized_frames = _apply_shared_palette(normalized_frames)
+        for record, frame in zip(frame_records, normalized_frames):
+            frame.save(record["path"], format="PNG", optimize=True)
+            record["sha256"] = _sha256(Path(record["path"]))
         alpha_counts = [_opaque_pixel_count(frame) for frame in normalized_frames]
         atlas = Image.new("RGBA", (width * SPRITE_GRID_COLS, height * SPRITE_GRID_ROWS), (0, 0, 0, 0))
         for index, frame in enumerate(normalized_frames):
@@ -156,7 +183,9 @@ class SpriteAdapter:
         atlas.save(atlas_path, format="PNG", optimize=True)
 
         duration_ms = max(1, round(1000.0 / frame_rate))
-        gif_frames = [_to_transparent_palette(frame) for frame in normalized_frames]
+        preview_scale = max(1, round(SPRITE_PREVIEW_EDGE / max(width, height)))
+        preview_frames = [_enlarge(frame, preview_scale) for frame in normalized_frames]
+        gif_frames = [_to_transparent_palette(frame) for frame in preview_frames]
         gif_path = root / "animation.gif"
         gif_kwargs: dict[str, Any] = {
             "save_all": True,
@@ -170,11 +199,11 @@ class SpriteAdapter:
         gif_frames[0].save(gif_path, format="GIF", **gif_kwargs)
 
         webp_path = root / "animation.webp"
-        normalized_frames[0].save(
+        preview_frames[0].save(
             webp_path,
             format="WEBP",
             save_all=True,
-            append_images=normalized_frames[1:],
+            append_images=preview_frames[1:],
             duration=duration_ms,
             loop=0 if loop else 1,
             lossless=True,
@@ -202,7 +231,9 @@ class SpriteAdapter:
             "loop": bool(loop),
             "animation_kind": "periodic" if loop else "one_shot",
             "alpha": "binary",
-            "background_mode": "preserved",
+            "background_mode": "green_keyed",
+            "palette_colors": SPRITE_PALETTE_COLORS,
+            "preview_scale": preview_scale,
             "frames": frame_records,
             "outputs": {
                 "atlas": str(atlas_path),
@@ -254,25 +285,49 @@ def _fit_frame(
     available_width = max(1, width - safe_margin * 2)
     available_height = max(1, height - safe_margin * 2)
     scale = min(available_width / content.width, available_height / content.height)
-    resized = content.resize(
-        (max(1, round(content.width * scale)), max(1, round(content.height * scale))),
-        Image.Resampling.LANCZOS,
+    # Premultiplied BOX resampling keeps hard cluster edges and never bleeds the
+    # transparent backdrop's color into the silhouette.
+    resized = (
+        content.convert("RGBa")
+        .resize(
+            (max(1, round(content.width * scale)), max(1, round(content.height * scale))),
+            Image.Resampling.BOX,
+        )
+        .convert("RGBA")
     )
     result = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    result.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2), resized)
+    result.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
     return _binary_alpha(result)
 
 
-def _union_bbox(images: list[Image.Image]) -> tuple[int, int, int, int] | None:
-    boxes = [_alpha_bbox(image) for image in images]
-    boxes = [box for box in boxes if box is not None]
+def _shared_bbox(images: list[Image.Image]) -> tuple[int, int, int, int] | None:
+    """One crop box for every frame, sized by the ordinary frames.
+
+    A single screen-filling burst must not shrink the character in all the other
+    frames, so frames far larger than the median are cropped by the box instead
+    of defining it. The box is padded so ordinary effects keep some room.
+    """
+    boxes = [box for box in (_alpha_bbox(image) for image in images) if box is not None]
     if not boxes:
         return None
-    left = min(box[0] for box in boxes)
-    top = min(box[1] for box in boxes)
-    right = max(box[2] for box in boxes)
-    bottom = max(box[3] for box in boxes)
-    return left, top, right, bottom
+    areas = sorted((box[2] - box[0]) * (box[3] - box[1]) for box in boxes)
+    ordinary_limit = areas[len(areas) // 2] * SPRITE_OUTLIER_AREA_RATIO
+    ordinary = [
+        box for box in boxes if (box[2] - box[0]) * (box[3] - box[1]) <= ordinary_limit
+    ]
+    left = min(box[0] for box in ordinary)
+    top = min(box[1] for box in ordinary)
+    right = max(box[2] for box in ordinary)
+    bottom = max(box[3] for box in ordinary)
+    pad_x = round((right - left) * SPRITE_BOX_PADDING)
+    pad_y = round((bottom - top) * SPRITE_BOX_PADDING)
+    width, height = images[0].size
+    return (
+        max(0, left - pad_x),
+        max(0, top - pad_y),
+        min(width, right + pad_x),
+        min(height, bottom + pad_y),
+    )
 
 
 def _alpha_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
@@ -283,6 +338,38 @@ def _binary_alpha(image: Image.Image) -> Image.Image:
     alpha = image.getchannel("A").point(lambda value: 255 if value >= 128 else 0)
     image.putalpha(alpha)
     return image
+
+
+def _key_out_green_backdrop(image: Image.Image) -> Image.Image:
+    """Make the flat green backdrop transparent and remove its color spill from the edge."""
+    red, green, blue, _ = image.split()
+    dominance = ImageChops.subtract(green, ImageChops.lighter(red, blue))
+    keep = dominance.point(lambda value: 0 if value >= SPRITE_KEY_DOMINANCE else 255)
+    # Two pixels of erosion remove the half-blended green halo (olive on orange effects).
+    keep = keep.filter(ImageFilter.MinFilter(5))
+    despilled_green = ImageChops.darker(green, ImageChops.lighter(red, blue))
+    return Image.merge("RGBA", (red, despilled_green, blue, keep))
+
+
+def _apply_shared_palette(frames: list[Image.Image]) -> list[Image.Image]:
+    opaque_pixels = [
+        pixel[:3] for frame in frames for pixel in frame.getdata() if pixel[3] == 255
+    ]
+    sample = Image.new("RGB", (len(opaque_pixels), 1))
+    sample.putdata(opaque_pixels)
+    palette = sample.quantize(
+        colors=SPRITE_PALETTE_COLORS, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE
+    )
+    result: list[Image.Image] = []
+    for frame in frames:
+        quantized = frame.convert("RGB").quantize(palette=palette, dither=Image.Dither.NONE).convert("RGBA")
+        quantized.putalpha(frame.getchannel("A"))
+        result.append(quantized)
+    return result
+
+
+def _enlarge(image: Image.Image, scale: int) -> Image.Image:
+    return image.resize((image.width * scale, image.height * scale), Image.Resampling.NEAREST)
 
 
 def _to_transparent_palette(image: Image.Image) -> Image.Image:

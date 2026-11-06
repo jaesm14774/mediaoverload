@@ -116,7 +116,8 @@ def test_user_given_final_review_when_regenerate_is_clicked_then_the_decision_re
             allow_text_edit=values["allow_text_edit"], selection_mode=values["selection_mode"],
             selection_required=values["selection_required"], selection_limit=values["selection_limit"],
             allow_regenerate=values["allow_regenerate"],
-            allow_series_lifecycle_choice=values["allow_series_lifecycle_choice"],
+            allow_series_completion=values["allow_series_completion"],
+            allow_series_discard=values["allow_series_discard"],
         )
         observed["labels"] = {button.label for button in view.children if isinstance(button, discord.ui.Button)}
         message = ReviewMessage()
@@ -219,7 +220,8 @@ def test_user_given_a_serial_final_publish_review_when_completed_or_discarded_is
             content="Kirby follows the glow of a night flower.",
             timeout=30,
             allow_asset_selection=False,
-            allow_series_lifecycle_choice=True,
+            allow_series_completion=True,
+            allow_series_discard=True,
         )
         button = next(item for item in view.children if getattr(item, "label", "") == label)
         response = InteractionResponse()
@@ -230,6 +232,37 @@ def test_user_given_a_serial_final_publish_review_when_completed_or_discarded_is
 
     assert asyncio.run(choose("完成系列並發布本集")) == ("accept", "completed", True, [])
     assert asyncio.run(choose("廢棄系列")) == ("reject", "discarded", True, [])
+
+
+def test_user_given_an_intermediate_serial_review_when_the_creator_is_unhappy_then_the_series_can_be_discarded_without_a_completion_option(monkeypatch):
+    """User Given a serial review before the final episode review When the creator opens it Then 廢棄系列 is offered without 完成系列並發布本集, and choosing it rejects the media and discards the series."""
+    from agentic.tools.discord_review_view import create_discord_review_view
+
+    monkeypatch.setenv("discord_review_allowed_user_ids", "42")
+
+    async def open_and_discard():
+        view = create_discord_review_view(
+            files=[],
+            content="Segment 2 of 6",
+            timeout=30,
+            allow_asset_selection=False,
+            allow_text_edit=False,
+            allow_regenerate=True,
+            regenerate_current_segment=True,
+            allow_series_discard=True,
+        )
+        labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
+        button = next(item for item in view.children if getattr(item, "label", "") == "廢棄系列")
+        await button.callback(SimpleNamespace(user=SimpleNamespace(id=42), response=InteractionResponse()))
+        result = (view.result, view.series_disposition, view.selected_files)
+        view.stop()
+        return labels, result
+
+    labels, result = asyncio.run(open_and_discard())
+
+    assert "廢棄系列" in labels
+    assert "完成系列並發布本集" not in labels
+    assert result == ("reject", "discarded", [])
 
 
 def test_user_given_an_unauthorized_reviewer_when_regenerate_is_clicked_then_no_rerun_is_requested(monkeypatch):
@@ -297,7 +330,8 @@ class ReviewTransportBoundary:
                 selection_required=values["selection_required"],
                 selection_limit=values["selection_limit"],
                 allow_regenerate=values["allow_regenerate"],
-                allow_series_lifecycle_choice=values["allow_series_lifecycle_choice"],
+                allow_series_completion=values["allow_series_completion"],
+                allow_series_discard=values["allow_series_discard"],
             )
             label = next(self.decisions)
             self.reviewed.append({

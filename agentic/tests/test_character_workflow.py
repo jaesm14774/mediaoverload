@@ -195,7 +195,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(selection["selection_source"], "fixed_config_role")
 
     def test_user_given_a_selected_canvas_and_requested_sprite_duration_when_payload_is_built_then_sprite_uses_the_run_canvas_and_resolved_duration(self) -> None:
-        """User Given a game-sprite route and selected run canvas When its payload is built Then source and video dimensions match that canvas and frame count follows the resolved duration."""
+        """User Given a game-sprite route and selected run canvas When its payload is built Then the source image uses that canvas, the clip never exceeds it, and frame count follows the resolved duration."""
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = root / "sprite.yaml"
@@ -236,11 +236,9 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(
             constraints["sprite_source_height"], constraints["canvas_height"]
         )
-        self.assertEqual(
-            constraints["sprite_video_width"], constraints["canvas_width"]
-        )
-        self.assertEqual(
-            constraints["sprite_video_height"], constraints["canvas_height"]
+        self.assertLessEqual(
+            constraints["sprite_video_width"] * constraints["sprite_video_height"],
+            constraints["canvas_width"] * constraints["canvas_height"],
         )
 
     def test_user_given_reference_video_preferences_when_payload_is_built_then_requested_analysis_settings_are_retained(self) -> None:

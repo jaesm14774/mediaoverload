@@ -715,7 +715,8 @@ class DiscordHumanReviewService:
         review_scope: str = "",
         allow_regenerate: bool = False,
         regenerate_current_segment: bool = False,
-        allow_series_lifecycle_choice: bool = False,
+        allow_series_completion: bool = False,
+        allow_series_discard: bool = False,
     ) -> HumanReviewDecision:
         filtered_media_paths = self._filter_media_paths(media_paths)
         filtered_document_paths = self._filter_document_paths(document_paths or [])
@@ -766,7 +767,8 @@ class DiscordHumanReviewService:
                 "selection_limit": normalized_selection_limit,
                 "allow_regenerate": allow_regenerate,
                 "regenerate_current_segment": regenerate_current_segment,
-                "allow_series_lifecycle_choice": allow_series_lifecycle_choice,
+                "allow_series_completion": allow_series_completion,
+                "allow_series_discard": allow_series_discard,
             }
             if filtered_document_paths:
                 review_request["document_paths"] = filtered_document_paths
@@ -954,7 +956,8 @@ async def _run_discord_file_feedback_process(
     selection_limit: int | None = None,
     allow_regenerate: bool = False,
     regenerate_current_segment: bool = False,
-    allow_series_lifecycle_choice: bool = False,
+    allow_series_completion: bool = False,
+    allow_series_discard: bool = False,
 ) -> tuple[str | None, str | None, str | None, list[int] | None, dict[str, Any]]:
     import discord
     from discord.ext import commands
@@ -999,7 +1002,8 @@ async def _run_discord_file_feedback_process(
                 selection_limit=selection_limit,
                 allow_regenerate=allow_regenerate,
                 regenerate_current_segment=regenerate_current_segment,
-                allow_series_lifecycle_choice=allow_series_lifecycle_choice,
+                allow_series_completion=allow_series_completion,
+                allow_series_discard=allow_series_discard,
             )
             if context_text.strip() or documents:
                 await channel.send(
