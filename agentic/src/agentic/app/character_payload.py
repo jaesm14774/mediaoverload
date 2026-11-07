@@ -732,10 +732,6 @@ def build_goal_payload_from_character_config(
                 "sprite_video_width": video_width,
                 "sprite_video_height": video_height,
                 "sprite_video_length": round(float(duration_seconds) * 24.0),
-                "sprite_video_steps": int(game_sprite_config.get("video_steps", 16)),
-                "sprite_h3_model_profile": str(
-                    game_sprite_config.get("h3_model_profile", "q2")
-                ),
                 "sprite_fps": float(game_sprite_config.get("fps", 12)),
                 "sprite_cell_width": int(game_sprite_config.get("cell_width", 128)),
                 "sprite_cell_height": int(game_sprite_config.get("cell_height", 128)),

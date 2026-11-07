@@ -80,7 +80,7 @@ workflows:
       load_image: "225"
 
   minimax_h3_t2va.json:
-    summary: MiniMax H3 T2VA through ComfyUI with native stereo audio
+    summary: MiniMax H3 T2VA (FastH3 8-step) through ComfyUI with native stereo audio
     media_types:
     - text2video
     - long_video
@@ -89,8 +89,7 @@ workflows:
       height: 352
       length: 124
       frame_rate: 24
-      steps: 16
-      model_profile: q4
+      steps: 8
     conditioning:
       provider: comfyui
       recipes:
@@ -112,8 +111,7 @@ workflows:
       height: 352
       length: 240
       frame_rate: 24
-      steps: 16
-      model_profile: q4
+      steps: 8
     conditioning:
       provider: comfyui
       recipes:
@@ -137,8 +135,7 @@ workflows:
       height: 352
       length: 362
       frame_rate: 24
-      steps: 16
-      model_profile: q4
+      steps: 8
     conditioning:
       provider: comfyui
       recipes:
@@ -170,8 +167,7 @@ workflows:
       height: 352
       length: 362
       frame_rate: 24
-      steps: 16
-      model_profile: q4
+      steps: 8
     conditioning:
       provider: comfyui
       recipes:

@@ -283,9 +283,10 @@ class ComfyWorkflowToolset:
         workflow: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         updates: list[dict[str, Any]] = []
+        graph = workflow or self.adapter.load_workflow(workflow_path)
 
         if spec.prompt_binding and payload.get("prompt"):
-            updates.append(self._binding_update(spec.prompt_binding, payload["prompt"], str(workflow_path)))
+            updates.append(self._required_update(spec, spec.prompt_binding, payload["prompt"], str(workflow_path), graph))
         if spec.negative_prompt_binding and "negative_prompt" in payload:
             updates.append(self._binding_update(spec.negative_prompt_binding, payload["negative_prompt"], str(workflow_path)))
         if spec.width_binding and payload.get("width") is not None:
@@ -302,14 +303,14 @@ class ComfyWorkflowToolset:
         if image_binding and image_path:
             if not image_filename:
                 raise ValueError("ComfyUI image input must be uploaded before candidate rendering")
-            updates.append(self._binding_update(image_binding, image_filename, str(workflow_path)))
+            updates.append(self._required_update(spec, image_binding, image_filename, str(workflow_path), graph))
 
         seed = payload.get("seed")
         if seed is None and spec.seed_enabled:
             seed = random.randint(1, 999999999)
 
         return self.adapter.generate_updates(
-            workflow=workflow or self.adapter.load_workflow(workflow_path),
+            workflow=graph,
             updates_config=updates,
             description=None,
             seed=seed if spec.seed_enabled else None,
@@ -379,6 +380,40 @@ class ComfyWorkflowToolset:
                 + ", ".join(missing)
                 + ". Install the custom nodes required by the selected workflow before rendering."
             )
+
+    def _required_update(
+        self,
+        spec: ComfyWorkflowSpec,
+        binding: NodeBinding,
+        value: Any,
+        workflow_path: str,
+        workflow: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build an update the run cannot do without: the prompt or the input image.
+
+        Size, steps and negative prompt stay optional, since some workflows (Krea2
+        has no negative prompt) legitimately lack them. A prompt or image that
+        reaches no node would instead render something unrelated to the request.
+        """
+        update = self._binding_update(binding, value, workflow_path)
+        if "node_id" in update:
+            applied = str(update["node_id"]) in workflow
+        else:
+            applied = bool(
+                self.adapter.generate_updates(
+                    workflow=workflow,
+                    updates_config=[update],
+                    description=None,
+                    seed=None,
+                    workflow_path=workflow_path,
+                )
+            )
+        if not applied:
+            raise ValueError(
+                f"Workflow '{spec.workflow_name}' has no node that accepts the "
+                f"{binding.kind} input; refusing to render without it."
+            )
+        return update
 
     def _binding_update(self, binding: NodeBinding, value: Any, workflow_path: str) -> dict[str, Any]:
         if binding.alias:

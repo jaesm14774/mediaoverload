@@ -1,21 +1,23 @@
 {
   "1": {
+    "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "minimax_h3_fl2va_pruned_fp8_Q4_0.gguf"
+      "unet_name": "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
     },
-    "class_type": "UnetLoaderGGUFDynamicVRAM",
     "_meta": {
-      "title": "MiniMax H3 Q4 diffusion (GGUF)"
+      "title": "FastH3 V2 8-step diffusion (int8 ConvRot)"
     }
   },
   "2": {
+    "class_type": "CLIPLoader",
     "inputs": {
-      "clip_name": "qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf",
-      "type": "minimax"
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
     },
-    "class_type": "CLIPLoaderGGUFDynamicVRAM",
     "_meta": {
-      "title": "MiniMax H3 Q4 text encoder (GGUF)"
+      "title": "MiniMax H3 text encoder (NVFP4 AWQ)"
     }
   },
   "3": {
@@ -63,7 +65,7 @@
         "1",
         0
       ],
-      "shift_video": 12.0,
+      "shift_video": 10.0,
       "shift_audio": 3.0
     },
     "class_type": "MiniMaxH3SigmaShift",
@@ -72,9 +74,18 @@
     }
   },
   "7": {
-    "class_type": "ManualSigmas",
+    "class_type": "BasicScheduler",
     "inputs": {
-      "sigmas": "1.000000000000, 0.994475126266, 0.988235294819, 0.981132090092, 0.972972989082, 0.963503658772, 0.952380955219, 0.939130425453, 0.923076927662, 0.903225779533, 0.878048777580, 0.845070421696, 0.800000011921, 0.734693884850, 0.631578922272, 0.444444447756, 0.000000000000"
+      "model": [
+        "21",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 8,
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "H3 8-step scheduler"
     }
   },
   "8": {
@@ -98,7 +109,7 @@
   "10": {
     "inputs": {
       "model": [
-        "6",
+        "21",
         0
       ],
       "conditioning": [
@@ -202,6 +213,40 @@
     "class_type": "SaveVideo",
     "_meta": {
       "title": "Save Kirby H3 video"
+    }
+  },
+  "20": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "attention": "comfy kitchen attention"
+    },
+    "_meta": {
+      "title": "Attention backend"
+    }
+  },
+  "21": {
+    "class_type": "BlockSparseAttention",
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "selection": "vsa",
+      "selection.keep_percent": 10.0,
+      "start_percent": 0.2,
+      "end_percent": 1.0,
+      "dense_blocks": "",
+      "min_tokens": 12288,
+      "extra_tokens": 256,
+      "sink_conditioning": "exact_kv_and_rows",
+      "verbose": false
+    },
+    "_meta": {
+      "title": "VSA keep 10% (FastH3)"
     }
   }
 }

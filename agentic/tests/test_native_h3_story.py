@@ -687,7 +687,6 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(plan.metadata["recipe"], "native_h3_t2v_story")
         self.assertEqual(plan.metadata["native_h3"]["length"], 362)
         self.assertEqual(plan.metadata["native_h3"]["backend"], "comfyui")
-        self.assertEqual(plan.metadata["native_h3"]["steps"], 16)
         self.assertNotIn("native-opening-keyframe", [node.node_id for node in plan.nodes])
         self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
 

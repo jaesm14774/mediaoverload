@@ -195,7 +195,7 @@ serial_video_mysql_password=<your-generated-password>
 
 不同集數共用相同資料表，透過 episode_id、segment_id、render_id 關聯；不會為每集建立新表。舊試作的 SQLite 檔案保留為歷史輸出，執行入口和後續寫入都改用 MySQL。既有試作資料已匯入 MySQL：series 1 列、episodes 4 列、episode_plans 3 列、segments 8 列、render_attempts 5 列、reviews 5 列、reference_assets 8 列；episode_publications 會從新的發布審核開始累積。
 
-`series.lifecycle_status` 儲存 `active`、`completed` 或 `discarded`，另有 `lifecycle_note` 和 `lifecycle_updated_at` 記錄創作者決定。自動續集只查詢 active 系列，且要求該系列最新集為 ready。
+`series.lifecycle_status` 儲存 `active`、`completed` 或 `discarded`，另有 `lifecycle_note` 和 `lifecycle_updated_at` 記錄創作者決定。自動續集只查詢 active 系列，且要求該系列最新集為 ready 並帶有目前格式的人審核准狀態；最新集為 blocked、或被中斷而停在 rendering／planned 的系列，則先走上述恢復路徑。更新前、只有舊版 ending 摘要的 active 系列兩條路都進不去，請在 Discord 廢棄。若最新集在計畫存檔前就失敗或被中斷（沒有可恢復的計畫與段落），自動選擇開始時會把該 active 系列標為 discarded；仍有寫入的新集不受影響。
 
 ### 清理已結束系列的本機媒體
 
@@ -299,7 +299,7 @@ serial_video:
 
 這個角色設定會套用到每個片段審核和最終發布審核；設定值優先於命令列值。未設定時使用 1800 秒預設值。
 
-每集送 Discord 審核、核准狀態並完成發布流程後，才會開始下一集。自動策略先查找目前格式的最新失敗集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若片段審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若續集尚無下一集大綱，系統會先依完整故事路線和人審核准狀態產生大綱，等待 Discord 接受後才產片。若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
+每集送 Discord 審核、核准狀態並完成發布流程後，才會開始下一集。自動策略先查找目前格式的最新未完成集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若片段審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。若執行被強制中斷（程式被關閉、當機、斷電），該集會停在 rendering 或 planned；超過 2 小時沒有任何寫入就視為被中斷，和 blocked 一樣被恢復，不會變成永遠選不到的孤兒系列。2 小時內仍有寫入的 rendering／planned 集視為另一個執行中的 run，不會被重複生成。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若續集尚無下一集大綱，系統會先依完整故事路線和人審核准狀態產生大綱，等待 Discord 接受後才產片。若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
 
 使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
 

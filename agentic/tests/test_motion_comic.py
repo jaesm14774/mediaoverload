@@ -48,7 +48,7 @@ def ffmpeg_nvidia_vfx_boundary(payload: dict[str, object]) -> dict[str, object]:
     started = time.perf_counter()
     command = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source),
-        "-vf", f"scale={int(source_info['width']) * 2}:{int(source_info['height']) * 2}:flags=lanczos,fps={output_fps:g}",
+        "-vf", f"scale={int(source_info['width']) * 3}:{int(source_info['height']) * 3}:flags=lanczos,fps={output_fps:g}",
         "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "ultrafast",
         "-pix_fmt", "yuv420p",
     ]
@@ -58,12 +58,12 @@ def ffmpeg_nvidia_vfx_boundary(payload: dict[str, object]) -> dict[str, object]:
     subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
     result_info = adapter.probe_media(str(target))
     expected = {
-        "width": int(source_info["width"]) * 2,
-        "height": int(source_info["height"]) * 2,
+        "width": int(source_info["width"]) * 3,
+        "height": int(source_info["height"]) * 3,
         "fps": output_fps,
     }
     if (result_info["width"], result_info["height"]) != (expected["width"], expected["height"]):
-        raise AssertionError("FFmpeg VFX fixture did not double the canvas")
+        raise AssertionError("FFmpeg VFX fixture did not triple the canvas")
     if abs(float(result_info["frame_rate"]) - output_fps) > 0.15:
         raise AssertionError("FFmpeg VFX fixture did not double the frame rate")
     if abs(float(result_info["duration"]) - float(source_info["duration"])) > 1 / output_fps:
@@ -82,7 +82,7 @@ def ffmpeg_nvidia_vfx_boundary(payload: dict[str, object]) -> dict[str, object]:
         "summary_path": str(summary_path),
         "source": source_info,
         "result": {**result_info, "fps": float(result_info["frame_rate"])},
-        "settings": {"upscale_factor": 2, "frame_rate_multiplier": 2},
+        "settings": {"upscale_factor": 3, "frame_rate_multiplier": 2},
         "chunk_count": 1,
         "wall_seconds": time.perf_counter() - started,
     }

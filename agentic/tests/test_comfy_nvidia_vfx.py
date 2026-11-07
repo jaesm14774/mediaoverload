@@ -299,6 +299,41 @@ def test_user_given_material_audio_video_drift_when_nvidia_vfx_starts_then_it_is
     assert not output.exists()
 
 
+def test_user_given_a_source_not_divisible_by_eight_when_nvidia_vfx_starts_then_it_is_rejected_before_comfyui(
+    tmp_path: Path,
+):
+    """User Given a source whose width is divisible by 4 but not 8 When NVIDIA VFX starts Then it is rejected before output exists or ComfyUI is contacted."""
+    source = tmp_path / "odd_width.mp4"
+    output = tmp_path / "result.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=green:size=100x96:rate=24:duration=1",
+            "-frames:v",
+            "24",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    tool = ComfyNvidiaVfxToolset(comfy_host="127.0.0.1", comfy_port=1)
+    with pytest.raises(ValueError, match="divisible by 8"):
+        tool.execute({"video_path": str(source), "output_path": str(output)})
+
+    assert not output.exists()
+
+
 def test_user_given_an_existing_vfx_output_when_postprocessing_starts_then_the_existing_file_is_preserved(
     tmp_path: Path,
 ):

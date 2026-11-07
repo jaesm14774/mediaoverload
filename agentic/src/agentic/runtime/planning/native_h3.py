@@ -50,9 +50,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         round(MIN_VIDEO_DURATION_SECONDS * 24),
         int(goal.constraints.get("native_h3_fl2va_length") or render_config["length"]),
     )
-    steps = int(goal.constraints.get("native_h3_fl2va_steps") or render_config["steps"])
     video_count = render_config["video_count"]
-    model_profile = str(goal.constraints.get("native_h3_model_profile") or "q4")
     pre_video_review = context.pre_video_review_enabled(goal)
     pre_video_requires_human = context.pre_video_review_requires_human(goal)
     stage_probe_auto_select = bool(
@@ -291,9 +289,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         "width": width,
         "height": height,
         "length": length,
-        "steps": steps,
         "video_count": video_count,
-        "model_profile": model_profile,
         "use_last_frame": use_last_frame,
         "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
     }
@@ -355,7 +351,6 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             "width": width,
             "height": height,
             "length": length,
-            "steps": steps,
             "target_duration": int(goal.duration_seconds),
             "keyframe_candidate_count": keyframe_candidate_count,
             "require_human_review": require_human_review,
@@ -410,11 +405,6 @@ def build_native_h3_t2v_story(
             or render_config["length"]
         ),
     )
-    steps = int(
-        goal.constraints.get("native_h3_t2v_steps")
-        or goal.constraints.get("native_h3_steps")
-        or render_config["steps"]
-    )
     video_count = render_config["video_count"]
     frame_rate = float(goal.constraints.get("native_h3_frame_rate") or 24)
     render_duration = round(length / frame_rate, 3)
@@ -456,13 +446,7 @@ def build_native_h3_t2v_story(
                 "width": width,
                 "height": height,
                 "length": length,
-                "steps": steps,
                 "video_count": video_count,
-                "model_profile": str(
-                    goal.constraints.get("native_h3_t2v_model_profile")
-                    or goal.constraints.get("native_h3_model_profile")
-                    or "q4"
-                ),
             },
             depends_on=["native-story-prompt", "native-video-asset-check"],
             tags=["render", "video", "native-h3", "t2v"],
@@ -490,7 +474,6 @@ def build_native_h3_t2v_story(
             "width": width,
             "height": height,
             "length": length,
-            "steps": steps,
             "target_duration": render_duration,
             "requested_duration": int(goal.duration_seconds),
             "backend": "comfyui",
@@ -558,9 +541,7 @@ def build_native_h3_l2va_story(
         round(MIN_VIDEO_DURATION_SECONDS * 24),
         int(goal.constraints.get("native_h3_l2va_length") or render_config["length"]),
     )
-    steps = int(goal.constraints.get("native_h3_l2va_steps") or render_config["steps"])
     video_count = render_config["video_count"]
-    model_profile = str(goal.constraints.get("native_h3_model_profile") or "q4")
     storyboard_path = context.native_h3_storyboard_path(goal, "native_h3_l2va_story")
     reference_node = context.reference_video_analysis_node(goal)
     story_prompt_dependencies = [reference_node.node_id] if reference_node else []
@@ -711,9 +692,7 @@ def build_native_h3_l2va_story(
                     "width": width,
                     "height": height,
                     "length": length,
-                    "steps": steps,
                     "video_count": video_count,
-                    "model_profile": model_profile,
                 },
                 depends_on=[
                     "native-story-prompt",
@@ -758,7 +737,6 @@ def build_native_h3_l2va_story(
             "width": width,
             "height": height,
             "length": length,
-            "steps": steps,
             "target_duration": int(goal.duration_seconds),
             "require_human_review": require_human_review,
             "stage_probe_auto_select": stage_probe_auto_select,
@@ -824,14 +802,12 @@ def build_native_h3_ref2va(
         ),
         allowed_media_types={"native_h3_ref2va", "long_video"},
     )
-    render_config = context.native_h3_render_config(
-        goal, video_manifest, default_steps=20
-    )
+    render_config = context.native_h3_render_config(goal, video_manifest)
     width, height = render_config["width"], render_config["height"]
-    length, steps, video_count = (
-        render_config["length"],
-        render_config["steps"],
-        render_config["video_count"],
+    length, video_count = render_config["length"], render_config["video_count"]
+    steps = int(
+        goal.constraints.get("native_h3_steps")
+        or dict(video_manifest.recommended_defaults or {}).get("steps", 20)
     )
     storyboard_path = context.native_h3_storyboard_path(goal, "native_h3_ref2va")
     reference_manifest = list(

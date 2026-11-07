@@ -7,6 +7,7 @@ import os
 import hashlib
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -798,6 +799,168 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(selected["episode_prompt"], "A hero enters a station")
             self.assertEqual(selected["episode_topic"], "月台盡頭的微光")
 
+    def _start_rendering_episode(self, root: Path, series_id: str) -> dict[str, object]:
+        identity = _write_reference(root / f"{series_id}-identity.png", b"identity")
+        store = self._new_store()
+        context = store.prepare_series_context(series_id, "Hero", [identity])
+        episode = store.start_episode(context, "A hero enters a station", topic="月台盡頭的微光")
+        store.record_plan(
+            episode["episode_id"],
+            segment_count=2,
+            plan_payload={"goal": {"duration_seconds": 20}},
+        )
+        store.record_story(
+            episode["episode_id"],
+            [
+                {"visual": "The hero enters", "end_state": "A light appears"},
+                {"visual": "The hero follows", "end_state": "A door opens"},
+            ],
+        )
+        store.begin_render(
+            episode["episode_id"],
+            1,
+            workflow_name="minimax_h3_ref2va",
+            h3_mode="ref2va",
+            conditioning_paths=[identity],
+        )
+        return episode
+
+    def _make_episode_silent(self, store: SerialVideoStore, episode_id: str, hours: int) -> None:
+        silent_since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with store._connection(write=True) as connection:
+            connection.execute(
+                "UPDATE episodes SET updated_at = ? WHERE episode_id = ?",
+                (silent_since, episode_id),
+            )
+            connection.execute(
+                "UPDATE segments SET updated_at = ? WHERE episode_id = ?",
+                (silent_since, episode_id),
+            )
+
+    def test_user_given_a_run_was_killed_mid_render_when_auto_next_selects_work_then_it_resumes_that_episode_instead_of_orphaning_the_series(self) -> None:
+        """User Given a run died while rendering and nothing has touched the episode for hours When automatic serial work is prepared Then that episode is resumed before any new-or-continue roll."""
+        class NewSeriesRoll:
+            def random(self) -> float:
+                return 0.99
+
+            def choice(self, values):
+                return values[0]
+
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            episode = self._start_rendering_episode(root, "killed-mid-render")
+            store = self._new_store()
+            self._make_episode_silent(store, episode["episode_id"], hours=12)
+
+            selected = store.prepare_auto_next_context("Hero", random_source=NewSeriesRoll())
+
+            self.assertEqual(selected["automation_mode"], "resume")
+            self.assertEqual(selected["series_id"], "killed-mid-render")
+            self.assertEqual(selected["resume_episode_id"], episode["episode_id"])
+
+    def test_user_given_another_run_is_rendering_right_now_when_auto_next_selects_work_then_it_does_not_double_render_that_episode(self) -> None:
+        """User Given an episode is mid-render with recent activity When another automatic run prepares work Then it leaves that episode alone."""
+        class NewSeriesRoll:
+            def random(self) -> float:
+                return 0.99
+
+            def choice(self, values):
+                return values[0]
+
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            episode = self._start_rendering_episode(root, "live-render")
+            store = self._new_store()
+
+            selected = store.prepare_auto_next_context("Hero", random_source=NewSeriesRoll())
+
+            self.assertEqual(selected["automation_mode"], "new")
+            self.assertNotEqual(selected["series_id"], "live-render")
+
+    def test_user_given_a_resume_died_before_rendering_restarted_when_auto_next_selects_work_then_the_planned_episode_is_resumed(self) -> None:
+        """User Given a blocked episode was reopened and the run died before any render When the episode has been silent for hours Then automatic serial work resumes it again."""
+        class NewSeriesRoll:
+            def random(self) -> float:
+                return 0.99
+
+            def choice(self, values):
+                return values[0]
+
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            episode = self._start_rendering_episode(root, "died-after-reopen")
+            store = self._new_store()
+            store.fail_episode(episode["episode_id"], "Discord review timed out")
+            store.resume_episode(episode["episode_id"])
+            self._make_episode_silent(store, episode["episode_id"], hours=12)
+
+            selected = store.prepare_auto_next_context("Hero", random_source=NewSeriesRoll())
+
+            self.assertEqual(selected["automation_mode"], "resume")
+            self.assertEqual(selected["resume_episode_id"], episode["episode_id"])
+
+    def test_user_given_an_interrupted_rendering_episode_when_it_resumes_then_segment_one_is_runnable_again(self) -> None:
+        """User Given an episode left in rendering by a killed run When the creator or automation resumes it Then no accepted work is invented and segment one is runnable."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            episode = self._start_rendering_episode(root, "interrupted-resume")
+            store = self._new_store()
+
+            resumed = store.resume_episode(episode["episode_id"])
+
+            self.assertEqual(resumed["completed_segment_count"], 0)
+            self.assertEqual(resumed["next_segment_number"], 1)
+            self.assertEqual(store.get_episode(episode["episode_id"])["status"], "planned")
+
+    def _series_lifecycle(self, store: SerialVideoStore, series_id: str) -> str:
+        with store._connection() as connection:
+            row = connection.execute(
+                "SELECT lifecycle_status FROM series WHERE series_id = ?", (series_id,)
+            ).fetchone()
+        return str(row["lifecycle_status"])
+
+    def test_user_given_a_run_died_before_its_plan_was_saved_when_auto_next_selects_work_then_the_unresumable_series_is_discarded(self) -> None:
+        """User Given an episode was created and its run died before any plan was saved When the episode has been silent for hours Then automatic serial work discards that series instead of leaving it active but unselectable."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("died-before-plan", "Hero", [identity])
+            episode = store.start_episode(context, "A hero enters a station", topic="月台盡頭的微光")
+            self._make_episode_silent(store, episode["episode_id"], hours=12)
+
+            selected = store.prepare_auto_next_context("Hero")
+
+            self.assertEqual(self._series_lifecycle(store, "died-before-plan"), "discarded")
+            self.assertNotEqual(selected["series_id"], "died-before-plan")
+
+    def test_user_given_an_episode_failed_before_its_plan_was_saved_when_auto_next_selects_work_then_the_unresumable_series_is_discarded(self) -> None:
+        """User Given an episode failed before any plan was saved When automatic serial work is prepared Then that series is discarded."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("failed-before-plan", "Hero", [identity])
+            episode = store.start_episode(context, "A hero enters a station", topic="月台盡頭的微光")
+            store.fail_episode(episode["episode_id"], "Plan could not be saved")
+
+            store.prepare_auto_next_context("Hero")
+
+            self.assertEqual(self._series_lifecycle(store, "failed-before-plan"), "discarded")
+
+    def test_user_given_a_run_is_between_creating_an_episode_and_saving_its_plan_when_another_run_selects_work_then_the_series_stays_active(self) -> None:
+        """User Given an episode was just created and its plan is about to be saved When another automatic run prepares work Then it does not discard the live series."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("live-before-plan", "Hero", [identity])
+            store.start_episode(context, "A hero enters a station", topic="月台盡頭的微光")
+
+            store.prepare_auto_next_context("Hero")
+
+            self.assertEqual(self._series_lifecycle(store, "live-before-plan"), "active")
+
     def test_user_given_the_first_segment_failed_before_any_acceptance_when_episode_resumes_then_segment_one_is_runnable(self) -> None:
         """User Given a persisted episode whose first segment failed review When the creator resumes it Then the accepted prefix may be empty and segment one remains runnable."""
         with _workspace_temporary_directory() as temporary:
@@ -1495,7 +1658,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             lifecycle = self._mysql_one(
                 store, "SELECT lifecycle_status FROM series WHERE series_id = ?", (series_id,)
             )["lifecycle_status"]
-            resumable = [row["blocked_episode_id"] for row in store.list_auto_resume_candidates("Hero")]
+            resumable = [row["resumable_episode_id"] for row in store.list_auto_resume_candidates("Hero")]
             self.assertEqual(result.status, "blocked")
             self.assertEqual(lifecycle, "active")
             self.assertEqual(resumable, [episode["episode_id"]])

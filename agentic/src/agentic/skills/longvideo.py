@@ -361,12 +361,10 @@ class LongVideoSkills:
         width = context.node.inputs.get("width") or constraints.get("canvas_width") or constraints.get("longvideo_width") or constraints.get("longvideo_h3_width")
         height = context.node.inputs.get("height") or constraints.get("canvas_height") or constraints.get("longvideo_height") or constraints.get("longvideo_h3_height")
         length = context.node.inputs.get("length") or constraints.get("longvideo_length") or constraints.get("longvideo_h3_length")
-        steps = context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps")
         if workflow_name.startswith("minimax_h3_"):
             width = width or 512
             height = height or 288
             length = length or 124
-            steps = steps or 16
 
         h3_mode = {
             "anchor_first": "i2va",
@@ -413,10 +411,13 @@ class LongVideoSkills:
             "width": width,
             "height": height,
             "length": length,
-            "steps": steps,
             "video_count": int(context.node.inputs.get("video_count") or 1),
-            "model_profile": str(context.node.inputs.get("model_profile") or "q2"),
         }
+        if h3_mode == "ref2va":
+            payload["steps"] = int(
+                context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps") or 16
+            )
+            payload["model_profile"] = str(context.node.inputs.get("model_profile") or "q2")
         if first_frame:
             payload["image_path"] = first_frame
         if last_frame:
@@ -448,7 +449,6 @@ class LongVideoSkills:
                     "width": width,
                     "height": height,
                     "length": length,
-                    "steps": steps,
                     "seed": constraints.get("seed"),
                 },
             )
@@ -501,7 +501,6 @@ class LongVideoSkills:
             raise RuntimeError("Native H3 render requires workflow_name and first_frame_path")
         if use_last_frame and not last_frame:
             raise RuntimeError("Native H3 render with use_last_frame=true requires last_frame_path")
-        default_model_profile = "q4"
         mode = "fl2va" if use_last_frame else "i2va"
         prompt_length = int(
             context.node.inputs.get("length")
@@ -541,22 +540,11 @@ class LongVideoSkills:
                 minimum=17,
                 maximum=362,
             ),
-            "steps": _bounded_int(
-                context.node.inputs.get("steps") or context.plan.goal.constraints.get("native_h3_steps") or 16,
-                name="steps",
-                minimum=1,
-                maximum=32,
-            ),
             "video_count": _bounded_int(
                 context.node.inputs.get("video_count") or 1,
                 name="video_count",
                 minimum=1,
                 maximum=4,
-            ),
-            "model_profile": str(
-                context.node.inputs.get("model_profile")
-                or context.plan.goal.constraints.get("native_h3_model_profile")
-                or default_model_profile
             ),
         }
         seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
@@ -580,7 +568,7 @@ class LongVideoSkills:
         return SkillResult(
             status="success",
             outputs=outputs,
-            metrics={"video_count": len(result.get("saved_files", [])), "length": payload["length"], "steps": payload["steps"]},
+            metrics={"video_count": len(result.get("saved_files", [])), "length": payload["length"]},
             logs=[
                 f"Rendered one continuous native H3 story with '{workflow_name}' ({'first + last frame' if use_last_frame else 'first frame only'})."
             ],
@@ -742,18 +730,7 @@ class LongVideoSkills:
                 minimum=17,
                 maximum=362,
             ),
-            "steps": _bounded_int(
-                context.node.inputs.get("steps") or context.plan.goal.constraints.get("native_h3_steps") or 16,
-                name="steps",
-                minimum=1,
-                maximum=32,
-            ),
             "video_count": _bounded_int(context.node.inputs.get("video_count") or 1, name="video_count", minimum=1, maximum=4),
-            "model_profile": str(
-                context.node.inputs.get("model_profile")
-                or context.plan.goal.constraints.get("native_h3_model_profile")
-                or "q4"
-            ),
         }
         seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
         if seed is not None:
@@ -922,23 +899,11 @@ class LongVideoSkills:
                 minimum=17,
                 maximum=362,
             ),
-            "steps": _bounded_int(
-                context.node.inputs.get("steps") or context.plan.goal.constraints.get("native_h3_steps") or 20,
-                name="steps",
-                minimum=1,
-                maximum=32,
-            ),
             "video_count": _bounded_int(
                 context.node.inputs.get("video_count") or 1,
                 name="video_count",
                 minimum=1,
                 maximum=4,
-            ),
-            "model_profile": str(
-                context.node.inputs.get("model_profile")
-                or constraints.get("native_h3_t2v_model_profile")
-                or constraints.get("native_h3_model_profile")
-                or "q4"
             ),
         }
         seed = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
@@ -970,7 +935,6 @@ class LongVideoSkills:
         metrics = {
             "video_count": len(result.get("saved_files", [])),
             "length": render.payload["length"],
-            "steps": render.payload["steps"],
             **render.metrics,
         }
         return SkillResult(status="success", outputs=outputs, metrics=metrics, logs=[render.log])

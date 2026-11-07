@@ -22,13 +22,15 @@ The project does not install NVIDIA's SDK into the agent Python environment. The
 The final video path runs:
 
 1. Read at most 128 source frames through VideoHelperSuite, overlapping adjacent chunks by one frame.
-2. Upscale each chunk 2x with `RTXVideoSuperResolution`, `ULTRA`, strength `1.0`, and 8-bit RGB.
+2. Upscale each chunk 3x with `RTXVideoSuperResolution`, `ULTRA`, strength `1.0`, and 8-bit RGB.
 3. Generate 2x the frame rate with `RTXVideoFrameGeneration`, `MEDIUM`, with automatic shot-change detection.
 4. Join the chunks, remove each repeated boundary frame, hold the final endpoint for one output frame, and mux the source audio back onto the result. Canvas normalization copies an existing AAC stream and bounds the output to the video stream duration, avoiding a second AAC encode and its packet-end drift.
 
-For a 640x360, 24 FPS source, the expected output is 1280x720 at 48 FPS with the same duration and audio channels. NVIDIA's node emits `(N - 1) * multiplier + 1` frames for `N` input frames. Holding the final frame once restores the `N * multiplier` frame count needed to keep the original duration at the doubled frame rate.
+For a 640x360, 24 FPS source, the expected output is 1920x1080 at 48 FPS with the same duration and audio channels. NVIDIA's node emits `(N - 1) * multiplier + 1` frames for `N` input frames. Holding the final frame once restores the `N * multiplier` frame count needed to keep the original duration at the doubled frame rate.
 
-Source width and height must each be divisible by 4. NVIDIA VSR rounds scaled output dimensions to the nearest multiple of 8; this input constraint keeps the output dimensions at exactly 2x and lets final QA use the same expected dimensions. The tool rejects other sizes before uploading frames to ComfyUI.
+Source width and height must each be divisible by 8. NVIDIA VSR rounds scaled output dimensions to the nearest multiple of 8; this input constraint keeps the output dimensions at exactly 3x and lets final QA use the same expected dimensions. The tool rejects other sizes before uploading frames to ComfyUI.
+
+NVIDIA's SDK documentation lists 720p as the maximum input for 3x, but the RTX 4060 with `nvidia-vfx 0.2.0.0` accepted 3x upscales of 576x1024, 1280x720, and 1920x1080 sources in a local probe, so the tool does not enforce that documented limit.
 
 HDR is not enabled. The project outputs SDR video, and the current node setup uses the 8-bit RGB path.
 

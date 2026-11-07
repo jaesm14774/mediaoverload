@@ -1621,11 +1621,15 @@ def _validate_serial_resume_episode(
         )
     if args.serial_resume_episode_number is None:
         return None
+    from agentic.runtime.serial_video import RESUMABLE_EPISODE_STATUSES
+
     resume_episode = serial_store.get_current_episode(
         args.series_id, args.serial_resume_episode_number
     )
-    if resume_episode["status"] != "blocked":
-        raise ValueError("--serial-resume-episode-number requires a current blocked episode.")
+    if resume_episode["status"] not in RESUMABLE_EPISODE_STATUSES:
+        raise ValueError(
+            "--serial-resume-episode-number requires a current blocked or interrupted episode."
+        )
     if not args.goal:
         args.goal = str(resume_episode["prompt"])
     if str(resume_episode["prompt"]) != str(args.goal).strip():
