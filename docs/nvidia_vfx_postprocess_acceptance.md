@@ -5,9 +5,23 @@
 ### Final video is enlarged, interpolated, and kept in sync
 
 User
-Given a finished SDR MP4 with a constant frame rate and width and height divisible by 4, and ComfyUI has the NVIDIA VFX nodes on an RTX 40-series or newer GPU
+Given a finished SDR MP4 with a constant frame rate and width and height divisible by 8, and ComfyUI has the NVIDIA VFX nodes on an RTX 40-series or newer GPU
 When the video enters final post-processing
-Then each source frame is upscaled 2x with NVIDIA ULTRA before 2x MEDIUM frame generation, the output is 2x the width and height and frame rate, the final endpoint is held for one output frame so the source duration is retained, and the original audio stream is preserved.
+Then each source frame is upscaled 3x with NVIDIA ULTRA before 2x MEDIUM frame generation, the output is 3x the width and height and 2x the frame rate, the final endpoint is held for one output frame so the source duration is retained, and the original audio stream is preserved.
+
+### A 16:9 canvas is delivered as full HD
+
+User
+Given a finished 640x360 SDR MP4
+When it completes final post-processing
+Then the delivered video is 1920x1080.
+
+### Sizes that cannot scale to exact dimensions are rejected early
+
+User
+Given a source whose width or height is not divisible by 8
+When final post-processing starts
+Then it is rejected before ComfyUI is contacted, because NVIDIA VSR rounds output dimensions to a multiple of 8 and the 3x result would not be exact.
 
 ### Final output contains every expected frame
 

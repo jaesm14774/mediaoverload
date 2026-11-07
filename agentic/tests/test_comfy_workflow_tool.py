@@ -100,7 +100,10 @@ class _FakeAdapter:
         self.last_generate_updates: dict[str, object] | None = None
 
     def load_workflow(self, workflow_path: Path | str) -> dict[str, object]:
-        return {"workflow_path": str(workflow_path)}
+        return {
+            "42": {"class_type": "PrimitiveString", "inputs": {"value": ""}},
+            "84": {"class_type": "LoadImage", "inputs": {"image": ""}},
+        }
 
     def build_generator(self, host: str | None = None, port: int | None = None) -> _FakeGenerator:
         del host, port
@@ -290,6 +293,74 @@ class ComfyWorkflowToolsetTests(unittest.TestCase):
             ],
         )
         self.assertEqual(toolset.adapter.last_generate_updates["seed"], 321)
+
+    def _build_updates_on(self, workflow: dict[str, object], spec: ComfyWorkflowSpec, payload: dict[str, object], *, image_filename: str | None = None) -> list[dict[str, object]]:
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            with patch.object(ComfyWorkflowToolset, "_build_specs", return_value={}):
+                toolset = ComfyWorkflowToolset(asset_registry=_FakeAssetRegistry(temp_root), output_root=temp_root)
+            return toolset._build_updates(
+                spec,
+                temp_root / f"{spec.workflow_name}.json",
+                payload,
+                image_filename=image_filename,
+                workflow=workflow,
+            )
+
+    def test_user_requests_a_prompt_from_a_workflow_with_no_prompt_node_when_updates_are_built_then_the_run_fails_before_any_render(self) -> None:
+        """User Given a workflow with no prompt node When a prompt is requested Then the run stops with a clear error instead of rendering something unrelated to the request."""
+        workflow = {"7": {"class_type": "EmptyLatentImage", "inputs": {"width": 512, "height": 512}}}
+        spec = ComfyWorkflowSpec(
+            name="comfy.workflow.text_to_image",
+            workflow_name="no_prompt_node",
+            output_folder="images",
+            file_prefix="x",
+            prompt_binding=NodeBinding(kind="prompt", node_type="PrimitiveString", title="positive"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "no_prompt_node.*prompt"):
+            self._build_updates_on(workflow, spec, {"prompt": "Kirby in rain"})
+
+    def test_user_requests_an_input_image_through_an_alias_for_a_missing_node_when_updates_are_built_then_the_run_fails_before_any_render(self) -> None:
+        """User Given an alias that points at a node the workflow no longer has When an input image is requested Then the run stops with a clear error."""
+        workflow = {"1": {"class_type": "LoadImage", "inputs": {"image": "old.png"}}}
+        spec = ComfyWorkflowSpec(
+            name="comfy.workflow.image_to_image",
+            workflow_name="stale_alias",
+            output_folder="images",
+            file_prefix="x",
+            image_binding=NodeBinding(kind="image", alias="load_image", node_type="LoadImage", input_key="image"),
+        )
+
+        with patch("agentic.tools.comfy_adapter.ComfyAdapter.resolve_alias", return_value="84"):
+            with self.assertRaisesRegex(ValueError, "stale_alias.*image"):
+                self._build_updates_on(
+                    workflow, spec, {"input_image_path": "C:\\in.png"}, image_filename="in.png"
+                )
+
+    def test_user_runs_a_workflow_without_a_negative_prompt_node_when_updates_are_built_then_the_prompt_still_applies_and_nothing_fails(self) -> None:
+        """User Given a workflow that has only a positive prompt node When a prompt and a negative prompt are requested Then the positive prompt is applied and the run proceeds."""
+        workflow = {
+            "11": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": "old", "clip": ["45", 0]},
+                "_meta": {"title": "CLIP Text Encode (Positive Prompt)"},
+            }
+        }
+        spec = ComfyWorkflowSpec(
+            name="comfy.workflow.text_to_image",
+            workflow_name="positive_only",
+            output_folder="images",
+            file_prefix="x",
+            prompt_binding=NodeBinding(kind="prompt", node_type="PrimitiveString", title="positive"),
+            negative_prompt_binding=NodeBinding(kind="negative_prompt", node_type="PrimitiveString", title="negative"),
+        )
+
+        updates = self._build_updates_on(
+            workflow, spec, {"prompt": "Kirby", "negative_prompt": "blurry"}
+        )
+
+        self.assertEqual([u["inputs"]["text"] for u in updates], ["Kirby"])
 
     def test_user_can_clear_a_workflow_negative_prompt(self) -> None:
         """User Given a workflow has a default negative prompt, When the user explicitly sends an empty one, Then the default is cleared."""

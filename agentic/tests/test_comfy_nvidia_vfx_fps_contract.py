@@ -47,6 +47,8 @@ class _FfmpegComfyGenerator:
         frame_count = int(inputs["frame_load_cap"])
         expected_output_frames = (frame_count - 1) * 2 + 1 if frame_count > 1 else 1
         output_fps = float(workflow["4"]["inputs"]["fps"])
+        # Like the real NVIDIA node, enlarge the 64x64 source by the requested scale.
+        side = int(64 * float(workflow["2"]["inputs"]["resize_type.scale"]))
         output = Path(output_dir) / f"{file_prefix}.mp4"
         output.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
@@ -59,7 +61,7 @@ class _FfmpegComfyGenerator:
                 "-f",
                 "lavfi",
                 "-i",
-                "color=c=blue:size=128x128:rate=48:duration=16",
+                f"color=c=blue:size={side}x{side}:rate=48:duration=16",
                 "-vf",
                 f"setpts=N/({output_fps:.12g}*TB)",
                 "-vsync",
@@ -133,7 +135,7 @@ def test_user_given_a_24fps_nominal_source_with_fractional_average_rate_when_nvi
 
     assert output.is_file()
     assert result["result"]["frame_count"] == 2 * result["source"]["frame_count"]
-    assert result["result"]["width"] == 2 * result["source"]["width"]
-    assert result["result"]["height"] == 2 * result["source"]["height"]
+    assert result["result"]["width"] == 3 * result["source"]["width"]
+    assert result["result"]["height"] == 3 * result["source"]["height"]
     duration_tolerance = 1 / (result["source"]["fps"] * 2) + result["result"]["time_base_seconds"]
     assert abs(result["result"]["duration_seconds"] - result["source"]["duration_seconds"]) <= duration_tolerance

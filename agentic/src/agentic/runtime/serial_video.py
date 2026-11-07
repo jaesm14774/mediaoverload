@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -20,6 +20,13 @@ from pymysql.cursors import DictCursor
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# A killed or crashed run leaves its episode in 'rendering' or 'planned' with no
+# further writes. A live run writes at every render, review and tail step, so an
+# episode silent for this long has no owner and automation may resume it.
+INTERRUPTED_EPISODE_SILENCE = timedelta(hours=2)
+RESUMABLE_EPISODE_STATUSES = ("blocked", "rendering", "planned")
 
 
 def _json(value: Any) -> str:
@@ -1378,32 +1385,91 @@ class SerialVideoStore:
     def list_auto_resume_candidates(
         self, character: str | None = None
     ) -> list[dict[str, Any]]:
-        """Return the newest current blocked episode that has enough persisted state to retry."""
-        query = """SELECT s.series_id, s.character_name, s.lifecycle_status,
-                          e.episode_id AS blocked_episode_id,
-                          e.episode_number AS blocked_episode_number,
+        """Return current episodes that are blocked or whose run died, with enough state to retry."""
+        return self._list_stranded_episodes(
+            character, plan_persisted=True, lifecycles=("active", "completed")
+        )
+
+    def discard_unrecoverable_series(self, character: str | None = None) -> list[str]:
+        """Discard active series whose latest episode stopped before its plan was saved.
+
+        Without a persisted plan and segments there is nothing to resume, so the series
+        would stay active but unselectable forever.
+        """
+        stranded = self._list_stranded_episodes(
+            character, plan_persisted=False, lifecycles=("active",)
+        )
+        discarded: list[str] = []
+        for row in stranded:
+            series_id = str(row["series_id"])
+            self.set_series_lifecycle_status(
+                series_id,
+                "discarded",
+                note=(
+                    f"Episode {row['resumable_episode_number']} stopped before its plan "
+                    "was saved and cannot be resumed"
+                ),
+            )
+            discarded.append(series_id)
+        return discarded
+
+    def _list_stranded_episodes(
+        self,
+        character: str | None,
+        *,
+        plan_persisted: bool,
+        lifecycles: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        """Return each series' latest current episode that is blocked or whose run died.
+
+        An episode still 'rendering' or 'planned' counts as interrupted only after it has
+        been silent for INTERRUPTED_EPISODE_SILENCE, so a live run is never raced.
+        """
+        silent_before = (
+            datetime.now(timezone.utc) - INTERRUPTED_EPISODE_SILENCE
+        ).isoformat()
+        lifecycle_placeholders = ", ".join("?" for _ in lifecycles)
+        plan_negation = "" if plan_persisted else "NOT"
+        query = f"""SELECT s.series_id, s.character_name, s.lifecycle_status,
+                          e.episode_id AS resumable_episode_id,
+                          e.episode_number AS resumable_episode_number,
                           e.prompt AS episode_prompt,
                           e.episode_topic,
                           e.target_duration_seconds,
                           e.updated_at
                    FROM series s JOIN episodes e ON e.series_id = s.series_id AND e.is_current = 1
-                   WHERE s.lifecycle_status IN ('active', 'completed')
-                     AND e.status = 'blocked'
+                   WHERE s.lifecycle_status IN ({lifecycle_placeholders})
                      AND e.episode_number = (
                          SELECT MAX(e2.episode_number) FROM episodes e2
                          WHERE e2.series_id = s.series_id AND e2.is_current = 1
                      )
-                     AND e.plan_sha256 IS NOT NULL
-                     AND EXISTS (
-                         SELECT 1 FROM episode_plans p
-                         WHERE p.episode_id = e.episode_id AND p.plan_sha256 = e.plan_sha256
+                     AND (
+                         e.status = 'blocked'
+                         OR (
+                             e.status IN ('rendering', 'planned')
+                             AND GREATEST(
+                                 e.updated_at,
+                                 COALESCE(
+                                     (SELECT MAX(seg2.updated_at) FROM segments seg2
+                                      WHERE seg2.episode_id = e.episode_id),
+                                     e.updated_at
+                                 )
+                             ) < ?
+                         )
                      )
-                     AND EXISTS (SELECT 1 FROM segments seg WHERE seg.episode_id = e.episode_id)"""
-        parameters: tuple[Any, ...] = ()
+                     AND {plan_negation} (
+                         e.plan_sha256 IS NOT NULL
+                         AND EXISTS (
+                             SELECT 1 FROM episode_plans p
+                             WHERE p.episode_id = e.episode_id AND p.plan_sha256 = e.plan_sha256
+                         )
+                         AND EXISTS (SELECT 1 FROM segments seg WHERE seg.episode_id = e.episode_id)
+                     )"""
+        parameters: tuple[Any, ...] = (*lifecycles, silent_before)
         normalized_character = str(character or "").strip()
         if normalized_character:
             query += " AND s.character_name = ?"
-            parameters = (normalized_character,)
+            parameters = (*parameters, normalized_character)
         query += " ORDER BY e.updated_at DESC, e.created_at DESC, e.episode_id"
         with self._connection() as connection:
             return connection.execute(query, parameters).fetchall()
@@ -1421,19 +1487,20 @@ class SerialVideoStore:
         if not normalized_character:
             raise ValueError("Automatic serial generation requires a fixed character.")
         source = random_source or random.SystemRandom()
+        self.discard_unrecoverable_series(normalized_character)
         retry_candidates = self.list_auto_resume_candidates(normalized_character)
         if retry_candidates:
             selected = retry_candidates[0]
             context = self.prepare_series_context(
                 str(selected["series_id"]),
                 normalized_character,
-                episode_number=int(selected["blocked_episode_number"]),
+                episode_number=int(selected["resumable_episode_number"]),
                 require_story_first_for_new=True,
             )
             context["automation_mode"] = "resume"
             context["automation_source_series_id"] = str(selected["series_id"])
-            context["automation_source_episode_id"] = str(selected["blocked_episode_id"])
-            context["resume_episode_id"] = str(selected["blocked_episode_id"])
+            context["automation_source_episode_id"] = str(selected["resumable_episode_id"])
+            context["resume_episode_id"] = str(selected["resumable_episode_id"])
             context["episode_prompt"] = str(selected["episode_prompt"] or "")
             context["episode_topic"] = str(selected["episode_topic"] or "")
             context["target_duration_seconds"] = int(selected["target_duration_seconds"])
@@ -2680,7 +2747,7 @@ class SerialVideoStore:
         }
 
     def resume_episode(self, episode_id: str) -> dict[str, Any]:
-        """Reopen a blocked episode using only its contiguous, current accepted render prefix."""
+        """Reopen a blocked or interrupted episode using only its contiguous, current accepted render prefix."""
         now = _now()
         initial_node_outputs: dict[str, Any] = {}
         with self._connection(write=True) as connection:
@@ -2688,8 +2755,10 @@ class SerialVideoStore:
                 "SELECT * FROM episodes WHERE episode_id = ? AND is_current = 1",
                 (episode_id,),
             ).fetchone()
-            if episode is None or episode["status"] != "blocked":
-                raise ValueError("Only the current blocked serial episode can be resumed.")
+            if episode is None or episode["status"] not in RESUMABLE_EPISODE_STATUSES:
+                raise ValueError(
+                    "Only the current blocked or interrupted serial episode can be resumed."
+                )
             plan = connection.execute(
                 "SELECT plan_sha256 FROM episode_plans WHERE episode_id = ?",
                 (episode_id,),

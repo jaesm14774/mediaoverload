@@ -19,7 +19,7 @@ from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 
 
 CHUNK_FRAMES = 128
-UPSCALE_FACTOR = 2
+UPSCALE_FACTOR = 3
 FRAME_RATE_MULTIPLIER = 2
 
 
@@ -461,13 +461,13 @@ def _validate_source_video(source: dict[str, Any]) -> None:
         raise ValueError("NVIDIA VFX post-process requires a non-empty video")
     if source["width"] < 64 or source["height"] < 64:
         raise ValueError("NVIDIA VFX post-process requires video dimensions of at least 64 pixels")
-    if source["width"] % 4 or source["height"] % 4:
+    if source["width"] % 8 or source["height"] % 8:
         raise ValueError(
-            "NVIDIA VFX post-process requires source dimensions divisible by 4 "
-            "for exact 2x output dimensions"
+            "NVIDIA VFX post-process requires source dimensions divisible by 8 "
+            f"for exact {UPSCALE_FACTOR}x output dimensions"
         )
     if source["width"] > 4096 or source["height"] > 4096:
-        raise ValueError("2x NVIDIA VFX upscaling supports source dimensions up to 4096 pixels")
+        raise ValueError("NVIDIA VFX upscaling supports source dimensions up to 4096 pixels")
     if source["fps"] > 60:
         raise ValueError("NVIDIA VFX 2x frame generation requires a source frame rate of 60 FPS or less")
     if source["audio_stream_count"] > 1:

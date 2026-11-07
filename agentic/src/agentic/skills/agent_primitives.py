@@ -1127,7 +1127,7 @@ class AgentMediaSkills:
                 "height": int(first["result"]["height"]),
             },
             logs=[
-                "Upscaled final video 2x with NVIDIA ULTRA and doubled its frame rate with NVIDIA MEDIUM interpolation."
+                "Upscaled final video 3x with NVIDIA ULTRA and doubled its frame rate with NVIDIA MEDIUM interpolation."
             ],
         )
 

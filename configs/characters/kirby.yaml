@@ -182,8 +182,8 @@ generation:
     # Keep image-to-video renders within this workflow's frame limit.
     max_i2v_frames: 240
   generation_type_weights:
-    serial_video: 5
-    text2img: 5
+    serial_video: 2
+    text2img: 10
     text2image2video: 0.1
     native_h3_story: 0.1
     native_h3_t2v_story: 0.1
@@ -191,10 +191,10 @@ generation:
     native_h3_l2va_story: 0.1
     native_h3_ref2va: 0.1
     text2image2native_h3_ref2va: 0.1
-    sticker_pack: 1
+    sticker_pack: 0.5
     story_card: 1
-    motion_comic: 1
-    game_sprite: 1
+    motion_comic: 0.8
+    game_sprite: 2
 
 social_media:
   # Hashtags are generated from the final article and visible media.

@@ -17,6 +17,8 @@ from urllib import error, parse, request
 import websocket
 import yaml
 
+from agentic.tools.comfy_diagnostics import describe_rejection, validate_workflow_graph
+
 
 class ComfyUploadResult(NamedTuple):
     comfy_path: str
@@ -101,9 +103,8 @@ class AgenticComfyCommunicator:
             with request.urlopen(req, timeout=self.submit_timeout) as response:
                 return json.loads(response.read())
         except error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace").strip()
-            detail = body[:4000] if body else "no response body"
-            raise RuntimeError(f"ComfyUI /prompt HTTP {exc.code}: {detail}") from exc
+            body = exc.read().decode("utf-8", "replace")
+            raise RuntimeError(describe_rejection(exc.code, body)) from exc
         except (TimeoutError, socket.timeout) as exc:
             raise RuntimeError(
                 f"ComfyUI did not acknowledge /prompt within {self.submit_timeout:g} seconds"
@@ -598,6 +599,9 @@ class AgenticComfyCommunicator:
                 all_nodes,
                 update,
             )
+        broken_links = validate_workflow_graph(workflow_copy)
+        if broken_links:
+            raise ValueError("Workflow has broken links: " + "; ".join(broken_links))
         return workflow_copy
 
     def _apply_workflow_update(
