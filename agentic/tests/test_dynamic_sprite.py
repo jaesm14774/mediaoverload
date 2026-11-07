@@ -408,7 +408,7 @@ def test_game_sprite_plan_has_no_human_review_or_fixed_action_nodes() -> None:
     assert package_node.inputs["video_node"] == "sprite-motion-video"
 
 
-def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
+def test_game_sprite_h3_render_leaves_the_distilled_schedule_to_the_route(tmp_path: Path) -> None:
     """User Given a sprite video node When it renders Then the configured sampling contract reaches the media tool."""
 
     calls: list[tuple[str, dict[str, object]]] = []
@@ -435,7 +435,6 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
                 "width": 608,
                 "height": 352,
                 "length": 124,
-                "steps": 16,
             },
         ),
         state=RunState(goal={}, metadata={}, node_outputs={}),
@@ -448,7 +447,7 @@ def test_game_sprite_h3_render_forwards_sampling_steps(tmp_path: Path) -> None:
     tool_name, payload = calls[0]
     assert tool_name == "comfy.render_h3"
     assert payload["length"] == 124
-    assert payload["steps"] == 16
+    assert "steps" not in payload and "model_profile" not in payload
 
 
 def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
@@ -485,7 +484,6 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
     assert video_width * video_height < canvas_width * canvas_height
     # The clip keeps the keyframe's shape; H3 stretches a mismatched first frame.
     assert abs(video_width / video_height - canvas_width / canvas_height) < 0.1
-    assert payload["constraints"]["sprite_h3_model_profile"] == "q4"
     assert payload["constraints"]["strategy_context"]["reference_pack_version"] == "game_sprite_action_references_v1"
     assert len(payload["constraints"]["strategy_context"]["creative_inspiration"]) == 25
 

@@ -39,10 +39,11 @@ IMAGE_WORKFLOW_CANDIDATES = (
 )
 CANVAS = {"width": 608, "height": 352, "frame_rate": 24}
 MODE_PROFILES: dict[H3Mode, dict[str, Any]] = {
-    H3Mode.T2VA: {"length": 362, "steps": 16, "duration": 362 / 24},
-    H3Mode.I2VA: {"length": 124, "steps": 20, "duration": 124 / 24},
-    H3Mode.FL2VA: {"length": 362, "steps": 16, "duration": 362 / 24},
-    H3Mode.L2VA: {"length": 362, "steps": 16, "duration": 362 / 24},
+    H3Mode.T2VA: {"length": 362, "duration": 362 / 24},
+    H3Mode.I2VA: {"length": 124, "duration": 124 / 24},
+    H3Mode.FL2VA: {"length": 362, "duration": 362 / 24},
+    H3Mode.L2VA: {"length": 362, "duration": 362 / 24},
+    # Only Ref2VA still runs the step-configurable Q4 GGUF recipe; the other modes are the fixed 8-step FastH3 route.
     H3Mode.REF2VA: {"length": 124, "steps": 20, "duration": 124 / 24},
 }
 
@@ -106,11 +107,11 @@ def _render_video(tools: ToolRegistry, *, mode: H3Mode, run_dir: Path, payload: 
         "width": CANVAS["width"],
         "height": CANVAS["height"],
         "length": payload["length"],
-        "steps": payload["steps"],
         "video_count": 1,
-        "model_profile": "q4",
     }
-    request.update({key: value for key, value in payload.items() if key not in {"prompt", "length", "steps"} and value is not None})
+    if mode is H3Mode.REF2VA:
+        request["model_profile"] = "q4"
+    request.update({key: value for key, value in payload.items() if key not in {"prompt", "length"} and value is not None})
     result = tools.call(tool_name, request)
     return _first_saved(result, (".mp4", ".webm", ".mkv", ".mov")), result
 
@@ -174,7 +175,7 @@ def _run_mode(
             tools,
             mode=mode,
             run_dir=run_dir,
-            payload={"prompt": prompt, "length": profile["length"], "steps": profile["steps"]},
+            payload={"prompt": prompt, "length": profile["length"]},
         )
     elif mode is H3Mode.I2VA:
         opening = _render_image(
@@ -193,7 +194,6 @@ def _run_mode(
                 "use_first_frame": True,
                 "use_last_frame": False,
                 "length": profile["length"],
-                "steps": profile["steps"],
             },
         )
         result["generated_opening_image"] = opening
@@ -221,7 +221,6 @@ def _run_mode(
                 "use_first_frame": True,
                 "use_last_frame": True,
                 "length": profile["length"],
-                "steps": profile["steps"],
             },
         )
         result.update({"generated_opening_image": opening, "generated_landing_image": landing})
@@ -242,7 +241,6 @@ def _run_mode(
                 "use_first_frame": False,
                 "use_last_frame": True,
                 "length": profile["length"],
-                "steps": profile["steps"],
             },
         )
         result["generated_landing_image"] = landing
@@ -263,7 +261,6 @@ def _run_mode(
                 "use_first_frame": True,
                 "use_last_frame": False,
                 "length": MODE_PROFILES[H3Mode.I2VA]["length"],
-                "steps": MODE_PROFILES[H3Mode.I2VA]["steps"],
             },
         )
         manifest = [

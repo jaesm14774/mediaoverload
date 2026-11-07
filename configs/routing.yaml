@@ -953,19 +953,19 @@ routing:
         tradeoffs:
           - "需要 Anima 資產，Krea2 是目前已完成本機 live 驗證的首選。"
       minimax_h3_fl2va:
-        summary: "MiniMax H3 低 VRAM 15 秒影像條件 workflow；ComfyUI 依策略綁定首幀、尾幀或兩者。"
+        summary: "MiniMax H3 15 秒影像條件 workflow（FastH3 8 步蒸餾）；ComfyUI 依策略綁定首幀、尾幀或兩者。"
         strengths:
           - "MiniMaxH3ImageToVideo 提供 first_frame 與 last_frame 輸入，可承載 I2VA、FL2VA 與 L2VA 三種契約。"
-          - "使用 Q4 GGUF、ComfyUI 動態顯存載入與 H3 audio VAE，適合目前的 balanced-lowvram profile。"
+          - "使用 FastH3 8 步蒸餾（INT8 diffusion、NVFP4 text encoder、VSA 稀疏注意力），本機 RTX 4060 8GB 約 5 秒 608x352 片段 72 秒、15 秒片段約 277 秒；品質與 16 步 Q4 GGUF 在盲測中互有勝負。"
           - "輸出 MP4 與 H3 原生 stereo audio。"
         tradeoffs:
           - "它不是純 T2V；至少需要由上游產生或審核可用的 frame condition。"
-          - "15 秒與低 VRAM 設定是固定取向，長篇內容應改用 serial_video。"
+          - "步數固定為 8（蒸餾模型只在訓練步數有效），不接受自訂步數；長篇內容應改用 serial_video。"
       minimax_h3_l2va:
         summary: "ComfyUI H3 Last Frame 路線，只有尾幀，沒有固定首幀。"
         strengths:
           - "只綁定 last_frame，讓影片落在指定的結尾畫面。"
-          - "Q4 GGUF、動態顯存載入與 H3 原生音訊。"
+          - "FastH3 8 步蒸餾與 H3 原生音訊，只綁定尾幀。"
         tradeoffs:
           - "必須提供可讀取的尾幀圖片；角色開場構圖由模型生成。"
       minimax_h3_ref2va:

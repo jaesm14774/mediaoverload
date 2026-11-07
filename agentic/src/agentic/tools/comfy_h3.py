@@ -17,7 +17,15 @@ from typing import Any
 
 from PIL import Image
 
-from agentic.assets.minimax_h3 import DIFFUSION_MODELS, TEXT_ENCODERS, h3_requirements
+from agentic.assets.minimax_h3 import (
+    FASTH3_DIFFUSION,
+    FASTH3_STEPS,
+    FASTH3_TEXT_ENCODER,
+    REF2VA_DIFFUSION,
+    REF2VA_TEXT_ENCODERS,
+    h3_requirements,
+    uses_fasth3,
+)
 from agentic.assets.registry import AssetRegistry, AssetRequirement, WorkflowManifest
 from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
 from agentic.minimax_prompting import require_h3_prompt
@@ -106,28 +114,42 @@ def build_h3_workflow(template: dict[str, Any], mode: str | H3Mode,
     validate_h3_payload(mode, payload)
     width, height = int(payload.get("width") or 608), int(payload.get("height") or 352)
     length = int(payload.get("length") or 124)
-    steps = int(payload.get("steps") or 16)
     fps = int(payload.get("fps") or payload.get("frame_rate") or 24)
     if not (256 <= width <= 1344 and 256 <= height <= 1344):
         raise ValueError("H3 canvas dimensions must be between 256 and 1344")
+    graph = json.loads(json.dumps(template))
+    if uses_fasth3(mode.value):
+        # The distilled checkpoint is trained for exactly FASTH3_STEPS and has no GGUF text-encoder profiles.
+        if payload.get("steps") not in (None, FASTH3_STEPS) or payload.get("model_profile"):
+            raise ValueError(
+                f"The distilled H3 route runs exactly {FASTH3_STEPS} steps with a fixed text encoder; "
+                "steps and model_profile apply only to Ref2VA"
+            )
+        steps, profile = FASTH3_STEPS, None
+        requirements = h3_requirements(mode.value)
+        graph["1"]["inputs"]["unet_name"] = FASTH3_DIFFUSION[0]
+        graph["2"]["inputs"]["clip_name"] = FASTH3_TEXT_ENCODER[0]
+        graph["7"]["inputs"]["steps"] = steps
+    else:
+        steps, profile = int(payload.get("steps") or 16), str(payload.get("model_profile") or "q4")
+        requirements = h3_requirements(mode.value, profile)  # rejects an unknown profile
+        graph["1"]["inputs"]["unet_name"] = REF2VA_DIFFUSION[0]
+        graph["2"]["inputs"]["clip_name"] = REF2VA_TEXT_ENCODERS[profile][0]
     if not (1 <= length <= 362 and 1 <= steps <= 32 and fps == 24):
         raise ValueError("H3 supports 1-362 delivered frames, 1-32 steps and 24 fps in this workflow")
-    profile = str(payload.get("model_profile") or "q4")
-    requirements = h3_requirements(mode.value, profile)
-    graph = json.loads(json.dumps(template))
-    graph["1"]["inputs"]["unet_name"] = DIFFUSION_MODELS["ref2va" if mode is H3Mode.REF2VA else "fl2va"][0]
-    graph["2"]["inputs"]["clip_name"] = TEXT_ENCODERS[profile][0]
     inputs = graph["5"]["inputs"]
     inputs.update(prompt=prompt, width=width // 32 * 32, height=height // 32 * 32,
                   length=max(107, math.ceil((length - 5) / 17) * 17 + 5))
-    shift = float(graph["6"]["inputs"]["shift_video"])
-    # The model's shifted flow schedule is supplied to Comfy's ManualSigmas node.
-    sigmas = [shift * t / (1 + (shift - 1) * t) for t in ((steps - i) / steps for i in range(steps + 1))]
-    graph["7"]["inputs"]["sigmas"] = ", ".join(format(value, ".12g") for value in sigmas)
+    if not uses_fasth3(mode.value):
+        shift = float(graph["6"]["inputs"]["shift_video"])
+        # The model's shifted flow schedule is supplied to Comfy's ManualSigmas node.
+        sigmas = [shift * t / (1 + (shift - 1) * t) for t in ((steps - i) / steps for i in range(steps + 1))]
+        graph["7"]["inputs"]["sigmas"] = ", ".join(format(value, ".12g") for value in sigmas)
     graph["9"]["inputs"]["noise_seed"] = int(payload.get("seed", random.randint(1, 999999999)))
     graph["14"]["inputs"]["fps"] = float(fps)
-    evidence: dict[str, Any] = {"h3_mode": mode.value, "model_profile": profile, "required_assets": requirements,
-                               "conditioning_files": [], "delivery": {"width": width, "height": height, "length": length, "fps": fps}}
+    evidence: dict[str, Any] = {"h3_mode": mode.value, "model_profile": profile, "steps": steps,
+                               "required_assets": requirements, "conditioning_files": [],
+                               "delivery": {"width": width, "height": height, "length": length, "fps": fps}}
     next_id = 30
 
     def bind_file(path: str, role: str, input_key: str, *, video: bool = False) -> None:

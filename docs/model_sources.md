@@ -27,6 +27,15 @@
 
 以上資產供 `flux3_image_klein_img2img.json` 使用；工作流包含 prompt upsampler。該 Hugging Face 儲存庫需要符合其存取條件，使用與商業輸出須遵守 FLUX Kommunity License v1；詳見 [`workflow_config.yaml`](../configs/workflow/workflow_config.yaml)。FLUX Klein 產生靜態圖片，影片仍由 H3 工作流生成。
 
+## MiniMax FastH3（T2VA、I2VA、FL2VA、L2VA）
+
+| 檔案 | 目的地 | 來源 |
+| --- | --- | --- |
+| `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors` | `ComfyUI/models/diffusion_models` | [Hugging Face](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy) `diffusion_models/` |
+| `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | `ComfyUI/models/text_encoders` | [Hugging Face](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy) `text_encoders/` |
+
+權重受 MiniMax H3 Community License 約束（部分地區不得使用），商業使用前請先閱讀其條款。
+
 ## 尚未列出公開來源的資產
 
-MiniMax H3 的必要檔名與大小目前由 `agentic/src/agentic/assets/minimax_h3.py` 宣告，該清單沒有公開下載網址。取得並確認可公開引用的上游頁面後，再補入本頁；不要自行推測或拼造模型 URL。
+Ref2VA 的 GGUF 權重與 H3 VAE 的必要檔名與大小目前由 `agentic/src/agentic/assets/minimax_h3.py` 宣告，該清單沒有公開下載網址。取得並確認可公開引用的上游頁面後，再補入本頁；不要自行推測或拼造模型 URL。

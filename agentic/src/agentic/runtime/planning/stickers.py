@@ -128,7 +128,6 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
     video_length = int(
         goal.constraints.get("sprite_video_length") or round(goal.duration_seconds * 24)
     )
-    video_steps = int(goal.constraints.get("sprite_video_steps") or 16)
     cell_width = context.constraint_int(goal, "sprite_cell_width", 128)
     cell_height = context.constraint_int(goal, "sprite_cell_height", 128)
     nodes = [
@@ -187,10 +186,6 @@ def build_game_sprite(context: PlanningContext, goal: GoalRequest) -> ExecutionP
                 "width": video_width,
                 "height": video_height,
                 "length": video_length,
-                "steps": video_steps,
-                "model_profile": str(
-                    goal.constraints.get("sprite_h3_model_profile") or "q2"
-                ),
                 "video_count": 1,
             },
             depends_on=[

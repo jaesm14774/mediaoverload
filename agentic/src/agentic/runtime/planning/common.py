@@ -95,7 +95,7 @@ class PlanningContext:
 
     @staticmethod
     def native_h3_render_config(
-        goal: GoalRequest, manifest: WorkflowManifest, *, default_steps: int = 16
+        goal: GoalRequest, manifest: WorkflowManifest
     ) -> dict[str, int]:
         defaults = dict(manifest.recommended_defaults or {})
         minimum_length = round(MIN_VIDEO_DURATION_SECONDS * 24)
@@ -114,10 +114,6 @@ class PlanningContext:
                 goal.constraints.get("canvas_height") or defaults.get("height", 352)
             ),
             "length": max(minimum_length, configured_length),
-            "steps": int(
-                goal.constraints.get("native_h3_steps")
-                or defaults.get("steps", default_steps)
-            ),
             "video_count": PlanningContext.constraint_int(goal, "video_count", 1),
         }
 

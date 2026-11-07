@@ -205,7 +205,6 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
                     "height": 360,
                     "video_count": 1,
                     "length": 144,
-                    "steps": 16,
                 },
             )
 
@@ -220,7 +219,9 @@ class ComfyWorkflowSkillsTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["height"], 360)
         self.assertEqual(calls[0][1]["video_count"], 1)
         self.assertEqual(calls[0][1]["length"], 144)
-        self.assertEqual(calls[0][1]["steps"], 16)
+        # The distilled H3 route owns its sampling schedule, so the request never carries one.
+        self.assertNotIn("steps", calls[0][1])
+        self.assertNotIn("model_profile", calls[0][1])
 
     def test_optional_upscale_failure_keeps_source_image_for_downstream_video(self) -> None:
         tools = ToolRegistry()

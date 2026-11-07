@@ -327,19 +327,21 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             "height": render_height,
             "length": render_length,
             "target_duration_seconds": segment_duration_seconds,
-            "steps": context.longvideo_int(
+        }
+        if recipe_name == "reference_bundle":
+            # Only Ref2VA still runs the step-configurable GGUF recipe; the other H3 modes are fixed 8-step.
+            render_inputs["steps"] = context.longvideo_int(
                 goal,
                 "longvideo_steps",
                 int(goal.constraints.get("longvideo_h3_steps") or 16),
                 100,
-            ),
-            "model_profile": str(
+            )
+            render_inputs["model_profile"] = str(
                 goal.constraints.get("longvideo_model_profile")
                 or goal.constraints.get("native_h3_model_profile")
                 or goal.constraints.get("longvideo_h3_model_profile")
                 or "q2"
-            ),
-        }
+            )
         nodes.append(
             ExecutionNode(
                 node_id=video_node,

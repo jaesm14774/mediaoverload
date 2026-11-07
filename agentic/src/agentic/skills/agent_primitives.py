@@ -672,11 +672,6 @@ class AgentMediaSkills:
             "workflow_name": workflow_name,
             "run_dir": str(self._build_run_dir(context.plan.goal.prompt, "i2v")),
             "prompt": prompt,
-            "model_profile": str(
-                context.node.inputs.get("model_profile")
-                or context.plan.goal.constraints.get("native_h3_model_profile")
-                or "q4"
-            ),
             "video_count": int(
                 context.node.inputs.get("video_count")
                 or context.plan.goal.constraints.get("video_count")
@@ -699,14 +694,10 @@ class AgentMediaSkills:
                     "width": int(constraints.get("longvideo_h3_width", 512)),
                     "height": int(constraints.get("longvideo_h3_height", 288)),
                     "length": int(constraints.get("longvideo_h3_length", 124)),
-                    "steps": int(constraints.get("longvideo_h3_steps", 16)),
-                    "model_profile": str(constraints.get("longvideo_h3_model_profile", "q4")),
                 }
             )
         elif workflow_name.startswith("minimax_h3_") and context.node.inputs.get("length") is not None:
             payload["length"] = int(context.node.inputs["length"])
-        if workflow_name.startswith("minimax_h3_") and context.node.inputs.get("steps") is not None:
-            payload["steps"] = int(context.node.inputs["steps"])
         result = self.tools.call("comfy.render_h3", payload)
         return SkillResult(
             status="success",

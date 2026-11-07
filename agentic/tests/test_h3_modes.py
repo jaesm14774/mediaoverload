@@ -57,7 +57,7 @@ class H3ModePlanTests(unittest.TestCase):
         self.assertEqual(render.inputs["width"], plan.goal.constraints["canvas_width"])
         self.assertEqual(render.inputs["height"], plan.goal.constraints["canvas_height"])
         self.assertEqual(render.inputs["length"], 362)
-        self.assertEqual(render.inputs["model_profile"], "q4")
+        self.assertNotIn("model_profile", render.inputs)  # the distilled route has no profile choice
         self.assertEqual(plan.metadata["native_h3"]["backend"], "comfyui")
         pacing = next(node for node in plan.nodes if node.node_id == "native-h3-editorial-pacing")
         self.assertEqual(pacing.skill_name, "media.video.editorial_pacing")
