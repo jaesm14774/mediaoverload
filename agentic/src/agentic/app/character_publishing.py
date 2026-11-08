@@ -126,22 +126,11 @@ def _publish_review_scope(media_paths: list[str]) -> str:
     return "final_media"
 
 
-def _publish_selection_limit(
-    media_paths: list[str],
-    configured_limit: Any,
-    *,
-    source_generation_type: str = "",
-) -> int:
-    """Resolve the publish-review cap without splitting a story-card carousel."""
+def _publish_selection_limit(media_paths: list[str]) -> int:
+    """Resolve the publish-review cap: one video, or whatever images the user keeps."""
     if _publish_review_scope(media_paths) == "final_video":
         return 1
-    if str(source_generation_type).strip().lower() == "story_card":
-        return len(media_paths)
-    try:
-        limit = int(configured_limit or 0)
-    except (TypeError, ValueError):
-        limit = 0
-    return max(1, min(len(media_paths), limit or len(media_paths)))
+    return max(1, len(media_paths))
 
 
 def _review_stage_status(run_result: dict[str, Any]) -> str:

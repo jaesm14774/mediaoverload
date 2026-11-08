@@ -285,25 +285,23 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
         self.assertEqual(paths, [r"C:\retry-paced.mp4"])
 
-    def test_publish_review_keeps_all_story_card_pages_as_one_carousel(self) -> None:
-        page_paths = [rf"C:\runs\story_card_{index:02d}.png" for index in range(1, 6)]
+    def test_user_selects_several_final_images_when_publish_review_resolves_then_every_candidate_may_be_published(
+        self,
+    ) -> None:
+        """User Given six rendered image candidates When the publish review resolves its selection cap Then the cap never truncates the images the user may pick."""
+        image_paths = [rf"C:\runs\candidate_{index:02d}.png" for index in range(1, 7)]
 
-        self.assertEqual(
-            _publish_selection_limit(
-                page_paths,
-                configured_limit=1,
-                source_generation_type="story_card",
-            ),
-            len(page_paths),
+        self.assertGreaterEqual(
+            _publish_selection_limit(image_paths), len(image_paths)
         )
-        self.assertEqual(
-            _publish_selection_limit(
-                page_paths,
-                configured_limit=1,
-                source_generation_type="text2img",
-            ),
-            1,
-        )
+
+    def test_user_reviews_final_video_when_publish_review_resolves_then_exactly_one_video_is_published(
+        self,
+    ) -> None:
+        """User Given several rendered video candidates When the publish review resolves its selection cap Then only one video can be published."""
+        video_paths = [rf"C:\runs\candidate_{index:02d}.mp4" for index in range(1, 4)]
+
+        self.assertEqual(_publish_selection_limit(video_paths), 1)
 
     def test_no_review_text2image2video_uses_one_keyframe_without_pre_video_gate(self) -> None:
         """User Given a text-to-image-to-video request skips review When a goal payload is built Then it schedules one keyframe and no pre-video review gate."""
