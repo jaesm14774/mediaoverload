@@ -455,6 +455,61 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(result.outputs["review_fallback_used"])
         self.assertIn("timed out", result.outputs["fallback_reason"])
 
+    def test_user_misses_final_publish_review_when_discord_times_out_then_only_the_top_image_is_published(self) -> None:
+        """User Given six publishable images and a failure fallback When the final publish review times out without a decision Then a single top-ranked image is published, not the whole set."""
+        tool_registry = ToolRegistry()
+        skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())
+        candidate_paths = [f"C:\\final_{index}.png" for index in range(1, 7)]
+        plan = ExecutionPlan(
+            goal=GoalRequest(
+                prompt="publish the best Kirby image",
+                media_type="text2img",
+                style="anime",
+                constraints={"pre_video_review_failure_policy": "fallback_to_top"},
+            ),
+            workflow_name="publish_review_v1",
+            nodes=[],
+        )
+        node = ExecutionNode(
+            node_id="review-select",
+            skill_name="review.assets.select",
+            depends_on=["ingest-media"],
+            inputs={
+                "limit": len(candidate_paths),
+                "review_all_candidates": True,
+                "review_scope": "final_media",
+                "require_human_review": True,
+            },
+        )
+        state = RunState(
+            goal={"prompt": "publish the best Kirby image"},
+            metadata={},
+            node_outputs={"ingest-media": {"media_paths": candidate_paths}},
+        )
+
+        with patch.object(
+            skills.discord_review,
+            "review_candidates",
+            return_value=type(
+                "_Decision",
+                (),
+                {
+                    "review_mode": "discord",
+                    "status": "failed",
+                    "selected_paths": [],
+                    "reviewer": "",
+                    "session_id": "sess-final-timeout",
+                    "session_path": "C:\\session-final-timeout.json",
+                    "edited_text": "",
+                    "fallback_reason": "discord review timed out before any decision was received",
+                },
+            )(),
+        ):
+            result = skills.select_best_assets(SkillContext(plan=plan, node=node, state=state))
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(len(result.outputs["selected_assets"]), 1)
+
     def test_first_frame_review_sends_all_six_candidates_and_never_auto_selects(self) -> None:
         tool_registry = ToolRegistry()
         skills = AgentSocialSkills(tool_registry, self.project_root / ".tmp-tests", prompt_engine=HardContractPromptEngine())

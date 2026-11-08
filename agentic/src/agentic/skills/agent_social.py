@@ -922,7 +922,11 @@ class AgentSocialSkills:
             .strip()
             .lower()
         )
-        fallback_selected = candidates.ranked[: policy.limit]
+        # A missed final publish review must never widen into publishing the
+        # whole candidate set: fall back to the single top-ranked media.
+        fallback_selected = candidates.ranked[
+            : 1 if policy.final_media_review else policy.limit
+        ]
         if failure_policy == "fallback_to_top" and fallback_selected:
             return SkillResult(
                 status="success",

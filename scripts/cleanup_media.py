@@ -1,8 +1,14 @@
-"""Preview or remove media belonging to terminal serial video series."""
+"""Preview or remove local media that is no longer needed.
+
+Covers terminal serial video series and every other strategy whose output
+folder records a fully published ``publish_manifest.json``.
+"""
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+import json
 import os
 from pathlib import Path
 import re
@@ -44,15 +50,15 @@ MEDIA_SUFFIXES = {
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "List local media for completed/discarded serial video series. "
-            "Pass --delete to remove the listed files."
+            "List local media for completed/discarded serial video series and "
+            "for fully published output folders. Pass --delete to remove the listed files."
         )
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=PROJECT_ROOT / "agentic" / "output",
-        help="Media root to inspect (default: agentic/output).",
+        action="append",
+        help="Media root to inspect; repeatable (default: output and agentic/output).",
     )
     parser.add_argument(
         "--delete",
@@ -70,6 +76,8 @@ def _media_root(value: Path) -> Path:
         raise ValueError(f"Media root must stay inside the project: {root}") from exc
     if root == PROJECT_ROOT:
         raise ValueError("Media root cannot be the project root itself.")
+    if SERIAL_OUTPUT_DIRECTORIES.intersection(root.relative_to(PROJECT_ROOT).parts):
+        raise ValueError(f"Media root cannot be inside a serial-owned folder: {root}")
     return root
 
 
@@ -189,9 +197,19 @@ def _series_artifact_media_files(
             return set()
     except (OSError, RuntimeError, ValueError):
         return set()
-    if not resolved_root.is_dir():
-        return set()
-    if _has_mounted_path_or_ancestor(resolved_root, media_root):
+    return _scan_media_files(resolved_root, media_root)
+
+
+def _scan_media_files(
+    resolved_root: Path,
+    media_root: Path,
+    *,
+    modified_until: float | None = None,
+) -> set[Path]:
+    """Media files under ``resolved_root``, optionally only those not modified after a time."""
+    if not resolved_root.is_dir() or _has_mounted_path_or_ancestor(
+        resolved_root, media_root
+    ):
         return set()
 
     files: set[Path] = set()
@@ -228,7 +246,13 @@ def _series_artifact_media_files(
                         continue
                     try:
                         resolved.relative_to(resolved_root)
-                    except ValueError:
+                        if modified_until is not None:
+                            # copy2 keeps the source mtime, so a fresh copy of an old
+                            # asset is only recognised as new by its ctime.
+                            stat = resolved.stat()
+                            if max(stat.st_mtime, stat.st_ctime) > modified_until:
+                                continue
+                    except (OSError, ValueError):
                         continue
                     files.add(resolved)
         except OSError:
@@ -247,6 +271,55 @@ def _database_media_path(raw_path: Any, media_root: Path) -> Path | None:
     if resolved is None or _has_mounted_path_or_ancestor(resolved, media_root):
         return None
     return resolved
+
+
+# Serial video owns these folders; their cleanup is decided by the database.
+SERIAL_OUTPUT_DIRECTORIES = {"serial_series", "serial_publication_retries"}
+
+
+def _published_output_media(media_root: Path) -> tuple[dict[str, set[Path]], dict[str, str]]:
+    """Media of non-serial output folders whose latest publish is fully public.
+
+    Each character folder keeps one ``publish_manifest.json`` for its latest
+    publish. When that manifest reports ``publication_state == "published"``,
+    every media file in the folder written up to that moment is no longer needed,
+    including older runs that were never published. Files created or changed
+    afterwards belong to a newer run and are kept.
+    """
+    paths_by_folder: dict[str, set[Path]] = {}
+    preserved: dict[str, str] = {}
+    try:
+        folders = sorted(media_root.iterdir())
+    except OSError:
+        return paths_by_folder, preserved
+    for folder in folders:
+        manifest_path = folder / "publish_manifest.json"
+        if (
+            folder.is_symlink()
+            or folder.name in SERIAL_OUTPUT_DIRECTORIES
+            or not manifest_path.is_file()
+        ):
+            continue
+        label = _format_path(folder)
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            state = str(manifest.get("publication_state") or "")
+            published_at = datetime.fromisoformat(str(manifest["created_at"])).timestamp()
+        except (OSError, OverflowError, ValueError, KeyError, AttributeError):
+            preserved[label] = "publish_manifest.json is unreadable"
+            continue
+        if state != "published":
+            preserved[label] = f"latest publication_state is {state or 'unknown'}"
+            continue
+        try:
+            resolved_folder = folder.resolve(strict=True)
+            resolved_folder.relative_to(media_root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        paths_by_folder[label] = _scan_media_files(
+            resolved_folder, media_root, modified_until=published_at
+        )
+    return paths_by_folder, preserved
 
 
 def _is_completed_series_retryable(
@@ -272,7 +345,7 @@ def _is_completed_series_retryable(
 def _collect_media(
     connection: pymysql.connections.Connection,
     media_root: Path,
-) -> tuple[dict[str, set[Path]], dict[str, str]]:
+) -> tuple[dict[str, set[Path]], dict[str, str], set[Path]]:
     _mount_points()
     with connection.cursor() as cursor:
         cursor.execute("SELECT series_id, lifecycle_status FROM series ORDER BY series_id")
@@ -388,7 +461,7 @@ def _collect_media(
     for series_id in eligible:
         paths_by_series[series_id].difference_update(protected_paths)
 
-    return paths_by_series, preserved
+    return paths_by_series, preserved, protected_paths
 
 
 def _format_path(path: Path) -> str:
@@ -398,20 +471,51 @@ def _format_path(path: Path) -> str:
         return str(path)
 
 
+def _collect_all(
+    roots: list[Path],
+) -> tuple[dict[str, set[Path]], dict[str, str], dict[Path, Path]]:
+    """Candidates per group, preserved reasons, and the media root owning each file."""
+    groups: dict[str, set[Path]] = {}
+    preserved: dict[str, str] = {}
+    protected: set[Path] = set()
+    connection = _database_connection()
+    try:
+        for root in roots:
+            series_paths, series_preserved, series_protected = _collect_media(connection, root)
+            for series_id, paths in series_paths.items():
+                groups.setdefault(f"serial {series_id}", set()).update(paths)
+            preserved.update({f"serial {key}": value for key, value in series_preserved.items()})
+            protected.update(series_protected)
+    finally:
+        connection.close()
+    for root in roots:
+        published_paths, published_preserved = _published_output_media(root)
+        for folder, paths in published_paths.items():
+            groups.setdefault(f"published {folder}", set()).update(paths)
+        preserved.update({f"published {key}": value for key, value in published_preserved.items()})
+
+    owners: dict[Path, Path] = {}
+    for paths in groups.values():
+        paths.difference_update(protected)
+        for path in paths:
+            owners[path] = next(root for root in roots if path.is_relative_to(root))
+    return groups, preserved, owners
+
+
 def main() -> int:
     args = _arguments()
     try:
-        media_root = _media_root(args.output_dir)
-        connection = _database_connection()
-        try:
-            paths_by_series, preserved = _collect_media(connection, media_root)
-        finally:
-            connection.close()
+        raw_roots = args.output_dir or [
+            PROJECT_ROOT / "output",
+            PROJECT_ROOT / "agentic" / "output",
+        ]
+        roots = [root for root in map(_media_root, raw_roots) if root.is_dir()]
+        paths_by_series, preserved, owners = _collect_all(roots)
     except (OSError, ValueError, pymysql.MySQLError) as exc:
-        print(f"Serial video cleanup could not continue: {exc}", file=sys.stderr)
+        print(f"Media cleanup could not continue: {exc}", file=sys.stderr)
         return 1
 
-    unique_paths = set().union(*paths_by_series.values()) if paths_by_series else set()
+    unique_paths = set(owners)
     total_bytes = 0
     for path in unique_paths:
         try:
@@ -437,6 +541,7 @@ def main() -> int:
     deleted_count = 0
     for path in sorted(unique_paths):
         try:
+            media_root = owners[path]
             resolved = _inside_root(path, media_root)
             if (
                 resolved is None

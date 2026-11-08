@@ -359,13 +359,7 @@ def run_character_workflow(
                     "output_dir": str(
                         Path(payload["resolved_output_dir"]) / "publish_ready"
                     ),
-                    "selection_limit": _publish_selection_limit(
-                        media_paths,
-                        payload["constraints"].get("review_selection_limit"),
-                        source_generation_type=str(
-                            payload.get("source_generation_type") or ""
-                        ),
-                    ),
+                    "selection_limit": _publish_selection_limit(media_paths),
                     "review_notes": review_notes,
                     # Every publishable media artifact must be explicitly
                     # approved in Discord before any platform dispatch.

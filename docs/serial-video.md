@@ -202,12 +202,14 @@ serial_video_mysql_password=<your-generated-password>
 可手動預覽並清理已標記為 `completed` 或 `discarded` 的系列媒體。從 repo 根目錄執行：
 
 ~~~powershell
-python scripts/cleanup_serial_video_media.py
+python scripts/cleanup_media.py
 ~~~
 
 預設只列出影片、片段、影格、參考圖片和音訊檔，不會刪除。確認清單後加上 `--delete` 才會刪除；故事、角色卡、分鏡等文字檔和 MySQL 紀錄會保留。預設媒體根目錄是 serial CLI 的 `agentic/output/`，自訂輸出目錄可用 `--output-dir` 指定，但必須位於 repo 內。
 
 `discarded` 系列可直接清理。`completed` 系列若仍有可恢復的 blocked 集數，或 ready 集數沒有每個已記錄平台的成功發布 receipt，腳本會保留整個系列的媒體，讓發布重試仍可使用原檔。`active` 系列永遠不會列入清理；若結束系列媒體也被其他系列的資料庫紀錄引用，也會保留該檔。
+
+同一支腳本也會清理其他策略的已發布輸出：根目錄（預設 `output/` 與 `agentic/output/`，可重複使用 `--output-dir`）下，若某個角色資料夾的 `publish_manifest.json` 顯示 `publication_state` 為 `published`，該資料夾內建立與修改時間都不晚於發布時間的媒體檔（含 `publish_ready/`，也包含發布前就產生但從未發布的舊輪次）都會列入清單；發布之後才產生的新一輪檔案、文字檔與 manifest 本身會保留。`awaiting_user_action`、`partially_published` 等未完全公開的狀態一律保留，`serial_series/` 與 `serial_publication_retries/` 仍由上述資料庫規則決定。
 
 掛載點檢查支援 Windows 和 Linux；其他作業系統會安全停止清理，避免把未辨識的掛載樹當成系列檔案刪除。
 
