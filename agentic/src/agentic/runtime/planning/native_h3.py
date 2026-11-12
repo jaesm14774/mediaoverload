@@ -18,6 +18,9 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
     so scheduled runs can swap the storyboard or topic without introducing a
     second execution mechanism.
     """
+    # A loop story conditions H3 on one approved keyframe as both the first and
+    # the last frame, so the clip ends exactly where it began.
+    is_loop = goal.media_type == "native_h3_loop_story"
     image_manifest = context.manifest_from_goal_constraints(
         goal,
         *context.DEFAULT_IMAGE_WORKFLOWS,
@@ -33,6 +36,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         (
             "minimax_h3_fl2va"
             if goal.media_type == "native_h3_fl2va_story"
+            or is_loop
             or goal.constraints.get("native_h3_use_last_frame")
             else "minimax_h3_i2va"
         ),
@@ -64,9 +68,13 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
     require_human_review = bool(
         goal.constraints.get("require_human_review", False)
     ) or (pre_video_review and pre_video_requires_human)
-    use_last_frame = goal.media_type == "native_h3_fl2va_story" or bool(
-        goal.constraints.get("native_h3_use_last_frame", False)
+    use_last_frame = (
+        goal.media_type == "native_h3_fl2va_story"
+        or is_loop
+        or bool(goal.constraints.get("native_h3_use_last_frame", False))
     )
+    # Only a distinct ending needs a refined second frame; a loop reuses the opening.
+    needs_ending_keyframe = use_last_frame and not is_loop
     refine_manifest = (
         context.manifest_from_goal_constraints(
             goal,
@@ -74,7 +82,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             constraint_keys=("refine_workflow_name", "identity_refine_workflow_name"),
             allowed_media_types={"image_refine"},
         )
-        if use_last_frame
+        if needs_ending_keyframe
         else None
     )
     if (
@@ -117,7 +125,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
                 "style": goal.style,
                 "render_mode": (
                     "first_last_frame_to_video"
-                    if use_last_frame
+                    if needs_ending_keyframe
                     else "image_to_video"
                 ),
             },
@@ -217,8 +225,8 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             )
         )
         opening_source_node = opening_review_node
-    ending_source_node = ""
-    if use_last_frame:
+    ending_source_node = opening_source_node if is_loop else ""
+    if needs_ending_keyframe:
         assert refine_manifest is not None
         ending_dependencies = [
             opening_source_node,
@@ -268,7 +276,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             ending_source_node = "native-ending-review"
 
     source_depends_on = [opening_source_node]
-    if ending_source_node:
+    if ending_source_node and ending_source_node != opening_source_node:
         source_depends_on.append(ending_source_node)
     source_inputs = {
         "character": str(goal.constraints.get("character") or ""),
@@ -291,7 +299,7 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         "length": length,
         "video_count": video_count,
         "use_last_frame": use_last_frame,
-        "h3_mode": "fl2va" if goal.media_type == "native_h3_fl2va_story" else "i2va",
+        "h3_mode": "fl2va" if use_last_frame else "i2va",
     }
     nodes.extend(
         [
@@ -333,8 +341,8 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         ]
     )
     metadata = {
-        "recipe": "native_h3_fl2va_story"
-        if goal.media_type == "native_h3_fl2va_story"
+        "recipe": goal.media_type
+        if goal.media_type in {"native_h3_fl2va_story", "native_h3_loop_story"}
         else "native_h3_story",
         "storyboard_path": storyboard_path,
         "selected_workflow": video_manifest.name,
@@ -356,7 +364,13 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
             "require_human_review": require_human_review,
             "stage_probe_auto_select": stage_probe_auto_select,
             "use_last_frame": use_last_frame,
-            "frame_pair_strategy": "krea2_to_flux3_reference_refine" if use_last_frame else "",
+            "frame_pair_strategy": (
+                "krea2_to_flux3_reference_refine"
+                if needs_ending_keyframe
+                else "same_frame_loop"
+                if is_loop
+                else ""
+            ),
             "landing_frame_workflow": refine_manifest.name if refine_manifest else "",
             "backend": "comfyui",
         },
@@ -375,6 +389,8 @@ def build_native_h3_story(context: PlanningContext, goal: GoalRequest) -> Execut
         description=(
             f"Native H3 first/last-frame causal story from storyboard '{storyboard_path}'"
             if goal.media_type == "native_h3_fl2va_story"
+            else f"Native H3 seamless loop from storyboard '{storyboard_path}'"
+            if is_loop
             else f"Native H3 causal story from storyboard '{storyboard_path}'"
         ),
     )

@@ -143,6 +143,7 @@ def generate_native_h3_storyboard(
     creative_brief: str = "",
     arc_guidance: str = "",
     reference_analysis: dict[str, Any] | None = None,
+    replayable_loop: bool = False,
 ) -> dict[str, Any]:
     """Generate a renderable story payload consumed by native H3.
 
@@ -232,9 +233,9 @@ def generate_native_h3_storyboard(
     subject_reference = "; ".join(
         part for part in (", ".join(character_names), canonical_identity) if part
     )
-    if int(duration_seconds) not in {15, 20}:
+    if int(duration_seconds) not in {10, 15, 20}:
         raise PromptGenerationError(
-            "Native H3 storyboard generation currently supports duration_seconds=15 or 20."
+            "Native H3 storyboard generation currently supports duration_seconds=10, 15 or 20."
         )
     world = dict(base_storyboard.get("world") or {})
     world.get("continuity_rules") or []
@@ -525,7 +526,11 @@ def generate_native_h3_storyboard(
             [
                 "Follow the user's creative brief and selected style.",
                 "Return one story object with 3 to 5 time-ordered native_shots. Give each a concise title, visible action, physical cause, visible effect or state change, and camera direction.",
-                "Shape the clip as a readable hook, a complication, a physical reversal or reveal, and a brief payoff reaction. Keep each beat simple enough to read on a phone; vary the movement around the reaction so each beat is legible, and hold the resolved pose only in the final tenth of the clip.",
+                (
+                    "Shape the clip as one small replayable gag: the character wants something within reach, a prop or the scene pushes back, the character's whole body and face react big with squash, stretch, and a clear expression change, and the last move returns the character and every prop to the opening arrangement so the clip replays without a seam. Choose one prop as the engine of the gag and let it do visible work on every beat. Keep each beat simple enough to read on a phone."
+                    if replayable_loop
+                    else "Shape the clip as a readable hook, a complication, a physical reversal or reveal, and a brief payoff reaction. Keep each beat simple enough to read on a phone; vary the movement around the reaction so each beat is legible, and hold the resolved pose only in the final tenth of the clip."
+                ),
                 "Keep the cast, camera axis, setting, palette, linework, and props consistent across opening and ending frame anchors.",
                 "Do not add extra characters, props, or locations unless a beat needs them. Keep the selected protagonist recognizable and causally active.",
             ]
@@ -534,7 +539,12 @@ def generate_native_h3_storyboard(
         [
             f"Video action and camera direction: {VIDEO_MOTION_DIRECTION}",
             NATIVE_H3_ACTIVE_PROTAGONIST,
-            "In every native_shots entry, action describes visible movement through a changed result and camera describes the opening framing, one decisive motivated move or intentional lock, its relation to the action, what it reveals, and the ending composition. The final shot reaches its result before a brief resolved pose in the final tenth.",
+            "In every native_shots entry, action describes visible movement through a changed result and camera describes the opening framing, one decisive motivated move or intentional lock, its relation to the action, what it reveals, and the ending composition. "
+            + (
+                "The final shot's last move returns the character and every prop to the opening arrangement, still in motion in the last frame."
+                if replayable_loop
+                else "The final shot reaches its result before a brief resolved pose in the final tenth."
+            ),
         ]
     )
     prompt_sections.extend(
@@ -656,6 +666,8 @@ def generate_native_h3_storyboard(
             news_story_revision = "draft_preserved"
     story = extract_native_h3_story(payload)
     story_base = dict(base_storyboard)
+    # Shot windows must span the clip actually rendered, not the template's 15 s.
+    story_base["native_duration_seconds"] = int(duration_seconds)
     story_base["character"] = str(
         character_label or story_base.get("character") or "the protagonist"
     ).strip()

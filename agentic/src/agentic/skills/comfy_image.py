@@ -76,6 +76,7 @@ class ComfyImageSkills:
         renders_native_h3_keyframe = media_type in {
             "native_h3_story",
             "native_h3_fl2va_story",
+            "native_h3_loop_story",
             "native_h3_l2va_story",
         }
         uses_opening_frame = media_type in {
@@ -84,6 +85,7 @@ class ComfyImageSkills:
             "image_to_video_audio",
             "native_h3_story",
             "native_h3_fl2va_story",
+            "native_h3_loop_story",
             "native_h3_l2va_story",
         } or (
             str(context.node.inputs.get("anchor_position") or "").strip().casefold() == "first"

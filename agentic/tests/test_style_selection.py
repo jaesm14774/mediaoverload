@@ -284,14 +284,21 @@ PHOTO_OR_RENDER_CATEGORIES = {"Photography", "3D & Render", "Commercial & Editor
 
 
 def test_user_given_the_default_style_pool_when_a_style_is_drawn_then_it_is_a_hand_made_illustration_treatment():
-    """User Given the saved style selection When any style can be drawn at random Then it is a hand-made illustration, painting, or mixed-media treatment and never a photo or 3D-render genre, and the six collection families stay available."""
+    """User Given the saved style selection When any style can be drawn at random Then it is a hand-made illustration, painting, or mixed-media treatment and never a photo or 3D-render genre, and the hand-made collection families stay available."""
     library = StyleLibrary()
     state = library.snapshot()
     by_id = {style["id"]: style for style in state["styles"]}
     enabled = set(state["enabled_ids"])
-    assert set(CHARACTER_STYLE_IDS) <= enabled
+    collection_families = {"storybook_watercolor", "soft_pastel_characters", "bold_cartoon_comic"}
+    assert collection_families <= enabled
     for style_id in enabled - {"photographic_character_fusion"}:
         assert not PHOTO_OR_RENDER_CATEGORIES & set(by_id[style_id]["categories"]), style_id
+
+
+def test_user_given_the_default_style_pool_when_a_style_is_drawn_then_academic_charcoal_and_woodblock_looks_are_never_drawn():
+    """User Given the saved style selection When any style can be drawn at random Then the dark academic pastel-drawing look and the woodblock-print look, which made rejected posts, are not in the pool."""
+    enabled = set(StyleLibrary().snapshot()["enabled_ids"])
+    assert not {"conte-pastel", "contemporary-ukiyo-e"} & enabled
 
 
 @pytest.mark.parametrize("media_type", ["image", "text2img2video"])

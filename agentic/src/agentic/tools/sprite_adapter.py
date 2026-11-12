@@ -34,6 +34,11 @@ SPRITE_PALETTE_COLORS = 32
 SPRITE_PIXEL_BLOCK = 2
 # Previews are enlarged with nearest-neighbor, never smoothed, to about this edge.
 SPRITE_PREVIEW_EDGE = 384
+# The clip people review and publish: the cut-out sprite looping on a flat
+# backdrop, on a square canvas with even sides for the video encoder.
+SPRITE_SHOWCASE_EDGE = 720
+SPRITE_SHOWCASE_BACKDROP = (247, 240, 228)
+SPRITE_SHOWCASE_SECONDS = 5
 
 
 class SpriteAdapter:
@@ -210,6 +215,8 @@ class SpriteAdapter:
             method=6,
         )
 
+        showcase_path = self._write_showcase(root, normalized_frames, frame_rate)
+
         qa = {
             "passed": True,
             "checks": {
@@ -239,6 +246,7 @@ class SpriteAdapter:
                 "atlas": str(atlas_path),
                 "gif": str(gif_path),
                 "webp": str(webp_path),
+                "showcase": str(showcase_path),
                 "frames_dir": str(frames_dir),
             },
             "qa": qa,
@@ -250,17 +258,52 @@ class SpriteAdapter:
             "atlas_path": str(atlas_path),
             "gif_path": str(gif_path),
             "webp_path": str(webp_path),
+            "showcase_path": str(showcase_path),
             "frame_paths": [str(record["path"]) for record in frame_records],
             "manifest_path": str(manifest_path),
             "saved_files": [
                 str(atlas_path),
                 str(gif_path),
                 str(webp_path),
+                str(showcase_path),
                 str(manifest_path),
                 *[str(record["path"]) for record in frame_records],
             ],
             "qa": qa,
         }
+
+    def _write_showcase(
+        self, root: Path, cell_frames: list[Image.Image], frame_rate: float
+    ) -> Path:
+        """Loop the cut-out sprite on a flat backdrop as an mp4 a feed can play."""
+        edge = SPRITE_SHOWCASE_EDGE
+        frames: list[Image.Image] = []
+        # A whole-number scale keeps every sprite pixel a clean square.
+        scale = max(1, (edge * 9 // 10) // max(cell_frames[0].size))
+        for frame in cell_frames:
+            sprite = _enlarge(frame.convert("RGBA"), scale)
+            canvas = Image.new("RGB", (edge, edge), SPRITE_SHOWCASE_BACKDROP)
+            canvas.paste(
+                sprite,
+                ((edge - sprite.width) // 2, (edge - sprite.height) // 2),
+                sprite,
+            )
+            frames.append(canvas)
+        loops = max(1, math.ceil(SPRITE_SHOWCASE_SECONDS * frame_rate / len(frames)))
+        sequence = frames * loops
+        gif_path = root / "showcase.gif"
+        sequence[0].save(
+            gif_path,
+            format="GIF",
+            save_all=True,
+            append_images=sequence[1:],
+            duration=max(1, round(1000.0 / frame_rate)),
+            loop=0,
+        )
+        showcase_path = root / "showcase.mp4"
+        self.ffmpeg.gif_to_mp4(str(gif_path), str(showcase_path), fps=frame_rate)
+        gif_path.unlink()
+        return showcase_path
 
 
 def _positive_int(value: object, name: str) -> int:

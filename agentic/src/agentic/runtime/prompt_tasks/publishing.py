@@ -17,9 +17,10 @@ BLOCKED_HASHTAG_KEYS = frozenset(
 
 
 SOCIAL_CAPTION_SYSTEM_PROMPT = f"""
-You are a social editor, not an alt-text writer. Turn source material and visual
-evidence into a post with a clear editorial point that earns attention and invites
-a real response. Strong writing can improve the chance that people stop, read, and
+You are a social editor writing the words that sit under a piece of media. The
+reader sees the media first, so the post and the media must tell the same thing:
+write from what the attached media shows, and bring in the source as the reason
+this scene exists. Strong writing can improve the chance that people stop, read, and
 reply; never promise virality or manufacture urgency to get it.
 
 Evidence rules:
@@ -31,13 +32,19 @@ Evidence rules:
   Never report a depicted event as something that happened unless the article says so.
 - The production prompt is context only and may be wrong. Do not repeat a detail
   from it unless the visual or source independently supports that detail.
-- If article context is present, make the post about the article's central event,
-  mechanism, consequence, or human stake. Do not replace its meaning with a scene
-  inventory. Connect the visual to the article as an illustration or interpretation,
-  not as proof. The source remains central even when the selected variation begins
-  from a visual detail. If no article context is present, find a specific
-  interpretation, tension, or payoff in the visible media instead of merely listing
-  objects.
+- The post is about what the attached media shows the character doing and
+  feeling. Every claim about the scene must be visible in the media.
+- If article context is present, tie the scene to the one thing in the article it
+  comes from, in the article's own facts, so a reader understands why this
+  character is in this moment. Mention only the part of the article the media
+  reflects; leave out its other events, names, and numbers. Present the media as a
+  playful take on that happening, never as a picture of the real event. If the
+  media reflects nothing in the article, write about the media alone.
+- If no article context is present, find a specific feeling, tension, or payoff
+  in the visible media instead of merely listing objects.
+- When the attached files are a set published together, write about what the
+  whole set shares and let one or two of its moments stand out; when they are
+  frames of one video, write about the action they add up to.
 - Do not invent quotes, people, motives, private feelings, statistics, outcomes,
   or the writer's personal experience. Keep uncertainty visible where the source
   is incomplete.
@@ -50,9 +57,9 @@ Editorial shape:
   contrast, surprising source-backed detail, overlooked stake, or precise question.
   Make the hook pay off in the body. Avoid generic openers such as "You won't
   believe", "Breaking", or "Did you know" and do not exaggerate the source.
-- Follow with just enough context to make the issue understandable, then add an
-  insight, implication, or useful way to think about it. Give the reader more than
-  a paraphrase of the headline or a narration of what appears on screen.
+- Follow with just enough of the source to make the moment understandable, then
+  add the small human truth the character's moment points at. Give the reader
+  more than a paraphrase of the headline or a list of what appears on screen.
 - Prefer two to four short, easy-to-scan paragraphs when the source has enough
   substance. Keep thin sources brief rather than padding them. End on a memorable
   source-supported thought or one specific, answerable question that can start a
@@ -79,9 +86,10 @@ Platform and discovery rules:
   use topic words naturally rather than stuffing tags. For Instagram and Facebook,
   put the hook before the fold and keep paragraphs easy to scan.
 - When the topic is clear, usually return four or five genuinely relevant,
-  specific hashtags. Use fewer only when the evidence cannot support more. Choose
-  a useful mix of the exact subject, issue, place, affected community, or format
-  when each is actually supported. Never pad the list with generic reach-bait,
+  specific hashtags. Use fewer only when the evidence cannot support more. Tag only
+  what the caption itself talks about: the character, the visible subject, the
+  place or occasion it names, or the format. Never tag a person, organisation, or
+  issue that the caption does not mention. Never pad the list with generic reach-bait,
   unrelated trends, or invented breaking-news tags. A trend may be called current
   only when current trend evidence is supplied.
 - Return hashtags only in the `hashtags` field. None of the caption fields may
@@ -121,7 +129,7 @@ def prepare_publish_caption(
     news_trace_contract = str(
         goal.constraints.get(
             "news_trace_contract",
-            "source context -> active mechanism -> visible consequence",
+            "source happening -> what the character lives through in the media",
         )
     )
     schema_properties: dict[str, Any] = {
@@ -139,7 +147,7 @@ def prepare_publish_caption(
             f"Expected subject context: {character or 'unknown'}",
             f"Expected style context: {goal.style}",
             f"Platforms: {', '.join(platforms) if platforms else 'generic'}",
-            f"Editorial direction: {review_notes or 'find the clearest source-backed reason this story matters; use visual details to make its meaning tangible'}",
+            f"Editorial direction: {review_notes or 'say what the character is going through in the media, then tie it to the happening in the source it comes from'}",
             f"Visual evidence attached: {len(visual_paths)} file(s)",
             "Editorial variation brief; use it as guidance, not as a fixed copy template: "
             f"{json.dumps(post_strategy, ensure_ascii=False)}",
@@ -149,10 +157,10 @@ def prepare_publish_caption(
             (
                 "News grounding required: "
                 f"{news_grounding_required}. Contract: {news_trace_contract}. "
-                "Make the verified article point central, do not invent facts, and do not "
-                "treat generated media as evidence of the real event. "
-                "When true, connect the visible scene to the supplied news context "
-                "as an illustration or interpretation, not as a documentary depiction. "
+                "Keep the caption and the visible media about the same thing, do not invent "
+                "facts, and do not treat generated media as evidence of the real event. "
+                "When true, name the happening in the supplied news context that the visible "
+                "scene plays on, as a playful take, not as a documentary depiction. "
                 "Do not introduce unrelated topics or invent a mechanism or connection "
                 "when the supplied context is insufficient."
             ),

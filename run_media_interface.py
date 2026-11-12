@@ -7,6 +7,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 REPO_ROOT = Path(__file__).resolve().parent
 AGENTIC_SRC = REPO_ROOT / "agentic" / "src"
 for candidate in (REPO_ROOT, AGENTIC_SRC):
@@ -26,6 +28,10 @@ from agentic.app.serial_video_dispatch import (
     load_serial_video_settings,
 )
 from agentic.app.serial_video_execution import run_serial_episodes
+from agentic.runtime.claude_brain import BRAIN_DIR_ENV
+from agentic.runtime.run_log import RunLog
+from agentic.runtime.strategies import NON_NEWS_NATIVE_STORY_TYPES
+from agentic.tools.context_services import NewsContextService
 from agentic.tools.social_services import complete_facebook_profile_handoff
 
 
@@ -188,6 +194,24 @@ def main(
     parser.add_argument("--no-review", action="store_true", help="Disable human review for this run; auto Ref2VA keeps generated references without a Discord selection gate")
     parser.add_argument("--stage-probe", action="store_true", help="Run the real multi-stage graph with six image candidates and vision-LLM auto-selection; never use this as publish approval")
     parser.add_argument("--news-driven", action="store_true", help="Require a usable news item for this run")
+    parser.add_argument(
+        "--news-url",
+        type=str,
+        default="",
+        help="Pin the run to the news article with this article_url (implies --news-driven); use it to feed two runs the same news",
+    )
+    parser.add_argument(
+        "--routing-seed",
+        type=int,
+        help="Seed for strategy/style/stage-workflow routing so two runs make the same picks (unrelated to --seed)",
+    )
+    parser.add_argument(
+        "--claude-brain",
+        type=str,
+        default="",
+        metavar="DIR",
+        help="Answer every LLM call through files in DIR (served by Claude Code, see the mediaoverload-claude-brain skill) instead of OpenRouter/other APIs",
+    )
     parser.add_argument("--enable-review-loop", action="store_true", help="Enable retry/review branches where supported")
     parser.add_argument(
         "--motion-graphics",
@@ -229,6 +253,14 @@ def main(
     if args.serial_episodes is not None or args.episode_topic:
         parser.error("--serial-episodes and --episode-topic require --generation-type serial_video")
 
+    if args.claude_brain:
+        os.environ[BRAIN_DIR_ENV] = str(Path(args.claude_brain).resolve())
+    pinned_news: dict[str, Any] | None = None
+    if args.news_url:
+        if str(args.generation_type or "").strip().lower() in NON_NEWS_NATIVE_STORY_TYPES:
+            parser.error(f"--news-url does not apply to {args.generation_type}: it invents its own premise")
+        pinned_news = NewsContextService().news_by_url(args.news_url).to_dict()
+
     # Keep strategy/character routing randomness independent from --seed,
     # which is reserved for reproducible media rendering.
     request = CharacterWorkflowRequest(
@@ -240,11 +272,12 @@ def main(
             preferred_generation_type=args.generation_type,
             duration_seconds=args.duration_seconds,
             output_dir=args.output_dir,
-            news_driven=args.news_driven,
+            news_driven=args.news_driven or pinned_news is not None,
+            news_context=pinned_news,
             reference_video_source=args.reference_video,
             reference_video_depth=args.reference_video_depth,
             reference_video_max_keyframes=args.reference_keyframes,
-            rng=random.Random(),
+            rng=random.Random(args.routing_seed),
             seed=args.seed,
             motion_graphics=args.motion_graphics,
             story_complexity=args.story_complexity,
@@ -268,12 +301,16 @@ def main(
     )
     selected_workflow_runner = workflow_runner
     if workflow_runner is run_character_workflow:
+        load_dotenv(REPO_ROOT / "media_overload.env", override=False)
+        # Opened once, before any generation, so a broken run log fails the command at once.
+        run_log = RunLog.from_environment()
 
         def run_serial_aware_workflow(
             workflow_request: CharacterWorkflowRequest,
         ) -> dict[str, Any]:
             return run_character_workflow(
                 workflow_request,
+                run_log=run_log,
                 serial_dispatcher=lambda: _run_serial_video(
                     args,
                     config_path,

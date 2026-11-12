@@ -25,6 +25,11 @@ from agentic.tools.publishing_adapter import build_dispatch_plan, merge_platform
 
 VIDEO_REVIEW_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 IMAGE_REVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+SERIAL_STORY_REVIEW_CONTEXT = (
+    "請直接觀看完整成片，依你的判斷審核故事效果、節奏和前後連續性。"
+    "接受後，本集提出的結尾狀態會成為下一集起點。\n"
+    "上一集已核准狀態與本集結尾狀態提案的完整內容請看附件。"
+)
 
 
 @dataclass(frozen=True)
@@ -494,6 +499,7 @@ class AgentSocialSkills:
                 "publish_ready": bool(bundle.get("publish_ready", bool(selected))),
                 "review_notes": str(context.node.inputs.get("review_notes") or context.plan.goal.constraints.get("review_notes", "")),
                 "prompt_mode": str(bundle.get("prompt_mode", "template")),
+                "review_decision": "approved" if review_mode == "discord" else "automatic",
                 "review_mode": review_mode,
                 "reviewer": reviewer,
                 "review_session_id": review_session_id,
@@ -748,10 +754,14 @@ class AgentSocialSkills:
         review_metadata = self._review_metadata(context)
         if policy.review_phase == "serial_final_publish":
             serial_context = goal.constraints.get("serial_story_review_context")
-            review_context_text = self._build_serial_story_review_context(
-                serial_context if isinstance(serial_context, dict) else {}
-            )
+            review_documents = [
+                self._write_serial_story_review_document(
+                    serial_context if isinstance(serial_context, dict) else {}
+                )
+            ]
+            review_context_text = SERIAL_STORY_REVIEW_CONTEXT
         else:
+            review_documents = []
             review_context_text = self._build_review_context_text(
                 context=context,
                 strategy=review_metadata["strategy"],
@@ -793,6 +803,7 @@ class AgentSocialSkills:
             decision = self.discord_review.review_candidates(
                 text=review_text,
                 context_text=review_context_text,
+                document_paths=review_documents,
                 media_paths=candidates.review_media_paths,
                 timeout_seconds=int(
                     goal.constraints.get("discord_review_timeout_seconds")
@@ -838,6 +849,7 @@ class AgentSocialSkills:
                 "ranked_candidates": candidates.ranked_candidates,
                 "rejected_assets": candidates.ranked,
                 "selection_rationale": "Required Discord human review was unavailable; no candidate was selected automatically.",
+                "review_decision": "unavailable",
                 "review_mode": str(getattr(decision, "review_mode", "none")),
                 "review_scope": policy.review_scope,
                 "fallback_reason": str(
@@ -897,6 +909,7 @@ class AgentSocialSkills:
                     "ranked_candidates": candidates.ranked_candidates,
                     "rejected_assets": candidates.ranked,
                     "selection_rationale": "Human reviewer rejected all candidates in Discord.",
+                    "review_decision": "rejected",
                     "regeneration_notes": decision.edited_text
                     or str(context.node.inputs.get("review_notes") or ""),
                     "review_mode": decision.review_mode,
@@ -937,6 +950,7 @@ class AgentSocialSkills:
                     "ranked_candidates": candidates.ranked_candidates,
                     "rejected_assets": [],
                     "selection_rationale": "Discord review did not complete; used the deterministic top-ranked candidate.",
+                    "review_decision": "timed_out",
                     "regeneration_notes": decision.edited_text
                     or str(context.node.inputs.get("review_notes") or ""),
                     "review_mode": decision.review_mode,
@@ -963,6 +977,7 @@ class AgentSocialSkills:
                 "ranked_candidates": candidates.ranked_candidates,
                 "rejected_assets": [],
                 "selection_rationale": "Discord review did not complete.",
+                "review_decision": "timed_out",
                 "regeneration_notes": decision.edited_text
                 or str(context.node.inputs.get("review_notes") or ""),
                 "review_mode": decision.review_mode,
@@ -1011,6 +1026,7 @@ class AgentSocialSkills:
                         "ranked_candidates": ranked_candidates,
                         "rejected_assets": ranked,
                         "selection_rationale": f"{frame_label.capitalize()}-frame review must select exactly one candidate; automatic first-item selection is disabled.",
+                        "review_decision": "invalid_selection",
                         "review_mode": decision.review_mode,
                         "review_scope": review_scope,
                         "reviewer": decision.reviewer,
@@ -1038,6 +1054,7 @@ class AgentSocialSkills:
                         "ranked_candidates": ranked_candidates,
                         "rejected_assets": ranked,
                         "selection_rationale": f"Anchor-set review must select exactly {required_count} paired assets.",
+                        "review_decision": "invalid_selection",
                         "review_mode": decision.review_mode,
                         "review_scope": review_scope,
                         "reviewer": decision.reviewer,
@@ -1067,6 +1084,7 @@ class AgentSocialSkills:
                             f"Reference review must select between 1 and {limit} candidates; "
                             "the received selection was invalid."
                         ),
+                        "review_decision": "invalid_selection",
                         "review_mode": decision.review_mode,
                         "review_scope": review_scope,
                         "reviewer": decision.reviewer,
@@ -1171,25 +1189,22 @@ class AgentSocialSkills:
         ).strip()
         return {"strategy": strategy or "unknown", "workflow": workflow or "unknown"}
 
-    @staticmethod
-    def _build_serial_story_review_context(state: dict[str, Any]) -> str:
-        def compact(value: object, limit: int) -> str:
-            text = " ".join(str(value or "").split())
-            return text if len(text) <= limit else text[: limit - 1] + "…"
-
-        lines = [
-            "請直接觀看完整成片，依你的判斷審核故事效果、節奏和前後連續性。接受後，本集提出的結尾狀態會成為下一集起點。",
+    def _write_serial_story_review_document(self, state: dict[str, Any]) -> str:
+        """Write both story states in full so the reviewer is never shown a clipped proposal."""
+        starting_state = str(state.get("approved_start_state") or "").strip()
+        ending_state = str(state.get("proposed_end_state") or "").strip()
+        sections = [
+            "# 本集故事狀態審核",
+            "## 上一集已核准狀態\n\n" + (starting_state or "這是系列首集，尚無前集狀態。"),
         ]
-        starting_state = compact(state.get("approved_start_state"), 140)
-        ending_state = compact(state.get("proposed_end_state"), 250)
-        if starting_state:
-            lines.extend(["上一集已核准狀態：", starting_state])
-        else:
-            lines.append("這是系列首集，尚無前集狀態。")
         if ending_state:
-            lines.extend(["本集結尾狀態提案：", ending_state])
-        review_context = "\n".join(lines)
-        return review_context[:500]
+            sections.append("## 本集結尾狀態提案\n\n" + ending_state)
+        body = "\n\n".join(sections) + "\n"
+        digest = hashlib.sha1(body.encode("utf-8")).hexdigest()[:12]
+        path = self.output_root / "serial_review" / f"story_states_{digest}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return str(path)
 
     @staticmethod
     def _build_review_context_text(

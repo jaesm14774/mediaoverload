@@ -55,6 +55,13 @@ GENERATION_STRATEGIES = {
     "native_h3_fl2va_story": GenerationStrategy(
         "native_h3_fl2va_story", _NATIVE, news_grounded=True, native_story=True
     ),
+    # One approved keyframe is both the first and last frame, so the clip
+    # replays seamlessly. It is a no-news gag loop, not a news story.
+    "native_h3_loop_story": GenerationStrategy(
+        "native_h3_loop_story",
+        ("video_workflow_name", "image_workflow_name"),
+        native_story=True,
+    ),
     "native_h3_l2va_story": GenerationStrategy(
         "native_h3_l2va_story",
         ("video_workflow_name", "image_workflow_name", "refine_workflow_name"),
@@ -83,6 +90,8 @@ GENERATION_STRATEGIES = {
         "story_card", _IMAGE, image_only=True, news_grounded=True
     ),
     "motion_comic": GenerationStrategy("motion_comic", _IMAGE),
+    # One fixed scene, one page per group member; the pages publish as one set.
+    "series_carousel": GenerationStrategy("carousel", _IMAGE, image_only=True),
 }
 CONFIG_MEDIA_TYPE_MAP = {
     name: strategy.media_type for name, strategy in GENERATION_STRATEGIES.items()
@@ -93,6 +102,9 @@ NATIVE_STORY_GENERATION_TYPES = frozenset(
 NEWS_GROUNDED_GENERATION_TYPES = frozenset(
     name for name, strategy in GENERATION_STRATEGIES.items() if strategy.news_grounded
 )
+# Native H3 stories that write their own premise (the replayable loop) and
+# must never have a news item attached.
+NON_NEWS_NATIVE_STORY_TYPES = NATIVE_STORY_GENERATION_TYPES - NEWS_GROUNDED_GENERATION_TYPES
 IMAGE_ONLY_GENERATION_TYPES = frozenset(
     name for name, strategy in GENERATION_STRATEGIES.items() if strategy.image_only
 )

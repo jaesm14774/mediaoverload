@@ -21,7 +21,6 @@ from agentic.app.character_payload import build_goal_payload_from_character_conf
 from agentic.app.character_selection import resolve_character_selection
 from character_workflow_helpers import make_character_workflow_request
 from agentic.tools.context_services import NewsSelection
-from agentic.runtime.news_grounding import is_brand_safe_news_selection
 from agentic.app.main import _allow_runtime_output_for_visual_evidence
 
 
@@ -101,6 +100,25 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertNotIn("supporting_cast", payload["constraints"]["story_card_visual"])
         self.assertTrue(payload["constraints"]["visual_style_profile"]["prompt"])
         self.assertNotIn("story_card_refine_denoise", payload["constraints"])
+
+    def test_user_given_kirby_config_when_requesting_story_cards_then_the_card_is_a_portrait_that_leaves_room_to_read(self) -> None:
+        """User Given a run canvas that is drawn at random When requesting story cards repeatedly Then every card has the same portrait size with room for a full page of text."""
+        sizes = set()
+        for _ in range(12):
+            constraints = build_goal_payload_from_character_config(
+                make_character_workflow_request(
+                    self.repo_root,
+                    self.kirby_config,
+                    prompt="寫一篇關於父親早餐的安靜故事",
+                    preferred_generation_type="story_card",
+                    publish_after_generate=False,
+                )
+            )["constraints"]
+            sizes.add((constraints["story_card_width"], constraints["story_card_height"]))
+        self.assertEqual(len(sizes), 1)
+        width, height = sizes.pop()
+        self.assertGreater(height, width)
+        self.assertGreaterEqual(width, 800)
 
     def test_user_given_a_five_second_request_when_routed_then_the_single_action_contract_keeps_the_minimum_duration(self) -> None:
         """User Given a short character-video request When routing selects a single-action workflow Then the request remains on that route and carries the ten-second minimum."""
@@ -891,15 +909,15 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
 
         self.assertEqual(result, image_paths)
 
-    def test_publish_review_collects_story_card_pages_without_anchor_or_summary(self) -> None:
-        anchor_path = r"C:\runs\story_card_anchor.png"
+    def test_publish_review_collects_story_card_pages_without_vignette_or_summary(self) -> None:
+        vignette_path = r"C:\runs\story_card_vignette.png"
         page_paths = [r"C:\runs\story_card_01.png", r"C:\runs\story_card_02.png"]
         summary_path = r"C:\runs\story_card_summary.json"
         result = collect_media_paths_from_run_result(
             {
                 "state": {
                     "node_outputs": {
-                        "story-card-anchor": {"saved_files": [anchor_path]},
+                        "story-card-vignette": {"vignette_paths": [vignette_path]},
                         "story-card-compose": {"saved_files": [*page_paths, summary_path]},
                     }
                 }
@@ -1047,11 +1065,6 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertFalse(payload["constraints"]["news_driven"])
         self.assertFalse(payload["constraints"]["news_grounding_required"])
         self.assertFalse(generate_prompt.call_args.kwargs["news_grounding_required"])
-
-    def test_news_selection_rejects_brand_unsafe_titles(self) -> None:
-        self.assertTrue(is_brand_safe_news_selection("Cloudflare launches WebMCP", "AI agent"))
-        self.assertFalse(is_brand_safe_news_selection("AI性愛機器人新產品", "AI;性愛機器人"))
-        self.assertFalse(is_brand_safe_news_selection("牙醫猝逝後愛貓也離世", "生活焦點"))
 
     def test_native_h3_news_mode_does_not_create_a_second_autonomous_prompt(self) -> None:
         news = type(

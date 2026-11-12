@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from collections.abc import Callable
@@ -10,8 +11,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from agentic.app.character_requests import CharacterWorkflowRequest
+from agentic.app.character_run_log import run_entry_from_result, serial_run_entry
 from agentic.app.main import _build_prompt_summary, build_runtime
 from agentic.runtime.observability import RunRecorder
+from agentic.runtime.run_log import RunLog
 from agentic.runtime.strategies import NEWS_GROUNDED_GENERATION_TYPES
 from agentic.runtime.step_logger import create_run_logger
 from agentic.tools.context_services import DiscordRunNotificationService
@@ -41,6 +44,9 @@ from agentic.app.character_publishing import (
 )
 from agentic.app.generation_routing import _resolve_routing_asset_root
 from agentic.app.character_payload import build_goal_payload_from_character_config
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _extract_failure_details(result: dict[str, Any] | None) -> dict[str, str]:
@@ -92,6 +98,56 @@ def run_character_workflow(
     runtime_builder: Callable[..., Any] | None = None,
     notification_service: DiscordRunNotificationService | None = None,
     serial_dispatcher: Callable[[], dict[str, Any]] | None = None,
+    run_log: RunLog | None = None,
+) -> dict[str, Any]:
+    """Run one character workflow; entry points pass a `run_log` to record it (None records nothing)."""
+    run_id = uuid.uuid4().hex[:12]
+    if run_log is not None:
+        # Before any generation: a broken run log database fails here, while failing is cheap.
+        run_log.begin(
+            run_id,
+            prompt=request.generation.prompt or "",
+            dry_run=request.review.dry_run_publish,
+        )
+    try:
+        return _run_character_workflow(
+            request,
+            run_id=run_id,
+            run_log=run_log,
+            runtime_builder=runtime_builder,
+            notification_service=notification_service,
+            serial_dispatcher=serial_dispatcher,
+        )
+    except BaseException as exc:
+        if run_log is not None:
+            reason = f"{type(exc).__name__}: {exc}"
+            _write_run_log(
+                _LOGGER,
+                "run_log.fail.error",
+                run_id,
+                lambda: run_log.fail(run_id, reason=reason),
+            )
+        raise
+
+
+def _write_run_log(
+    logger: logging.Logger, event: str, run_id: str, write: Callable[[], None]
+) -> None:
+    """A run log outage must never turn a finished (possibly published) run into an error."""
+    try:
+        write()
+    except Exception as exc:
+        logger.exception("%s | run_id=%s | error=%s", event, run_id, exc)
+
+
+def _run_character_workflow(
+    request: CharacterWorkflowRequest,
+    *,
+    run_id: str,
+    run_log: RunLog | None,
+    runtime_builder: Callable[..., Any] | None,
+    notification_service: DiscordRunNotificationService | None,
+    serial_dispatcher: Callable[[], dict[str, Any]] | None,
 ) -> dict[str, Any]:
     repo_root = request.repo_root
     config_path = request.config_path
@@ -103,7 +159,6 @@ def run_character_workflow(
         requested=review.publish_after_generate,
         stage_probe=review.stage_probe,
     )
-    run_id = uuid.uuid4().hex[:12]
     recorder = RunRecorder(repo_root / "logs" / "runs", run_id)
     logger, log_path = create_run_logger(
         repo_root / "logs" / "runs", run_id, recorder=recorder
@@ -259,6 +314,19 @@ def run_character_workflow(
                 "canvas_profile": payload.get("canvas_profile", {}),
             }
         )
+        if run_log is not None:
+            _write_run_log(
+                logger,
+                "run_log.finish.error",
+                run_id,
+                lambda: run_log.finish(
+                    serial_run_entry(
+                        run_id=run_id,
+                        status=str(serial_result.get("status") or "success"),
+                        dry_run=dry_run_publish,
+                    )
+                ),
+            )
         return serial_result
     logger.info(
         "routing.selected | strategy=%s | media_type=%s | workflow=%s | prompt_source=%s",
@@ -385,7 +453,7 @@ def run_character_workflow(
                         in NEWS_GROUNDED_GENERATION_TYPES
                     ),
                     "news_trace_contract": (
-                        "source context -> active mechanism -> visible consequence"
+                        "source happening -> what the character lives through in the media"
                     ),
                 },
             )
@@ -641,6 +709,8 @@ def run_character_workflow(
         "source_generation_type": payload["source_generation_type"],
         "agentic_media_type": payload["media_type"],
         "character": payload["character_name"],
+        "prompt": payload["prompt"],
+        "news_context": dict(payload["constraints"].get("news_context") or {}),
         "character_selection": payload.get("character_selection", {}),
         "routing_summary": payload.get("routing_summary", {}),
         "plan": plan.to_dict(),
@@ -676,6 +746,19 @@ def run_character_workflow(
         "memory": run_memory.as_serializable(),
     }
     recorder.finalize(result_payload)
+    if run_log is not None:
+        _write_run_log(
+            logger,
+            "run_log.finish.error",
+            run_id,
+            lambda: run_log.finish(
+                run_entry_from_result(
+                    result_payload,
+                    dry_run=dry_run_publish,
+                    repo_root=request.repo_root,
+                )
+            ),
+        )
     return result_payload
 
 

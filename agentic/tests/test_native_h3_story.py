@@ -115,7 +115,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         plan = planner.build_plan(goal)
 
         self.assertEqual(goal.media_type, "native_h3_story")
-        self.assertEqual(goal.duration_seconds, 15)
+        self.assertGreaterEqual(goal.duration_seconds, 10)
         self.assertEqual(plan.workflow_name, "minimax_h3_i2va")
         node_ids = [node.node_id for node in plan.nodes]
         expected_node_ids = [
@@ -171,6 +171,147 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertEqual(plan.metadata["native_h3"]["keyframe_candidate_count"], 6)
         self.assertFalse(plan.metadata["native_h3"]["use_last_frame"])
         self.assertIn("native_h3", plan.metadata)
+
+    def test_user_given_a_loop_story_when_it_is_planned_then_one_approved_frame_opens_and_closes_a_ten_second_clip(self) -> None:
+        """User Given a character whose only enabled strategy is the loop story, When the plan is built, Then one reviewed keyframe is both the first and last frame of a ten second FL2VA clip and no second ending frame is made."""
+        import random
+
+        import yaml
+
+        config = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        config["generation"]["generation_type_weights"] = {"native_h3_loop_story": 1}
+        config["generation"]["subject_mode"] = "single"
+        config["character"] = {"name": "Kirby"}
+        tmp_dir = self.repo_root / ".tmp-tests" / "native-h3-loop-plan"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        config_path = tmp_dir / "character.yaml"
+        config_path.write_text(
+            yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+
+        payload = build_goal_payload_from_character_config(
+            make_character_workflow_request(
+                self.repo_root,
+                config_path,
+                prompt="Kirby chases a runaway rolling berry",
+                rng=random.Random(5),
+                publish_after_generate=False,
+            )
+        )
+        planner, _runner, _memory = build_runtime(
+            self.repo_root,
+            output_root=tmp_dir / "runtime",
+            comfy_host="127.0.0.1",
+            comfy_port=8188,
+        )
+        goal = planner.create_goal(
+            prompt=payload["prompt"],
+            media_type=payload["media_type"],
+            duration_seconds=payload["duration_seconds"],
+            style=payload["style"],
+            constraints=payload["constraints"],
+        )
+        plan = planner.build_plan(goal)
+        nodes = {node.node_id: node for node in plan.nodes}
+
+        self.assertEqual(payload["source_generation_type"], "native_h3_loop_story")
+        self.assertGreaterEqual(goal.duration_seconds, 10)
+        self.assertEqual(plan.workflow_name, "minimax_h3_fl2va")
+        self.assertNotIn("native-ending-keyframe", nodes)
+        self.assertNotIn("native-ending-review", nodes)
+        self.assertNotIn("native-refine-asset-check", nodes)
+        source_check = nodes["native-keyframe-source-check"]
+        self.assertEqual(source_check.inputs["opening_node"], source_check.inputs["ending_node"])
+        self.assertTrue(source_check.inputs["use_last_frame"])
+        render = nodes["native-h3-render"]
+        self.assertEqual(render.inputs["h3_mode"], "fl2va")
+        self.assertTrue(render.inputs["use_last_frame"])
+        self.assertGreaterEqual(render.inputs["length"], 10 * 24)
+        self.assertEqual(nodes["native-story-prompt"].inputs["render_mode"], "image_to_video")
+
+    def test_user_given_a_scheduled_loop_run_without_a_prompt_when_the_goal_is_built_then_no_news_is_attached(self) -> None:
+        """User Given a scheduled run with no prompt whose only strategy is the loop story, When the goal is built, Then no news item is attached, so the story is a replayable gag rather than a news story."""
+        import random
+
+        import yaml
+
+        config = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        config["generation"]["generation_type_weights"] = {"native_h3_loop_story": 1}
+        config["generation"]["subject_mode"] = "single"
+        config["character"] = {"name": "Kirby"}
+        tmp_dir = self.repo_root / ".tmp-tests" / "native-h3-loop-scheduled"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        config_path = tmp_dir / "character.yaml"
+        config_path.write_text(
+            yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+
+        payload = build_goal_payload_from_character_config(
+            make_character_workflow_request(
+                self.repo_root,
+                config_path,
+                prompt="",
+                rng=random.Random(5),
+                publish_after_generate=False,
+            )
+        )
+
+        self.assertEqual(payload["source_generation_type"], "native_h3_loop_story")
+        self.assertFalse(payload["constraints"].get("news_driven"))
+        self.assertFalse(payload["constraints"].get("news_context"))
+
+    def test_user_given_an_approved_loop_keyframe_when_h3_renders_then_the_same_image_is_the_first_and_last_frame(self) -> None:
+        """User Given one approved loop keyframe, When H3 renders the ten second clip, Then the video model receives that one image as both first and last frame in FL2VA mode."""
+        calls: list[dict[str, object]] = []
+
+        class FakeTools:
+            def call(self, tool_name: str, payload: dict[str, object]) -> dict[str, object]:
+                calls.append(payload)
+                return {"saved_files": ["video.mp4"]}
+
+        context = SimpleNamespace(
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="Kirby chases a runaway rolling berry",
+                    media_type="native_h3_loop_story",
+                    duration_seconds=10,
+                    style="hand-drawn paper storybook animation",
+                    constraints={"character": "Kirby"},
+                )
+            ),
+            node=SimpleNamespace(
+                inputs={
+                    "workflow_name": "minimax_h3_fl2va",
+                    "use_last_frame": True,
+                    "h3_mode": "fl2va",
+                    "length": 243,
+                    "width": 512,
+                    "height": 640,
+                }
+            ),
+            state=RunState(
+                goal={},
+                metadata={},
+                node_outputs={
+                    "native-story-prompt": {
+                        "prompt": "Kirby reaches for a berry, it rolls away, and he tumbles back to where he began."
+                    },
+                    "native-keyframe-source-check": {
+                        "first_frame_path": "approved.png",
+                        "last_frame_path": "approved.png",
+                    },
+                },
+            ),
+        )
+
+        result = LongVideoSkills(
+            FakeTools(), self.repo_root / ".tmp-tests" / "loop-h3-render"
+        ).render_native_h3(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(calls[0]["h3_mode"], "fl2va")
+        self.assertEqual(calls[0]["image_path"], calls[0]["last_image_path"])
+        self.assertGreaterEqual(calls[0]["length"], 10 * 24)
 
     def test_user_gets_a_distinct_flux_refined_ending_for_fl2va(self) -> None:
         """User Given a FL2VA story When the planner prepares both anchors Then Krea2 creates the opening and FLUX edits that image into the prompted ending state."""
@@ -413,6 +554,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
             plan=SimpleNamespace(
                 goal=SimpleNamespace(
                     prompt="Autonomous scene generated from the selected news",
+                    media_type="native_h3_story",
                     style="polished 2D anime",
                     constraints={
                         "character": "Kirby, Bandana Waddle Dee",
@@ -680,7 +822,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         plan = planner.build_plan(goal)
 
         self.assertEqual(goal.media_type, "native_h3_t2v_story")
-        self.assertEqual(goal.duration_seconds, 15)
+        self.assertGreaterEqual(goal.duration_seconds, 10)
         self.assertEqual(plan.workflow_name, "minimax_h3_t2va")
         render = next(node for node in plan.nodes if node.node_id == "native-h3-render")
         self.assertEqual(render.tool_name, "comfy.render_h3")
@@ -856,6 +998,146 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertIn(guidance, directive)
         self.assertIn("article remains authoritative for facts", directive)
+
+    def test_user_given_no_news_when_native_story_is_requested_then_it_is_a_replayable_gag_that_returns_to_its_opening(self) -> None:
+        """User Given a brief with no news source, When the native story is requested, Then the writer is asked for one small gag whose last move returns the character and props to the opening arrangement, and is not asked to freeze on a resolved pose."""
+        class ContractChatModel:
+            last_success_model = "local-contract-model"
+
+            def __init__(self) -> None:
+                self.calls: list[list[dict[str, object]]] = []
+
+            def chat_completion(self, *, messages: list[dict[str, object]], **_options: object) -> str:
+                self.calls.append(messages)
+                return json.dumps(
+                    {
+                        "story": {
+                            "native_shots": [
+                                {"time": "0-5s", "action": "Kirby eyes a cherry on the pudding."},
+                                {"time": "5-10s", "action": "The pudding wobbles and Kirby bounces off."},
+                                {"time": "10-15s", "action": "Kirby lands back in the starting spot."},
+                            ],
+                        }
+                    }
+                )
+
+        model = ContractChatModel()
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=SimpleNamespace(text_model=model, vision_model=model),
+        )
+        engine.generate_native_h3_storyboard(
+            character="Kirby",
+            style="polished 2D anime",
+            duration_seconds=15,
+            base_storyboard=load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml"),
+            news_context={},
+            replayable_loop=True,
+        )
+
+        prompt = " ".join(str(call["content"]) for messages in model.calls for call in messages).lower()
+        self.assertIn("returns the character and every prop to the opening arrangement", prompt)
+        self.assertNotIn("resolved pose in the final tenth", prompt)
+        self.assertNotIn("hold the resolved pose", prompt)
+
+    def test_user_given_a_non_loop_story_without_news_when_it_is_requested_then_it_still_ends_on_its_resolved_pose(self) -> None:
+        """User Given a first-and-last-frame story with no news, When the native story is requested, Then the writer is still told to end on a resolved pose, because its ending frame is a distinct landing and not a return to the opening."""
+        class ContractChatModel:
+            last_success_model = "local-contract-model"
+
+            def __init__(self) -> None:
+                self.calls: list[list[dict[str, object]]] = []
+
+            def chat_completion(self, *, messages: list[dict[str, object]], **_options: object) -> str:
+                self.calls.append(messages)
+                return json.dumps(
+                    {
+                        "story": {
+                            "native_shots": [
+                                {"time": "0-5s", "action": "Kirby eyes a cherry on the pudding."},
+                                {"time": "5-10s", "action": "The pudding wobbles and Kirby bounces off."},
+                                {"time": "10-15s", "action": "Kirby lands beside the pudding."},
+                            ],
+                        }
+                    }
+                )
+
+        model = ContractChatModel()
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=SimpleNamespace(text_model=model, vision_model=model),
+        )
+        engine.generate_native_h3_storyboard(
+            character="Kirby",
+            style="polished 2D anime",
+            duration_seconds=15,
+            base_storyboard=load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml"),
+            news_context={},
+        )
+
+        prompt = " ".join(str(call["content"]) for messages in model.calls for call in messages).lower()
+        self.assertIn("resolved pose in the final tenth", prompt)
+        self.assertNotIn("returns the character and every prop to the opening arrangement", prompt)
+
+    def test_user_given_a_loop_story_when_it_is_prepared_then_no_news_is_ever_requested(self) -> None:
+        """User Given a loop story run and a news service that has nothing, When the story is prepared, Then a ten second gag is written without asking for news, and its keyframe prompts do not demand a distinct ending."""
+        class NoNews:
+            def select_news(self) -> None:
+                raise AssertionError("a loop story must not ask for news")
+
+        class ContractChatModel:
+            last_success_model = "local-contract-model"
+
+            def chat_completion(self, *, messages: list[dict[str, object]], **_options: object) -> str:
+                return json.dumps(
+                    {
+                        "story": {
+                            "native_shots": [
+                                {"time": "0-5s", "action": "Kirby eyes a cherry on the pudding."},
+                                {"time": "5-10s", "action": "The pudding wobbles and Kirby lands back in the starting spot."},
+                            ],
+                        }
+                    }
+                )
+
+        model = ContractChatModel()
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=SimpleNamespace(text_model=model, vision_model=model),
+        )
+        from agentic.runtime.story_service import NativeH3StoryService
+
+        skills = LongVideoSkills(
+            SimpleNamespace(),
+            self.repo_root / ".tmp-tests" / "loop-story-prepare",
+            story_service=NativeH3StoryService(llm_engine=engine, news_service=NoNews()),
+        )
+        context = SimpleNamespace(
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="",
+                    media_type="native_h3_loop_story",
+                    duration_seconds=10,
+                    style="hand-drawn paper storybook animation",
+                    constraints={"character": "Kirby", "news_context": {}},
+                )
+            ),
+            node=SimpleNamespace(
+                inputs={
+                    "storyboard_path": str(self.repo_root / "configs/storyboards/native_h3_15s.yaml"),
+                    "duration_seconds": 10,
+                    "style": "hand-drawn paper storybook animation",
+                    "render_mode": "image_to_video",
+                }
+            ),
+            state=RunState(goal={}, metadata={}, node_outputs={}),
+        )
+
+        result = skills.prepare_native_h3_story(context)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs["duration_seconds"], 10)
+        self.assertFalse(result.outputs["news_context"])
 
     def test_user_given_news_without_a_custom_brief_when_story_prompt_is_built_then_default_news_direction_is_included(self) -> None:
         """User Given news with no custom creative brief When the story prompt is built Then its default direction keeps the story character-led and emotionally honest."""

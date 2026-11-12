@@ -105,6 +105,28 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("the gate opens", prompt)
         self.assertNotIn("Input relation:", prompt)
 
+    def test_user_given_multi_beat_story_in_one_clip_when_prompt_is_composed_then_later_beats_continue_the_same_shot(self) -> None:
+        """User Given a story of several beats that H3 renders as one clip, When the prompt is composed, Then every beat is present in order and none asks the camera to cut away, so the locked-camera look of the opening frame survives."""
+        prompt = compose_minimax_h3_prompt(
+            duration_seconds=15,
+            character="Kirby",
+            style="flat hand-painted picture book",
+            shots=[
+                {"time": "0-5s", "action": "Kirby crouches on the pudding"},
+                {"time": "5-10s", "action": "Kirby springs up and spins"},
+                {"time": "10-15s", "action": "Kirby lands with a squish"},
+            ],
+            render_mode="i2va",
+            prior_frame=True,
+        )
+
+        lowered = prompt.lower()
+        self.assertNotIn("camera cuts", lowered)
+        self.assertLess(prompt.index("crouches on the pudding"), prompt.index("springs up and spins"))
+        self.assertLess(prompt.index("springs up and spins"), prompt.index("lands with a squish"))
+        self.assertIn("00:05.000", prompt)
+        self.assertIn("00:10.000", prompt)
+
     def test_pair_prompt_lists_configured_subjects_without_interaction_rules(self) -> None:
         prompt = compose_minimax_h3_prompt(
             duration_seconds=6,

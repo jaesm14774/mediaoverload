@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from agentic.runtime.claude_brain import BRAIN_DIR_ENV, BRAIN_MODEL_NAME
 from agentic.runtime.model_backends import _load_project_env, provider_default_model
 
 
 def resolve_backend_info(mode: str) -> dict[str, Any]:
     _load_project_env()
+    brain_dir = os.environ.get(BRAIN_DIR_ENV, "").strip()
+    if brain_dir:
+        return {
+            "mode": mode,
+            "text_provider": "claude_brain",
+            "text_model": BRAIN_MODEL_NAME,
+            "vision_provider": "claude_brain",
+            "vision_model": BRAIN_MODEL_NAME,
+            "claude_brain_dir": brain_dir,
+        }
     text_provider = (
         str(
             os.environ.get("AGENTIC_TEXT_MODEL_PROVIDER", "openrouter") or "openrouter"

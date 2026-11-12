@@ -528,28 +528,6 @@ class AgenticPlannerTests(unittest.TestCase):
         )
         self.assertTrue(plan.metadata["review_loop_enabled"])
 
-    def test_carousel_plan_is_available(self) -> None:
-        goal = self.planner.create_goal(
-            prompt="robot chef travel diary in rainy taipei",
-            media_type="carousel",
-            duration_seconds=30,
-            style="editorial anime postcard",
-            constraints={},
-        )
-        plan = self.planner.build_plan(goal)
-        self.assertEqual(plan.workflow_name, "carousel_v1")
-        self.assertEqual(
-            [node.skill_name for node in plan.nodes],
-            [
-                "agent.goal.expand",
-                "agent.story.segment",
-                "agent.carousel.prompt_set",
-                "image.ensure_workflow",
-                "media.image.render_batch",
-                "agent.carousel.package",
-            ],
-        )
-
     def test_publish_review_plan_is_available(self) -> None:
         goal = self.planner.create_goal(
             prompt="review and prep kirby assets for instagram",

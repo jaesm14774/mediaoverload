@@ -2074,6 +2074,7 @@ def _build_cli_goal(
         if character_config_path is not None and character_config_path.is_file():
             from agentic.app.character_config import load_character_config
             from agentic.app.creative_profiles import resolve_creative_profile
+            from agentic.runtime.story_cards import story_card_canvas
 
             character_config = load_character_config(character_config_path)
             generation_config = dict(character_config.get("generation", {}) or {})
@@ -2084,8 +2085,10 @@ def _build_cli_goal(
             constraints["canvas_aspect_ratio"] = str(canvas_profile["aspect_ratio"])
             constraints["canvas_width"] = int(canvas_profile["width"])
             constraints["canvas_height"] = int(canvas_profile["height"])
-            constraints["story_card_width"] = int(canvas_profile["width"])
-            constraints["story_card_height"] = int(canvas_profile["height"])
+            (
+                constraints["story_card_width"],
+                constraints["story_card_height"],
+            ) = story_card_canvas(generation_config.get("story_card"))
     if serial_context is not None and serial_store is not None:
         from agentic.runtime.serial_video import continuity_state_text
 

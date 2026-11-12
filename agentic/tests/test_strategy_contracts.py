@@ -61,7 +61,9 @@ def test_user_given_a_configured_strategy_when_planned_then_every_step_can_be_ex
             REPO / "configs/characters/kirby.yaml",
             prompt="A hero catches a falling seed",
             preferred_generation_type=generation_type,
-            duration_seconds=15,
+            # The loop is a fixed 10 s clip; an explicit 15 s request is routed
+            # to native_h3_story by the duration policy before any pick.
+            duration_seconds=10 if generation_type == "native_h3_loop_story" else 15,
         )
     )
     goal = GoalRequest(

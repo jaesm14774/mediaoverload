@@ -1149,8 +1149,11 @@ class AgentSocialSkillTests(unittest.TestCase):
         self.assertTrue(youtube_title)
         self.assertNotIn("第 1 集｜主題：", youtube_title)
 
-    def test_user_given_a_serial_final_video_with_approved_story_states_when_discord_review_starts_then_public_copy_and_context_are_separate(self) -> None:
-        """User Given a serial final video has approved story states When Discord review starts Then interactive copy contains only caption and hashtags while context explains continuity."""
+    def test_user_given_a_serial_final_video_with_long_story_states_when_discord_review_starts_then_the_full_states_are_attached_and_public_copy_stays_separate(self) -> None:
+        """User Given a serial final video has long approved and proposed story states When Discord review starts Then the reviewer gets every line of both states as an attachment, while the interactive copy stays caption and hashtags only."""
+        long_end_state = "\n".join(
+            [f"{index}. Kirby guides the firefly through chapter {index}. " + "lantern " * 60 for index in range(1, 9)]
+        )
         discord = RecordingDiscordReview()
         skills = AgentSocialSkills(
             ToolRegistry(),
@@ -1171,7 +1174,7 @@ class AgentSocialSkillTests(unittest.TestCase):
                     "hashtags": ["#Kirby"],
                     "serial_story_review_context": {
                         "approved_start_state": "The firefly is waiting beneath the old stone bridge.",
-                        "proposed_end_state": "Kirby guides the firefly to the warm lantern garden.",
+                        "proposed_end_state": long_end_state,
                     },
                 },
             ),
@@ -1199,11 +1202,15 @@ class AgentSocialSkillTests(unittest.TestCase):
         )
 
         self.assertEqual(discord.request["text"], "Draft social post\n\n#kirby")
-        context_text = discord.request["context_text"]
-        self.assertIn("上一集已核准狀態：", context_text)
-        self.assertIn("The firefly is waiting beneath the old stone bridge.", context_text)
-        self.assertIn("本集結尾狀態提案：", context_text)
-        self.assertIn("Kirby guides the firefly to the warm lantern garden.", context_text)
+        self.assertLessEqual(len(discord.request["context_text"]), 500)
+        documents = discord.request["document_paths"]
+        self.assertEqual(len(documents), 1)
+        attached = Path(documents[0]).read_text(encoding="utf-8")
+        self.assertIn("上一集已核准狀態", attached)
+        self.assertIn("The firefly is waiting beneath the old stone bridge.", attached)
+        self.assertIn("本集結尾狀態提案", attached)
+        for line in long_end_state.splitlines():
+            self.assertIn(line.rstrip(), attached)
 
     def test_prepare_caption_uses_approved_review_text_without_second_llm_gate(self) -> None:
         tool_registry = ToolRegistry()

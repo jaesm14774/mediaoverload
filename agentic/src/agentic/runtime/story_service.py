@@ -7,7 +7,6 @@ from typing import Any
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.storyboard import merge_native_h3_storyboard
 from agentic.runtime.news_grounding import (
-    is_brand_safe_news_selection,
     is_usable_news_selection,
 )
 from agentic.tools.context_services import NewsContextService
@@ -38,14 +37,15 @@ class NativeH3StoryService:
         creative_brief: str = "",
         arc_guidance: str = "",
         reference_analysis: dict[str, Any] | None = None,
+        replayable_loop: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        resolved_news = dict(news_context or {})
+        # A replayable loop writes its own gag and must never have a news item
+        # attached, so it never asks the news service for one.
+        news_required = not replayable_loop
+        resolved_news = dict(news_context or {}) if news_required else {}
         if resolved_news.get("error"):
             raise RuntimeError(f"Native H3 news context failed: {resolved_news['error']}")
-        if not is_usable_news_selection(
-            str(resolved_news.get("title") or ""),
-            str(resolved_news.get("keyword") or ""),
-        ) or not is_brand_safe_news_selection(
+        if news_required and not is_usable_news_selection(
             str(resolved_news.get("title") or ""),
             str(resolved_news.get("keyword") or ""),
         ):
@@ -54,7 +54,7 @@ class NativeH3StoryService:
                 raise RuntimeError("Native H3 requires a selectable news item; no news context was available")
             resolved_news = selected_news.to_dict()
         recorder = getattr(self.llm_engine, "recorder", None)
-        if recorder is not None:
+        if recorder is not None and news_required:
             recorder.record_event("news.selected", news_context=resolved_news)
 
         resolved_character = str(character or base_storyboard.get("character") or "").strip()
@@ -79,5 +79,6 @@ class NativeH3StoryService:
             creative_brief=creative_brief,
             arc_guidance=arc_guidance,
             reference_analysis=dict(reference_analysis or {}),
+            replayable_loop=replayable_loop,
         )
         return self.storyboard_merger(resolved_base_storyboard, payload["story"]), payload

@@ -204,7 +204,9 @@ class SocialServiceTools:
         else:
             status = "success" if not errors else "partial_failure"
         dispatch_status = "skipped" if skipped_platforms and not effective_platforms and not errors else status
+        published_at = datetime.now(timezone.utc).isoformat()
         manifest_path = self._write_publish_manifest(
+            published_at=published_at,
             payload=payload,
             media_paths=media_paths,
             platforms=effective_platforms,
@@ -233,6 +235,7 @@ class SocialServiceTools:
             "publish_receipts": publish_receipts,
             "handoff_receipts": handoff_receipts,
             "manifest_path": manifest_path,
+            "published_at": published_at,
             "media_paths": media_paths,
             "caption": caption,
             "hashtags": hashtags_str,
@@ -448,6 +451,7 @@ class SocialServiceTools:
     @staticmethod
     def _write_publish_manifest(
         *,
+        published_at: str,
         payload: dict[str, object],
         media_paths: list[str],
         platforms: list[str],
@@ -472,7 +476,7 @@ class SocialServiceTools:
         output_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = output_dir / "publish_manifest.json"
         manifest = {
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": published_at,
             "publish_mode": publish_mode,
             "platforms": platforms,
             "media_paths": media_paths,

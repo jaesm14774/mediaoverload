@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
+from agentic.runtime.claude_brain import ClaudeBrainModel
 from agentic.runtime.model_backends import (
     AgenticLLMManager,
     FallbackChatModel,
@@ -238,6 +239,12 @@ def _wrap_openrouter_vision(backend: dict[str, Any], candidates: list[str]) -> A
 
 
 def build_llm_manager(backend: dict[str, Any]) -> Any:
+    brain_dir = backend.get("claude_brain_dir")
+    if brain_dir:
+        return AgenticLLMManager(
+            text_model=ClaudeBrainModel(brain_dir, "text"),
+            vision_model=ClaudeBrainModel(brain_dir, "vision"),
+        )
     text_provider = str(backend["text_provider"])
     vision_provider = str(backend["vision_provider"])
 

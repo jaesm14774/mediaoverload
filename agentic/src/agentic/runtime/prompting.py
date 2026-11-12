@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import random
 import re
-import secrets
+from difflib import SequenceMatcher
 from typing import Any
 
 from agentic.runtime.contracts import GoalRequest
@@ -13,6 +12,14 @@ from agentic.video_directing import (
 
 
 _ISOLATED_STICKER_TYPES = frozenset({"sticker_pack", "animated_sticker"})
+
+
+SINGLE_SUBJECT_MEDIA_TYPES = frozenset({"sticker_pack", "animated_sticker", "game_sprite"})
+
+
+def texts_are_alike(first: str, second: str) -> bool:
+    """True when two writer descriptions say nearly the same thing, so a set built from them repeats itself."""
+    return SequenceMatcher(None, first.casefold(), second.casefold()).ratio() >= 0.9
 
 
 def selected_role_description(goal: GoalRequest) -> str:
@@ -31,6 +38,10 @@ def selected_role_description(goal: GoalRequest) -> str:
                 if name or description:
                     identities.append(f"{name}: {description}" if name and description else name or description)
         if identities:
+            # A sticker or sprite is one isolated subject; a second cast
+            # member would be drawn into every frame of it.
+            if goal.media_type in SINGLE_SUBJECT_MEDIA_TYPES:
+                return identities[0]
             return "; ".join(identities)
 
     profile = goal.constraints.get("character_profile")
@@ -74,9 +85,8 @@ IMAGE_PROMPT_CONTRACT = (
     "1) Medium: one sentence naming the selected medium with two or three observable surface cues such as paper tooth, "
     "pigment bloom, pencil outline, or brush texture; use photographic camera language only when the selected style is "
     "photographic. "
-    "2) Concept: the single clearest idea of the brief as one charming visual metaphor rather than a literal report: the "
-    "character nests inside, becomes part of, or is sized against the key object of the story, for example resting in a "
-    "cup, tucked into a sleeve, or plugged into a socket as if it were the thing the story is about; treat the requested and selected cast, action, setting, and explicit "
+    "2) Concept: the single clearest idea of the brief as one small moment the character itself lives through, with one "
+    "feeling that reads from its face and whole body, rather than a literal report; treat the requested and selected cast, action, setting, and explicit "
     "framing as fixed, and show every required subject in the same frame with a visible interaction. "
     "3) Scale: the world is the main subject. Unless a close-up is requested, each named character is small and simple, "
     "about one fifth to one third of the frame height, placed off-center and grounded by contact, shadow, or overlap. "
@@ -158,68 +168,35 @@ DEFAULT_GAME_SPRITE_VISUAL_CONTRACT = (
 
 
 DYNAMIC_SPRITE_SYSTEM_PROMPT = (
-    "You write prompts for one small 2D game-skill sprite animation. image_prompt describes one still "
+    "You write prompts for one small 2D game sprite animation of a cute character. image_prompt describes one still "
     "frame: exactly one character (the requested subject, never a duplicate or a second character), "
     "full body, centered, in the pose just before the action, with at most one small prop and no "
     "description of any backdrop, ground, shadow, or scenery (a plain backdrop is added later). Never describe a sprite sheet, storyboard, panels, key frames, or several "
     "poses in image_prompt. video_prompt is one short paragraph of plain motion for that same frame, "
-    "under 70 words: one skill with anticipation, charge, release, impact, and recovery, where the pose "
-    "and a visible effect that starts at the character change together; fixed camera, no new "
-    "characters, no cuts. A long news or theme brief must be reduced to one visual motif; drop every "
+    "under 70 words: the character acts out the one small everyday action the theme is about, with its whole "
+    "body. It gets ready, does the action, reacts to what happens with a clear change of face and body, and "
+    "settles back into the pose it started in; fixed camera, no new characters, no cuts. The action is the "
+    "theme's own action done at the character's size, never an attack, weapon swing, energy blast, or "
+    "explosion. A long theme must be reduced to that one action and at most one prop; drop every "
     "other element, because the sprite is read at thumbnail size. Never mention frames, atlas, grid, "
     "fps, seconds, loops, or the rendering pipeline. The configured game-sprite visual contract is "
     "mandatory; selected styles may only guide palette and materials and cannot replace its game-art "
     "rendering. Return image_prompt, video_prompt, and exactly five ordered beats."
 )
 
-def build_game_sprite_reference_context(
-    goal: GoalRequest,
-    *,
-    limit: int = 8,
-) -> dict[str, Any]:
-    """Sample optional game-sprite inspiration notes for lineage."""
+
+def build_game_sprite_reference_context(goal: GoalRequest) -> dict[str, Any]:
+    """Resolve the game-sprite visual contract configured for this route."""
 
     strategy_context = goal.constraints.get("strategy_context") or {}
     if not isinstance(strategy_context, dict):
         strategy_context = {}
-    raw_references = strategy_context.get("creative_inspiration") or []
-    references: list[dict[str, str]] = []
-    if isinstance(raw_references, list):
-        for item in raw_references:
-            if not isinstance(item, dict):
-                continue
-            reference = {
-                "id": str(item.get("id") or "").strip(),
-                "source": str(item.get("source") or "").strip(),
-                "source_url": str(item.get("source_url") or "").strip(),
-                "inspiration": " ".join(str(item.get("inspiration") or "").split()).strip(),
-            }
-            if all(reference.values()):
-                references.append(reference)
-
-    sample_limit = max(0, min(int(limit), len(references)))
-    if sample_limit:
-        raw_seed = goal.constraints.get("sprite_reference_seed")
-        chooser = (
-            random.Random(str(raw_seed))
-            if raw_seed is not None and str(raw_seed) != ""
-            else secrets.SystemRandom()
-        )
-        selected = chooser.sample(references, sample_limit)
-    else:
-        selected = []
-    lines = [
-        "Optional inspiration notes (use for visual timing only; do not assign or register these actions as character abilities):"
-    ]
-    lines.extend(f"- {item['source']}: {item['inspiration']}" for item in selected)
     return {
         "pack_version": str(strategy_context.get("reference_pack_version") or "strategy_context"),
         "visual_contract": " ".join(
             str(strategy_context.get("visual_contract") or DEFAULT_GAME_SPRITE_VISUAL_CONTRACT)
             .split()
         ).strip(),
-        "references": selected,
-        "prompt_text": "\n".join(lines),
     }
 
 
@@ -329,18 +306,6 @@ def validate_story_segments(
     return segments
 
 
-def build_sticker_prompt(character: str, expression: str, prompt_prefix: str, style: str) -> str:
-    return ", ".join(
-        part
-        for part in (
-            _hero_subject_clause(character),
-            expression,
-            prompt_prefix,
-            style,
-        )
-        if part
-    )
-
 
 def build_animated_sticker_motion_prompt(goal: GoalRequest) -> str:
     character = str(goal.constraints.get("character", "") or "").strip()
@@ -365,39 +330,39 @@ def _dynamic_sprite_fallback_beats(request: str) -> list[dict[str, Any]]:
             "time_end": 0.2,
             "purpose": "anticipation",
             "action": request,
-            "body_change": "The character plants its feet, shifts its weight, and draws into a readable skill-ready pose.",
+            "body_change": "The character plants its feet, shifts its weight, and draws into a readable ready pose.",
         },
         {
             "time_start": 0.2,
             "time_end": 0.4,
             "purpose": "charge",
-            "action": "The body braces and a focused charge visibly gathers at the ability's source point.",
-            "body_change": "The silhouette compresses or leans against the growing force.",
-            "cause": "The anticipation pose stores force for the ability.",
+            "action": "The body leans into the action and its first movement begins.",
+            "body_change": "The silhouette compresses or leans as the movement starts.",
+            "cause": "The ready pose leads straight into the movement.",
         },
         {
             "time_start": 0.4,
             "time_end": 0.6,
             "purpose": "release",
-            "action": "The character snaps into the requested skill and sends its effect along a clear path.",
-            "body_change": "The body follows through in the same direction as the released force.",
-            "cause": "The charge releases from the visible casting point.",
+            "action": "The character carries out the requested action with its whole body.",
+            "body_change": "The body follows through in the direction of the action.",
+            "cause": "The movement that began in the previous beat completes.",
         },
         {
             "time_start": 0.6,
             "time_end": 0.8,
             "purpose": "impact_or_peak",
-            "action": "The effect reaches its target or fullest point in a compact, high-contrast impact burst.",
-            "spatial_change": "The effect visibly expands or reaches the end of its travel path.",
-            "cause": "The released skill resolves against its target or the arena.",
+            "action": "What the action causes becomes visible, and the character's face and pose react to it.",
+            "spatial_change": "The prop or the character ends up somewhere visibly different.",
+            "cause": "The completed action produces its result.",
         },
         {
             "time_start": 0.8,
             "time_end": 1.0,
             "purpose": "recovery",
-            "action": "Recoil and follow-through settle into a clear end pose as the remaining particles dissipate.",
-            "body_change": "The character absorbs the recoil and regains a stable stance.",
-            "cause": "The impact or effect peak carries the body into recovery.",
+            "action": "The reaction eases and the character settles back into its starting pose.",
+            "body_change": "The character relaxes and regains a stable stance.",
+            "cause": "The reaction winds down into rest.",
         },
     ]
 
@@ -463,7 +428,7 @@ def compile_dynamic_sprite_image_prompt(
     prompt = str(creative_prompt or "").strip()
     subject_contract = (
         "One game sprite keyframe of exactly one character, full body, centered in a single frame and "
-        "large, about two thirds of the frame height, in the pose just before a skill with its effect source visible; never a sprite sheet, "
+        "large, about two thirds of the frame height, in the pose just before its action, with its one prop visible; never a sprite sheet, "
         f"storyboard, collage, panels, duplicate characters, or several poses; set on {SPRITE_BACKDROP_CLAUSE}."
     )
     configured_contract = str(visual_contract or "").strip()
@@ -487,13 +452,13 @@ def compile_dynamic_sprite_video_prompt(
     """Add a short choreography contract; the text encoder reads every word of it."""
     prompt = str(creative_prompt or "").strip()
     action_contract = (
-        "One continuous one-shot skill with a fixed camera and only the single character from the "
-        "first frame: anticipation with a wind-up, charge at a visible source, a fast release along a "
-        "clear path, a brief held impact, then recoil and a stable end pose. The body silhouette "
-        "changes with the force in every phase; no cuts, no new characters, no camera drift, no idle "
-        "holds. The character stays at the same position in the frame, the effect stays compact "
-        "around it and never covers its face, and nothing leaves the frame. The flat pure green backdrop stays solid and unchanged for the whole clip, with no "
-        "green in the character or its effects."
+        "One continuous small action with a fixed camera and only the single character from the "
+        "first frame: it gets ready, does the action with its whole body, reacts with a clear change "
+        "of face and pose, and settles back into its starting pose. The body silhouette changes in "
+        "every phase; no cuts, no new characters, no camera drift, no idle holds, and no energy "
+        "effects, blasts, or explosions. The character stays at the same position in the frame, its "
+        "face stays visible, and nothing leaves the frame. The flat pure green backdrop stays solid and unchanged for the whole clip, with no "
+        "green in the character or its prop."
     )
     configured_contract = str(visual_contract or "").strip()
     art_contract = (

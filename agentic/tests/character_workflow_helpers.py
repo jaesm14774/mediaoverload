@@ -60,14 +60,16 @@ def _test_resolved_selection(config_path: Path) -> tuple[str, dict[str, Any]] | 
     character = character if isinstance(character, dict) else {}
     selected_name = str(character.get("name") or "Kirby").strip()
     group_name = str(character.get("group_name") or "").strip()
+    # A real group has several active members; a series carousel casts them.
+    group = [selected_name, "Waddle Dee", "Meta Knight", "King Dedede", "Bandana Dee"]
     return selected_name, {
         "mode": "config",
         "subject_mode": "single",
         "configured_subject_mode": "random",
         "group_name": group_name,
         "selected_character": selected_name,
-        "candidate_count": 1,
-        "candidates": [{"name": selected_name, "status": 1, "weight": 1.0}],
+        "candidate_count": len(group),
+        "candidates": [{"name": name, "status": 1, "weight": 1.0} for name in group],
         "selected_profile": {},
         "selection_source": "test_fixture_resolved_selection",
     }

@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import unittest
 import os
+import sys
 import hashlib
 import json
 import uuid
@@ -869,7 +870,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
 
         with _workspace_temporary_directory() as temporary:
             root = Path(temporary)
-            episode = self._start_rendering_episode(root, "live-render")
+            self._start_rendering_episode(root, "live-render")
             store = self._new_store()
 
             selected = store.prepare_auto_next_context("Hero", random_source=NewSeriesRoll())
@@ -2355,7 +2356,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             env["mysql_port"] = str(self.mysql_options["port"])
             completed = subprocess.run(
                 [
-                    os.environ.get("PYTHON", "python"),
+                    sys.executable,
                     "-X", "utf8",
                     "-m", "agentic.app.main",
                     "--goal", "A hero enters a station",

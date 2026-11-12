@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -13,8 +14,10 @@ from agentic.minimax_prompting import format_h3_video_prompt
 from agentic.runtime.story_cards import (
     STORY_CARD_DEFAULT_HEIGHT,
     STORY_CARD_DEFAULT_WIDTH,
-    new_story_card_visual_seed,
+    STORY_CARD_SEED_MAX,
+    resolve_story_card_visual_seed,
     render_story_card_images,
+    story_card_vignette_size,
     validate_story_card_payload,
 )
 from agentic.runtime.prompting import (
@@ -286,21 +289,7 @@ class AgentPlanningSkills:
 
     def build_sticker_prompt_set(self, context: SkillContext) -> SkillResult:
         expressions = list(context.state[context.node.depends_on[0]].get("expressions", []))
-        style = str(
-            context.node.inputs.get(
-                "style",
-                "LINE sticker style, chibi proportions, white outline, simple clean background, 2D flat shading",
-            )
-        )
-        character = str(context.node.inputs.get("character") or context.plan.goal.constraints.get("character", "")).strip()
-        prompt_prefix = str(context.node.inputs.get("prompt_prefix", context.plan.goal.prompt)).strip()
-        bundle = self.prompt_engine.build_sticker_prompt_set(
-            context.plan.goal,
-            expressions=expressions,
-            character=character,
-            prompt_prefix=prompt_prefix,
-            style=style,
-        )
+        bundle = self.prompt_engine.build_sticker_prompt_set(context.plan.goal, expressions)
         return SkillResult(
             status="success",
             outputs=bundle,
@@ -346,15 +335,16 @@ class AgentPlanningSkills:
             logs=[f"Generated open-ended sprite motion plan '{plan.get('motion_name', '')}'."],
         )
 
-    def build_slide_prompt_set(self, context: SkillContext) -> SkillResult:
-        segments = list(context.state[context.node.depends_on[0]].get("segments", []))
-        style = str(context.node.inputs.get("style", context.plan.goal.style))
-        bundle = self.prompt_engine.build_carousel_prompt_set(context.plan.goal, segments, style)
+    def build_series_prompt_set(self, context: SkillContext) -> SkillResult:
+        members = list(context.plan.goal.constraints.get("series_members") or [])
+        if not members:
+            raise ValueError("Series carousel requires a resolved cast in series_members")
+        bundle = self.prompt_engine.build_series_template(context.plan.goal, members)
         return SkillResult(
             status="success",
             outputs=bundle,
-            metrics={"prompt_count": int(bundle.get("prompt_count", 0))},
-            logs=["Prepared a reusable carousel prompt set."],
+            metrics={"prompt_count": len(bundle["prompt_sets"])},
+            logs=["Wrote one fixed scene and filled it once per cast member."],
         )
 
     def write_story_card(self, context: SkillContext) -> SkillResult:
@@ -737,12 +727,17 @@ class AgentMediaSkills:
         native_h3_keyframe = media_type in {
             "native_h3_story",
             "native_h3_fl2va_story",
+            "native_h3_loop_story",
         }
         run_dir = self._build_run_dir(context.plan.goal.prompt, str(context.node.inputs.get("suffix", "batch_images")))
         saved_files: list[str] = []
         item_runs: list[dict[str, str]] = []
         seed_value = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
         seed_base = int(seed_value) if seed_value is not None else None
+        # A series keeps one composition only if every page starts from the same noise.
+        shared_seed = bool(context.node.inputs.get("shared_seed"))
+        if shared_seed and seed_base is None:
+            seed_base = random.SystemRandom().randrange(1, 2**31)
         rendered_count = 0
         for index, (prompt_set, prompt_image_count) in enumerate(
             zip(prompt_sets, image_counts, strict=True), start=1
@@ -753,16 +748,19 @@ class AgentMediaSkills:
             )
             item_dir = run_dir / label
             prompt = str(prompt_set["prompt"])
-            if not native_h3_keyframe:
-                prompt = include_role_description(prompt, context.plan.goal)
-            if media_type in {"sticker_pack", "animated_sticker"}:
-                prompt = apply_isolated_subject_art_direction(prompt)
-            prompt = include_visual_style_profile(
-                prompt, context.plan.goal, image_generation=True
-            )
-            prompt = include_image_prompt_quality_clause(
-                prompt, context.plan.goal, image_generation=True
-            )
+            # A self-contained prompt already carries its identity and look;
+            # anything appended would bury the pose it leads with.
+            if not prompt_set.get("self_contained"):
+                if not native_h3_keyframe:
+                    prompt = include_role_description(prompt, context.plan.goal)
+                if media_type in {"sticker_pack", "animated_sticker"}:
+                    prompt = apply_isolated_subject_art_direction(prompt)
+                prompt = include_visual_style_profile(
+                    prompt, context.plan.goal, image_generation=True
+                )
+                prompt = include_image_prompt_quality_clause(
+                    prompt, context.plan.goal, image_generation=True
+                )
             render_payload = {
                 "workflow_name": workflow_name,
                 "prompt": prompt,
@@ -773,7 +771,9 @@ class AgentMediaSkills:
                 "run_dir": str(item_dir),
             }
             if seed_base is not None:
-                render_payload["seed"] = (seed_base + rendered_count) % (2**64)
+                render_payload["seed"] = (
+                    seed_base if shared_seed else (seed_base + rendered_count) % (2**64)
+                )
             result = self.tools.call(
                 "comfy.workflow.text_to_image", render_payload
             )
@@ -792,93 +792,81 @@ class AgentMediaSkills:
             )
         return SkillResult(
             status="success",
-            outputs={"run_dir": str(run_dir), "saved_files": saved_files, "items": item_runs},
+            outputs={
+                "run_dir": str(run_dir),
+                "saved_files": saved_files,
+                "items": item_runs,
+                **({"seed": seed_base} if shared_seed else {}),
+            },
             metrics={"image_count": len(saved_files)},
             logs=[f"Rendered {len(saved_files)} images as a reusable batch primitive."],
         )
-    def render_story_card_backgrounds(self, context: SkillContext) -> SkillResult:
-        """Render each requested story-card background."""
+    def render_story_card_vignette(self, context: SkillContext) -> SkillResult:
+        """Render one small vignette for each story-card page."""
 
         story_output = context.state[context.node.inputs.get("story_node", "story-card-write")]
         story = validate_story_card_payload(dict(story_output))
         workflow_name = str(context.node.inputs["workflow_name"])
         render_tool = str(context.node.inputs.get("render_tool") or "comfy.workflow.text_to_image")
-        width = int(context.node.inputs.get("width", STORY_CARD_DEFAULT_WIDTH))
-        height = int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT))
-        run_dir = self._build_run_dir(context.plan.goal.prompt, "story_card_backgrounds")
-        background_paths: list[str] = []
-        page_runs: list[dict[str, object]] = []
+        width, height = story_card_vignette_size(
+            int(context.node.inputs.get("width", STORY_CARD_DEFAULT_WIDTH)),
+            int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT)),
+        )
+        run_dir = self._build_run_dir(context.plan.goal.prompt, "story_card_vignette")
         image_goal = replace(context.plan.goal, media_type="image")
         negative_prompt = "; ".join(
             part for part in (str(story["negative_prompt"]), style_profile_avoidance(image_goal)) if part
         )
-        seed_value = context.plan.goal.constraints.get("seed")
-        if seed_value is not None:
-            seed_base = int(seed_value)
-        else:
-            seed_base = int(story.get("visual_seed") or new_story_card_visual_seed())
-        for index, page in enumerate(story["pages"], start=1):
-            page_dir = run_dir / f"page_{index:02d}"
-            background_prompt = include_visual_style_profile(page["background_prompt"], image_goal)
-            background_prompt = include_image_prompt_quality_clause(
-                background_prompt, image_goal, image_generation=True
+        # The writer already resolved the pinned or random seed, so the recorded lineage is what renders.
+        base_seed = resolve_story_card_visual_seed(story.get("visual_seed"))
+        vignette_paths: list[str] = []
+        prompts: list[str] = []
+        for page in story["pages"]:
+            prompt = include_visual_style_profile(page["vignette_prompt"], image_goal)
+            prompt = include_image_prompt_quality_clause(prompt, image_goal, image_generation=True)
+            result = self.tools.call(
+                render_tool,
+                {
+                    "workflow_name": workflow_name,
+                    "prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                    "width": width,
+                    "height": height,
+                    "image_count": 1,
+                    "run_dir": str(run_dir / f"page_{int(page['page']):02d}"),
+                    # A different seed per page keeps compositions from repeating.
+                    "seed": (base_seed + int(page["page"]) - 2) % STORY_CARD_SEED_MAX + 1,
+                },
             )
-            page_seed = seed_base + (index * 1009)
-            payload: dict[str, object] = {
-                "workflow_name": workflow_name,
-                "prompt": background_prompt,
-                "negative_prompt": negative_prompt,
-                "width": width,
-                "height": height,
-                "image_count": 1,
-                "run_dir": str(page_dir),
-                "seed": page_seed,
-            }
-            result = self.tools.call(render_tool, payload)
             generated = [str(path) for path in result.get("saved_files", []) if str(path)]
             if not generated:
-                raise RuntimeError(f"Story-card background render produced no image for page {index}")
-            generated_path = generated[0]
-            background_paths.append(generated_path)
-            page_runs.append(
-                {
-                    "page": str(index),
-                    "style_anchor_prompt": story["anchor_prompt"],
-                    "prompt": background_prompt,
-                    "saved_file": generated_path,
-                    "seed": str(page_seed),
-                }
-            )
+                raise RuntimeError(f"Story-card vignette render for page {page['page']} produced no image")
+            vignette_paths.append(generated[0])
+            prompts.append(prompt)
         return SkillResult(
             status="success",
             outputs={
                 "run_dir": str(run_dir),
-                "anchor_path": "",
-                "style_anchor_prompt": story["anchor_prompt"],
-                "background_paths": background_paths,
-                "page_runs": page_runs,
-                "visual_seed": seed_base,
+                "vignette_paths": vignette_paths,
+                "prompts": prompts,
+                "visual_seed": base_seed,
             },
-            metrics={"background_count": len(background_paths)},
-            logs=[f"Rendered {len(background_paths)} text-to-image page backgrounds."],
+            metrics={"vignette_count": len(vignette_paths)},
+            logs=[f"Rendered {len(vignette_paths)} text-to-image vignettes, one per story-card page."],
         )
 
     def compose_story_card(self, context: SkillContext) -> SkillResult:
         story_output = context.state[context.node.inputs.get("story_node", "story-card-write")]
-        backgrounds_output = context.state[context.node.inputs.get("background_node", "story-card-backgrounds")]
+        vignette_output = context.state[context.node.inputs.get("vignette_node", "story-card-vignette")]
         story = validate_story_card_payload(dict(story_output))
-        background_paths = [
-            str(path) for path in backgrounds_output.get("background_paths", []) if str(path)
-        ]
-        output_dir = Path(str(backgrounds_output.get("run_dir") or self._build_run_dir(context.plan.goal.prompt, "story_card"))) / "cards"
+        output_dir = Path(str(vignette_output.get("run_dir") or self._build_run_dir(context.plan.goal.prompt, "story_card"))) / "cards"
         render_result = render_story_card_images(
-            background_paths=background_paths,
+            vignette_paths=[str(path) for path in vignette_output["vignette_paths"]],
             story=story,
             output_dir=output_dir,
             width=int(context.node.inputs.get("width", STORY_CARD_DEFAULT_WIDTH)),
             height=int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT)),
             font_path=str(context.node.inputs.get("font_path") or context.plan.goal.constraints.get("story_card_font_path") or "") or None,
-            overlay_opacity=int(context.node.inputs.get("overlay_opacity", 176)),
             brand_label=str(context.node.inputs.get("brand_label", "STORY NOTE")),
         )
         summary_path = output_dir / "story_card_summary.json"
@@ -886,8 +874,7 @@ class AgentMediaSkills:
             "goal": context.plan.goal.prompt,
             "media_type": context.plan.goal.media_type,
             "story": story,
-            "anchor_path": backgrounds_output.get("anchor_path", ""),
-            "background_paths": background_paths,
+            "vignette_paths": vignette_output["vignette_paths"],
             "render": render_result,
             "prompt_lineage": self._collect_prompt_lineage(context),
             "node_prompt_modes": self._collect_node_prompt_modes(context),
@@ -901,12 +888,11 @@ class AgentMediaSkills:
                 "summary_path": str(summary_path),
                 "saved_files": saved_files,
                 "story": story,
-                "anchor_path": backgrounds_output.get("anchor_path", ""),
                 "prompt_lineage": summary["prompt_lineage"],
                 "node_prompt_modes": summary["node_prompt_modes"],
             },
             metrics={"page_count": len(render_result["saved_files"])},
-            logs=["Composed exact Traditional-Chinese text over subdued story-card backgrounds."],
+            logs=["Composed exact Traditional-Chinese text on cream paper above a faded vignette."],
         )
 
     def narrate_text(self, context: SkillContext) -> SkillResult:
@@ -1465,6 +1451,9 @@ class AgentMediaSkills:
         run_dir = Path(str(rendered["run_dir"]))
         summary_path = run_dir / "carousel_summary.json"
         items = list(rendered.get("items", []))
+        missing = [item["label"] for item in items if not item.get("saved_file")]
+        if missing:
+            raise ValueError(f"Carousel pages rendered no image: {', '.join(missing)}")
         summary = {
             "goal": context.plan.goal.prompt,
             "media_type": context.plan.goal.media_type,
@@ -1539,7 +1528,7 @@ class AgentMediaSkills:
             "node_prompt_modes": self._collect_node_prompt_modes(context),
         }
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        saved_files = [str(summary_path), video_path, *[str(item) for item in result.get("saved_files", [])]]
+        saved_files = [str(summary_path), *[str(item) for item in result.get("saved_files", [])]]
         if image_paths:
             saved_files.insert(1, image_paths[0])
         saved_files = list(dict.fromkeys(path for path in saved_files if path))
@@ -1547,7 +1536,10 @@ class AgentMediaSkills:
             status="success",
             outputs={
                 **result,
-                "video_path": video_path,
+                # The raw clip still has its green backdrop; the showcase is
+                # the cut-out sprite and is what review and publishing use.
+                "final_video_path": str(result["showcase_path"]),
+                "source_video_path": video_path,
                 "master_image_path": image_paths[0] if image_paths else "",
                 "summary_path": str(summary_path),
                 "saved_files": saved_files,
@@ -1556,7 +1548,7 @@ class AgentMediaSkills:
                 "node_prompt_modes": summary["node_prompt_modes"],
             },
             metrics={"frame_count": len(result.get("frame_paths", []))},
-            logs=["Packaged generated motion into a 4x4 game sprite atlas while preserving its background."],
+            logs=["Cut the sprite out of its green backdrop into a 4x4 atlas and a looping showcase clip."],
         )
 
     def package_animated_sticker_outputs(self, context: SkillContext) -> SkillResult:
@@ -1721,7 +1713,7 @@ def register_agent_primitive_skills(
     skill_registry.register("agent.sticker.prompt_set", planning.build_sticker_prompt_set, "Build sticker prompt sets")
     skill_registry.register("agent.sticker.motion_prompt", planning.build_sticker_motion_prompt, "Build an animated sticker motion prompt")
     skill_registry.register("agent.sprite.motion_plan", planning.build_dynamic_sprite_motion_plan, "Generate an open-ended game sprite motion plan")
-    skill_registry.register("agent.carousel.prompt_set", planning.build_slide_prompt_set, "Build carousel slide prompt sets")
+    skill_registry.register("agent.series.prompt_set", planning.build_series_prompt_set, "Write one fixed series scene and fill it per cast member")
     skill_registry.register("agent.story_card.write", planning.write_story_card, "Write a dedicated story-card article")
     skill_registry.register("media.ensure_workflow", media.ensure_workflow, "Check workflow assets for any agent step")
     skill_registry.register("media.image.refine", media.refine_image, "Refine an image as an agent media primitive")
@@ -1731,8 +1723,8 @@ def register_agent_primitive_skills(
     skill_registry.register("media.image.upscale", media.upscale_image, "Upscale an image as an agent media primitive")
     skill_registry.register("media.image.animate", media.animate_image, "Animate an image as an agent media primitive")
     skill_registry.register("media.image.render_batch", media.render_image_batch, "Render a batch of images as an agent media primitive")
-    skill_registry.register("media.story_card.backgrounds", media.render_story_card_backgrounds, "Render story-card backgrounds per page")
-    skill_registry.register("media.story_card.compose", media.compose_story_card, "Compose exact story-card text over generated backgrounds")
+    skill_registry.register("media.story_card.vignette", media.render_story_card_vignette, "Render one story-card vignette per page")
+    skill_registry.register("media.story_card.compose", media.compose_story_card, "Compose exact story-card text on cream paper above each page's own vignette")
     skill_registry.register("media.audio.narrate", media.narrate_text, "Generate narration audio as an agent media primitive")
     skill_registry.register("media.audio.concat", media.concat_audio_tracks, "Concatenate audio tracks as an agent media primitive")
     skill_registry.register("media.video.concat", media.concat_videos, "Concatenate videos as an agent media primitive")

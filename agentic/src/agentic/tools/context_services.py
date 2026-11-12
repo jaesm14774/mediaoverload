@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import re
+import tempfile
 import textwrap
 import uuid
 from collections.abc import Awaitable, Callable
@@ -18,7 +19,6 @@ from typing import Any
 from dotenv import load_dotenv
 from agentic.runtime.contracts import DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
 from agentic.runtime.news_grounding import (
-    is_brand_safe_news_selection,
     is_usable_news_selection,
 )
 from agentic.runtime.news_selection import (
@@ -31,6 +31,9 @@ from agentic.runtime.news_selection import (
 REVIEW_MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 REVIEW_DOCUMENT_EXTENSIONS = {".md", ".txt"}
 MAX_REVIEW_FILE_BYTES = 200 * 1024 * 1024
+REVIEW_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+# Discord's upload limit for servers without boosts; used when the channel does not report one.
+DEFAULT_DISCORD_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024
 
 
 def _load_env_once() -> None:
@@ -114,6 +117,53 @@ class NewsContextService:
             for key in ("mysql_host", "mysql_port", "mysql_user", "mysql_password", "mysql_db_name")
         )
 
+    def _connect(self) -> Any:
+        import pymysql
+
+        return pymysql.connect(
+            host=os.getenv("mysql_host"),
+            port=int(os.getenv("mysql_port", "3306")),
+            user=os.getenv("mysql_user"),
+            password=os.getenv("mysql_password"),
+            database=os.getenv("mysql_db_name"),
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+
+    def news_by_url(self, article_url: str) -> NewsSelection:
+        """Load one specific article so two runs can work from the same news."""
+        if not self.is_configured():
+            raise RuntimeError("MySQL is not configured; cannot look up the pinned news.")
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT title, keyword, category, created_at, content,
+                           article_url AS url, source
+                    FROM news_ch.news
+                    WHERE article_url = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    [article_url],
+                )
+                row = cursor.fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            raise ValueError(f"No news article found for url {article_url!r}")
+        return NewsSelection(
+            title=str(row.get("title") or "").strip(),
+            keyword=str(row.get("keyword") or "").strip(),
+            category=str(row.get("category") or "").strip(),
+            created_at=str(row.get("created_at") or "").strip(),
+            content=str(row.get("content") or "").strip(),
+            url=str(row.get("url") or "").strip(),
+            source=str(row.get("source") or "").strip(),
+            selection_reason="pinned_by_url",
+        )
+
     def select_news(
         self,
         *,
@@ -126,8 +176,6 @@ class NewsContextService:
         if not self.is_configured():
             _logger().info("news.fetch.skipped | reason=mysql_not_configured")
             return None
-
-        import pymysql
 
         categories = list(exclude_categories or self.DEFAULT_EXCLUDE_CATEGORIES)
         reference_time = datetime.now()
@@ -184,15 +232,7 @@ class NewsContextService:
         ptt_params = [two_days_ago, current_time, 3000]
 
         _logger().info("news.fetch.start | lookback_days=%s | limit=%s", lookback_days, limit)
-        connection = pymysql.connect(
-            host=os.getenv("mysql_host"),
-            port=int(os.getenv("mysql_port", "3306")),
-            user=os.getenv("mysql_user"),
-            password=os.getenv("mysql_password"),
-            database=os.getenv("mysql_db_name"),
-            charset="utf8mb4",
-            cursorclass=pymysql.cursors.DictCursor,
-        )
+        connection = self._connect()
         ptt_rows: list[dict[str, Any]] = []
         news_volume: dict[str, int] = {"6h": 0, "24h": 0, "previous_24h": 0}
         try:
@@ -218,7 +258,6 @@ class NewsContextService:
                 row
                 for row in rows
                 if is_usable_news_selection(row.get("title", ""), row.get("keyword", ""))
-                and is_brand_safe_news_selection(row.get("title", ""), row.get("keyword", ""))
                 and is_traceable_news(row)
             ]
             if not rows:
@@ -919,6 +958,69 @@ def _fit_discord_message(
     return textwrap.shorten(compact_text, width=max_length, placeholder="...")
 
 
+@dataclass(frozen=True)
+class ReviewUploads:
+    media_paths: list[str]
+    document_paths: list[str]
+
+
+def fit_review_uploads(
+    media_paths: list[str],
+    document_paths: list[str],
+    *,
+    limit_bytes: int,
+    work_dir: Path,
+) -> ReviewUploads:
+    """Return files whose combined size fits one Discord message.
+
+    Oversized videos are replaced by a smaller preview for display only; the
+    caller keeps the original paths, so selection and publishing never see it.
+    """
+    document_bytes = sum(Path(path).stat().st_size for path in document_paths)
+    if document_bytes + sum(Path(path).stat().st_size for path in media_paths) <= limit_bytes:
+        return ReviewUploads(list(media_paths), list(document_paths))
+
+    unfit = ValueError(f"review files cannot fit the {limit_bytes} byte upload limit")
+    # Only videos can shrink: images keep their size, videos share what is left.
+    video_count = sum(Path(path).suffix.lower() in REVIEW_VIDEO_EXTENSIONS for path in media_paths)
+    fixed_bytes = document_bytes + sum(
+        Path(path).stat().st_size
+        for path in media_paths
+        if Path(path).suffix.lower() not in REVIEW_VIDEO_EXTENSIONS
+    )
+    budget = (limit_bytes - fixed_bytes) // max(1, video_count)
+    if video_count == 0 or budget <= 0:
+        raise unfit
+    from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+
+    uploads: list[str] = []
+    for index, raw_path in enumerate(media_paths):
+        path = Path(raw_path)
+        if path.suffix.lower() not in REVIEW_VIDEO_EXTENSIONS or path.stat().st_size <= budget:
+            uploads.append(raw_path)
+            continue
+        preview =work_dir / f"{index}_{path.stem}_review_preview.mp4"
+        try:
+            FFmpegAdapter().make_size_limited_preview(str(path), str(preview), max_bytes=budget)
+        except ValueError as exc:
+            raise ValueError(f"{unfit}: {exc}") from exc
+        uploads.append(str(preview))
+    total = document_bytes + sum(Path(path).stat().st_size for path in uploads)
+    if total > limit_bytes:
+        raise unfit
+    return ReviewUploads(uploads, list(document_paths))
+
+
+async def _notify_review_failure(channel: Any, exc: Exception) -> None:
+    """Tell the reviewer the review could not be delivered, instead of leaving a dangling message."""
+    if channel is None:
+        return
+    try:
+        await channel.send(content=f"審核訊息送出失敗，請重新執行此集審核。原因：{type(exc).__name__}: {exc}"[:1900])
+    except Exception:
+        _logger().exception("discord.review.failure_notice.error")
+
+
 async def _close_discord_client(client: Any, *, label: str) -> None:
     """Close discord.py and its HTTP session, including login-failure paths."""
     try:
@@ -979,6 +1081,10 @@ async def _run_discord_file_feedback_process(
     @bot.event
     async def on_ready() -> None:
         nonlocal result
+        channel = None
+        message = None
+        opened_files: list[Any] = []
+        preview_dir = tempfile.TemporaryDirectory(prefix="discord_review_", ignore_cleanup_errors=True)
         try:
             channel = bot.get_channel(channel_id)
             if channel is None:
@@ -989,8 +1095,21 @@ async def _run_discord_file_feedback_process(
                     result = ("channel_unavailable", None, text, None, {"status": "channel_unavailable", "channel_id": channel_id})
                     completed.set()
                     return
-            files = [discord.File(path) for path in filepaths]
-            documents = [discord.File(path) for path in (document_paths or [])]
+            upload_limit = (
+                getattr(getattr(channel, "guild", None), "filesize_limit", None)
+                or DEFAULT_DISCORD_UPLOAD_LIMIT_BYTES
+            )
+            uploads = await asyncio.to_thread(
+                fit_review_uploads,
+                filepaths,
+                list(document_paths or []),
+                limit_bytes=int(upload_limit),
+                work_dir=Path(preview_dir.name),
+            )
+            files = [discord.File(path) for path in uploads.media_paths]
+            opened_files.extend(files)
+            documents = [discord.File(path) for path in uploads.document_paths]
+            opened_files.extend(documents)
             view = create_discord_review_view(
                 files,
                 text or "Review request",
@@ -1049,10 +1168,15 @@ async def _run_discord_file_feedback_process(
                 delivery["edit_requested"] = bool(view.edit_requested)
                 delivery["series_disposition"] = str(view.series_disposition or "")
                 result = (view.result, view.user_name, view.content, view.selected_files, delivery)
-        except Exception:
+        except Exception as exc:
             _logger().exception("discord.review.on_ready.error")
+            if message is None:
+                await _notify_review_failure(channel, exc)
             result = ("error", None, text, None, {"status": "error", "channel_id": channel_id})
         finally:
+            for opened in opened_files:
+                opened.close()
+            preview_dir.cleanup()
             completed.set()
 
     task = asyncio.create_task(bot.start(token))

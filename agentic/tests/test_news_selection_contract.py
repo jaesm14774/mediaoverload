@@ -274,10 +274,10 @@ def test_user_given_news_without_a_publisher_or_article_url_when_selecting_then_
         )
 
 
-def test_user_given_random_story_inspiration_when_selecting_then_it_chooses_uniformly_from_only_safe_traceable_articles():
-    """User Given safe and unsafe recent article rows When choosing a random story seed Then the injected chooser receives only usable, brand-safe, traceable articles and the decision records its pool size."""
+def test_user_given_random_story_inspiration_when_selecting_then_it_chooses_uniformly_from_only_usable_traceable_articles():
+    """User Given usable, untitled and untraceable recent article rows When choosing a random story seed Then the injected chooser receives only usable, traceable articles and the decision records its pool size."""
     allowed = _news("社區修復老橋讓居民重新通行", "Outlet A", "2026-10-24 09:00:00", "bridge")
-    rejected = _news("政治人物宣布競選政策", "Outlet B", "2026-10-24 08:00:00", "politics")
+    untitled = _news("...", "Outlet B", "2026-10-24 08:00:00", "politics")
 
     class ChooseLast:
         def __init__(self):
@@ -289,7 +289,7 @@ def test_user_given_random_story_inspiration_when_selecting_then_it_chooses_unif
 
     chooser = ChooseLast()
     decision = select_random_news_inspiration(
-        [allowed, rejected, {"title": "untraceable", "keyword": "x"}],
+        [allowed, untitled, {"title": "untraceable", "keyword": "x"}],
         rng=chooser,
     )
 

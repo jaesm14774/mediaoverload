@@ -15,6 +15,8 @@ from agentic.runtime.route_selection import select_weighted_route
 from agentic.runtime.strategies import (
     CONFIG_MEDIA_TYPE_MAP,
     NATIVE_STORY_GENERATION_TYPES,
+    NEWS_GROUNDED_GENERATION_TYPES,
+    NON_NEWS_NATIVE_STORY_TYPES,
     WORKFLOW_STAGE_KEYS,
     active_count_policy,
     media_type_for_generation,
@@ -26,7 +28,7 @@ from agentic.runtime.contracts import (
     normalize_video_duration,
 )
 from agentic.runtime.news_grounding import (
-    is_brand_safe_news_selection,
+    UnsuitableNewsError,
     is_usable_news_selection,
 )
 from agentic.tools.context_services import NewsContextService
@@ -642,6 +644,20 @@ def _collect_workflow_stage_candidates(
                     generation.get("identity_refine_workflow_name"),
                 ],
             }
+        elif generation_type == "native_h3_loop_story":
+            native_recipe = dict(generation.get("native_h3_loop_story", {}) or {})
+            inferred = {
+                "image_workflow_name": [
+                    native_recipe.get("keyframe_workflow_name"),
+                    generation.get("keyframe_workflow_name"),
+                    generation_workflows.get("text2img"),
+                ],
+                "video_workflow_name": [
+                    native_recipe.get("workflow_name"),
+                    generation_workflows.get("native_h3_loop_story"),
+                    generation_workflows.get("text2image2video"),
+                ],
+            }
         elif generation_type == "native_h3_l2va_story":
             native_recipe = dict(generation.get("native_h3_l2va_story", {}) or {})
             inferred = {
@@ -966,6 +982,9 @@ def _build_default_prompt(character_name: str, media_type: str, style: str) -> s
     return f"{character_name} in a {style} {media_label} concept"
 
 
+NEWS_RESELECT_ATTEMPTS = 3
+
+
 def _resolve_autonomous_prompt(
     *,
     prompt: str,
@@ -988,8 +1007,6 @@ def _resolve_autonomous_prompt(
             raise ValueError(
                 "Explicit news context requires a usable title."
             )
-        if not is_brand_safe_news_selection(title, keyword):
-            raise ValueError("Explicit news context is not brand safe.")
     if explicit_prompt and not news_driven:
         return {
             "prompt": explicit_prompt,
@@ -1002,59 +1019,77 @@ def _resolve_autonomous_prompt(
             "source_anchors": [],
         }
 
-    if not news_context:
-        try:
-            news_service = NewsContextService()
-            selected_news = news_service.select_news()
-            if selected_news is not None:
-                selected_context = selected_news.to_dict()
-                selected_title = str(selected_context.get("title") or "")
-                selected_keyword = str(selected_context.get("keyword") or "")
-                if (
-                    is_usable_news_selection(
-                        selected_title, selected_keyword
-                    )
-                    and is_brand_safe_news_selection(
-                        selected_title, selected_keyword
-                    )
-                ):
-                    news_context = selected_context
-                    resolved_news_driven = True
-        except Exception as exc:
-            if news_driven:
-                raise
-            news_context = {"error": f"{type(exc).__name__}: {exc}"}
-
-    news_grounding_required = resolved_news_driven
-    if resolved_news_driven and not is_usable_news_selection(
-        news_context.get("title", ""), news_context.get("keyword", "")
-    ):
-        raise RuntimeError(
-            "News-driven generation did not receive a usable news context."
-        )
-
-    if generation_type in ({"story_card"} | NATIVE_STORY_GENERATION_TYPES):
+    if generation_type in NON_NEWS_NATIVE_STORY_TYPES:
+        # The replayable loop invents its own premise: never attach a news item to it.
         return {
             "prompt": "",
-            "source": "news",
-            "prompt_mode": "news",
+            "source": "autonomous",
+            "prompt_mode": "autonomous",
             "creative_seed": "",
             "news_context": news_context,
-            "news_driven": resolved_news_driven,
-            "news_grounding_required": news_grounding_required,
+            "news_driven": False,
+            "news_grounding_required": False,
             "source_anchors": [],
         }
 
-    bundle = LLMPromptEngine(
-        mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
-        recorder=recorder,
-    ).generate_autonomous_scene_prompt(
-        character=character_name,
-        style=style,
-        media_type=media_type,
-        news_context=news_context,
-        news_grounding_required=news_grounding_required,
-    )
+    picks_own_news = not news_context
+    for attempt in range(NEWS_RESELECT_ATTEMPTS):
+        if picks_own_news:
+            news_context = {}
+            resolved_news_driven = bool(news_driven)
+        if not news_context:
+            try:
+                news_service = NewsContextService()
+                selected_news = news_service.select_news()
+                if selected_news is not None:
+                    selected_context = selected_news.to_dict()
+                    selected_title = str(selected_context.get("title") or "")
+                    selected_keyword = str(selected_context.get("keyword") or "")
+                    if is_usable_news_selection(selected_title, selected_keyword):
+                        news_context = selected_context
+                        resolved_news_driven = True
+            except Exception as exc:
+                if news_driven:
+                    raise
+                news_context = {"error": f"{type(exc).__name__}: {exc}"}
+
+        news_grounding_required = resolved_news_driven
+        if resolved_news_driven and not is_usable_news_selection(
+            news_context.get("title", ""), news_context.get("keyword", "")
+        ):
+            raise RuntimeError(
+                "News-driven generation did not receive a usable news context."
+            )
+
+        if generation_type in NEWS_GROUNDED_GENERATION_TYPES:
+            return {
+                "prompt": "",
+                "source": "news",
+                "prompt_mode": "news",
+                "creative_seed": "",
+                "news_context": news_context,
+                "news_driven": resolved_news_driven,
+                "news_grounding_required": news_grounding_required,
+                "source_anchors": [],
+            }
+
+        try:
+            bundle = LLMPromptEngine(
+                mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
+                recorder=recorder,
+            ).generate_autonomous_scene_prompt(
+                character=character_name,
+                style=style,
+                media_type=media_type,
+                news_context=news_context,
+                news_grounding_required=news_grounding_required,
+            )
+            break
+        except UnsuitableNewsError:
+            # Another article may hold a gentler happening; an article the
+            # caller supplied, or a last failed attempt, is an error.
+            if not picks_own_news or attempt == NEWS_RESELECT_ATTEMPTS - 1:
+                raise
     bundle.setdefault("prompt_mode", "template")
     bundle.setdefault("source", "autonomous_fallback")
     bundle["news_context"] = news_context

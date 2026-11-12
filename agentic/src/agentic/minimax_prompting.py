@@ -181,7 +181,7 @@ def compose_minimax_h3_prompt(
         if index == 1:
             shot_parts.extend(part for part in opening if part)
         elif time:
-            shot_parts.append(f"At {_format_h3_cut_time(time)}, the camera cuts to")
+            shot_parts.append(f"At {_format_h3_cut_time(time)}, in the same unbroken shot,")
         if cause:
             shot_parts.append(f"Because {cause},")
         if action:

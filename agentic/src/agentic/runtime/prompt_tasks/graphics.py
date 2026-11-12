@@ -16,23 +16,67 @@ from agentic.runtime.prompting import (
     compile_dynamic_sprite_video_prompt,
     dynamic_sprite_frame_map,
     normalize_dynamic_sprite_beats,
-    build_sticker_prompt,
     include_role_description,
     selected_role_description,
     style_profile_direction,
+    texts_are_alike,
 )
-from agentic.runtime.llm_client import PromptClient
+from agentic.runtime.llm_client import PromptClient, PromptGenerationError
+from agentic.runtime.series_carousel import series_prompt_sets
 
+
+STICKER_ACTING = (
+    "A sticker is a reaction someone sends in a chat, so the acting is bigger than life: the whole body squashes, "
+    "stretches, tilts, or flops, the eyes and mouth are exaggerated, and where it helps the feeling read, a simple "
+    "drawn emotion mark that fits that one feeling sits beside the character. Cuteness comes first: the character is "
+    "drawn at its most adorable, with soft round shapes, big shining eyes, and a feeling that reads at thumbnail size."
+)
 
 STICKER_FRAMING = (
-    "Sticker framing: one isolated subject with a thick white die-cut outline, centered and large on a "
-    "plain, flat, pale backdrop; the backdrop has no scenery, ground, crowd, or props beyond what the subject holds."
+    "Cute chat sticker: one isolated subject with a thick white die-cut outline that stays fully inside the frame, "
+    "on a plain, flat, pale backdrop with no scenery, ground, crowd, or writing."
 )
 
 
-def _with_sticker_framing(prompt: str) -> str:
-    """A model that writes a scene into a sticker prompt must still get one isolated subject."""
-    return f"{prompt.rstrip()}\n{STICKER_FRAMING}"
+
+# Typographic quotes and dashes are ordinary English; anything still outside
+# ASCII after this is an emoji or symbol the renderer cannot draw.
+_PLAIN_PUNCTUATION = str.maketrans(
+    {"‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-"}
+)
+
+
+def _sticker_reaction(payload: Any, target_count: int) -> list[str]:
+    """Check the writer's reactions and join each into one drawable sentence."""
+    reactions = payload.get("reactions") if isinstance(payload, dict) else None
+    if not isinstance(reactions, list) or len(reactions) != target_count:
+        raise ValueError(f"sticker writer must return exactly {target_count} reactions.")
+    feelings: set[str] = set()
+    framings: list[str] = []
+    sentences: list[str] = []
+    for index, reaction in enumerate(reactions, start=1):
+        fields = {
+            key: " ".join(
+                str((reaction or {}).get(key) or "").translate(_PLAIN_PUNCTUATION).split()
+            ).rstrip(".")
+            for key in ("framing", "feeling", "body", "eyes", "mark")
+        }
+        if not all(fields.values()):
+            raise ValueError(f"sticker reaction {index} needs framing, feeling, body, eyes, and mark.")
+        if not all(character.isascii() for character in "".join(fields.values())):
+            raise ValueError(f"sticker reaction {index} must be plain English words without symbols.")
+        if fields["feeling"].casefold() in feelings:
+            raise ValueError("sticker reactions must each carry a different feeling.")
+        if any(texts_are_alike(fields["framing"], earlier) for earlier in framings):
+            raise ValueError("sticker reactions must each be drawn at a different distance.")
+        feelings.add(fields["feeling"].casefold())
+        framings.append(fields["framing"])
+        sentences.append(
+            f"{fields['framing'][:1].upper()}{fields['framing'][1:]}. {fields['body']}. "
+            f"For this feeling the eyes are drawn as {fields['eyes']}. "
+            f"{fields['mark'][:1].upper()}{fields['mark'][1:]} floats beside the head"
+        )
+    return sentences
 
 
 def sticker_expressions(
@@ -47,10 +91,27 @@ def sticker_expressions(
     user_prompt = "\n".join(
         [
             f"Character: {character}",
+            f"Character features: {selected_role_description(goal) or character}",
             f"Theme/Context: {prompt}",
-            f"Generate exactly {target_count} unique sticker expressions.",
-            "Each expression is only a pose and a facial emotion in under twelve words; never a location or scenery.",
-            'Return JSON object with key "expressions" only.',
+            f"Write exactly {target_count} sticker reactions.",
+            "Read the theme as one small happening the character goes through. The reactions are what a person would "
+            "send in a chat while living that happening, in time order from before it to after it. The set covers the "
+            "whole experience, including its uncomfortable or funny low point, so the feelings differ in kind and are "
+            "not several shades of happy.",
+            STICKER_ACTING,
+            "Fill five fields for each reaction, in plain English words with no emoji or symbol characters. "
+            "framing: in one short clause, how much of the character the picture shows and how large it sits in "
+            "the frame, from the head and upper body filling most of the picture to the whole character full-length "
+            "at about half the frame height; the pack runs across that range, so no two reactions share a distance, "
+            "and the character and its white outline always stay completely inside the picture. "
+            "feeling: the feeling in one or two words; no two reactions share it. "
+            "body: starting with the word Body, what the whole body is doing, as a painter would draw it, in ten to "
+            "eighteen words; the body's outline differs so much between reactions that their silhouettes filled in "
+            "solid black could be told apart; it may hold one small prop from the theme. "
+            "eyes: the shape the eyes take for this feeling, which replaces their normal shape, described as lines "
+            "and shapes a painter can copy and never by repeating how the character's eyes normally look. "
+            "mark: one small drawn object or shape that shows this feeling, named as a thing.",
+            'Return a JSON object with key "reactions" only.',
         ]
     )
     try:
@@ -63,152 +124,66 @@ def sticker_expressions(
             schema={
                 "type": "object",
                 "properties": {
-                    "expressions": {
+                    "reactions": {
                         "type": "array",
                         "minItems": target_count,
                         "maxItems": target_count,
-                        "items": {"type": "string"},
-                    }
-                },
-                "required": ["expressions"],
-                "additionalProperties": False,
-            },
-        )
-        expressions = payload.get("expressions")
-        if isinstance(expressions, list) and expressions:
-            normalized = [
-                str(item).strip() for item in expressions if str(item).strip()
-            ]
-            if len(normalized) == target_count:
-                return normalized
-    except Exception:
-        pass
-    fallback = fallback_sticker_expressions(prompt, target_count)
-    return fallback
-
-
-def build_sticker_prompt_set(
-    client: PromptClient,
-    goal: GoalRequest,
-    expressions: list[str],
-    character: str,
-    prompt_prefix: str,
-    style: str,
-) -> dict[str, Any]:
-    role_description = selected_role_description(goal)
-
-    fallback_prompt_sets = [
-        {
-            "label": f"sticker_{index + 1:02d}",
-            "expression": expression,
-            "prompt": _with_sticker_framing(
-                include_role_description(
-                    ", ".join(
-                        part
-                        for part in (
-                            build_sticker_prompt(character, expression, prompt_prefix, style),
-                            style_profile_direction(goal),
-                        )
-                        if part
-                    ),
-                    goal,
-                )
-            ),
-        }
-        for index, expression in enumerate(expressions)
-    ]
-    user_prompt = "\n".join(
-        [
-            f"Goal: {goal.prompt}",
-            f"Character: {character}",
-            *(
-                [
-                    f"Character feature description to preserve in every prompt: {role_description}"
-                ]
-                if role_description
-                else []
-            ),
-            f"Prompt prefix: {prompt_prefix}",
-            f"Style: {style}",
-            f"Resolved visual style rules: {style_profile_direction(goal)}",
-            f"Expressions JSON: {json.dumps(expressions, ensure_ascii=False)}",
-            "Return a JSON object with key prompt_sets.",
-            "prompt_sets must be an array where each item has keys: label, expression, prompt.",
-            "Follow the requested expressions and style.",
-        ]
-    )
-    try:
-        manager = client.require_manager()
-        payload = client.generate_json(
-            manager,
-            STICKER_SYSTEM_PROMPT,
-            user_prompt,
-            schema_name="sticker_prompt_set",
-            schema={
-                "type": "object",
-                "properties": {
-                    "prompt_sets": {
-                        "type": "array",
-                        "minItems": len(fallback_prompt_sets),
-                        "maxItems": len(fallback_prompt_sets),
                         "items": {
                             "type": "object",
                             "properties": {
-                                "label": {"type": "string"},
-                                "expression": {"type": "string"},
-                                "prompt": {"type": "string"},
+                                "framing": {"type": "string"},
+                                "feeling": {"type": "string"},
+                                "body": {"type": "string"},
+                                "eyes": {"type": "string"},
+                                "mark": {"type": "string"},
                             },
-                            "required": ["label", "expression", "prompt"],
+                            "required": ["framing", "feeling", "body", "eyes", "mark"],
                             "additionalProperties": False,
                         },
                     }
                 },
-                "required": ["prompt_sets"],
+                "required": ["reactions"],
                 "additionalProperties": False,
             },
-        )
-        prompt_items = payload.get("prompt_sets")
-        if isinstance(prompt_items, list) and prompt_items:
-            prompt_sets: list[dict[str, Any]] = []
-            for index, item in enumerate(prompt_items[: len(fallback_prompt_sets)]):
-                base_item = fallback_prompt_sets[index]
-                prompt_sets.append(
-                    {
-                        "label": str(item.get("label") or base_item["label"]),
-                        "expression": str(
-                            item.get("expression") or base_item["expression"]
-                        ),
-                        "prompt": _with_sticker_framing(
-                            include_role_description(item["prompt"], goal)
-                        )
-                        if item.get("prompt")
-                        else base_item["prompt"],
-                    }
-                )
-            while len(prompt_sets) < len(fallback_prompt_sets):
-                prompt_sets.append(fallback_prompt_sets[len(prompt_sets)])
-            return client.mark_payload(
-                {
-                    "prompt_sets": prompt_sets,
-                    "prompt_count": len(prompt_sets),
-                }
-            )
-    except Exception as exc:
-        return client.template_fallback(
-            {
-                "prompt_sets": fallback_prompt_sets,
-                "prompt_count": len(fallback_prompt_sets),
+            validate_response=lambda response: {
+                **response,
+                "expressions": _sticker_reaction(response, target_count),
             },
-            exc,
-            fallback_reason="json_parse_failed",
         )
-    return client.template_fallback(
+        return list(payload["expressions"])
+    except Exception as exc:
+        # A canned mood list makes every pack look the same, so a failed
+        # writer stops the run instead.
+        raise client.generation_error("sticker_expressions", exc) from exc
+
+
+def build_sticker_prompt_set(goal: GoalRequest, expressions: list[str]) -> dict[str, Any]:
+    """One short prompt per expression: the pose leads, then identity, then the sticker look.
+
+    The renderer follows the start of a short prompt and ignores a pose buried
+    in a long one, so nothing else is appended to these at render time.
+    """
+    identity = include_role_description("", goal).rstrip(".")
+    style = style_profile_direction(goal, include_motion=False)
+    prompt_sets = [
         {
-            "prompt_sets": fallback_prompt_sets,
-            "prompt_count": len(fallback_prompt_sets),
-        },
-        fallback_reason="json_parse_failed",
-    )
+            "label": f"sticker_{index:02d}",
+            "expression": expression,
+            "prompt": " ".join(
+                part
+                for part in (
+                    f"{expression.rstrip('.')}.",
+                    STICKER_FRAMING,
+                    f"The character is {identity}." if identity else "",
+                    f"{style.rstrip('.')}." if style else "",
+                )
+                if part
+            ),
+            "self_contained": True,
+        }
+        for index, expression in enumerate(expressions, start=1)
+    ]
+    return {"prompt_sets": prompt_sets, "prompt_count": len(prompt_sets)}
 
 
 def build_sticker_motion_prompt(
@@ -377,13 +352,26 @@ def review_motion_graphics_plan(
 
 
 def _sprite_theme(goal: GoalRequest) -> str:
-    """A sprite reads at thumbnail size, so the theme is the headline, not the long scene brief."""
+    """What the sprite acts out: the happening this run took from its source.
+
+    The scene brief also carries the run's rendering style, which a sprite
+    must not inherit, so the theme is the source-to-scene mapping, or the
+    headline when the run has none.
+    """
+    anchors = goal.constraints.get("news_source_anchors")
+    mappings = [
+        str(anchor.get("visual_mapping") or "").strip()
+        for anchor in (anchors if isinstance(anchors, list) else [])
+        if isinstance(anchor, dict)
+    ]
     news = goal.constraints.get("news_context")
-    if isinstance(news, dict):
-        headline = str(news.get("title") or news.get("keyword") or "").strip()
-        if headline:
-            return headline
-    return str(goal.prompt or "").strip()
+    headline = (
+        str(news.get("title") or news.get("keyword") or "").strip()
+        if isinstance(news, dict)
+        else ""
+    )
+    theme = "; ".join(part for part in (*mappings, headline) if part)
+    return theme or str(goal.prompt or "").strip()
 
 
 def build_dynamic_sprite_motion_plan(
@@ -397,10 +385,11 @@ def build_dynamic_sprite_motion_plan(
         part
         for part in (
             f"Subject: {goal.constraints.get('character') or ''}",
-            f"Theme (reduce to one visual motif): {_sprite_theme(goal)}",
+            f"Theme (the character acts out its one action): {_sprite_theme(goal)}",
             f"Mandatory game-sprite visual contract: {reference_context['visual_contract']}",
-            f"Reference notes (optional): {reference_context['prompt_text'] if reference_context['references'] else ''}",
-            "Reduce the request to one character action and at most one prop or symbol; drop the rest of the scene. Even when the source scene is quiet, stage one playable skill whose phases (anticipation, charge, release, impact or effect peak, recovery) change the pose and the effect together.",
+            "Reduce the theme to the one everyday action it is about and at most one prop; drop the rest of the scene. "
+            "Stage that action so its phases (getting ready, starting, doing it, what happens, settling back) each change "
+            "the silhouette.",
             "Return JSON with image_prompt and video_prompt, plus exactly five ordered beats for the same phases.",
         )
         if part
@@ -488,13 +477,11 @@ def build_dynamic_sprite_motion_plan(
             "fps": max(4.0, min(24.0, float(payload.get("fps", fallback["fps"])))),
             "video_duration_seconds": target_duration_seconds,
             "action_reference_pack": reference_context["pack_version"],
-            "action_references": reference_context["references"],
             "frame_map": dynamic_sprite_frame_map(beats),
         }
         return client.mark_payload(normalized)
     except Exception as exc:
         fallback["action_reference_pack"] = reference_context["pack_version"]
-        fallback["action_references"] = reference_context["references"]
         fallback["video_duration_seconds"] = target_duration_seconds
         fallback["video_prompt"] = compile_dynamic_sprite_video_prompt(
             str(fallback.get("creative_video_prompt") or goal.prompt),
@@ -505,128 +492,87 @@ def build_dynamic_sprite_motion_plan(
         )
 
 
-def build_carousel_prompt_set(
-    client: PromptClient,
-    goal: GoalRequest,
-    segments: list[dict[str, Any]],
-    style: str,
+SERIES_SCENE_CONTRACT = (
+    "Write one fixed scene as a template for a series of pictures that differ only in who is in them. The template "
+    "opens with one sentence naming the selected medium with two or three observable surface cues from the style "
+    "rules. It then fixes the camera, the one prop and where it sits, and where the character stands or lies and how "
+    "large it is drawn, so the same words give the same composition every time. The one place where the character "
+    "goes is written as {character}, exactly once, as a bare noun phrase with no possessive; the scene never writes a cast "
+    "member's name and never describes the character's body, species, or colour, because the look supplies that. The picture holds "
+    "that one character and the scene only, with no writing, numbers, labels, or signs. For every cast member give a "
+    "look of at most twelve words that starts with 'the' and names the shape, the colour, and the one feature that "
+    "tells it apart; the look is swapped into the slot of the fixed composition, so it describes the body only and "
+    "never an action, a prop, or a setting."
+)
+
+
+def build_series_template(
+    client: PromptClient, goal: GoalRequest, members: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    fallback_prompt_sets = [
+    """Write one scene template and a short look per member; no canned scene exists."""
+    if client.mode == "template":
+        raise PromptGenerationError(
+            "Series carousel requires an LLM; canned scenes are not supported"
+        )
+    cast = [
         {
-            "label": f"slide_{index + 1:02d}",
-            "prompt": ", ".join(
-                part
-                for part in (
-                    str(segment.get("visual", "")),
-                    style,
-                    style_profile_direction(goal),
-                )
-                if part
-            ),
-            "narration": str(segment.get("narration", "")),
+            "name": str(member["name"]),
+            "description": str(member.get("role_description") or "")[:300],
+            "keywords": str(member.get("keywords") or ""),
         }
-        for index, segment in enumerate(segments)
-    ]
-    fallback = {
-        "prompt_sets": fallback_prompt_sets,
-        "prompt_count": len(fallback_prompt_sets),
-    }
-    compact_segments = [
-        {
-            "segment_id": str(segment.get("segment_id", f"segment-{index + 1}")),
-            "visual": str(segment.get("visual", "")),
-            "narration": str(segment.get("narration", "")),
-        }
-        for index, segment in enumerate(segments)
+        for member in members
     ]
     user_prompt = "\n".join(
         [
-            f"Goal: {goal.prompt}",
-            f"Style: {style}",
+            f"Scene idea: {goal.prompt}",
+            f"Style: {goal.style}",
             f"Resolved visual style rules: {style_profile_direction(goal)}",
-            f"Segment count: {len(compact_segments)}",
-            f"Segments JSON: {json.dumps(compact_segments, ensure_ascii=False)}",
-            "Return a JSON object with key prompt_sets.",
-            "prompt_sets must be an array where each item has keys: label, prompt, narration.",
-            "Follow the requested subject, sequence, and style.",
+            f"Cast JSON: {json.dumps(cast, ensure_ascii=False)}",
+            SERIES_SCENE_CONTRACT,
+            "Return a JSON object with keys template and looks. looks has one item per cast member with keys name "
+            "(exactly as given) and look.",
         ]
     )
-    try:
-        manager = client.require_manager()
-        payload = client.generate_json(
-            manager,
-            LONG_VIDEO_SYSTEM_PROMPT,
-            user_prompt,
-            schema_name="carousel_prompt_set",
-            schema={
-                "type": "object",
-                "properties": {
-                    "prompt_sets": {
-                        "type": "array",
-                        "minItems": len(fallback_prompt_sets),
-                        "maxItems": len(fallback_prompt_sets),
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "label": {"type": "string"},
-                                "prompt": {"type": "string"},
-                                "narration": {"type": "string"},
-                            },
-                            "required": ["label", "prompt", "narration"],
-                            "additionalProperties": False,
+    manager = client.require_manager()
+
+    def validate_response(payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("series writer must return an object.")
+        series_prompt_sets(payload.get("template"), payload.get("looks") or [], members)
+        return payload
+
+    payload = client.generate_json(
+        manager,
+        LONG_VIDEO_SYSTEM_PROMPT,
+        user_prompt,
+        schema_name="series_template",
+        schema={
+            "type": "object",
+            "properties": {
+                "template": {"type": "string"},
+                "looks": {
+                    "type": "array",
+                    "minItems": len(members),
+                    "maxItems": len(members),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "look": {"type": "string"},
                         },
-                    }
+                        "required": ["name", "look"],
+                        "additionalProperties": False,
+                    },
                 },
-                "required": ["prompt_sets"],
-                "additionalProperties": False,
             },
-        )
-        prompt_items = payload.get("prompt_sets")
-        if isinstance(prompt_items, list) and prompt_items:
-            prompt_sets: list[dict[str, Any]] = []
-            for index, item in enumerate(prompt_items[: len(fallback_prompt_sets)]):
-                base_item = fallback_prompt_sets[index]
-                prompt_sets.append(
-                    {
-                        "label": str(item.get("label") or base_item["label"]),
-                        "prompt": str(item.get("prompt") or base_item["prompt"]),
-                        "narration": str(
-                            item.get("narration") or base_item["narration"]
-                        ),
-                    }
-                )
-            while len(prompt_sets) < len(fallback_prompt_sets):
-                prompt_sets.append(fallback_prompt_sets[len(prompt_sets)])
-            return client.mark_payload(
-                {
-                    "prompt_sets": prompt_sets,
-                    "prompt_count": len(prompt_sets),
-                }
-            )
-    except Exception as exc:
-        return client.template_fallback(fallback, exc)
-    return client.template_fallback(fallback)
-
-
-def fallback_sticker_expressions(prompt: str, target_count: int) -> list[str]:
-    prompt_tail = prompt.split(":", 1)[-1]
-    candidates = [item.strip() for item in prompt_tail.split(",") if item.strip()]
-    fallback = candidates[:target_count]
-    default_pool = [
-        "happy",
-        "angry",
-        "crying",
-        "sleepy",
-        "surprised",
-        "celebrating",
-        "confused",
-        "love struck",
-        "thinking",
-        "cheering",
-    ]
-    for item in default_pool:
-        if len(fallback) >= target_count:
-            break
-        if item not in fallback:
-            fallback.append(item)
-    return fallback[:target_count]
+            "required": ["template", "looks"],
+            "additionalProperties": False,
+        },
+        validate_response=validate_response,
+    )
+    return client.mark_payload(
+        {
+            "template": str(payload["template"]).strip(),
+            "prompt_sets": series_prompt_sets(payload["template"], payload["looks"], members),
+        }
+    )

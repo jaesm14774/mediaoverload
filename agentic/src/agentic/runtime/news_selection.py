@@ -12,7 +12,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from agentic.runtime.news_grounding import (
-    is_brand_safe_news_selection,
     is_usable_news_selection,
 )
 
@@ -186,16 +185,15 @@ def select_random_news_inspiration(
     *,
     rng: Any | None = None,
 ) -> NewsCandidateDecision:
-    """Choose one safe, usable, traceable article uniformly for creative inspiration."""
+    """Choose one usable, traceable article uniformly for creative inspiration."""
     eligible = [
         row
         for row in rows
         if is_usable_news_selection(str(row.get("title") or ""), str(row.get("keyword") or ""))
-        and is_brand_safe_news_selection(str(row.get("title") or ""), str(row.get("keyword") or ""))
         and _is_traceable(row)
     ]
     if not eligible:
-        raise ValueError("Random story inspiration requires a usable, brand-safe article with a traceable publisher and URL.")
+        raise ValueError("Random story inspiration requires a usable article with a traceable publisher and URL.")
     chooser = rng or random.SystemRandom()
     selected = chooser.choice(eligible)
     return NewsCandidateDecision(
@@ -506,7 +504,6 @@ def select_news_candidate(
             row for row in community_rows
             if (created_at := _parse_created_at(row.get("created_at"))) is not None
             and timedelta(0) <= current_time - created_at <= timedelta(hours=48)
-            and is_brand_safe_news_selection(str(row.get("title") or ""), "")
         ]
     else:
         community_rows = []

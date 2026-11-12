@@ -19,6 +19,11 @@ from agentic.editorial_pacing import EDITORIAL_PACING_SPEEDS, motion_pacing_labe
 
 FFMPEG_COMMAND_TIMEOUT_SECONDS = 600
 MAX_EDITORIAL_AUDIO_VIDEO_DRIFT_SECONDS = 0.032
+PREVIEW_SIZE_HEADROOM = 0.85
+PREVIEW_ENCODE_ATTEMPTS = 3
+PREVIEW_MIN_VIDEO_BPS = 16_000
+PREVIEW_MIN_AUDIO_BPS = 16_000
+PREVIEW_MAX_AUDIO_BPS = 48_000
 
 
 class FFmpegAdapter:
@@ -1005,6 +1010,62 @@ class FFmpegAdapter:
         )
         self._run(command)
         return output_path
+
+    def make_size_limited_preview(self, video_path: str, output_path: str, *, max_bytes: int) -> str:
+        """Re-encode a watchable copy that fits `max_bytes`; the source is never modified."""
+
+        self._ensure_binaries()
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"Input video does not exist: {video_path}")
+        if os.path.abspath(video_path) == os.path.abspath(output_path):
+            raise ValueError("output_path must be different from video_path")
+        duration = float(self.probe_media(video_path)["duration"])
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("video has no measurable duration")
+        self._ensure_parent(output_path)
+        total_bps = max_bytes * 8 * PREVIEW_SIZE_HEADROOM / duration
+        for _attempt in range(PREVIEW_ENCODE_ATTEMPTS):
+            audio_bps = int(max(PREVIEW_MIN_AUDIO_BPS, min(PREVIEW_MAX_AUDIO_BPS, total_bps * 0.2)))
+            video_bps = int(total_bps - audio_bps)
+            if video_bps < PREVIEW_MIN_VIDEO_BPS:
+                raise ValueError(
+                    f"{max_bytes} bytes is too small for a watchable {duration:.1f}s preview"
+                )
+            self._run(
+                [
+                    "ffmpeg",
+                    "-i",
+                    video_path,
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "0:a?",
+                    "-vf",
+                    "scale=-2:'min(720,ih)'",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-b:v",
+                    str(video_bps),
+                    "-maxrate",
+                    str(video_bps),
+                    "-bufsize",
+                    str(video_bps * 2),
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    str(audio_bps),
+                    "-movflags",
+                    "+faststart",
+                    "-y",
+                    output_path,
+                ]
+            )
+            if Path(output_path).stat().st_size <= max_bytes:
+                return output_path
+            total_bps *= 0.7
+        raise RuntimeError(f"Could not encode a preview within {max_bytes} bytes")
 
     def video_to_gif(
         self,

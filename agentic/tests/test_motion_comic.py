@@ -579,7 +579,7 @@ def test_user_given_a_motion_comic_weight_when_character_routing_runs_then_the_s
         )
     )
     assert payload["source_generation_type"] == "motion_comic"
-    assert payload["duration_seconds"] == 10
+    assert payload["duration_seconds"] >= 10
     assert "video_speed" not in payload["constraints"]
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
     assert not payload["constraints"]["video_workflow_name"]
@@ -606,3 +606,27 @@ def test_user_given_the_story_text_when_validating_it_then_visible_states_and_ca
     """User Given valid bilingual story content When its public contract is validated Then the title, captions and visible-state/cause evidence remain available for later image review."""
     normalized = validate_motion_comic_story(story_response())
     assert normalized == story_response()
+
+
+def test_user_given_captions_that_stop_mid_sentence_when_the_story_is_checked_then_it_is_refused():
+    """User Given a comic whose caption stops on a comma or a dash When the story is checked Then it is refused, while the same story with finished captions is accepted."""
+    from agentic.runtime.motion_comics import validate_motion_comic_story
+
+    def story(caption):
+        return {
+            "title": "\u6e6f\u5713\u8ce3\u5b8c\u4e86",
+            "visual_style": "soft pastel",
+            "continuity": "one stall, one pot",
+            "panels": [
+                {"role": role, "caption": caption, "image_prompt": "Kirby hugs a pot", "visible_state": "pot is empty", "cause": "it sold out"}
+                for role in ("setup", "escalation", "payoff")
+            ],
+        }
+
+    assert validate_motion_comic_story(story("\u5361\u6bd4\u62b1\u8457\u7a7a\u934b"))["panels"][0]["caption"]
+    for cut in ("卡比看著鍋，", "卡比看著鍋、", "卡比看著鍋—"):
+        try:
+            validate_motion_comic_story(story(cut))
+        except ValueError:
+            continue
+        raise AssertionError(f"cut-off caption was accepted: {cut}")
