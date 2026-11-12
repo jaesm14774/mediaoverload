@@ -21,7 +21,8 @@ from agentic.runtime.strategies import (
     NATIVE_STORY_GENERATION_TYPES,
     media_type_for_generation,
 )
-from agentic.runtime.story_cards import STORY_CARD_PAGE_COUNT_DEFAULT
+from agentic.runtime.series_carousel import select_series_members
+from agentic.runtime.story_cards import STORY_CARD_PAGE_COUNT_DEFAULT, story_card_canvas
 from agentic.tools.publishing_adapter import FACEBOOK_PROFILE_HANDOFF_PLATFORM
 from agentic.app.character_selection import (
     _fixed_character_selection,
@@ -323,7 +324,9 @@ def build_goal_payload_from_character_config(
         news_context_override=news_context_override,
         recorder=recorder,
     )
-    if config_generation_type in ({"story_card"} | NATIVE_STORY_GENERATION_TYPES) and (
+    if config_generation_type in (
+        {"story_card"} | NATIVE_STORY_GENERATION_TYPES
+    ) and (
         effective_news_driven or not str(prompt).strip()
     ):
         # Native H3 owns the news-to-story prompt contract. Do not create a
@@ -404,6 +407,7 @@ def build_goal_payload_from_character_config(
         in {
             "native_h3_story",
             "native_h3_fl2va_story",
+            "native_h3_loop_story",
             "native_h3_l2va_story",
         }
         and (not no_review or stage_probe)
@@ -483,6 +487,7 @@ def build_goal_payload_from_character_config(
         )
     story_card_config = dict(generation.get("story_card", {}) or {})
     story_card_visual = dict(story_card_config.get("visual") or {})
+    story_card_width, story_card_height = story_card_canvas(story_card_config)
     game_sprite_config = dict(generation.get("game_sprite", {}) or {})
     constraints = {
         "character": character_name,
@@ -505,11 +510,8 @@ def build_goal_payload_from_character_config(
             story_card_config.get("page_count", STORY_CARD_PAGE_COUNT_DEFAULT)
         ).strip()
         or STORY_CARD_PAGE_COUNT_DEFAULT,
-        "story_card_width": int(canvas_profile["width"]),
-        "story_card_height": int(canvas_profile["height"]),
-        "story_card_overlay_opacity": int(
-            story_card_config.get("overlay_opacity", 202)
-        ),
+        "story_card_width": story_card_width,
+        "story_card_height": story_card_height,
         "story_card_brand_label": str(
             story_card_config.get("brand_label", "STORY NOTE")
         ),
@@ -613,6 +615,7 @@ def build_goal_payload_from_character_config(
                     "native_h3_story",
                     "native_h3_t2v_story",
                     "native_h3_fl2va_story",
+                    "native_h3_loop_story",
                     "native_h3_l2va_story",
                     "native_h3_ref2va",
                     "text2image2native_h3_ref2va",
@@ -708,6 +711,7 @@ def build_goal_payload_from_character_config(
                 "text2image2video",
                 "native_h3_story",
                 "native_h3_fl2va_story",
+                "native_h3_loop_story",
                 "native_h3_l2va_story",
                 "native_h3_ref2va",
                 "text2image2native_h3_ref2va",
@@ -718,6 +722,13 @@ def build_goal_payload_from_character_config(
         constraints["enable_motion_graphics"] = True
     if config_generation_type == "motion_comic":
         constraints["motion_comic"] = dict(generation.get("motion_comic", {}) or {})
+    if config_generation_type == "series_carousel":
+        constraints["series_members"] = select_series_members(
+            character_selection.get("candidates") or [],
+            primary=character_name,
+            page_count=int(routing["count_plan"]["image_count"]),
+            rng=rng,
+        )
     if config_generation_type == "game_sprite":
         video_width, video_height = _fit_sprite_video_canvas(
             int(canvas_profile["width"]),

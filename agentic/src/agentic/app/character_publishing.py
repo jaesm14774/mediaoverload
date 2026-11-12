@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from agentic.app.character_config import MEDIA_EXTENSIONS, VIDEO_EXTENSIONS
+from agentic.runtime.series_carousel import SERIES_SLOT
 
 
 def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]:
@@ -66,7 +67,9 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
         return [final_video_candidates[-1]]
 
     preferred_package_nodes = (
+        "sprite-package",
         "story-card-compose",
+        "package-carousel",
         "native-h3-package",
         "package-outputs",
         "collect-longvideo-outputs",
@@ -91,7 +94,7 @@ def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]
             "image_path",
             "final_image_path",
         )
-        if node_id == "story-card-compose":
+        if node_id in {"story-card-compose", "package-carousel"}:
             package_keys = (*package_keys, "saved_files")
         for key in package_keys:
             append_media(outputs.get(key))
@@ -202,6 +205,19 @@ def _resolve_publish_prompt(
                 )
             lines.append("Write publish copy about this rendered comic, using the contact sheet to verify visible claims.")
             return "\n".join(lines), "motion_comic"
+        series = node_outputs.get("series-prompts")
+        if isinstance(series, dict):
+            cast = ", ".join(item["character"] for item in series["prompt_sets"])
+            return (
+                "\n".join(
+                    [
+                        f"Series: one fixed scene shown once for each of these characters, in page order: {cast}",
+                        f"Scene: {series['template'].replace(SERIES_SLOT, 'the character')}",
+                        "Write publish copy about the whole set: every page is the same scene with a different character.",
+                    ]
+                ),
+                "series_carousel",
+            )
         native_story = node_outputs.get("native-story-prompt")
         if isinstance(native_story, dict):
             generated_storyboard = native_story.get("generated_storyboard")

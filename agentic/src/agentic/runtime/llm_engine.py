@@ -57,6 +57,7 @@ class LLMPromptEngine:
         creative_brief: str = "",
         arc_guidance: str = "",
         reference_analysis: dict[str, Any] | None = None,
+        replayable_loop: bool = False,
     ) -> dict[str, Any]:
         return native_h3.generate_native_h3_storyboard(
             self.client,
@@ -69,6 +70,7 @@ class LLMPromptEngine:
             creative_brief=creative_brief,
             arc_guidance=arc_guidance,
             reference_analysis=reference_analysis,
+            replayable_loop=replayable_loop,
         )
 
     def generate_autonomous_scene_prompt(
@@ -208,16 +210,9 @@ class LLMPromptEngine:
         )
 
     def build_sticker_prompt_set(
-        self,
-        goal: GoalRequest,
-        expressions: list[str],
-        character: str,
-        prompt_prefix: str,
-        style: str,
+        self, goal: GoalRequest, expressions: list[str]
     ) -> dict[str, Any]:
-        return graphics.build_sticker_prompt_set(
-            self.client, goal, expressions, character, prompt_prefix, style
-        )
+        return graphics.build_sticker_prompt_set(goal, expressions)
 
     def build_sticker_motion_prompt(
         self,
@@ -260,13 +255,10 @@ class LLMPromptEngine:
     def build_dynamic_sprite_motion_plan(self, goal: GoalRequest) -> dict[str, Any]:
         return graphics.build_dynamic_sprite_motion_plan(self.client, goal)
 
-    def build_carousel_prompt_set(
-        self,
-        goal: GoalRequest,
-        segments: list[dict[str, Any]],
-        style: str,
+    def build_series_template(
+        self, goal: GoalRequest, members: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        return graphics.build_carousel_prompt_set(self.client, goal, segments, style)
+        return graphics.build_series_template(self.client, goal, members)
 
     def build_story_card(self, goal: GoalRequest) -> dict[str, Any]:
         return story_cards.build_story_card(self.client, goal)

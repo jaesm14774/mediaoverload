@@ -373,8 +373,8 @@ def build_story_card(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             stage="assets",
         ),
         ExecutionNode(
-            node_id="story-card-backgrounds",
-            skill_name="media.story_card.backgrounds",
+            node_id="story-card-vignette",
+            skill_name="media.story_card.vignette",
             inputs={
                 "workflow_name": image_manifest.name,
                 "render_tool": "comfy.workflow.text_to_image",
@@ -383,7 +383,7 @@ def build_story_card(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 "story_node": "story-card-write",
             },
             depends_on=["story-card-write", "story-card-image-asset-check"],
-            tags=["render", "story-card", "text-to-image", "background"],
+            tags=["render", "story-card", "text-to-image", "vignette"],
             stage="render",
         ),
         ExecutionNode(
@@ -393,16 +393,13 @@ def build_story_card(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
                 "width": width,
                 "height": height,
                 "story_node": "story-card-write",
-                "background_node": "story-card-backgrounds",
-                "overlay_opacity": int(
-                    goal.constraints.get("story_card_overlay_opacity", 202)
-                ),
+                "vignette_node": "story-card-vignette",
                 "brand_label": str(
                     goal.constraints.get("story_card_brand_label", "STORY NOTE")
                 ),
                 "font_path": str(goal.constraints.get("story_card_font_path", "")),
             },
-            depends_on=["story-card-write", "story-card-backgrounds"],
+            depends_on=["story-card-write", "story-card-vignette"],
             tags=["compose", "story-card", "text-primary"],
             stage="package",
         ),
@@ -417,7 +414,7 @@ def build_story_card(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
         "width": width,
         "height": height,
         "text_primary": True,
-        "background_generation": "style_locked_text_to_image",
+        "vignette_generation": "one_text_to_image_per_page",
     }
     return ExecutionPlan(
         goal=goal,
@@ -428,53 +425,28 @@ def build_story_card(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
     )
 
 
-def build_carousel(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
+def build_series_carousel(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
     image_manifest = context.manifest_from_goal_constraints(
         goal,
         *context.DEFAULT_IMAGE_WORKFLOWS,
         constraint_keys=("image_workflow_name", "workflow_name"),
         allowed_media_types={"image"},
     )
-    slide_count = context.constraint_int(
-        goal, "segment_count", max(3, goal.duration_seconds // 10)
-    )
-    images_per_prompt = context.constraint_int(goal, "images_per_prompt", 1)
+    width, height = context.canvas_dimensions(goal, image_manifest)
     nodes = [
         ExecutionNode(
-            node_id="idea-brief",
-            skill_name="agent.goal.expand",
-            inputs={
-                "prompt": goal.prompt,
-                "style": goal.style,
-                "idea_variants": context.idea_director.generate_variations(goal),
-            },
-            tags=["creative", "carousel"],
-            stage="prompting",
-        ),
-        ExecutionNode(
-            node_id="script-plan",
-            skill_name="agent.story.segment",
-            inputs={"segment_count": slide_count, "tone": "distinct carousel beat"},
-            depends_on=["idea-brief"],
-            tags=["story", "carousel"],
-            stage="prompting",
-        ),
-        ExecutionNode(
-            node_id="carousel-prompts",
-            skill_name="agent.carousel.prompt_set",
-            inputs={"style": goal.style},
-            depends_on=["script-plan"],
-            tags=["creative", "carousel"],
+            node_id="series-prompts",
+            skill_name="agent.series.prompt_set",
+            inputs={},
+            tags=["creative", "series-carousel"],
             stage="prompting",
         ),
         ExecutionNode(
             node_id="image-asset-check",
             skill_name="image.ensure_workflow",
-            inputs={
-                "workflow_name": image_manifest.name,
-            },
-            depends_on=["carousel-prompts"],
-            tags=["assets", "carousel"],
+            inputs={"workflow_name": image_manifest.name},
+            depends_on=["series-prompts"],
+            tags=["assets", "series-carousel"],
             stage="assets",
         ),
         ExecutionNode(
@@ -482,13 +454,14 @@ def build_carousel(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan
             skill_name="media.image.render_batch",
             inputs={
                 "workflow_name": image_manifest.name,
-                "width": context.canvas_dimensions(goal, image_manifest)[0],
-                "height": context.canvas_dimensions(goal, image_manifest)[1],
-                "images_per_prompt": images_per_prompt,
-                "suffix": "carousel",
+                "width": width,
+                "height": height,
+                "images_per_prompt": 1,
+                "shared_seed": True,
+                "suffix": "series_carousel",
             },
-            depends_on=["carousel-prompts", "image-asset-check"],
-            tags=["render", "carousel", "batch"],
+            depends_on=["series-prompts", "image-asset-check"],
+            tags=["render", "series-carousel", "batch"],
             stage="render",
         ),
         ExecutionNode(
@@ -496,7 +469,7 @@ def build_carousel(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan
             skill_name="agent.carousel.package",
             inputs={},
             depends_on=["render-carousel"],
-            tags=["artifact", "carousel"],
+            tags=["artifact", "series-carousel"],
             stage="package",
         ),
     ]
@@ -506,12 +479,12 @@ def build_carousel(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan
             asset.to_dict() for asset in image_manifest.required_assets
         ],
         "graph_overview": [node.node_id for node in nodes],
-        "slide_count": slide_count,
+        "slide_count": len(goal.constraints.get("series_members") or []),
     }
     return ExecutionPlan(
         goal=goal,
-        workflow_name="carousel_v1",
+        workflow_name="series_carousel_v1",
         nodes=nodes,
         metadata=metadata,
-        description=f"Agentic carousel chain for goal '{goal.prompt}'",
+        description=f"Series carousel: one fixed scene, one page per character, for goal '{goal.prompt}'",
     )

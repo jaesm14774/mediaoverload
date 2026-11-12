@@ -10,6 +10,8 @@ User Given a video strategy generates a still image or opening keyframe When Med
 
 User Given a creator requests a text2img image set When MediaOverload expands and renders the request Then it creates four to six self-contained prompts that keep the same requested subject, action, and style while changing the visual presentation enough to read as distinct compositions, and renders one image for each prompt.
 
+User Given a bare news-driven text2img run with no scene of the creator's own When MediaOverload plans the candidates Then the six prompts are six different small moments of the character with one object the news names, each with its own pose and feeling, and the run stops with an error if the prompt writer is unavailable.
+
 User Given an image-to-video strategy creates multiple opening-frame candidates When MediaOverload prepares and renders those candidates Then each frame uses its own composition prompt for the same cast and story state, the single downstream motion prompt remains independent, and the existing review selects among the rendered frames.
 
 User Given a video request includes a negative prompt When distinct opening-frame prompts are expanded and rendered Then every candidate retains that negative prompt alongside its own composition.
@@ -277,10 +279,11 @@ explicitly required.
   - `expand_goal()` 與 `compose_prompt()` 的 image 請求都使用相同 contract；影片請求只把此 contract 套用到 opening keyframe，時間動作仍留在 video prompt。必要角色會被提示在同一畫面形成可見互動，風格不能新增角色或道具。
   - LLM 產生的 image prompt 與 `expand_goal()` 的 template fallback 都會附上精簡品質要求。
 - 一般 text2img 會先展開 4–6 份完整 prompt，每份保留相同題材、角色和動作，改變構圖、視角、景深或焦點路徑，再由 `media.image.render_batch` 每份渲染一張。每個變體會檢查必須出現的主體名稱；LLM 不可用時使用六種明確構圖方向的模板。
+- 新聞驅動、沒有使用者自訂場景的 text2img 改走「六個小瞬間」：新聞只借一個它點名的物件，六張是角色對同一物件的六種不同姿勢與情緒（由物件本身的大小、形狀、軟硬、開口、用途推出），不再是同一場景的六種構圖。這條路線沒有模板 fallback，LLM 不可用時直接報錯。
 - Text2Image2Video、啟用首幀審核的 Text2Video，以及 Native H3 Story／FL2VA 在產生多張首幀候選時，會用同一個 `agent.image.prompt_variants` 為候選各寫一份構圖 prompt，再交給 `media.image.render_batch`。變體維持相同角色、場景與凍結起始狀態；既有影片 prompt 繼續單獨描述後續動作。審核重試會沿用這個首幀流程並套用審核意見。
 - Native H3 L2VA 的文字生圖圖像是末幀生成的身份來源，Ref2VA 的自動生圖圖像是參考素材；兩者不當成影片首幀候選處理。
 - `agentic/src/agentic/skills/comfy_image.py`、`agentic/src/agentic/skills/agent_primitives.py` 與 `agentic/src/agentic/skills/motion_comic.py`
-  - 所有 runtime 的文字生圖入口（含影片首幀、原生 H3 keyframe、motion-comic panels 與 story-card 背景）會把精簡品質要求附在實際靜態圖 prompt；品質要求不強迫三層景深或單一光源，`sticker_pack`、`animated_sticker`、`game_sprite` 保留各自的素材規格，影片 motion prompt 維持獨立。
+  - 所有 runtime 的文字生圖入口（含影片首幀、原生 H3 keyframe、motion-comic panels 與 story-card 小插畫）會把精簡品質要求附在實際靜態圖 prompt；品質要求不強迫三層景深或單一光源，`sticker_pack`、`animated_sticker`、`game_sprite` 保留各自的素材規格，影片 motion prompt 維持獨立。
 - `agentic/src/agentic/runtime/illustration_style.py`
   - 一般圖片不再無條件追加通用 storybook 風格段落；只有貼圖隔離主體保留其去背輪廓與背景規格。媒材與情緒由當次 brief 和選定風格決定。
 

@@ -10,6 +10,7 @@ routing:
     - native_h3_story
     - native_h3_t2v_story
     - native_h3_fl2va_story
+    - native_h3_loop_story
     - native_h3_l2va_story
     - native_h3_ref2va
     - text2image2native_h3_ref2va
@@ -19,6 +20,7 @@ routing:
     - sticker_pack
     - story_card
     - motion_comic
+    - series_carousel
     - game_sprite
 
   # Image-conditioned routes use a human-reviewed image gate before video
@@ -61,183 +63,6 @@ routing:
         palette, clean silhouette edges, deliberate pose exaggeration, and
         nearest-neighbor-friendly shapes; never painterly, photoreal, tabletop,
         soft 3D, or cinematic concept art.
-      creative_inspiration:
-        - id: celeste-air-momentum
-          source: Celeste
-          source_url: https://store.steampowered.com/app/504230/Celeste/
-          inspiration: >-
-            A limited directional burst can be readable when anticipation,
-            travel, braking, and recovery each change the silhouette; walls
-            can become a reason to redirect momentum rather than a static
-            backdrop.
-        - id: celeste-climb-redirection
-          source: Celeste
-          source_url: https://store.steampowered.com/app/504230/Celeste/
-          inspiration: >-
-            A movement sequence can alternate between contact, cling, push-off,
-            and mid-air correction, making the next direction visibly caused by
-            the previous contact.
-        - id: dead-cells-roll-counter
-          source: Dead Cells
-          source_url: https://store.steampowered.com/app/588650/Dead_Cells/
-          inspiration: >-
-            A defensive roll becomes expressive when the character passes
-            through danger, emerges on a new line, and immediately converts
-            the saved momentum into a counter-movement.
-        - id: dead-cells-skill-recoil
-          source: Dead Cells
-          source_url: https://store.steampowered.com/app/588650/Dead_Cells/
-          inspiration: >-
-            A compact tool or deployable effect can change the subject's
-            timing: place it, react to its result, then use the opening it
-            creates instead of stacking unrelated effects.
-        - id: hollow-knight-dive-rebound
-          source: Hollow Knight
-          source_url: https://store.steampowered.com/app/367520/Hollow_Knight/
-          inspiration: >-
-            A descending strike can create a strong vertical arc: suspension,
-            plunge, contact, rebound, and a brief grounded recovery all read
-            as one action.
-        - id: hollow-knight-dash-through
-          source: Hollow Knight
-          source_url: https://store.steampowered.com/app/367520/Hollow_Knight/
-          inspiration: >-
-            A fast pass-through works best when the entry line, crossing
-            moment, exit spacing, and turn-back decision remain visible in the
-            silhouette.
-        - id: shovel-knight-pogo
-          source: "Shovel Knight: Treasure Trove"
-          source_url: https://store.steampowered.com/app/250760/Shovel_Knight_Treasure_Trove/
-          inspiration: >-
-            A downward contact can become a spring-like traversal beat without
-            changing the character into a spring: impact compresses the pose,
-            then the same contact launches a new arc.
-        - id: shovel-knight-charge-release
-          source: "Shovel Knight: Treasure Trove"
-          source_url: https://store.steampowered.com/app/250760/Shovel_Knight_Treasure_Trove/
-          inspiration: >-
-            A held wind-up followed by a committed release gives a short clip
-            contrast between restraint, stored force, extension, and a physical
-            follow-through.
-        - id: pizza-tower-sprint-chain
-          source: Pizza Tower
-          source_url: https://store.steampowered.com/app/2231450/Pizza_Tower/
-          inspiration: >-
-            Acceleration can visibly build across several steps, then turn into
-            a wall run, skid, crash, or sudden direction change whose
-            consequence determines the ending pose.
-        - id: pizza-tower-grab-throw
-          source: Pizza Tower
-          source_url: https://store.steampowered.com/app/2231450/Pizza_Tower/
-          inspiration: >-
-            A separate prop or target can be approached, seized, carried
-            briefly, and released; the character's balance should react to the
-            changing load while the prop stays independent.
-        - id: katana-zero-time-beat
-          source: Katana ZERO
-          source_url: https://store.steampowered.com/app/460950/Katana_ZERO/
-          inspiration: >-
-            A sharp action can use a deliberate pause before commitment, then
-            a compact burst and a quiet return; the contrast comes from timing
-            and body control rather than extra visual effects.
-        - id: katana-zero-object-throw
-          source: Katana ZERO
-          source_url: https://store.steampowered.com/app/460950/Katana_ZERO/
-          inspiration: >-
-            A grabbed object can redirect the action: reach, pivot, throw along
-            a readable line, watch the result, and let the reaction determine
-            the final pose.
-        - id: hyper-light-drifter-dash-strike
-          source: Hyper Light Drifter
-          source_url: https://store.steampowered.com/app/257850/Hyper_Light_Drifter/
-          inspiration: >-
-            A diagonal burst paired with a close-range hit gives a strong
-            slash-shaped trajectory, with a visible landing or slide that
-            explains where the subject ends.
-        - id: hyper-light-drifter-charge-release
-          source: Hyper Light Drifter
-          source_url: https://store.steampowered.com/app/257850/Hyper_Light_Drifter/
-          inspiration: >-
-            A charged ranged action can make the body act as a counterweight:
-            gather energy, brace, release, then absorb the recoil or chase the
-            released force.
-        - id: spelunky-whip-interaction
-          source: Spelunky
-          source_url: https://store.steampowered.com/app/239350/Spelunky/
-          inspiration: >-
-            A long tool creates a readable extension of reach: test distance,
-            snap toward a separate object, pull or deflect it, then react to
-            the altered spacing.
-        - id: spelunky-rope-commitment
-          source: Spelunky
-          source_url: https://store.steampowered.com/app/239350/Spelunky/
-          inspiration: >-
-            A traversal aid can be thrown first and used second; the visual
-            story comes from committing to the new route and the body hanging,
-            climbing, or swinging from it.
-        - id: metroid-dread-dash-melee
-          source: Metroid Dread
-          source_url: https://metroid.nintendo.com/dread/news/metroid-dread-report-vol-9/
-          inspiration: >-
-            A defensive movement can become an attack at the moment of
-            contact: evade, reverse direction, meet the threat, and let the
-            impact carry the subject into recovery.
-        - id: metroid-dread-slide-counter
-          source: Metroid Dread
-          source_url: https://metroid.nintendo.com/dread/news/metroid-dread-report-vol-9/
-          inspiration: >-
-            A low slide can create a distinct lower-body silhouette, then flow
-            into a rise, turn, or counter instead of returning immediately to a
-            neutral stance.
-        - id: broforce-recoil-launch
-          source: Broforce
-          source_url: https://store.steampowered.com/app/274190/Broforce/
-          inspiration: >-
-            The force of a tool can move the user as much as the target: fire
-            or strike, show recoil, travel with that recoil, and land in a new
-            physical situation.
-        - id: enter-the-gungeon-dodge-roll
-          source: Enter the Gungeon
-          source_url: https://store.steampowered.com/app/311690/Enter_the_Gungeon/
-          inspiration: >-
-            A roll can be a compact punctuation mark between two decisions: the
-            subject lowers, clears a threat, changes facing, and resumes with a
-            different line of attack or escape.
-        - id: the-messenger-cloudstep
-          source: The Messenger
-          source_url: https://store.steampowered.com/app/764790/The_Messenger/
-          inspiration: >-
-            A brief contact with an airborne object can reset vertical momentum
-            and produce a chained ascent, with each bounce visibly caused by
-            the previous touch.
-        - id: cave-story-charge-shot
-          source: Cave Story+
-          source_url: https://store.steampowered.com/app/200900/Cave_Story/
-          inspiration: >-
-            A held ranged action can be expressed through growing body tension,
-            a focused release, and a small recoil or pursuit that gives the
-            projectile a physical consequence.
-        - id: iconoclasts-tool-combo
-          source: Iconoclasts
-          source_url: https://store.steampowered.com/app/393520/Iconoclasts/
-          inspiration: >-
-            A tool can serve two adjacent purposes in one beat: make contact,
-            alter position or orientation, then immediately use the changed
-            geometry to continue moving.
-        - id: freedom-planet-boost-return
-          source: Freedom Planet 2
-          source_url: https://store.steampowered.com/app/595500/Freedom_Planet_2/
-          inspiration: >-
-            A high-speed rush is more readable when the entry acceleration,
-            sustained line, interruption, and return path are distinct,
-            allowing the endpoint to be caused by the interruption.
-        - id: terraria-grapple-swing
-          source: Terraria
-          source_url: https://store.steampowered.com/app/105600/Terraria/
-          inspiration: >-
-            A tether changes movement from a straight path into an arc: reach,
-            attach, swing or pull, release at a chosen angle, and let the
-            landing settle the action.
 
   workflow_stage_candidates:
     motion_comic:
@@ -246,6 +71,9 @@ routing:
     # Writing-first route. Kirby's character YAML gives it an explicit
     # generation_type_weights entry so bare CLI runs can select it.
     story_card:
+      image_workflow_name:
+        - krea2_turbo
+    series_carousel:
       image_workflow_name:
         - krea2_turbo
     text2img:
@@ -288,6 +116,11 @@ routing:
         - minimax_h3_fl2va
       refine_workflow_name:
         - flux3_image_klein_img2img
+    native_h3_loop_story:
+      image_workflow_name:
+        - krea2_turbo
+      video_workflow_name:
+        - minimax_h3_fl2va
     native_h3_l2va_story:
       image_workflow_name:
         - krea2_turbo
@@ -337,10 +170,18 @@ routing:
     story_card:
       image_count:
         min: 1
-        max: 1
+        max: 10
       review_selection_limit:
         min: 1
-        max: 1
+        max: 10
+    # One page per cast member; image_count is the cast size.
+    series_carousel:
+      image_count:
+        min: 4
+        max: 4
+      review_selection_limit:
+        min: 1
+        max: 4
     text2img:
       image_count:
         min: 6
@@ -449,6 +290,22 @@ routing:
       review_selection_limit:
         min: 1
         max: 2
+      images_per_prompt:
+        min: 1
+        max: 1
+    native_h3_loop_story:
+      image_count:
+        min: 6
+        max: 6
+      video_count:
+        min: 1
+        max: 1
+      segment_count:
+        min: 1
+        max: 1
+      review_selection_limit:
+        min: 1
+        max: 1
       images_per_prompt:
         min: 1
         max: 1
@@ -555,7 +412,9 @@ routing:
       motion_comic:
         image_workflow_name: "Required text-to-image stage: one illustration for each of three LLM-authored causal beats. Exact captions and progressive-panel timing are composed by Pillow/FFmpeg; no neural video workflow or prewritten story file is required."
       story_card:
-        image_workflow_name: "Required style-locked text-to-image stage for each static story page; prompts must preserve the resolved selected character while changing visual beat, expression, pose, and optional supporting cast without blocking typography."
+        image_workflow_name: "Required text-to-image stage that renders one small vignette per page of the resolved selected character beside that page's own object or action; Pillow dissolves each into cream paper and sets the exact text."
+      series_carousel:
+        image_workflow_name: "Required text-to-image stage that renders one page per cast member from one fixed scene with a single seed; only the character differs between pages, so the pages read as one set."
       text2img:
         image_workflow_name: "Required static-image stage. It may produce one image or the configured candidate count; no video stage is implied."
       text2video:
@@ -578,6 +437,9 @@ routing:
         image_workflow_name: "Krea2 creates the opening image; FLUX uses that selected image to produce a distinct landing state."
         video_workflow_name: "Native H3 FL2VA stage. It receives both first_frame and last_frame."
         refine_workflow_name: "FLUX Klein reference edit that preserves the selected opening identity while applying the ending prompt."
+      native_h3_loop_story:
+        image_workflow_name: "Krea2 creates the opening keyframe candidates; the one frame chosen in review is bound as both first_frame and last_frame, so no second ending image is made."
+        video_workflow_name: "Native H3 FL2VA stage. It receives the same approved image as first_frame and last_frame, so the clip ends where it began."
       native_h3_l2va_story:
         image_workflow_name: "Krea2 creates an identity source; FLUX edits it into the reviewed landing keyframe."
         video_workflow_name: "Native H3 L2VA stage. It receives last_frame and leaves the opening unconstrained."
@@ -669,19 +531,30 @@ routing:
           - "三格必須有 setup、escalation、payoff，每句文字對應可見事件，結尾回應標題。"
           - "每格圖片不生成文字；字幕由合成器精確加入。維持角色、道具設計、場景和鏡頭一致。"
           - "最終圖文一致性仍由既有審查確認；技術 QA 不等於故事通過。"
-      story_card:
-        summary: "寫作優先的 1–6 頁繁中故事字卡；多頁每頁約 36–70 字、以 42–65 字為目標，超過 70 字按意思分頁，使用當輪解析出的角色做連續動作與表情節拍，可選一名可愛配角，文字由 Pillow 精確疊字，不產生影片。"
+      series_carousel:
+        summary: "固定模板系列輪播：LLM 只寫一次場景（鏡頭、道具位置、角色位置與大小都寫死，角色處留一個 {character} 空格），同一個種子畫出同一個群組的多位角色，每頁只有角色不同，看起來就是一整套。不產生影片。"
         best_for:
-          - "需求重點是安靜、細膩、讓人讀完後重新理解一件日常小事的文字。"
-          - "新聞關鍵字只作情緒入口，成品要改寫成日常人物、物件與無聲照顧。"
-          - "需要背景有角色辨識度但不能搶走文字注意力。"
+          - "想用同一個可愛場景展示群組裡多位角色的系列貼文，例如同一張床、同一面鏡子換角色。"
+        avoid_when:
+          - "需求是單一角色的情緒或姿勢變化；改用 text2img 或 sticker_pack。"
+          - "需求是影片、文字閱讀或有劇情的多格故事；改用影片策略、story_card 或 motion_comic。"
+        hard_rules:
+          - "場景模板只能有一個 {character}，不得寫出任何成員名字；每位成員只換名字和一句不超過十二個字的外觀。"
+          - "每頁使用同一個種子與同一段提示，除角色外不得有差異；LLM 不可用時直接失敗，不使用寫死的場景。"
+          - "成員必須來自設定角色所屬的群組，第一頁是當輪主角；群組成員數少於頁數時直接失敗。"
+      story_card:
+        summary: "寫作優先的繁中故事字卡：新聞只是門，第一頁放入來源細節，中段用一個日常比方說出關於人的真道理並反轉讀者對細節的理解，最後一頁回扣同一個細節。頁數隨來源證據而定（只有標題 1–3 頁，有摘要 3–5 頁，有正文 4–7 頁），多頁時每頁 50–120 字、目標 60–100 字，是寫滿的一個小步驟。字卡使用自己的 4:5 直式畫布，不借用整輪隨機抽到的畫布。米色紙上每頁各有一幅當輪角色的淡出小插畫（畫的是該頁文字裡的那件物件，物件與構圖逐頁不同），文字由 Pillow 精確排版，不產生影片。"
+        best_for:
+          - "需求重點是安靜、細膩、讓人讀完後重新理解一件事的文字。"
+          - "新聞細節必須參與文章：第一頁放入，中段用比方翻轉讀者的理解，最後一頁回扣；整篇不能只是複述新聞。"
+          - "需要可愛的角色小插畫，但不能搶走文字注意力。"
         avoid_when:
           - "需求是影片、鏡頭運動、旁白或需要動態節奏；改用影片策略。"
           - "需求是單張主視覺或貼圖批次；改用 text2img 或 sticker_pack。"
         hard_rules:
-          - "背景不得含可讀文字、新聞現場、logo 或 watermark；中央留白優先。"
+          - "插畫不得含可讀文字、logo 或 watermark；每頁只畫一個角色與一個來自該頁文字的小物件（圖要對得上字，不出現第二隻生物），各頁物件與構圖不同，四周留白由 Pillow 淡出。"
           - "主角必須是當輪 resolved selected character；不可寫死 Kirby、不可在角色解析失敗時 fallback。"
-          - "每頁主角要有可見的姿勢、位置或表情變化；配角只能由角色包設定，最多一名且必須從屬。"
+          - "新聞事實只用來源明載的；不寫當事人的感受、動機或真誠與否，不替任何人背書或批評。比方必須用「想像／就像／有些人」框起、不具名、不當成真實事件；不得自編對話，只有來源明載的引述可以直接引用。頁數上限 10，符合 Instagram 輪播與 Discord 審核的附件上限。"
           - "每頁必須使用精確繁中正文，不能依賴圖片模型產字。"
       native_h3_t2v_story:
         summary: "純文字驅動的 15 秒單一連續影片；沒有輸入圖、沒有指定首幀、沒有指定尾幀，也沒有 reference manifest。"
@@ -720,6 +593,18 @@ routing:
         hard_rules:
           - "此模式必須有兩個可描述、可審核且不同的視覺狀態：opening state 與 landing state。"
           - "不得僅因為需求提到影片就選此模式；沒有明確終點時禁止選擇。"
+      native_h3_loop_story:
+        summary: "無縫循環：一張審核通過的關鍵畫面同時當第一幀與最後一幀，約 10 秒的單一鏡頭小笑點，最後一個動作把角色與所有道具帶回開場配置，重播時沒有接縫；不使用新聞，只靠一個道具與誇張的全身反應。"
+        best_for:
+          - "角色想要某樣東西、道具或場景使壞、角色大幅變形反應的輕鬆短笑點，看第二、第三遍仍然好笑。"
+          - "不依賴新聞或劇情因果，重點是可重複觀看的節奏與表情。"
+        avoid_when:
+          - "需要從 A 狀態到 B 狀態的可驗證轉變；改用 native_h3_fl2va_story。"
+          - "需要新聞事實或有因果的故事；改用 native_h3_story。"
+        hard_rules:
+          - "首尾使用同一張審核通過的畫面，不產生第二張結尾圖，也不經過 FLUX 精修。"
+          - "最後一個動作必須把角色與所有道具帶回開場配置，且最後一幀仍在動；不可停在定格收尾姿勢。"
+          - "整段為單一連續鏡頭，不可出現切鏡；只有一個道具作為笑點引擎。"
       native_h3_l2va_story:
         summary: "Last Frame to Video：以最後一幀作為不可妥協的落點，允許模型自由設計前段行動與開場，最後收束到指定畫面。"
         best_for:

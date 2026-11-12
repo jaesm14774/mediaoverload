@@ -549,3 +549,33 @@ def test_user_given_an_invalid_canvas_background_when_normalizing_then_the_reque
             background="red,format=yuv444p",
         )
     assert not output.exists()
+
+
+def test_user_given_a_video_over_the_upload_limit_when_making_a_review_preview_then_it_fits_and_stays_watchable(
+    source_factory, tmp_path,
+):
+    """User Given a final video larger than the chat upload limit When a review preview is made Then it fits the limit, keeps the full duration and audio, and leaves the original untouched."""
+    source = source_factory(changing=True, duration=6)
+    original = source.read_bytes()
+    limit = len(original) // 2
+    preview = tmp_path / "preview.mp4"
+    adapter = FFmpegAdapter()
+
+    adapter.make_size_limited_preview(str(source), str(preview), max_bytes=limit)
+
+    media = adapter.probe_media(str(preview))
+    assert 0 < preview.stat().st_size <= limit
+    assert media["has_video"] and media["has_audio"]
+    assert abs(media["duration"] - 6) < 0.3
+    assert source.read_bytes() == original
+
+
+def test_user_given_a_limit_too_small_for_any_watchable_preview_when_making_it_then_the_request_fails_explicitly(
+    source_factory, tmp_path,
+):
+    """User Given an impossibly small upload limit When a review preview is made Then it fails explicitly instead of producing an unwatchable file."""
+    source = source_factory(changing=True, duration=6)
+    with pytest.raises(ValueError, match="too small"):
+        FFmpegAdapter().make_size_limited_preview(
+            str(source), str(tmp_path / "preview.mp4"), max_bytes=500
+        )

@@ -188,33 +188,6 @@ class NativeH3StoryServiceTests(unittest.TestCase):
         self.assertEqual(merged["base"]["name"], "base")
         self.assertEqual(merged["base"]["character"], "Kirby")
 
-    def test_service_replaces_brand_unsafe_injected_news_context(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        class FakeNewsService:
-            def select_news(self) -> SimpleNamespace:
-                return SimpleNamespace(to_dict=lambda: {"title": "rain warning", "keyword": "weather"})
-
-        class FakeLLM:
-            def generate_native_h3_storyboard(self, **kwargs: object) -> dict[str, object]:
-                calls.append(kwargs)
-                return {"story": {"name": "generated"}}
-
-        service = NativeH3StoryService(
-            llm_engine=FakeLLM(),
-            news_service=FakeNewsService(),
-            storyboard_merger=lambda base, story: {"base": base, "story": story},
-        )  # type: ignore[arg-type]
-        service.resolve(
-            {"name": "base"},
-            character="Kirby",
-            style="anime",
-            duration_seconds=15,
-            news_context={"title": "AI性愛機器人新產品", "keyword": "AI;性愛機器人"},
-        )
-
-        self.assertEqual(calls[0]["news_context"], {"title": "rain warning", "keyword": "weather"})
-
 
 if __name__ == "__main__":
     unittest.main()

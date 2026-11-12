@@ -24,15 +24,17 @@ from agentic.runtime.prompting import (
     build_autonomous_scene_prompt,
     build_goal_brief,
     include_image_prompt_quality_clause,
+    include_role_description,
     include_visual_style_profile,
     news_grounding_anchor_clause,
+    texts_are_alike,
     build_story_segments,
     style_profile_avoidance,
     style_profile_direction,
     validate_story_segments,
 )
 from agentic.runtime.llm_client import PromptClient
-from agentic.runtime.news_grounding import is_usable_news_selection
+from agentic.runtime.news_grounding import UnsuitableNewsError, is_usable_news_selection
 
 
 def _goal_subject_instruction(goal: GoalRequest) -> str:
@@ -164,6 +166,41 @@ IMAGE_VARIANT_RESPONSE_CONTRACT = (
     "Give each item a short unique label and a presentation description that names its compositional approach."
 )
 
+NEWS_PREMISE_CONTRACT = (
+    "This scene comes from the article, so a reader of the article must recognise it. From the article take one small, "
+    "concrete, everyday happening that it actually reports, together with the object or place at its centre. The "
+    "character lives that happening itself, in place of the people in the article, with one feeling that reads from its "
+    "face and whole body. Put the exact short source excerpt and its matching visual_mapping into source_anchors; each "
+    "visual_mapping is a full clause with the character as its subject and the happening's own action as its verb, and "
+    "include every visual_mapping verbatim in prompt. Keep what happened true to the article and add no fact it does not "
+    "state. The picture shows the character and that object or place only: the reported people, officials, "
+    "organisations, flags, logos, slogans, numbers, and writing stay out of it. Style controls medium, surface, palette, "
+    "and composition only. When the article is about harm, blame, punishment, loss, or a contest between sides, a cute "
+    "character has no gentle place in it: return suitable as false with an empty prompt and no source_anchors. "
+    "Otherwise return suitable as true."
+)
+
+IMAGE_MOMENT_SET_CONTRACT = (
+    "Return exactly the requested number of image prompts. Together they are one carousel that tells, in time order, how "
+    "the character goes through the one happening the goal scene takes from the source, with the same object or place in "
+    "every picture, so every picture is still about what the source reports. Spread the prompts along that time line "
+    "from before the happening, through its start and its peak, to what it leaves behind and how the character ends up. "
+    "Each prompt is one frozen beat, and each beat changes what the character's whole body is doing and what it feels: "
+    "the pose, the silhouette, and the face in one prompt must not fit any other prompt. Standing and holding the object "
+    "is never a beat. Fill two fields for each item: feeling, one or two words that no other item shares, and pose, ten "
+    "to eighteen words on what the whole body is doing, written so that the silhouettes of any two poses filled in solid "
+    "black could be told apart. Use the object's own physical properties, such as its size against the character, its "
+    "shape, softness, openings, weight, and temperature, to find what the body does with it at each beat. Each feeling "
+    "reads from the silhouette and face alone at thumbnail size. Write each prompt in this order: the pose field word "
+    "for word, then the face, then the object, then one sentence naming the selected medium with two or three observable "
+    "surface cues. Keep the character small in a larger world, about one fifth to one third of the frame height, with "
+    "open space around it, drawn so that its silhouette and face still read. The picture holds exactly the named "
+    "characters, once each, and that one object; it has no writing, numbers, labels, or signs, and no other prop, "
+    "creature, or person. Nothing in it reports or implies anything about a real person. Name every required subject "
+    "in every prompt with its defining traits, and keep the same medium and style in all of them. Give each item a "
+    "short unique label and a presentation that names its beat, feeling, and pose in a few words."
+)
+
 H3_SEGMENT_RESPONSE_CONTRACT = (
     "Return a concise H3 scene description in prompt, separate from the two audio fields. "
     "Unless the brief explicitly requests an ensemble or co-leads, choose one primary visual focus "
@@ -258,10 +295,17 @@ def _required_image_subject_names(goal: GoalRequest) -> list[str]:
     ]
 
 
+def _plain_words(text: object) -> str:
+    """Lower-case words only, so quotes and punctuation never decide a comparison."""
+    return " ".join(re.findall(r"\w+", str(text or "").casefold()))
+
+
 def _validate_image_prompt_set(
     payload: Any,
     expected_count: int,
     required_subject_names: list[str] | None = None,
+    *,
+    distinct_acting: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("image prompt response must be an object.")
@@ -273,9 +317,24 @@ def _validate_image_prompt_set(
     labels: set[str] = set()
     presentations: set[str] = set()
     prompts: set[str] = set()
+    feelings: set[str] = set()
+    poses: list[str] = []
     for index, prompt_set in enumerate(prompt_sets, start=1):
         if not isinstance(prompt_set, dict):
             raise ValueError(f"image prompt variant {index} must be an object.")
+        if distinct_acting:
+            feeling = " ".join(str(prompt_set.get("feeling") or "").split())
+            pose = " ".join(str(prompt_set.get("pose") or "").split())
+            if not feeling or not pose:
+                raise ValueError(f"image prompt variant {index} needs a feeling and a pose.")
+            if feeling.casefold() in feelings:
+                raise ValueError("image prompt variants must each carry a different feeling.")
+            if any(texts_are_alike(pose, earlier) for earlier in poses):
+                raise ValueError("image prompt variants must each have a different body pose.")
+            if _plain_words(pose) not in _plain_words(prompt_set.get("prompt")):
+                raise ValueError(f"image prompt variant {index} must draw its own pose word for word.")
+            feelings.add(feeling.casefold())
+            poses.append(pose)
         label = str(prompt_set.get("label") or "").strip()
         presentation = str(prompt_set.get("presentation") or "").strip()
         if not label or not presentation:
@@ -438,7 +497,7 @@ def generate_autonomous_scene_prompt(
                     else ""
                 ),
                 (
-                    "This is a news-grounded story, not optional mood or style inspiration. Anchor the scene in the article's main documented event or impact. Select one or two concrete people, things, places, or events that the article explicitly names; turn each selected fact into a visible action, object, or consequence that makes its relationship to the article immediately clear. Put each exact short source excerpt and its matching visual_mapping into source_anchors, and include every visual_mapping verbatim in prompt. Preserve the source's actor-event relationship. A character may act as an allegorical stand-in, but a generic mood, a decorative motif, or style language cannot replace the event. Style controls medium, surface, palette, and composition only; it must not change the subject, setting, action, or emotional meaning of the source. Do not draw text, invent source facts, or imply a reported person did something the article does not say."
+                    NEWS_PREMISE_CONTRACT
                     if news_grounding_required
                     else (
                         "The supplied article is optional creative inspiration. Draw on one or two concrete people, things, places, or events it names when shaping the scene, and make their visual relationship to the scene recognizable. A character may act as an imaginative stand-in, but keep reported facts distinct from invented action. Do not add unsupported claims about what a real person did."
@@ -451,7 +510,7 @@ def generate_autonomous_scene_prompt(
                 ),
                 "Return the requested JSON directly using the supplied information.",
                 (
-                    "Return JSON with keys: prompt, creative_seed, source, source_anchors. Each source_anchors item has exactly source_excerpt and visual_mapping."
+                    "Return JSON with keys: suitable, prompt, creative_seed, source, source_anchors. Each source_anchors item has exactly source_excerpt and visual_mapping."
                     if news_grounding_required
                     else "Return JSON with keys: prompt, creative_seed, source."
                 ),
@@ -466,7 +525,6 @@ def generate_autonomous_scene_prompt(
         if news_grounding_required:
             schema_properties["source_anchors"] = {
                 "type": "array",
-                "minItems": 1,
                 "maxItems": 2,
                 "items": {
                     "type": "object",
@@ -479,8 +537,12 @@ def generate_autonomous_scene_prompt(
                 },
             }
             required_fields.append("source_anchors")
+            schema_properties["suitable"] = {"type": "boolean"}
+            required_fields.append("suitable")
         if news_grounding_required:
             def validate_response(payload: Any) -> dict[str, Any]:
+                if isinstance(payload, dict) and payload.get("suitable") is False:
+                    return payload
                 return validate_news_grounded_scene_response(
                     payload, normalized_news_context
                 )
@@ -499,6 +561,10 @@ def generate_autonomous_scene_prompt(
             },
             validate_response=validate_response,
         )
+        if news_grounding_required and payload.get("suitable") is False:
+            raise UnsuitableNewsError(
+                f"No gentle everyday happening in: {normalized_news_context.get('title', '')}"
+            )
         result = {
             "prompt": str(payload.get("prompt") or fallback["prompt"]),
             "creative_seed": str(
@@ -511,6 +577,8 @@ def generate_autonomous_scene_prompt(
         if news_grounding_required:
             result["source_anchors"] = list(payload["source_anchors"])
         return client.mark_payload(result)
+    except UnsuitableNewsError:
+        raise
     except Exception as exc:
         if news_grounding_required:
             raise client.generation_error("autonomous_scene_prompt", exc) from exc
@@ -551,7 +619,13 @@ def expand_goal(
     optional_news_context = is_usable_news_selection(
         news_context.get("title", ""), news_context.get("keyword", "")
     )
+    # A pipeline-written news image run has no scene of the user's to protect,
+    # so its candidates are different moments rather than layouts of one scene.
+    moment_set = image_prompt_request and news_grounding_required
     news_grounding_contract = (
+        "Every prompt stays inside the one happening the goal scene takes from the source; add no other fact from it."
+        if moment_set
+        else
         f"{news_grounding_anchor_clause(news_context)} "
         f"Carry the validated source-to-scene mappings into the creative brief and prompt: {json.dumps(goal.constraints.get('news_source_anchors') or [], ensure_ascii=False)}. "
         "Keep at least one mapped article fact visible in the story action or consequence; do not let style or generic mood replace it. "
@@ -583,7 +657,9 @@ def expand_goal(
         )
         fallback["prompt"] = f"{fallback['prompt']}, {reference_motion_directive}"
     still_prompt_contract = ""
-    if goal.media_type == "image":
+    if moment_set:
+        still_prompt_contract = ""
+    elif image_prompt_request:
         still_prompt_contract = IMAGE_PROMPT_CONTRACT
     elif video_request and goal.media_type not in {
         "sticker_pack",
@@ -612,7 +688,11 @@ def expand_goal(
     try:
         manager = client.require_manager()
         if image_prompt_request:
-            response_contract = IMAGE_VARIANT_RESPONSE_CONTRACT
+            response_contract = (
+                IMAGE_MOMENT_SET_CONTRACT
+                if moment_set
+                else IMAGE_VARIANT_RESPONSE_CONTRACT
+            )
             response_schema = {
                 "type": "object",
                 "properties": {
@@ -626,9 +706,19 @@ def expand_goal(
                             "properties": {
                                 "label": {"type": "string"},
                                 "presentation": {"type": "string"},
+                                **(
+                                    {"feeling": {"type": "string"}, "pose": {"type": "string"}}
+                                    if moment_set
+                                    else {}
+                                ),
                                 "prompt": {"type": "string"},
                             },
-                            "required": ["label", "presentation", "prompt"],
+                            "required": [
+                                "label",
+                                "presentation",
+                                *(["feeling", "pose"] if moment_set else []),
+                                "prompt",
+                            ],
                             "additionalProperties": False,
                         },
                     },
@@ -641,15 +731,23 @@ def expand_goal(
 
             def validate_response(payload: Any) -> dict[str, Any]:
                 return _validate_image_prompt_set(
-                    payload, prompt_variant_count, required_subject_names
+                    payload,
+                    prompt_variant_count,
+                    required_subject_names,
+                    distinct_acting=moment_set,
                 )
 
             response_prompt = (
                 f"Return JSON with keys: creative_brief and prompt_sets. Include exactly "
-                f"{prompt_variant_count} prompt_sets, each with label, presentation, and prompt."
+                f"{prompt_variant_count} prompt_sets, each with label, presentation, "
+                f"{'feeling, pose, ' if moment_set else ''}and prompt."
             )
             variant_guidance = (
                 "Required cast and identity details: "
+                + _goal_subject_instruction(goal)
+                + ". Repeat the exact name and distinguishing traits of every required subject in every prompt."
+                if moment_set
+                else "Required cast and identity details: "
                 + _goal_subject_instruction(goal)
                 + ". Repeat the exact name and distinguishing traits of every required subject in every prompt. Keep the same decisive action, "
                 "cast, setting, and style in every prompt. Make the presentations meaningfully different at thumbnail size by changing "
@@ -697,8 +795,12 @@ def expand_goal(
                 ),
                 response_prompt,
                 variant_guidance,
-                "Preserve the requested scene, cast, action, setting, text, and explicit framing. "
-                "Style controls rendering only; its composition is a fallback only when framing is unspecified.",
+                (
+                    ""
+                    if moment_set
+                    else "Preserve the requested scene, cast, action, setting, text, and explicit framing. "
+                    "Style controls rendering only; its composition is a fallback only when framing is unspecified."
+                ),
                 (
                     "Write prompt as a motion-only timeline for H3 I2VA; the selected image will be the exact opening frame. "
                     "Do not restate the image's pose, composition, appearance, colors, or existing objects. Begin with the first visible movement, "
@@ -730,6 +832,13 @@ def expand_goal(
         )
         if image_prompt_request:
             fallback["prompt_sets"] = payload["prompt_sets"]
+            if moment_set:
+                # These prompts already state their own scale and cast rules.
+                identity = include_role_description("", goal).rstrip(".")
+                for prompt_set in fallback["prompt_sets"]:
+                    if identity and identity.casefold() not in prompt_set["prompt"].casefold():
+                        prompt_set["prompt"] = f"{prompt_set['prompt'].rstrip()} {identity}."
+                    prompt_set["self_contained"] = True
             fallback["prompt"] = fallback["prompt_sets"][0]["prompt"]
             fallback["opening_keyframe_prompt"] = fallback["prompt"]
         else:
@@ -746,11 +855,16 @@ def expand_goal(
                     ),
                 }
             )
-        fallback["prompt"] = include_image_prompt_quality_clause(
-            fallback["prompt"], goal
-        )
+        if not moment_set:
+            fallback["prompt"] = include_image_prompt_quality_clause(
+                fallback["prompt"], goal
+            )
         return client.mark_payload(fallback)
     except Exception as exc:
+        if moment_set:
+            # The template fallback is six layouts of one scene, which is the
+            # set this route exists to replace.
+            raise client.generation_error("image_moment_set", exc) from exc
         return client.template_fallback(fallback, exc)
 
 

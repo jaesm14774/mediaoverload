@@ -33,6 +33,7 @@ from agentic.app.character_requests import (
 )
 from agentic.app.character_session import run_character_session
 from agentic.app.character_workflow import run_character_workflow
+from agentic.runtime.run_log import RunLog
 
 LOGGER = logging.getLogger("mediaoverload.scheduler")
 QUIET_HOURS_END = 5
@@ -185,6 +186,12 @@ def run_scheduled_job(
             comfy_root=config.comfy_root,
         ),
     )
+    if workflow_runner is run_character_workflow:
+        # Opened per job, before any generation: an outage skips this job, not the whole scheduler.
+        run_log = RunLog.from_environment()
+        workflow_runner = lambda workflow_request: run_character_workflow(
+            workflow_request, run_log=run_log
+        )
     result = run_character_session(request, workflow_runner=workflow_runner)
     LOGGER.info(
         "scheduler.result | status=%s | strategy=%s | publish=%s",

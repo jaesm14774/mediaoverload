@@ -662,9 +662,8 @@ class LLMEngineTests(unittest.TestCase):
                 }],
             )
             user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-            self.assertIn("This is a news-grounded story, not optional mood or style inspiration", user_prompt)
+            self.assertIn("happening that it actually reports", user_prompt)
             self.assertIn("source_anchors", user_prompt)
-            self.assertIn("one or two", user_prompt)
             call_files = list((Path(temp_dir) / "autonomous-scene" / "llm").glob("*.json"))
             self.assertEqual(len(call_files), 1)
             call = json.loads(call_files[0].read_text(encoding="utf-8"))
@@ -813,60 +812,101 @@ class LLMEngineTests(unittest.TestCase):
                 news_grounding_required=True,
             )
 
-    def test_sticker_expressions_uses_llm_json_when_available(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"expressions": ["joyful leap", "sleepy yawn", "angry steam", "big surprise", "heart eyes", "confused tilt", "celebration pose", "dramatic sob"]}',
-                ]
-            ),
-        )
+    def test_user_given_a_theme_when_sticker_reactions_are_written_then_each_becomes_one_drawable_sentence_with_its_own_framing_and_body(self) -> None:
+        """User Given a theme When the writer returns reactions with a framing, feeling, body, eyes and mark Then each reaction becomes one sentence that leads with how close the picture is, then what the body does, and says how the eyes and the mark are drawn."""
+        reactions = [
+            {"framing": "tight close-up with the face filling the frame", "feeling": "dread", "body": "Body squashed flat like a pancake with both arms limp", "eyes": "two spirals", "mark": "a small rain cloud"},
+            {"framing": "whole character seen small and far away with open space around it", "feeling": "joy", "body": "Body stretched tall on tiptoe with both arms thrown up", "eyes": "two upward arcs", "mark": "a small star"},
+        ]
+        engine = LLMPromptEngine(mode="llm", manager=_FakeManager([json.dumps({"reactions": reactions})]))
         goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
 
-        expressions = engine.sticker_expressions(goal, "ramen shop", "Kirby", 8)
+        expressions = engine.sticker_expressions(goal, "ramen shop", "Kirby", 2)
 
-        self.assertEqual(len(expressions), 8)
-        self.assertEqual(expressions[0], "joyful leap")
+        self.assertEqual(len(expressions), 2)
+        self.assertTrue(expressions[0].startswith("Tight close-up with the face filling the frame"))
+        self.assertLess(expressions[0].index("close-up"), expressions[0].index("Body squashed flat"))
+        self.assertIn("eyes are drawn as two spirals", expressions[0])
+        self.assertTrue(expressions[1].startswith("Whole character seen small and far away"))
+        self.assertIn("A small star floats beside the head", expressions[1])
 
-    def test_build_sticker_prompt_set_uses_llm_json_when_available(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"prompt_sets": [{"label": "sticker_01", "expression": "joyful leap", "prompt": "kirby joyful prompt"}, {"label": "sticker_02", "expression": "sleepy yawn", "prompt": "kirby sleepy prompt"}]}',
-                ]
-            ),
-        )
+    def test_user_given_reactions_that_share_one_framing_when_checked_then_the_writer_is_asked_again(self) -> None:
+        """User Given every reaction is drawn at the same distance When the reactions are checked Then they are refused, so the pack never has one size for every sticker."""
+        base = {"framing": "full body at medium distance", "eyes": "two dots", "mark": "a star"}
+        reactions = [
+            {**base, "feeling": "joy", "body": "Body bouncing with both arms up"},
+            {**base, "feeling": "dread", "body": "Body squashed flat with both arms limp"},
+        ]
+        engine = LLMPromptEngine(mode="llm", manager=_FakeManager([json.dumps({"reactions": reactions})] * 12))
         goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
 
-        result = engine.build_sticker_prompt_set(
-            goal,
-            expressions=["joyful leap", "sleepy yawn"],
-            character="Kirby",
-            prompt_prefix="ramen shop",
-            style="LINE sticker",
+        with self.assertRaises(PromptGenerationError):
+            engine.sticker_expressions(goal, "ramen shop", "Kirby", 2)
+
+    def test_user_given_reactions_that_repeat_a_feeling_or_use_symbols_when_checked_then_the_writer_is_asked_again(self) -> None:
+        """User Given the writer repeats one feeling or draws a mark as an emoji When the reactions are checked Then they are refused, so the pack is never built from them."""
+        same = {"framing": "tight close-up on the face", "feeling": "joy", "body": "Body bouncing with both arms up", "eyes": "two arcs", "mark": "a star"}
+        emoji = {"framing": "full body seen from far away", "feeling": "calm", "body": "Body sitting with arms on knees", "eyes": "two dots", "mark": "\u2728"}
+        for reactions in ([same, same], [same, emoji]):
+            engine = LLMPromptEngine(mode="llm", manager=_FakeManager([json.dumps({"reactions": reactions})] * 12))
+            goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
+
+            with self.assertRaises(PromptGenerationError):
+                engine.sticker_expressions(goal, "ramen shop", "Kirby", 2)
+
+    def test_user_given_sticker_expressions_when_the_prompt_set_is_built_then_each_prompt_leads_with_its_pose_and_is_one_isolated_subject(self) -> None:
+        """User Given a pack with two cast members and a list of expressions When the sticker prompts are built Then each prompt starts with its own pose, names only the lead character, is one isolated subject on a plain backdrop, and is sent to the renderer as written."""
+        engine = LLMPromptEngine(mode="llm", manager=_FakeManager([]))
+        goal = GoalRequest(
+            prompt="a long scene about a parking lot",
+            media_type="sticker_pack",
+            style="sticker",
+            constraints={"subject_context": {"subjects": [
+                {"name": "Magolor", "profile": {"role_description": "Magolor is a hooded alien with yellow eyes"}},
+                {"name": "Silver arowana", "profile": {"role_description": "a freshwater fish"}},
+            ]}},
         )
 
-        self.assertIn("kirby joyful prompt", result["prompt_sets"][0]["prompt"])
-        self.assertEqual(result["prompt_sets"][1]["expression"], "sleepy yawn")
-        self.assertEqual(result["prompt_mode"], "llm")
+        result = engine.build_sticker_prompt_set(goal, ["flopped flat, eyes as closed arcs", "leaping tall, eyes as saucers"])
 
-    def test_user_given_scenic_sticker_prompts_when_the_set_is_built_then_every_sticker_is_one_subject_on_a_plain_backdrop(self) -> None:
-        """User Given a model that writes a whole scene into each sticker prompt When the prompt set is built Then every prompt, model-written or template, still demands one isolated subject with a white die-cut outline on a plain backdrop."""
-        scenic = '{"prompt_sets": [{"label": "sticker_01", "expression": "wave", "prompt": "Kirby waves above a busy parking lot with cars and scooters"}]}'
-        for response in (scenic, "not json"):
-            engine = LLMPromptEngine(mode="llm", manager=_FakeManager([response]))
-            goal = GoalRequest(prompt="parking lot", media_type="sticker_pack", style="sticker")
-
-            result = engine.build_sticker_prompt_set(
-                goal, expressions=["wave"], character="Kirby", prompt_prefix="parking lot", style="LINE sticker"
-            )
-
-            prompt = result["prompt_sets"][0]["prompt"].casefold()
+        self.assertEqual(result["prompt_count"], 2)
+        for item, pose in zip(result["prompt_sets"], ("flopped flat", "leaping tall")):
+            prompt = item["prompt"]
+            self.assertTrue(prompt.startswith(pose))
+            self.assertIn("hooded alien", prompt)
+            self.assertNotIn("arowana", prompt)
+            self.assertNotIn("parking lot", prompt)
             self.assertIn("one isolated subject", prompt)
             self.assertIn("white die-cut outline", prompt)
-            self.assertIn("plain", prompt)
+            self.assertTrue(item["self_contained"])
+            self.assertLess(len(prompt.split()), 90)
+
+    def test_user_given_a_selected_style_when_the_sticker_prompts_are_built_then_each_sticker_wears_the_style_and_stays_a_die_cut_subject(self) -> None:
+        """User Given a drawn visual style and a list of expressions When the sticker prompts are built Then every prompt still leads with its own pose and stays one die-cut subject on a plain backdrop, and also carries the selected style's medium but none of its scenery rules."""
+        engine = LLMPromptEngine(mode="llm", manager=_FakeManager([]))
+        goal = GoalRequest(
+            prompt="a long scene about a parking lot",
+            media_type="sticker_pack",
+            style="gouache picture-book",
+            constraints={"visual_style_profile": {
+                "label": "gouache picture-book",
+                "prompt": "soft gouache picture-book painting with chalky matte pigment",
+                "composition": "a wide meadow scene with the character tiny at the horizon",
+                "avoid": "plain backgrounds",
+            }},
+        )
+
+        result = engine.build_sticker_prompt_set(goal, ["flopped flat, eyes as closed arcs", "leaping tall, eyes as saucers"])
+
+        for item, pose in zip(result["prompt_sets"], ("flopped flat", "leaping tall")):
+            prompt = item["prompt"]
+            self.assertTrue(prompt.startswith(pose))
+            self.assertIn("chalky matte pigment", prompt)
+            self.assertNotIn("meadow", prompt)
+            self.assertNotIn("plain backgrounds", prompt)
+            self.assertIn("one isolated subject", prompt)
+            self.assertIn("white die-cut outline", prompt)
+            self.assertTrue(item["self_contained"])
 
     def test_prepare_segment_uses_llm_json_when_available(self) -> None:
         engine = LLMPromptEngine(
@@ -945,30 +985,6 @@ class LLMEngineTests(unittest.TestCase):
         result = engine.build_sticker_motion_prompt(goal, "base sticker prompt", "Kirby", "cheering")
 
         self.assertEqual(result["prompt"], "looping bounce with readable silhouette")
-        self.assertEqual(result["prompt_mode"], "llm")
-
-    def test_build_carousel_prompt_set_uses_llm_json_when_available(self) -> None:
-        engine = LLMPromptEngine(
-            mode="llm",
-            manager=_FakeManager(
-                [
-                    '{"prompt_sets": [{"label": "slide_01", "prompt": "shot one", "narration": "line one"}, {"label": "slide_02", "prompt": "shot two", "narration": "line two"}]}',
-                ]
-            ),
-        )
-        goal = GoalRequest(prompt="travel diary", media_type="carousel", style="editorial")
-
-        result = engine.build_carousel_prompt_set(
-            goal,
-            segments=[
-                {"segment_id": "segment-1", "visual": "visual one", "narration": "base one"},
-                {"segment_id": "segment-2", "visual": "visual two", "narration": "base two"},
-            ],
-            style="editorial",
-        )
-
-        self.assertEqual(result["prompt_sets"][0]["prompt"], "shot one")
-        self.assertEqual(result["prompt_sets"][1]["narration"], "line two")
         self.assertEqual(result["prompt_mode"], "llm")
 
     def test_prepare_publish_caption_uses_llm_json_when_available(self) -> None:
@@ -1442,33 +1458,13 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(result, [{"ok": True}])
         self.assertIn("JSON array", fake_manager.text_model.calls[0]["messages"][0]["content"])
 
-    def test_sticker_expressions_fall_back_when_llm_returns_empty(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=_FakeManager([""]))
-        goal = GoalRequest(prompt="Kirby sticker emotions: happy, angry, crying, sleepy", media_type="sticker_pack")
+    def test_user_given_the_sticker_writer_returns_nothing_when_expressions_are_planned_then_the_run_stops(self) -> None:
+        """User Given the sticker writer returns no usable expressions When a pack is planned Then the run stops instead of drawing a canned set of moods."""
+        engine = LLMPromptEngine(mode="llm", manager=_FakeManager(['{"reactions": []}'] * 12))
+        goal = GoalRequest(prompt="kirby reactions", media_type="sticker_pack", style="anime")
 
-        expressions = engine.sticker_expressions(goal, goal.prompt, "Kirby", 8)
-
-        self.assertEqual(expressions[:4], ["happy", "angry", "crying", "sleepy"])
-        self.assertEqual(len(expressions), 8)
-
-    def test_build_sticker_prompt_set_falls_back_on_json_parse_failure(self) -> None:
-        engine = LLMPromptEngine(mode="llm", manager=_FakeManager(["not json"]))
-        goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
-
-        result = engine.build_sticker_prompt_set(
-            goal,
-            expressions=["joyful leap", "sleepy yawn"],
-            character="Kirby",
-            prompt_prefix="ramen shop",
-            style="LINE sticker",
-        )
-
-        self.assertEqual(result["prompt_mode"], "template")
-        self.assertEqual(result["fallback_reason"], "json_parse_failed")
-        self.assertEqual(result["prompt_count"], 2)
-        self.assertEqual(result["prompt_sets"][0]["expression"], "joyful leap")
-
-
+        with self.assertRaises(PromptGenerationError):
+            engine.sticker_expressions(goal, "kirby reactions", "Kirby", 2)
 
     def test_backend_info_defaults_to_openrouter(self) -> None:
         with patch.dict(

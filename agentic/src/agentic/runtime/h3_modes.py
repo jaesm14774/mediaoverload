@@ -73,6 +73,7 @@ _ALIASES = {
     "image_to_video": H3Mode.I2VA,
     "fl2va": H3Mode.FL2VA,
     "native_h3_fl2va_story": H3Mode.FL2VA,
+    "native_h3_loop_story": H3Mode.FL2VA,
     "first_last_to_video": H3Mode.FL2VA,
     "l2va": H3Mode.L2VA,
     "native_h3_l2va_story": H3Mode.L2VA,

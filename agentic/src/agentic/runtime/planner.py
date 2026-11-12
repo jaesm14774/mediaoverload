@@ -17,7 +17,7 @@ from agentic.runtime.planning.images import (
     build_comfy_primitive,
     build_text2img2img,
     build_story_card,
-    build_carousel,
+    build_series_carousel,
 )
 from agentic.runtime.planning.stickers import (
     build_sticker_pack,
@@ -36,7 +36,7 @@ PLAN_BUILDERS = {
     "publish_review": build_publish_review,
     "game_sprite": build_game_sprite,
     "animated_sticker": build_animated_sticker,
-    "carousel": build_carousel,
+    "carousel": build_series_carousel,
     "story_card": build_story_card,
     "motion_comic": build_motion_comic,
     "sticker_pack": build_sticker_pack,
@@ -46,6 +46,7 @@ PLAN_BUILDERS = {
     "native_h3_story": build_native_h3_story,
     "native_h3_t2v_story": build_native_h3_t2v_story,
     "native_h3_fl2va_story": build_native_h3_story,
+    "native_h3_loop_story": build_native_h3_story,
     "native_h3_l2va_story": build_native_h3_l2va_story,
     "native_h3_ref2va": build_native_h3_ref2va,
     "text2image2native_h3_ref2va": build_native_h3_ref2va,

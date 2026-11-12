@@ -329,10 +329,9 @@ def resolve_character_selection(
     requested_character_name = str(
         request.generation.selected_character_name or ""
     ).strip()
-    story_card_requested = (
-        str(request.generation.preferred_generation_type or "").strip().lower()
-        == "story_card"
-    )
+    configured_role_requested = str(
+        request.generation.preferred_generation_type or ""
+    ).strip().lower() in {"story_card", "series_carousel"}
     reference_video_requested = str(
         request.generation.preferred_generation_type or ""
     ).strip().lower() == "text2image2video" and bool(
@@ -342,10 +341,11 @@ def resolve_character_selection(
         str(request.generation.preferred_generation_type or "").strip().lower()
         == "game_sprite"
     )
-    if story_card_requested:
-        # Story cards are writing-first decorative Kirby cards. Random or
-        # two-character selection adds unrelated subjects and can change the
-        # character identity that the corner illustration is meant to keep.
+    if configured_role_requested:
+        # Story cards are writing-first decorative Kirby cards, and a series
+        # carousel casts the configured role first. Random or two-character
+        # selection adds unrelated subjects and can change the character
+        # identity these routes are meant to keep.
         if group_name:
             selection = (
                 CharacterGroupSelectionService()

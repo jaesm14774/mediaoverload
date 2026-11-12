@@ -12,7 +12,6 @@ from agentic.runtime.contracts import SkillContext, SkillResult
 from agentic.runtime.llm_engine import LLMPromptEngine
 from agentic.runtime.motion_comics import validate_motion_comic_story
 from agentic.runtime.prompting import (
-    include_image_prompt_quality_clause,
     include_visual_style_profile,
     selected_role_description,
 )
@@ -81,13 +80,12 @@ class MotionComicSkills:
                     panel_style,
                     "Resolved subject identity: "
                     + selected_role_description(context.plan.goal),
+                    "The character is drawn large, at least a third of the frame height, so its pose and face read; "
+                    "this size replaces any smaller figure size in the style rules. "
                     "Show only this panel's current prop state. One single full-frame scene with one copy of each character, never a grid, collage, or several small pictures. No text, speech bubbles, borders or watermark.",
                 )
             )
             panel_prompt = include_visual_style_profile(
-                panel_prompt, context.plan.goal, image_generation=True
-            )
-            panel_prompt = include_image_prompt_quality_clause(
                 panel_prompt, context.plan.goal, image_generation=True
             )
             payload = {

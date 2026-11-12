@@ -50,32 +50,26 @@ def test_user_given_sprite_prompt_when_planned_then_direct_prompt_and_render_met
     assert isinstance(plan["video_prompt"], str) and plan["video_prompt"].strip()
 
 
-def test_game_sprite_reference_pack_is_ephemeral_inspiration_not_a_moveset() -> None:
-    """User Given a game-sprite route When reference context is built Then it remains optional inspiration."""
+def test_user_given_the_game_sprite_route_when_its_context_is_built_then_it_carries_the_pixel_art_contract_and_no_list_of_moves() -> None:
+    """User Given the game-sprite route When its context is built Then it carries the pixel-art look and no fixed list of moves to copy."""
 
     repo_root = Path(__file__).resolve().parents[2]
+    strategy_context = _load_global_routing_config(repo_root)["strategy_contexts"]["game_sprite"]
     goal = GoalRequest(
         prompt="a jelly star folds into a paper plane and circles back",
         media_type="game_sprite",
-        constraints={
-            "sprite_reference_seed": "test-seed",
-            "strategy_context": _load_global_routing_config(repo_root)["strategy_contexts"]["game_sprite"],
-        },
+        constraints={"strategy_context": strategy_context},
     )
 
-    context = build_game_sprite_reference_context(goal, limit=5)
+    context = build_game_sprite_reference_context(goal)
 
-    assert context["pack_version"] == "game_sprite_action_references_v1"
     assert "crisp 2d pixel-art game asset" in context["visual_contract"].casefold()
-    assert len(context["references"]) == 5
-    assert "optional inspiration notes" in context["prompt_text"].casefold()
-    assert "visual timing only" in context["prompt_text"].casefold()
-    assert "character abilities" in context["prompt_text"].casefold()
-    assert len({item["id"] for item in context["references"]}) == 5
+    assert "creative_inspiration" not in strategy_context
+    assert set(context) == {"pack_version", "visual_contract"}
 
 
-def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() -> None:
-    """User Given configured sprite inspiration When prompts are prepared Then the LLM receives optional visual notes without a fixed moveset."""
+def test_user_given_a_news_happening_when_sprite_prompts_are_prepared_then_the_model_is_asked_to_act_it_out_not_to_fight() -> None:
+    """User Given a run whose news happening is mapped to a scene When sprite prompts are prepared Then the model is asked to act out that happening as an everyday action and is told it is never an attack, with no list of game moves."""
 
     repo_root = Path(__file__).resolve().parents[2]
     class FakeTextModel:
@@ -126,14 +120,19 @@ def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() 
             style="bright toy game art",
             constraints={
                 "character": "jelly star",
-                "sprite_reference_seed": "test-seed",
+                "news_source_anchors": [
+                    {"source_excerpt": "x", "visual_mapping": "the jelly star hugs an empty pot"}
+                ],
                 "strategy_context": _load_global_routing_config(repo_root)["strategy_contexts"]["game_sprite"],
             },
         )
     )
 
     prompt = str(manager.text_model.calls[0]["messages"][1]["content"])
-    assert "Optional inspiration notes" in prompt
+    system = str(manager.text_model.calls[0]["messages"][0]["content"])
+    assert "the jelly star hugs an empty pot" in prompt
+    assert "never an attack" in system
+    assert "inspiration notes" not in prompt.casefold()
     assert "chroma-key" not in prompt.casefold()
     assert "atlas" not in prompt.casefold()
     assert "-second clip" not in prompt.casefold()
@@ -141,7 +140,7 @@ def test_llm_sprite_prompt_receives_reference_notes_without_character_moveset() 
     assert "action_reference_pack" in plan
     assert "chroma_color" not in plan
     assert "chroma_threshold" not in plan
-    assert len(plan["action_references"]) == 8
+    assert "action_references" not in plan
     assert "idle, walk, jump, attack" not in prompt.lower()
 
 
@@ -174,7 +173,7 @@ def test_user_given_a_crowded_news_scene_when_sprite_prompts_are_requested_then_
     assert "exactly one character" in system_prompt
     assert "one still frame" in system_prompt
     assert "storyboard" in system_prompt  # named so that it is forbidden
-    assert "one visual motif" in system_prompt
+    assert "reduced to that one action and at most one prop" in system_prompt
 
 
 def test_user_given_a_model_keyframe_prompt_when_compiled_then_single_subject_and_game_art_lead_the_prompt() -> None:
@@ -216,7 +215,8 @@ def test_user_given_a_video_prompt_when_compiled_then_the_green_backdrop_must_st
     compiled = compile_dynamic_sprite_video_prompt("Kirby spins", "Crisp 2D pixel-art game asset").casefold()
 
     assert "green" in compiled and "unchanged" in compiled
-    assert "same position" in compiled and "never covers" in compiled
+    assert "same position" in compiled and "face stays visible" in compiled
+    assert "explosions" in compiled  # named so that they are forbidden
 
 
 def test_user_given_a_photographic_news_run_when_sprite_prompts_are_requested_then_the_model_sees_the_headline_motif_but_no_photo_style() -> None:
@@ -467,8 +467,8 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
 
     assert payload["source_generation_type"] == "game_sprite"
     assert payload["media_type"] == "game_sprite"
-    assert payload["duration_seconds"] == 5
-    assert payload["constraints"]["sprite_video_length"] == 120
+    assert payload["duration_seconds"] > 0
+    assert payload["constraints"]["sprite_video_length"] == round(payload["duration_seconds"] * 24)
     assert "sprite_chroma_color" not in payload["constraints"]
     assert "sprite_chroma_threshold" not in payload["constraints"]
     assert payload["constraints"]["image_workflow_name"] == "krea2_turbo"
@@ -485,7 +485,7 @@ def test_kirby_yaml_exposes_game_sprite_as_an_explicit_additive_route() -> None:
     # The clip keeps the keyframe's shape; H3 stretches a mismatched first frame.
     assert abs(video_width / video_height - canvas_width / canvas_height) < 0.1
     assert payload["constraints"]["strategy_context"]["reference_pack_version"] == "game_sprite_action_references_v1"
-    assert len(payload["constraints"]["strategy_context"]["creative_inspiration"]) == 25
+    assert "creative_inspiration" not in payload["constraints"]["strategy_context"]
 
     native_payload = build_goal_payload_from_character_config(
         make_character_workflow_request(
@@ -503,8 +503,6 @@ def test_kirby_yaml_can_weight_game_sprite_for_random_selection(tmp_path: Path) 
     repo_root = Path(__file__).resolve().parents[2]
     kirby_config = repo_root / "configs" / "characters" / "kirby.yaml"
     config = load_character_config(kirby_config)
-
-    assert config["generation"]["generation_type_weights"]["game_sprite"] > 0
 
     config["generation"]["generation_type_weights"] = {"game_sprite": 1}
     result = _route_generation_from_character_config(
@@ -684,3 +682,40 @@ def test_sprite_adapter_keeps_technical_frame_contracts(tmp_path: Path) -> None:
         cell_height=64,
     )
     assert result["qa"]["passed"]
+
+
+def test_user_given_a_packaged_sprite_when_it_goes_to_review_then_the_clip_shows_the_cut_out_sprite_on_a_plain_backdrop_not_the_green_screen(
+    tmp_path: Path,
+) -> None:
+    """User Given a sprite rendered on a green screen When it is packaged and its media is collected for review Then the only clip offered is a looping video of the cut-out sprite on a plain backdrop, with no green in it."""
+    from agentic.app.character_publishing import collect_media_paths_from_run_result
+    from agentic.tools.ffmpeg_adapter import FFmpegAdapter
+
+    paths = _green_backdrop_frames(tmp_path / "source", [(0, 255, 0)] * 16)
+    result = SpriteAdapter().build_from_frames(
+        paths, output_dir=str(tmp_path / "sprite"), cell_width=32, cell_height=32, fps=12, loop=True
+    )
+    showcase = Path(result["showcase_path"])
+    raw_clip = tmp_path / "videos" / "h3_i2va_01.mp4"
+    raw_clip.parent.mkdir()
+    raw_clip.write_bytes(showcase.read_bytes())
+
+    offered = collect_media_paths_from_run_result(
+        {
+            "state": {
+                "node_outputs": {
+                    "sprite-motion-video": {"saved_files": [str(raw_clip)], "video_path": str(raw_clip)},
+                    "sprite-package": {**result, "final_video_path": str(showcase), "source_video_path": str(raw_clip)},
+                }
+            }
+        }
+    )
+
+    assert offered == [str(showcase)]
+    probe = FFmpegAdapter().probe_media(str(showcase))
+    assert float(probe["duration"]) >= 4
+    frame = tmp_path / "frame.png"
+    FFmpegAdapter().extract_frames_at(str(showcase), [str(frame)], [1.0])
+    pixels = list(Image.open(frame).convert("RGB").getdata())
+    assert not any(green > 200 and red < 80 and blue < 80 for red, green, blue in pixels)
+    assert Image.open(frame).convert("RGB").getpixel((2, 2))[0] > 200

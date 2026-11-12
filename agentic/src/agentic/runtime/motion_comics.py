@@ -18,8 +18,9 @@ MOTION_COMIC_DEFAULTS = {
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
-# A caption that stops on a hyphen or dash was cut off mid-word by the writer.
-_CUT_OFF = re.compile(r"[-‐-―−]$")
+# A caption that stops on a dash or a comma was cut off by the writer. Words
+# such as "and" cannot be checked this way: the same characters end real words.
+_CUT_OFF = re.compile(r"[-‐-―−、，,]$")
 
 
 def validate_motion_comic_story(payload: Any) -> dict[str, Any]:

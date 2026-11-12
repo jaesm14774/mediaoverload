@@ -45,6 +45,9 @@ agentic --goal "Pan across the source image" --media-type image_sequence_edit --
 
 # LLM 自動寫三格故事、生成插畫並合成漫畫短片；只生成、不發布
 python run_media_interface.py --character kirby --generation-type motion_comic --prompt "只想吃一小口蛋糕，卻忍不住一直吃" --no-publish
+
+# 固定模板系列輪播：同一個場景、同一個種子，只換同群組的角色（頁數由 routing.yaml 的 image_count 決定）；只生成、不發布
+python run_media_interface.py --character kirby --generation-type series_carousel --prompt "卡比蓋著星星被睡著" --no-publish --no-review
 ```
 
 `--dry-run-publish` 只禁止社群派送，生成與 Discord 審查仍會使用外部服務。未加 `--execute` 的 `agentic` 指令只輸出計畫。排程器入口為 `scheduler/scheduler.py`；不要為了測試重啟正在執行的生成工作。
@@ -64,6 +67,7 @@ python run_media_interface.py --character kirby --generation-type motion_comic -
 | `agentic/output/` | 直接使用 Agentic CLI 且未指定 `--output-dir` 時的輸出根目錄 |
 | `logs/runs/<run_id>/` | 角色流程的 manifest、事件、node、LLM 與 lifecycle 記錄；直接 Agentic CLI 預設只印結果並保存 portfolio 摘要 |
 | `agentic/logs/agentic_portfolio.jsonl` | runtime 的輕量 workflow 摘要 |
+| MySQL `run_log_mysql_database` | 每次 run 的策略、prompt、Discord 審核結論與發布紀錄；欄位與查詢見 [Run Log](docs/run-log.md) |
 | `.tmp-tests/` | 測試與建置暫存，不作為正式流程輸入 |
 
 策略語意以 [strategies.py](agentic/src/agentic/runtime/strategies.py) 為準；已啟用候選以 routing YAML 為準。影片的模型型號與 conditioning 由工作流描述，新增同類模型通常只需新工作流與候選設定。

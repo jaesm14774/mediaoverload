@@ -48,6 +48,14 @@ The reference clips in the collection are 4–9 second flat illustrated loops. T
 
 `VIDEO_MOTION_DIRECTION` and `VIDEO_OPENING_FRAME_DIRECTION` in `agentic/src/agentic/video_directing.py` therefore default to: at most one slow gentle push-in (no pan, orbit, or cut), unchanged illustrated look, constant energetic character motion (anticipation, a big action with stretch and squash, the same action chained into two or three connected moves, expression change), props and existing scene elements responding on every beat, still moving in the last frame, and no second goal or subplot. The vision writer is told to start with a motion verb and never describe the picture as it stands; without that, a calm keyframe produced a still description. The opening keyframe shows the character small with open space so nothing crops when it jumps. A brief that explicitly asks for camera movement or stillness still overrides this. Rendering one 5-second clip took about 11 minutes on the local 8 GB GPU.
 
+### Replayable gag and the loop-style strategy
+
+Without a news source, the native story prompt asks for one small replayable gag: the character wants something within reach, one prop pushes back, the whole body and face react big, and the last move returns the character and every prop to the opening arrangement, still in motion in the last frame. News-grounded stories keep their resolved final pose. Multi-beat stories inside one clip continue "in the same unbroken shot" (never "the camera cuts to"), consistent with the no-cut rule above.
+
+The loop strategy builds on this:
+
+- `native_h3_loop_story` (10 s, 243 frames): one reviewed Krea2 keyframe is bound as both `image_path` and `last_image_path` of an FL2VA render, so the clip ends where it began. No ending keyframe, FLUX refine, or distinct-state check is involved; `native-keyframe-source-check` reads the opening node for both frames. The local FL2VA contract accepts the same image for both inputs, and one prototype render completed on the local GPU. Whether the seam reads as seamless on a given take is a human judgement in Discord review; tests only prove the binding.
+
 ## Review and limits
 
 Local contracts verify which prompt and image paths reach the ComfyUI boundary. They do not prove visual quality. Review the generated video for identity, image adherence, visible action, endpoint continuity, and audible scene response. The official MiniMax prompt skill and ComfyUI H3 documentation are the format sources:

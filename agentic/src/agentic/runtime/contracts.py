@@ -18,6 +18,7 @@ VIDEO_OUTPUT_MEDIA_TYPES = frozenset(
         "native_h3_story",
         "native_h3_t2v_story",
         "native_h3_fl2va_story",
+        "native_h3_loop_story",
         "native_h3_l2va_story",
         "native_h3_ref2va",
         "text2image2native_h3_ref2va",
