@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Callable
 from agentic.runtime.contracts import GoalRequest
 from agentic.runtime.prompt_requests import GenerationRoutingRequest
@@ -293,10 +294,12 @@ class LLMPromptEngine:
         character: str,
         automation_mode: str,
         story_context: str = "",
+        previous_episodes: Sequence[str] = (),
     ) -> dict[str, Any]:
         return serial_episodes.generate_serial_episode_idea(
             self.client,
             character=character,
             automation_mode=automation_mode,
             story_context=story_context,
+            previous_episodes=previous_episodes,
         )

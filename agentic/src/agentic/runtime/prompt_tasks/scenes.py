@@ -601,6 +601,20 @@ def expand_goal(
 ) -> dict[str, Any]:
     fallback = build_goal_brief(goal, selected_style, idea_variants)
     image_prompt_request = goal.media_type == "image"
+    if image_prompt_request and goal.constraints.get("identity_reference"):
+        # One fixed look to lock in: the candidates differ only by noise, never by composition.
+        fallback["prompt"] = goal.prompt
+        fallback["prompt_sets"] = [
+            {
+                "label": f"identity-{index:02d}",
+                "presentation": "identity reference",
+                "prompt": goal.prompt,
+                "self_contained": True,
+            }
+            for index in range(1, _normalize_prompt_variant_count(prompt_variant_count) + 1)
+        ]
+        fallback["prompt_mode"] = "identity_reference"
+        return fallback
     prompt_variant_count = (
         _normalize_prompt_variant_count(prompt_variant_count)
         if image_prompt_request
@@ -1063,6 +1077,7 @@ def segment_story(
     reference_images = reference_keyframe_paths(reference_analysis)[:6]
 
     video_story_contract = requires_video_motion_direction(goal.media_type)
+    serial_episode = bool(goal.constraints.get("serial_mode"))
     if video_story_contract:
         direction_field_names = ", ".join(
             key for key, _ in VIDEO_SEGMENT_DIRECTION_FIELDS
@@ -1074,9 +1089,17 @@ def segment_story(
             "pursues, or flees. When a setting changes, connect it through the subject's route or a "
             "motivated cut; preserve screen direction, or re-establish it clearly before changing the axis. "
             "Give every segment a distinct consecutive beat and a readable start and result. "
-            "For a causal story, keep one visible goal, one obstacle, and one turn that changes the outcome; "
-            "each beat changes a visible state and causes the next, and the ending resolves or reframes the opening. "
-            "If the brief requests one action, do not invent a second problem or subplot. "
+            + (
+                "The goal lists one beat per segment. Segment i performs only beat i; do not add a beat the outline does not contain "
+                "and do not move events between segments. Each beat changes a visible state and causes the next. "
+                "The final segment shows the episode's small result and then its hook, an unanswered question or surprising closing image, "
+                "and never closes the series' standing question. "
+                if serial_episode
+                else "For a causal story, keep one visible goal, one obstacle, and one turn that changes the outcome; "
+                "each beat changes a visible state and causes the next, and the ending resolves or reframes the opening. "
+                "If the brief requests one action, do not invent a second problem or subplot. "
+            )
+            +
             "The first segment begins its action within its first tenth; the final segment reaches "
             "a clear payoff before a brief ending hold. Keep the subject's body, face, and goal readable. "
             "When the tone supports it, include a compact anticipation, action, follow-through, and charming "

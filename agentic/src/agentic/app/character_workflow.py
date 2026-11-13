@@ -278,19 +278,10 @@ def _run_character_workflow(
         if serial_dispatcher is None:
             from agentic.app.serial_video_dispatch import dispatch_serial_video_request
 
-            canvas_profile = dict(payload.get("canvas_profile") or {})
-            serial_dispatcher = lambda: dispatch_serial_video_request(
-                request,
-                canvas_width=int(canvas_profile["width"]),
-                canvas_height=int(canvas_profile["height"]),
-            )
+            serial_dispatcher = lambda: dispatch_serial_video_request(request)
         logger.info(
-            "serial.strategy.selected | routing_source=%s | canvas=%s | aspect_ratio=%s | dimensions=%sx%s",
+            "serial.strategy.selected | routing_source=%s",
             payload.get("routing_selection_source", ""),
-            payload.get("canvas_profile", {}).get("id", ""),
-            payload.get("canvas_profile", {}).get("aspect_ratio", ""),
-            payload.get("canvas_profile", {}).get("width", ""),
-            payload.get("canvas_profile", {}).get("height", ""),
         )
         try:
             serial_result = serial_dispatcher()

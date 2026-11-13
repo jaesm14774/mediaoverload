@@ -823,11 +823,32 @@ def _run_serial_character_review(args: argparse.Namespace) -> None:
     )
 
 
+def _earlier_episode_actions(
+    store: SerialVideoStore, series_id: str, episode_number: int
+) -> list[str]:
+    """One line per approved earlier episode, so a new episode cannot replay it."""
+    from agentic.runtime.serial_episode_plan import episode_action_digest
+
+    digests: list[str] = []
+    for prior_number in range(max(1, episode_number - 10), episode_number):
+        prior = store.get_latest_approved_series_episode_outline(series_id, prior_number)
+        if prior is not None:
+            digests.append(
+                episode_action_digest(
+                    prior_number,
+                    str(prior["episode_topic"]),
+                    str(prior.get("approved_outline") or ""),
+                )
+            )
+    return digests
+
+
 def _run_serial_episode_outline_draft(
     args: argparse.Namespace, project_root: Path, *, emit: bool = True
 ) -> dict[str, object]:
     from agentic.runtime.llm_client import PromptClient
     from agentic.runtime.serial_video import SerialVideoStore
+    from agentic.runtime.planning.long_video import minimum_segment_count
     from agentic.runtime.serial_episode_plan import (
         build_serial_episode_outline_prompts,
         serial_episode_outline_artifact_path,
@@ -858,6 +879,8 @@ def _run_serial_episode_outline_draft(
         episode_topic=str(args.episode_topic or ""),
         episode_direction=str(args.goal or ""),
         previous_episode_summaries=previous_summaries,
+        earlier_episode_actions=_earlier_episode_actions(store, series_id, episode_number),
+        beat_count=minimum_segment_count(args.duration_seconds),
         approved_story_state=str(
             store.get_human_approved_story_state(series_id).get("state_text") or ""
         ),
@@ -1004,10 +1027,6 @@ def _resolve_serial_character_reference_paths(
     )
     from agentic.runtime.serial_paths import serial_series_artifact_root
 
-    reference_prompt = build_serial_character_reference_prompt(
-        character_name=character_name,
-        character_card=card_text,
-    )
     production_config = (
         Path(args.character_config).expanduser().resolve()
         if args.character_config
@@ -1015,6 +1034,23 @@ def _resolve_serial_character_reference_paths(
     )
     if not production_config.is_file():
         return [], f"Character production profile does not exist: {production_config}"
+    from agentic.app.character_config import load_character_config
+    from agentic.app.serial_look import serial_series_look
+
+    look = serial_series_look(
+        dict(load_character_config(production_config).get("generation") or {}),
+        series_id,
+    )
+    style = look["style"]
+    reference_prompt = build_serial_character_reference_prompt(
+        character_name=character_name,
+        character_card=card_text,
+        # Only the medium and palette: a catalog style's own composition would pull the
+        # character off-centre, which is the one thing an identity image must not do.
+        style_direction="; ".join(
+            part for part in (style["prompt"], style["palette"]) if part
+        ),
+    )
 
     reference_output = (
         serial_series_artifact_root(output_root, series_id) / "character_references"
@@ -1030,6 +1066,8 @@ def _resolve_serial_character_reference_paths(
             selected_character_name=character_name,
             image_count=6,
             subject_mode="single",
+            creative_profile=look,
+            identity_reference=True,
         ),
         review=CharacterReviewOptions(
             publish_after_generate=False,
@@ -1512,6 +1550,9 @@ def _review_automatic_serial_outline(
         character=args.character,
         automation_mode="continue",
         story_context=idea_context,
+        previous_episodes=_earlier_episode_actions(
+            serial_store, str(args.series_id), episode_number
+        ),
     )
     args.episode_topic = str(episode_idea["topic"])
     args.goal = str(episode_idea["premise"])
@@ -1950,6 +1991,7 @@ def _configure_cli_output_streams() -> None:
 def _prepare_missing_auto_next_idea(
     args: argparse.Namespace,
     serial_context: dict[str, object] | None,
+    serial_store: SerialVideoStore | None,
 ) -> None:
     if args.serial_auto_next and (not args.goal or not args.episode_topic):
         from agentic.runtime.llm_engine import LLMPromptEngine
@@ -1960,9 +2002,36 @@ def _prepare_missing_auto_next_idea(
             character=args.character,
             automation_mode=str(serial_context.get("automation_mode") or "new"),
             story_context=str(serial_context.get("story_context") or ""),
+            previous_episodes=_earlier_episode_actions(
+                serial_store,
+                str(serial_context["series_id"]),
+                int(serial_context["episode_number"]),
+            ),
         )
         args.goal = args.goal or str(idea["premise"])
         args.episode_topic = args.episode_topic or str(idea["topic"])
+
+
+def _apply_series_look(
+    args: argparse.Namespace, serial_context: dict[str, object]
+) -> None:
+    """Give every episode of a series the canvas and illustration style it was born with."""
+    from agentic.app.character_config import load_character_config
+    from agentic.app.serial_look import serial_series_look
+
+    config_path = (
+        Path(args.character_config).expanduser().resolve()
+        if args.character_config
+        else REPO_ROOT / "configs" / "characters" / f"{str(args.character).lower()}.yaml"
+    )
+    look = serial_series_look(
+        dict(load_character_config(config_path).get("generation") or {}),
+        str(serial_context["series_id"]),
+    )
+    args.style = look["style"]["label"]
+    args.width = int(look["canvas"]["width"])
+    args.height = int(look["canvas"]["height"])
+    args.serial_style_profile = look["style"]
 
 
 def _allow_serial_reference_evidence(
@@ -2109,6 +2178,7 @@ def _build_cli_goal(
                 "platforms": serial_platforms,
                 "platform_configs": serial_platform_configs,
                 "publish_mode": args.publish_mode or "live",
+                "visual_style_profile": args.serial_style_profile,
                 "serial_story_context": serial_context["story_context"],
                 "serial_story_review_context": {
                     "approved_start_state": str(
@@ -2178,7 +2248,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
         comfy_root=Path(args.comfy_root).resolve() if args.comfy_root else None,
         input_roots=[Path(root) for root in args.edit_input_roots or []],
     )
-    _prepare_missing_auto_next_idea(args, serial_context)
+    if serial_context is not None:
+        _apply_series_look(args, serial_context)
+    _prepare_missing_auto_next_idea(args, serial_context, serial_store)
 
     _allow_serial_reference_evidence(
         serial_context, project_root, output_root

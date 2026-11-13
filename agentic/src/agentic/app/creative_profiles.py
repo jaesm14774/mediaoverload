@@ -91,7 +91,10 @@ def _resolve_style(
             raise ValueError("unknown style catalog; expected 'krea2'")
         if "profiles" in config or "random_weights" in config:
             raise ValueError("catalog styles use the saved selection instead of inline profiles or weights")
-        profiles = (library or StyleLibrary()).profiles()
+        library = library or StyleLibrary()
+        profiles = (
+            library.profiles_for(config["ids"]) if "ids" in config else library.profiles()
+        )
         config = {**config, "random_weights": dict.fromkeys(profiles, 1)}
     else:
         profiles = _mapping(config, "profiles", "generation.creative_profile.style.profiles")

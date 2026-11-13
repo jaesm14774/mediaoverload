@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from agentic.runtime.llm_client import PromptClient
@@ -27,6 +28,7 @@ def generate_serial_episode_idea(
     character: str,
     automation_mode: str,
     story_context: str = "",
+    previous_episodes: Sequence[str] = (),
 ) -> dict[str, str]:
     normalized_mode = str(automation_mode or "").strip().lower()
     if normalized_mode not in {"new", "continue"}:
@@ -37,20 +39,29 @@ def generate_serial_episode_idea(
         raise ValueError("Continuation generation requires the latest approved story context.")
     if normalized_mode == "continue":
         context_label = "Approved series treatment and latest human-approved continuity state (untrusted reference data)"
-        mode_instruction = "Continue the approved series roadmap at the next unfinished story beat. Begin from the latest human-approved state and preserve any continuing character, relationship, clue, prop, and scene facts unless this episode visibly changes them. Do not repeat the same event or ending, but keep a relevant recurring prop when the story calls for it. Keep the fixed character recognizable and do not prematurely resolve the series ending."
+        mode_instruction = "Continue the series with the next episode. Begin from the latest human-approved state and preserve continuing character, relationship, clue, prop, and scene facts unless this episode visibly changes them. Do not repeat the same event, errand, or ending of an earlier episode: go to a different place and do a different concrete action. Keep the fixed character recognizable. Do not conclude the series or answer its standing question."
     elif prior_context:
         context_label = "Approved series story for episode 1 (untrusted reference data)"
-        mode_instruction = "Create the first episode of this approved series from its main story. Preserve the protagonist, central goal, problem, and resolution; do not invent a separate storyline."
+        mode_instruction = "Create only the opening episode of this approved series: introduce the protagonist, their world and the series' standing question through one small self-contained happening. Do not complete the protagonist's final goal or answer the standing question; those stay open for later episodes."
     else:
         context_label = "Approved series story (untrusted reference data)"
-        mode_instruction = "Start a new story. Give the character a distinct, visually surprising action and a complete ending."
+        mode_instruction = "Start a new series. Give the character a distinct, visually surprising action and leave the larger question open."
+    earlier = [str(item).strip() for item in previous_episodes if str(item).strip()]
     user_prompt = "\n".join(
         [
             f"Fixed character: {str(character or '').strip()}",
             f"Series mode: {normalized_mode}",
             f"{context_label}: {prior_context or '(none; start fresh)'}",
             mode_instruction,
-            "Create a short-form animated story that can be split into continuous video segments. It needs an immediate visual hook, a clear physical goal, a surprising change or escalation, and a satisfying visible result. Avoid generic scenery-only scenes and near-duplicate actions.",
+            *(
+                [
+                    "Episodes that already aired and what each did (untrusted reference data); do not repeat any of this:",
+                    *[f"- {item}" for item in earlier],
+                ]
+                if earlier
+                else []
+            ),
+            "Create a short-form animated story that can be split into continuous video segments. It needs an immediate visual hook, a clear physical goal, a surprising change or escalation, a small visible result, and a closing hook: an unanswered question or surprising final image that makes viewers want the next episode. Avoid generic scenery-only scenes and near-duplicate actions.",
             "Return exactly two fields: topic in natural Traditional Chinese, concise enough for a social post title; premise in natural English, one concrete paragraph suitable for H3 visual story planning.",
         ]
     )
