@@ -23,6 +23,8 @@ def build_serial_episode_outline_prompts(
     episode_direction: str = "",
     previous_episode_summaries: Sequence[str] = (),
     approved_story_state: str = "",
+    earlier_episode_actions: Sequence[str] = (),
+    beat_count: int = 4,
     complexity: str = "simple",
 ) -> tuple[str, str]:
     story = str(approved_story or "").strip()
@@ -38,10 +40,14 @@ def build_serial_episode_outline_prompts(
         raise ValueError("Episode number must be positive.")
     if not topic:
         raise ValueError("Episode planning requires a human-readable episode topic.")
+    if int(beat_count) < 1:
+        raise ValueError("An episode needs at least one beat.")
+    beats = int(beat_count)
     previous = [str(item).strip() for item in previous_episode_summaries if str(item).strip()]
+    earlier = [str(item).strip() for item in earlier_episode_actions if str(item).strip()]
     current_state = str(approved_story_state or "").strip()
     prompt_parts = [
-        "以下是已核准的完整系列故事，必須保留它的主線、角色改變與結局方向：",
+        "以下是已核准的完整系列故事，必須保留它的主線與角色設定：",
         story,
         "",
         "以下是已核准的主角身分卡，維持角色的外觀、性格與行為：",
@@ -49,12 +55,22 @@ def build_serial_episode_outline_prompts(
         f"\n本次規劃第 {number} 集，集名／主題：{topic}",
         "本集創作者方向：",
         str(episode_direction or "").strip() or "（沒有額外方向，請依系列故事自然推進本集。）",
+        "",
+        f"只演第 {number} 集：已核准故事中的路線只當背景；本集只演它自己的部分，之後的集數是未來，不得提前演出，也不得完成長期懸念或主角的最終目標。",
     ]
+    if earlier:
+        prompt_parts.extend(
+            [
+                "",
+                "以下是已經演過的集數與它們的主要動作。本集不得重複同樣的差事、場景或動作，要換一個新地點和新的具體動作：",
+                *[f"- {action}" for action in earlier],
+            ]
+        )
     if normalized_complexity == "simple":
         prompt_parts.extend(
             [
                 "",
-                "本集複雜度：simple。只講一件小事：主角的一個目標、一個看得見的麻煩、一個簡單解法和清楚結果。最多兩個場景，不加支線、額外角色或反派。用三個節拍寫：開始、遇到問題、解決問題。每個節拍只安排一個主要動作，使用日常詞彙；不寫大場面、長篇解說或反轉。這是長篇主線的一集，依全系列分集路線推進當前事件，不要把整個系列提早結束，也不要另起無關故事。",
+                "本集複雜度：simple。這是約一分鐘的連續劇一集：一個小目標、一個看得見的麻煩、一個簡單解法和小結果，最多兩個場景，不加反派或支線。每個節拍只安排一個主要動作，使用日常詞彙；不寫大場面、長篇解說或反轉。",
             ]
         )
     else:
@@ -64,6 +80,12 @@ def build_serial_episode_outline_prompts(
                 "本集複雜度：cinematic。可以安排較多因果轉折、情感變化或場景，但每一個轉折都要服務同一條主線，並讓觀眾能理解角色為何這樣做。",
             ]
         )
+    prompt_parts.extend(
+        [
+            "",
+            "連續劇規則：結尾必須留下鉤子，也就是一個新的、尚未回答的小問題或意外畫面，讓人想看下一集；本集不得解開長期懸念。本集仍要有自己的小結果，不能只丟問題。",
+        ]
+    )
     if previous:
         prompt_parts.extend(
             [
@@ -82,10 +104,11 @@ def build_serial_episode_outline_prompts(
             ]
         )
     if normalized_complexity == "simple":
+        beat_names = "開場、問題、升級、解決並留下鉤子" if beats == 4 else f"依序推進的 {beats} 個節拍，最後一個節拍以鉤子收尾"
         prompt_parts.extend(
             [
                 "",
-                "請輸出四部分：一、本集一句話，並說明它在全系列路線中的位置；二、開始、問題、解決三個短節拍，清楚交代行動與因果；三、本集結尾狀態卡，逐項寫人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及留給下一集的未完成目標；四、最多五個簡單畫面提示。狀態卡要描述本集結尾後會實際延續的狀態，沒有變化的項目寫「不變」，沒有相關內容寫「無」。不用輸出 JSON、分鏡術語或鏡頭運動。",
+                f"請輸出四部分：一、本集一句話，並說明它在全系列路線中的位置；二、{_chinese_number(beats)}個節拍（{beat_names}），每個節拍對應一支影片，只寫該段看得見的一個主要動作與因果；三、本集結尾狀態卡，逐項寫人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及留給下一集的未完成目標（也就是鉤子）；四、每個節拍一個簡單畫面提示。狀態卡要描述本集結尾後會實際延續的狀態，沒有變化的項目寫「不變」，沒有相關內容寫「無」。不用輸出 JSON、分鏡術語或鏡頭運動。",
             ]
         )
     else:
@@ -102,6 +125,18 @@ def build_serial_episode_outline_prompts(
             ]
         )
     return SERIAL_EPISODE_PLAN_SYSTEM_PROMPT, "\n".join(prompt_parts)
+
+
+def episode_action_digest(episode_number: int, episode_topic: str, outline_text: str) -> str:
+    """Return a one-line record of what an approved episode already showed."""
+    first_section = re.split(r"\n\s*二、", str(outline_text or ""), maxsplit=1)[0]
+    lines = [line.strip() for line in first_section.splitlines() if line.strip()]
+    story = " ".join(lines[1:] if len(lines) > 1 else lines)[:240]
+    return f"第 {int(episode_number)} 集《{str(episode_topic or '').strip()}》：{story}"
+
+
+def _chinese_number(value: int) -> str:
+    return {1: "一", 2: "兩", 3: "三", 4: "四", 5: "五", 6: "六"}.get(value, str(value))
 
 
 def serial_episode_outline_artifact_path(

@@ -17,9 +17,23 @@ generation:
     series_selection_weights:
       new: 0.5
       continue: 0.5
-    default_duration_seconds: 30
+    # A continuing drama: about one minute per episode, one series question that
+    # outlives every episode. 4 clips of up to 15 s keep the chained hand-offs few.
+    default_duration_seconds: 60
     episodes_per_run: 1
-    style: watercolor storybook animation
+    # Each series draws one of these illustration styles (seeded by its series id)
+    # and keeps it, with its canvas, for every reference image and episode.
+    style_ids:
+      - storybook_watercolor
+      - soft_pastel_characters
+      - bold_cartoon_comic
+      - ghibli-style
+      - children-s-book-drawing
+      - collector-storybook-illustration
+      - whimsical-illustration
+      - watercolor-painting
+      - watercolor-anime-illustration
+      - playful-hand-drawn-illustration
     output_dir: output
     discord_review_timeout_seconds: 1800
     identity_references: []

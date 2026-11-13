@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import random
+import re
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -392,6 +393,36 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
         # Keep strict JSON prompting and local validation as the portable path.
         "supports_response_format": False,
     },
+    # Free-tier providers below are text-only and omit the JSON-schema
+    # parameter until it is verified against their live endpoints; the shared
+    # JSON validator and repair loop remain the portable structured path.
+    "cloudflare": {
+        "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+        "base_url_env": {"account_id": "CLOUDFLARE_ACCOUNT_ID"},
+        "api_key_env": ("CLOUDFLARE_API_TOKEN",),
+        "text_model": "@cf/openai/gpt-oss-120b",
+        "vision_model": "",
+        "supports_vision": False,
+        "supports_response_format": False,
+    },
+    "nvidia": {
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "api_key_env": ("NVIDIA_API_KEY",),
+        "text_model": "deepseek-ai/deepseek-v4.1-flash",
+        "vision_model": "",
+        "supports_vision": False,
+        "supports_response_format": False,
+    },
+    # AMD Radeon Cloud Token Factory (China site only).  Model ids are the
+    # catalog names; `GET /v1/models` lists what the key can call.
+    "amd": {
+        "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+        "api_key_env": ("RADEON_API_KEY",),
+        "text_model": "DeepSeek-V4-Flash",
+        "vision_model": "",
+        "supports_vision": False,
+        "supports_response_format": False,
+    },
 }
 
 
@@ -411,7 +442,26 @@ def provider_default_model(provider: str, modality: str = "text") -> str:
 
 def provider_credentials_present(provider: str) -> bool:
     _load_project_env()
-    return any(bool(os.environ.get(name, "").strip()) for name in provider_spec(provider)["api_key_env"])
+    spec = provider_spec(provider)
+    url_settings = spec.get("base_url_env", {}).values()
+    return any(bool(os.environ.get(name, "").strip()) for name in spec["api_key_env"]) and all(
+        bool(os.environ.get(name, "").strip()) for name in url_settings
+    )
+
+
+def _provider_base_url(spec: dict[str, Any]) -> str:
+    """Fill account-scoped placeholders from the environment, rejecting values
+    that could change the request path (and so where the API token is sent)."""
+    _load_project_env()
+    values: dict[str, str] = {}
+    for placeholder, env_name in spec.get("base_url_env", {}).items():
+        value = os.environ.get(env_name, "").strip()
+        if not value:
+            raise ProviderConfigurationError(f"Set {env_name} to use this provider.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ProviderConfigurationError(f"{env_name} may only contain letters, digits, '-' and '_'.")
+        values[placeholder] = value
+    return str(spec["base_url"]).format(**values)
 
 
 def _openai_reasoning_effort(configured: str | None) -> str:
@@ -482,7 +532,7 @@ class OpenAICompatibleModel:
         return cls(
             config,
             provider_name=normalized,
-            base_url=str(spec["base_url"]),
+            base_url=_provider_base_url(spec),
             api_key_env=tuple(spec["api_key_env"]),
             supports_vision=bool(spec.get("supports_vision", True)),
             supports_response_format=bool(spec.get("supports_response_format", True)),

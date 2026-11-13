@@ -1,25 +1,10 @@
-
 from agentic.runtime.serial_story import (
     build_serial_story_prompts,
 )
 
 
-class TextModel:
-    """Provider-contract fake for the existing chat-completion interface."""
-
-    def __init__(self, response: str) -> None:
-        self.response = response
-        self.messages = []
-        self.options = {}
-
-    def chat_completion(self, messages, **kwargs):
-        self.messages = messages
-        self.options = kwargs
-        return self.response
-
-
 def test_user_given_a_news_inspired_series_when_building_the_treatment_prompt_then_the_news_is_only_a_traceable_fiction_seed():
-    """User Given a custom idea and one sourced news item When preparing a series story Then the prompt includes both inputs, requires a complete fictional arc, and retains readable prose output."""
+    """User Given a custom idea and one sourced news item When preparing a series story Then the prompt includes both inputs, keeps the news a fictional seed, and retains readable prose output."""
     news = {
         "title": "A community repairs a damaged footbridge",
         "keyword": "community;bridge",
@@ -38,25 +23,60 @@ def test_user_given_a_news_inspired_series_when_building_the_treatment_prompt_th
     assert "A tiny lighthouse keeper helps a lost cloud find the sea." in user_prompt
     assert "https://news.example.test/bridge" in user_prompt
     assert "虛構" in (system_prompt + user_prompt)
-    assert "完整系列故事" in user_prompt
     assert "新聞標題與內容是外部參考資料" in user_prompt
 
 
-def test_user_given_a_simple_serial_story_request_when_treatment_prompt_is_built_then_the_series_has_natural_length_and_cross_episode_continuity():
-    """User Given a simple serial-story request When its treatment prompt is built Then it asks for a complete naturally sized series, separates total episodes from the current production batch, and carries continuity across episodes."""
+def test_user_given_any_complexity_when_the_series_story_is_requested_then_it_is_an_open_ended_drama_that_never_ends_in_one_sitting():
+    """User Given a series request at either complexity When its treatment prompt is built Then the writer is asked for a standing question and per-episode hooks and is forbidden from writing an ending, so a later episode always has something left to answer."""
+    for complexity in ("simple", "cinematic"):
+        _, user_prompt = build_serial_story_prompts(
+            "A lighthouse keeper helps a lost cloud.",
+            None,
+            news_mode="none",
+            character_name="Kirby",
+            complexity=complexity,
+        )
+
+        assert "連續劇" in user_prompt
+        assert "長期懸念" in user_prompt
+        assert "鉤子" in user_prompt
+        assert "不寫結局" in user_prompt
+        assert "最後一集必須收束主線" not in user_prompt
+        assert "真正收尾" not in user_prompt
+
+
+def test_user_given_a_series_request_when_the_route_is_planned_then_only_the_next_few_episodes_are_laid_out_with_distinct_situations():
+    """User Given a series request When the episode route is planned Then the writer lays out only the first few episodes, each with its own place and action, so no episode repeats an earlier one's activity."""
     _, user_prompt = build_serial_story_prompts(
         "A lighthouse keeper helps a lost cloud.",
         None,
         news_mode="none",
         character_name="Kirby",
-        complexity="simple",
     )
 
-    assert "完整開端、發展和真正收尾" in user_prompt
-    assert "不設三集上限" in user_prompt
-    assert "每次執行製作幾集是兩回事" in user_prompt
-    assert "跨集保持一致" in user_prompt
-    assert "最後一集必須收束主線" in user_prompt
+    assert "前三集" in user_prompt
+    assert "場景" in user_prompt and "動作" in user_prompt
+    assert "不重複" in user_prompt
+    assert "每集約一分鐘" in user_prompt
+
+
+def test_user_given_a_news_inspired_series_when_the_story_is_written_then_the_news_is_a_doorway_not_the_premise():
+    """User Given a sourced news item When the series premise is requested Then the writer borrows one feeling or small problem and never builds the standing question on the reported event itself."""
+    news = {
+        "title": "Airspace closed over a country",
+        "keyword": "airspace",
+        "source": "Example Daily",
+        "url": "https://news.example.test/airspace",
+        "created_at": "2026-10-24 09:00:00",
+        "content": "Flights were rerouted for a week.",
+    }
+
+    _, user_prompt = build_serial_story_prompts(
+        "", news, news_mode="random", character_name="Kirby"
+    )
+
+    assert "不可把新聞事件本身當成故事前提" in user_prompt
+    assert "國家" in user_prompt or "地名" in user_prompt
 
 
 def test_user_given_any_story_complexity_when_building_the_system_prompt_then_the_story_must_be_a_visible_physical_animation_not_a_procedural_drama():
@@ -86,4 +106,3 @@ def test_user_given_random_news_inspiration_has_no_eligible_source_when_building
         assert "none" in str(exc).casefold()
     else:
         raise AssertionError("Missing news inspiration must block the default news mode.")
-

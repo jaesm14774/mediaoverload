@@ -4,7 +4,15 @@
 
 ## Story-first 連載流程
 
-新系列沿用命令列選定的角色作為主角。預設 `simple` 複雜度適合動畫連載短劇：整個故事有完整主線與結局，每集處理一件容易看懂的小事，並延續角色、線索、道具和場景狀態；分集數依故事自然篇幅規劃，不設三集上限。想寫多層因果、較大事件與角色弧線時，可選 `cinematic`。`episodes_per_run` 只限制單次執行製作幾集，不限制故事總集數。
+新系列沿用命令列選定的角色作為主角。連載是一部會一直演下去的連續劇，不是有結局的單篇故事：
+
+- **長期懸念**：整部劇有一個單集內解不開的問題或心願，前三集不會被解決。
+- **每集約一分鐘**：每集是一個看得懂的完整小故事，有自己的小目標、麻煩和小結果，同時把長期懸念推進一小步。
+- **鉤子**：每集結尾留一個尚未回答的小問題或意外畫面，讓人想看下一集；單集內不得完成主角的最終目標。
+- **每集只演自己的部分**：故事只寫前三集的場景和動作，不寫結局。下一集的提案會收到所有已演過集數的主要動作，並被要求換新地點、做新動作，所以不會把同一件事（例如送信）再演一次。
+- **新聞只是入口**：只借一種情緒或小難題，不使用新聞中的國家、地名、機構或真實人物。
+
+預設 `simple` 複雜度保持單集簡單；想要較大的事件規模與角色成長時選 `cinematic`，但單集仍是一分鐘內的完整小故事。`episodes_per_run` 只限制單次執行製作幾集，不限制總集數；要結束系列請在最終審核按「完成系列並發布本集」。
 
 從 repo 根目錄啟動完整流程：
 
@@ -259,12 +267,22 @@ finally:
 
 ## 片長與 H3 段落
 
---duration-seconds 是整集目標片長，預設 30 秒。連載 H3 以約 10 秒為一段；30 秒會規劃 3 段，60 秒會規劃 6 段。每多一段，就多一次 H3 生成、技術 QA、Discord 人工接受與尾幀銜接。第 2 集試作當時明確使用 --duration-seconds 10，所以它只有一段；要更長就提高這個總秒數，不需要更改資料表或程式常數。
+--duration-seconds 是整集目標片長，預設 60 秒（消費端上限約 3 至 5 分鐘，先做一分鐘左右）。每集用最少的 H3 片段涵蓋：單段最長約 15 秒，所以 60 秒是 4 段、30 秒是 2 段、15 秒是 1 段。片段越少，接力次數越少，角色跑位累積得越少。每多一段，就多一次 H3 生成、技術 QA、Discord 人工接受與尾幀銜接。節拍數等於片段數：本集大綱會寫出同樣數量的節拍，分段編劇逐段只演自己的那一拍，最後一段演完小結果後接上鉤子。
+
+## 系列畫風鎖定
+
+每個系列由系列 ID 決定一組畫布與插畫風格，之後所有角色參考圖和每一集都用同一組，不再每次隨機重抽。風格只從 `generation.serial_video.style_ids` 的插畫風格池抽取（不含照片合成風格）；畫布取自 `generation.creative_profile.canvas` 的設定。因為抽取以系列 ID 為種子，不需要額外存檔，也不需要資料庫欄位。代價：若之後增刪或重排 `style_ids`、或改畫布權重，既有系列的抽取結果可能改變，與已生成的參考圖不一致；已有系列在 YAML 改動後應視為重新開始。串連載命令列的 `--style`、`--width`、`--height` 在連載路徑上會被系列畫風覆蓋。直接執行 `python -m agentic.app.main` 時，未傳 `--duration-seconds` 的預設仍是 30 秒；60 秒預設只適用於經角色 YAML 啟動的流程。
+
+設定缺少 `style_ids`、畫布，或列出不存在的風格 ID 時，載入角色 YAML 就會報錯，不會等到故事與角色卡審核之後。
+
+同集內的跑位仍未解決。2026-11-13 在本機 ComfyUI 用 Klein 在每段之間重新對齊尾幀並實測 I2VA：整張重畫成水彩能穩住單段內的畫風，但把夜晚改成白天，接縫會跳；改成只修角色，接縫不跳，卻會把背對鏡頭、抱著信的 Kirby 改成正面並弄丟信；降低 denoise 到 0.4 則修不動。再試過把系列角色參考圖當第二張參考圖一起餵給 Klein：在夜晚賽璐珞、Kirby 較小的尾幀上，5 個 seed 都保住接縫與信，接著的 I2VA 也演出劇本動作，單段內畫風不翻轉；但在水彩場景、Kirby 佔滿畫面的尾幀上，5 個 seed 全部把 Kirby 畫成白底黑星花紋，影片也照著延續這個錯誤。結果取決於尾幀內容，失敗時沒有可靠的偵測方式（不用 LLM 品質關卡），所以流程仍然沒有加入這個步驟。
+
+角色參考圖走專用路徑：六張候選使用同一個提示（含系列風格），不經 LLM 構圖變體，只差在雜訊，角色置中、約佔畫面三分之二高。這是為了避免參考圖出現縮在角落或不同風格的版本，進而被 Ref2VA 帶進影片。
 
 例如 60 秒：
 
 ~~~powershell
-python -m agentic.app.main --goal "Kirby guides a lost firefly home with the star flower." --episode-topic "星花引路，陪迷路火螢回家" --media-type long_video --duration-seconds 60 --style "watercolor storybook animation" --serial-mode --series-id kirby-continuity-20261024 --character Kirby --output-dir "agentic/output/kirby_continuity_20261024" --execute
+python -m agentic.app.main --goal "Kirby guides a lost firefly home with the star flower." --episode-topic "星花引路，陪迷路火螢回家" --media-type long_video --duration-seconds 60 --serial-mode --series-id kirby-continuity-20261024 --character Kirby --output-dir "agentic/output/kirby_continuity_20261024" --execute
 ~~~
 
 ## 從既有入口自動產生連載
@@ -275,14 +293,14 @@ python -m agentic.app.main --goal "Kirby guides a lost firefly home with the sta
 python run_media_interface.py --character kirby --generation-type serial_video
 ~~~
 
-不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 40；若抽中連載，會直接交給同一個連載 runner，執行故事、角色與首集大綱的 Discord 審核，再接續影片流程。審核遭拒、逾時或生成失敗時，入口會回報 blocked／failed，不會假裝整個流程成功。
+不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 3；若抽中連載，會直接交給同一個連載 runner，執行故事、角色與首集大綱的 Discord 審核，再接續影片流程。審核遭拒、逾時或生成失敗時，入口會回報 blocked／failed，不會假裝整個流程成功。
 
 預設 `simple` 是連載短劇模式：全系列有完整結局，每集是一件小事、少量角色和簡單結果；分集路線沒有三集上限，且會把人審核准的狀態帶到下一集。要提高故事層次時可加 `--story-complexity cinematic`；也能在角色 YAML 的 `generation.serial_video.story_complexity` 設定預設值。`episodes_per_run` 控制一次生成的集數，和故事規劃集數分開。
 
-Kirby 預設每次跑一集、每集 30 秒。想一次連跑五集、每集 60 秒：
+Kirby 預設每次跑一集、每集 60 秒。想一次連跑五集、每集 90 秒：
 
 ~~~powershell
-python run_media_interface.py --character kirby --generation-type serial_video --serial-episodes 5 --duration-seconds 60
+python run_media_interface.py --character kirby --generation-type serial_video --serial-episodes 5 --duration-seconds 90
 ~~~
 
 也可以在 `configs/characters/kirby.yaml` 的 `generation.serial_video` 設定預設值：
@@ -290,10 +308,10 @@ python run_media_interface.py --character kirby --generation-type serial_video -
 ~~~yaml
 serial_video:
   enabled: true
-  default_duration_seconds: 30
+  default_duration_seconds: 60
   episodes_per_run: 1
   story_complexity: simple
-  style: watercolor storybook animation
+  style_ids: [storybook_watercolor, soft_pastel_characters, ghibli-style]
   output_dir: output
   discord_review_timeout_seconds: 1800
   identity_references: []
@@ -303,9 +321,9 @@ serial_video:
 
 每集送 Discord 審核、核准狀態並完成發布流程後，才會開始下一集。自動策略先查找目前格式的最新未完成集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若片段審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。若執行被強制中斷（程式被關閉、當機、斷電），該集會停在 rendering 或 planned；超過 2 小時沒有任何寫入就視為被中斷，和 blocked 一樣被恢復，不會變成永遠選不到的孤兒系列。2 小時內仍有寫入的 rendering／planned 集視為另一個執行中的 run，不會被重複生成。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若續集尚無下一集大綱，系統會先依完整故事路線和人審核准狀態產生大綱，等待 Discord 接受後才產片。若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
 
-使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
+使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 15 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
 
-每張首輪候選圖依角色卡的固定外觀錨點生成：單一角色、正面略帶四分之三角度、依角色形態完整入鏡、素色背景，沿用角色設定檔的美術風格。Discord 審核時對照輪廓、臉部或頭部特徵、配色、服裝或身體表面和標誌細節，只接受完全符合的一張；若候選圖都不符合就拒絕，避免把錯誤設計鎖成後續各集的身份參考。接受後，選定圖片的 SHA-256 會和角色卡一起保存。
+每張首輪候選圖依角色卡的固定外觀錨點生成：單一角色、正面略帶四分之三角度、依角色形態完整入鏡、置中、素色背景，使用該系列鎖定的畫風。Discord 審核時對照輪廓、臉部或頭部特徵、配色、服裝或身體表面和標誌細節，只接受完全符合的一張；若候選圖都不符合就拒絕，避免把錯誤設計鎖成後續各集的身份參考。接受後，選定圖片的 SHA-256 會和角色卡一起保存。
 
 ## 產生新集
 
@@ -313,7 +331,7 @@ serial_video:
 
 ~~~powershell
 $env:PYTHONPATH = "agentic/src"
-python -m agentic.app.main --goal "Kirby finds a fallen star seed in a quiet garden, plants it, and protects it as a tiny star flower blooms." --episode-topic "星種發芽，守護花園裡的星花" --media-type long_video --duration-seconds 30 --style "watercolor storybook animation" --serial-mode --series-id kirby-continuity-20261024 --character Kirby --serial-character-reference "D:\ComfyUI_windows_portable\ComfyUI\input\krea2_kirby_identity.png" --output-dir "agentic/output/kirby_continuity_20261024" --execute
+python -m agentic.app.main --goal "Kirby finds a fallen star seed in a quiet garden, plants it, and protects it as a tiny star flower blooms." --episode-topic "星種發芽，守護花園裡的星花" --media-type long_video --duration-seconds 30 --serial-mode --series-id kirby-continuity-20261024 --character Kirby --serial-character-reference "D:\ComfyUI_windows_portable\ComfyUI\input\krea2_kirby_identity.png" --output-dir "agentic/output/kirby_continuity_20261024" --execute
 ~~~
 
 角色設定中啟用的社群平台預設為 Instagram、Facebook、YouTube。若要改目標，可重複傳 --platform，但指定的平台仍必須在角色 YAML 設為啟用。
@@ -333,7 +351,7 @@ Discord 審核卡顯示本集的發布文案與標籤。按接受後才呼叫發
 逾時時，系統不會自動接受素材或發布。先看實際 MP4，再用確切受審檔案記錄片段決定；之後以原始故事描述和 --serial-resume-episode-number 恢復。保存的已接受片段與計畫會重用，只有尚未完成的工作才會繼續執行；續跑時 Discord review timeout 以目前 character config 為準。
 
 ~~~powershell
-python -m agentic.app.main --goal "At night, Kirby follows the star flower's glow and guides a lost firefly across a moonlit stepping-stone path to its home in an old hollow tree." --media-type long_video --duration-seconds 30 --style "watercolor storybook animation" --serial-mode --series-id kirby-continuity-20261024 --character Kirby --serial-resume-episode-number 2 --output-dir "agentic/output/kirby_continuity_20261024" --execute
+python -m agentic.app.main --goal "At night, Kirby follows the star flower's glow and guides a lost firefly across a moonlit stepping-stone path to its home in an old hollow tree." --media-type long_video --duration-seconds 30 --serial-mode --series-id kirby-continuity-20261024 --character Kirby --serial-resume-episode-number 2 --output-dir "agentic/output/kirby_continuity_20261024" --execute
 ~~~
 
 ## 程式位置與驗證邊界

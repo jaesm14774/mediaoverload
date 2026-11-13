@@ -27,14 +27,25 @@ def _write_config(
     *,
     episodes_per_run: int = 2,
     weighted_serial_only: bool = False,
+    style_ids: list[str] | None = ["storybook_watercolor"],
 ) -> Path:
     generation = {
         "output_dir": "output",
+        "creative_profile": {
+            "canvas": {
+                "mode": "random",
+                "random_weights": {"square_1_1": 1},
+                "profiles": {
+                    "square_1_1": {"aspect_ratio": "1:1", "width": 512, "height": 512}
+                },
+            },
+            "style": {"mode": "random", "catalog": "krea2"},
+        },
         "serial_video": {
             "enabled": True,
             "default_duration_seconds": 40,
             "episodes_per_run": episodes_per_run,
-            "style": "watercolor storybook animation",
+            **({"style_ids": style_ids} if style_ids is not None else {}),
             "discord_review_timeout_seconds": 720,
             "identity_references": ["assets/kirby_identity.png"],
             "hashtags": ["#Kirby", "#連載"],
@@ -103,7 +114,9 @@ def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defau
     assert "--execute" in first
     assert "--character" in first and first[first.index("--character") + 1] == "Kirby"
     assert "--duration-seconds" in first and first[first.index("--duration-seconds") + 1] == "40"
-    assert "--style" in first and first[first.index("--style") + 1] == "watercolor storybook animation"
+    # The look belongs to the series, so no run-level style or canvas travels in the arguments.
+    assert "--style" not in first
+    assert "--width" not in first and "--height" not in first
     assert "--discord-review-timeout-seconds" in first
     assert "--serial-character-reference" in first
     assert first[first.index("--character-config") + 1] == str(config_path.resolve())
@@ -112,6 +125,20 @@ def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defau
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "success"
     assert result["episodes_started"] == 2
+
+
+def test_user_given_a_character_config_without_style_ids_when_serial_video_starts_then_it_fails_before_any_episode_runs(tmp_path):
+    """User Given a serial character config that lists no illustration styles When serial_video is selected Then the run stops with an actionable error before the serial runner starts any review."""
+    config_path = _write_config(tmp_path / "kirby.yaml", style_ids=None)
+    serial = SerialRunnerBoundary()
+
+    with pytest.raises(ValueError, match="style_ids"):
+        run_media_interface.main(
+            ["--config", str(config_path), "--generation-type", "serial_video"],
+            serial_runner=serial,
+        )
+
+    assert serial.calls == []
 
 
 def test_user_given_new_series_reaches_story_review_when_direct_serial_cli_runs_then_no_episode_starts(tmp_path, capsys):

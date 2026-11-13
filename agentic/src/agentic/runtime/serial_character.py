@@ -61,10 +61,14 @@ def build_serial_character_reference_prompt(
     *,
     character_name: str,
     character_card: str,
+    style_direction: str,
 ) -> str:
     """Build the first reusable identity image prompt from a character-card draft."""
     name = str(character_name or "").strip()
     card = str(character_card or "").strip()
+    style = str(style_direction or "").strip()
+    if not style:
+        raise ValueError("A series style is required so the identity image matches the episodes.")
     if not name:
         raise ValueError("A character name is required for its identity reference image.")
     if not card:
@@ -86,7 +90,7 @@ def build_serial_character_reference_prompt(
             image_prompt,
             "",
             "只使用角色卡中的跨集固定外觀資訊設計造型。性格、故事功能、本集行動或情緒變化不要轉成動作、表情或額外道具。",
-            "生成要求：只畫一個角色、單一畫面與單一自然站姿，表情中性；採正面略帶四分之三角度，依角色形態完整入鏡，不裁切頭部、身體或肢體。臉部或主要辨識區域、服裝或身體表面、標誌特徵清楚可見。使用簡潔、無文字的素色背景與均勻光線，沿用角色設定檔的既有美術風格。",
+            f"生成要求：只畫一個角色、單一畫面與單一自然站姿，表情中性；採正面略帶四分之三角度，依角色形態完整入鏡，不裁切頭部、身體或肢體。臉部或主要辨識區域、服裝或身體表面、標誌特徵清楚可見。角色置中，約佔畫面高度的三分之二，腳下留一點地面；使用簡潔、無文字的素色背景與均勻光線。畫風固定為整個系列共用的這一種：{style}。",
             "嚴格保留角色卡中的固定輪廓、臉部或頭部特徵、配色、服裝或身體表面、材質與標誌配件；各特徵在同一角色身上必須一致。未描述的外觀保持簡單中性，不自行新增醒目細節。",
             "這是單張影片角色參考圖，不是轉面表、多格拼版、角色群像或故事插圖；不要加入其他人物、場景、標籤、標誌、文字、邊框或水印。",
         ]

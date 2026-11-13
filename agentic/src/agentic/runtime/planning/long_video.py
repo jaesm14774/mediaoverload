@@ -13,6 +13,14 @@ from agentic.runtime.contracts import (
 from agentic.runtime.planning.common import PlanningContext
 
 
+H3_MAX_SEGMENT_SECONDS = 362 / 24
+
+
+def minimum_segment_count(duration_seconds: float) -> int:
+    """Fewest H3 clips that cover an episode; fewer clips means fewer chained hand-offs."""
+    return max(1, math.ceil(float(duration_seconds) / H3_MAX_SEGMENT_SECONDS))
+
+
 def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
     serial_mode = bool(goal.constraints.get("serial_mode", False))
     if not serial_mode:
@@ -23,9 +31,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
     if not str(goal.constraints.get("character") or "").strip():
         raise ValueError("Serial long-video planning requires an explicit fixed character")
 
-    minimum_h3_segment_count = max(
-        1, math.ceil(float(goal.duration_seconds) / (362 / 24))
-    )
+    minimum_h3_segment_count = minimum_segment_count(goal.duration_seconds)
     max_segment_count = max(
         minimum_h3_segment_count,
         int(goal.duration_seconds) // MIN_VIDEO_DURATION_SECONDS,
@@ -33,7 +39,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
     requested_segment_count = context.constraint_int(
         goal,
         "segment_count",
-        max_segment_count,
+        minimum_h3_segment_count,
     )
     segment_count = max(
         minimum_h3_segment_count,

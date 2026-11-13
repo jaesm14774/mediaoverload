@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from agentic.app.character_requests import CharacterWorkflowRequest
@@ -104,6 +105,8 @@ def build_goal_payload_from_character_config(
     rng = generation.rng
     requested_seed = generation.seed
     requested_image_count = generation.image_count
+    locked_creative_profile = generation.creative_profile
+    identity_reference = generation.identity_reference
     requested_reference_video_source = str(
         generation.reference_video_source or ""
     ).strip()
@@ -182,10 +185,14 @@ def build_goal_payload_from_character_config(
         creative_rng = random.Random()
         creative_rng.setstate(rng.getstate())
     style_library = StyleLibrary()
-    creative_profile = resolve_creative_profile(
-        dict(generation.get("creative_profile") or {}),
-        rng=creative_rng,
-        style_library=style_library,
+    creative_profile = (
+        deepcopy(locked_creative_profile)
+        if locked_creative_profile is not None
+        else resolve_creative_profile(
+            dict(generation.get("creative_profile") or {}),
+            rng=creative_rng,
+            style_library=style_library,
+        )
     )
     canvas_profile = dict(creative_profile["canvas"])
     style_profile = dict(creative_profile["style"])
@@ -504,6 +511,7 @@ def build_goal_payload_from_character_config(
         "canvas_width": int(canvas_profile["width"]),
         "canvas_height": int(canvas_profile["height"]),
         "visual_style_profile": style_profile,
+        "identity_reference": identity_reference,
         "seed": int(requested_seed) if requested_seed is not None else None,
         "h3_video_defaults": dict(generation.get("video_defaults") or {}),
         "story_card_page_count": str(

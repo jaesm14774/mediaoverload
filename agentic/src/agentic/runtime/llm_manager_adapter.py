@@ -15,11 +15,12 @@ from agentic.runtime.model_backends import (
     build_model,
     provider_credentials_present,
     provider_default_model,
+    provider_spec,
     static_openrouter_model_modes,
     static_openrouter_models,
 )
 
-MAX_AUXILIARY_FALLBACKS = 3
+MAX_AUXILIARY_FALLBACKS = 5
 
 
 def _build_openrouter_text_candidates(backend: dict[str, Any]) -> list[str]:
@@ -166,6 +167,9 @@ def _add_auxiliary_fallbacks(
             skipped.append(f"{provider}:no_{modality}_model")
             continue
         try:
+            if modality == "vision" and not provider_spec(normalized_provider).get("supports_vision", True):
+                skipped.append(f"{provider}:no_vision_support")
+                continue
             if not provider_credentials_present(normalized_provider):
                 skipped.append(f"{provider}:missing_api_key")
                 continue

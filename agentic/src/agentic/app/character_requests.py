@@ -28,6 +28,10 @@ class CharacterGenerationOptions:
     subject_mode: str | None = None
     motion_graphics: bool = False
     story_complexity: str | None = None
+    # A serial series' locked canvas and style; replaces the random per-run draw.
+    creative_profile: dict[str, Any] | None = None
+    # Candidates for one fixed identity image: same prompt, no invented compositions.
+    identity_reference: bool = False
 
 
 @dataclass(frozen=True, slots=True)

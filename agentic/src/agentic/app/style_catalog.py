@@ -80,17 +80,22 @@ class StyleLibrary:
                 "revision": hashlib.sha256(raw).hexdigest(),
             }
 
-    def profiles(self) -> dict[str, dict[str, Any]]:
-        state = self.snapshot()
-        enabled = set(state["enabled_ids"])
+    def _profiles(self, ids: set[str]) -> dict[str, dict[str, Any]]:
         return {
             style["id"]: {
                 "label": style["name"], "prompt": style["descriptor"],
                 **{field: style[field] for field in ("composition", "palette", "motion", "avoid")
                    if field in style},
             }
-            for style in state["styles"] if style["id"] in enabled
+            for style in self.catalog["styles"] if style["id"] in ids
         }
+
+    def profiles(self) -> dict[str, dict[str, Any]]:
+        return self._profiles(set(self.snapshot()["enabled_ids"]))
+
+    def profiles_for(self, ids: object) -> dict[str, dict[str, Any]]:
+        """Return the named catalog styles, whatever the saved random selection says."""
+        return self._profiles(set(self._validate_ids(ids)))
 
     def save(self, enabled_ids: object, *, revision: str) -> dict[str, Any]:
         ids = set(self._validate_ids(enabled_ids))
