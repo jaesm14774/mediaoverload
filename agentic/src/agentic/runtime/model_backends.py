@@ -7,7 +7,7 @@ import random
 import re
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Protocol
@@ -17,15 +17,15 @@ import requests
 from dotenv import load_dotenv
 
 
-STATIC_MODEL_MODES = {"structured", "prompt_only", "reasoning_off"}
 MAX_PROVIDER_RETRIES = 5
 MAX_OPENROUTER_MODELS_PER_CALL = 5
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 OPENAI_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 ATTEMPT_DIAGNOSTIC_FIELDS = frozenset(
-    {"provider", "model", "duration_seconds", "request_count", "status", "error_type"}
+    {"provider", "model", "duration_seconds", "request_count", "status", "error_type", "error"}
 )
+ATTEMPT_ERROR_CHARS = 300
 
 
 def _llm_attempt_record(
@@ -54,6 +54,7 @@ def _llm_attempt_record(
         record["request_count"] = request_count
     if error is not None:
         record["error_type"] = type(error).__name__
+        record["error"] = str(error)[:ATTEMPT_ERROR_CHARS]
     return record
 
 
@@ -79,24 +80,29 @@ def _attempt_records_for_model(
 DEFAULT_STATIC_MODEL_POOLS = {
     "text": [
         "nvidia/nemotron-3-ultra-550b-a55b:free",
-        "nvidia/nemotron-3-super-120b-a12b:free",
         "nvidia/nemotron-3.5-lightning:free",
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-        "qwen/qwen3.8-27b:free",
+        "baidu/ernie-5.5-flash-preview:free",
+        "particle-ai/particle-1:free",
+        "nvidia/nemotron-3.5-super-vl:free",
     ],
     "vision": [
         "google/gemma-4-26b-a4b-it:free",
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-        "qwen/qwen3.8-27b:free",
     ],
 }
+# How each pool model is called: structured sends response_format for ordinary
+# JSON requests; prompt_only relies on the prompt plus the shared fence/fragment
+# JSON parser; reasoning_off disables hidden reasoning that would otherwise
+# consume the answer budget.
 DEFAULT_STATIC_MODEL_MODES = {
     "nvidia/nemotron-3-ultra-550b-a55b:free": "structured",
-    "nvidia/nemotron-3-super-120b-a12b:free": "structured",
     "nvidia/nemotron-3.5-lightning:free": "prompt_only",
     "google/gemma-4-26b-a4b-it:free": "structured",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "reasoning_off",
-    "qwen/qwen3.8-27b:free": "structured",
+    "baidu/ernie-5.5-flash-preview:free": "structured",
+    "particle-ai/particle-1:free": "structured",
+    "nvidia/nemotron-3.5-super-vl:free": "structured",
 }
 
 _MODEL_SEQUENCE_ACTIVE: ContextVar[bool] = ContextVar(
@@ -128,9 +134,6 @@ def _remember_sequence_model(model_id: str) -> None:
         _MODEL_SEQUENCE_PREFERRED_MODEL.set(model_id)
 
 
-_STATIC_MODEL_CONFIG_CACHE: dict[str, Any] | None = None
-
-
 def _load_project_env() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     for env_path in (repo_root / "media_overload.env", repo_root / ".env"):
@@ -138,57 +141,9 @@ def _load_project_env() -> None:
             load_dotenv(env_path, override=False)
 
 
-def _load_static_model_config() -> dict[str, Any]:
-    global _STATIC_MODEL_CONFIG_CACHE
-    if _STATIC_MODEL_CONFIG_CACHE is not None:
-        return _STATIC_MODEL_CONFIG_CACHE
-    repo_root = Path(__file__).resolve().parents[4]
-    configured_path = os.environ.get("AGENTIC_OPENROUTER_MODEL_CONFIG", "").strip()
-    config_path = Path(configured_path) if configured_path else repo_root / "configs" / "openrouter_models.yaml"
-    if not config_path.is_absolute():
-        config_path = repo_root / config_path
-    config: dict[str, Any] = {}
-    try:
-        import yaml
-
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            config = loaded
-    except Exception:
-        config = {}
-    _STATIC_MODEL_CONFIG_CACHE = config
-    return config
-
-
 def static_openrouter_models(modality: str) -> list[str]:
     normalized = "vision" if modality.lower() in {"vision", "image", "multimodal"} else "text"
-    configured = _load_static_model_config().get(normalized)
-    models: list[str] = []
-    if isinstance(configured, list):
-        for item in configured:
-            raw_id = item.get("id") if isinstance(item, dict) else item
-            model_id = str(raw_id or "").strip()
-            if model_id and model_id not in models:
-                models.append(model_id)
-    return models or list(DEFAULT_STATIC_MODEL_POOLS[normalized])
-
-
-def static_openrouter_model_modes(modality: str | None = None) -> dict[str, str]:
-    modes = dict(DEFAULT_STATIC_MODEL_MODES)
-    config = _load_static_model_config()
-    modalities = (modality,) if modality in {"text", "vision"} else ("text", "vision")
-    for configured_modality in modalities:
-        entries = config.get(configured_modality)
-        if not isinstance(entries, list):
-            continue
-        for item in entries:
-            if not isinstance(item, dict):
-                continue
-            model_id = str(item.get("id") or "").strip()
-            mode = str(item.get("mode") or "").strip().lower()
-            if model_id and mode in STATIC_MODEL_MODES:
-                modes[model_id] = mode
-    return modes
+    return list(DEFAULT_STATIC_MODEL_POOLS[normalized])
 
 
 @dataclass(slots=True)
@@ -404,6 +359,9 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
         "vision_model": "",
         "supports_vision": False,
         "supports_response_format": False,
+        # Workers AI defaults to 256 output tokens, which this reasoning model
+        # spends entirely on reasoning before it writes any answer.
+        "max_tokens": 16384,
     },
     "nvidia": {
         "base_url": "https://integrate.api.nvidia.com/v1",
@@ -529,6 +487,8 @@ class OpenAICompatibleModel:
     def from_provider(cls, provider: str, config: ModelConfig) -> "OpenAICompatibleModel":
         normalized = str(provider or "").strip().lower()
         spec = provider_spec(normalized)
+        if config.max_tokens is None and spec.get("max_tokens"):
+            config = replace(config, max_tokens=int(spec["max_tokens"]))
         return cls(
             config,
             provider_name=normalized,
@@ -572,6 +532,7 @@ class OpenAICompatibleModel:
         self.last_attempt_model = model_name
         attempt_limit = min(MAX_PROVIDER_RETRIES, max(1, int(max_retries)))
         last_error: Exception | None = None
+        base_messages = payload["messages"]
         for attempt in range(attempt_limit):
             self.last_request_attempts += 1
             text, error, response, failure_stage = self._chat_completion_attempt(
@@ -589,6 +550,20 @@ class OpenAICompatibleModel:
                 break
             if attempt >= attempt_limit - 1:
                 break
+            if failure_stage == "validation":
+                # Resending the same request repeats the same mistake; show the
+                # model its rejected answer and why, replacing any earlier note.
+                payload["messages"] = [
+                    *base_messages,
+                    {"role": "assistant", "content": text or ""},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"That answer was rejected: {error}. "
+                            "Return the corrected answer only, in the same format."
+                        ),
+                    },
+                ]
             self._wait_before_retry(
                 response,
                 attempt,
@@ -648,6 +623,7 @@ class OpenAICompatibleModel:
         deadline: float | None,
     ) -> tuple[str | None, Exception | None, requests.Response | None, str | None]:
         response: requests.Response | None = None
+        finish_reason = ""
         try:
             remaining = _remaining_deadline(deadline)
             configured_read_timeout = (
@@ -681,7 +657,9 @@ class OpenAICompatibleModel:
                 if deadline is None
                 else self._read_streamed_json(response, deadline)
             )
-            message = body["choices"][0]["message"]
+            choice = body["choices"][0]
+            finish_reason = str(choice.get("finish_reason") or "")
+            message = choice["message"]
             text = self._extract_message_text(message)
         except requests.RequestException as exc:
             if deadline is not None and time.monotonic() >= deadline:
@@ -689,9 +667,10 @@ class OpenAICompatibleModel:
                     f"{self.provider_name} response exceeded its total deadline for model {model_name!r}"
                 ) from exc
             return None, exc, response, "response"
-        except (KeyError, ValueError, TypeError) as exc:
+        except (KeyError, IndexError, ValueError, TypeError, AttributeError) as exc:
             raise ProviderRequestError(
-                f"{self.provider_name} returned an invalid chat completion for model {model_name!r}: {exc}"
+                f"{self.provider_name} returned an invalid chat completion for model {model_name!r} "
+                f"(finish_reason={finish_reason or 'missing'}): {exc}"
             ) from exc
         if response_validator is not None:
             try:
@@ -701,7 +680,7 @@ class OpenAICompatibleModel:
                     f"{self.provider_name} returned invalid model output for model {model_name!r}: "
                     f"{type(exc).__name__}: {exc}"
                 )
-                return None, error, response, "validation"
+                return text, error, response, "validation"
         return text, None, response, None
 
     def _wait_before_retry(

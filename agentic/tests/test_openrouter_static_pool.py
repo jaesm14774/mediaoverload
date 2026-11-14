@@ -53,16 +53,23 @@ class OpenRouterStaticPoolTests(unittest.TestCase):
 
         self.assertIn("nvidia/nemotron-3-ultra-550b-a55b:free", text)
         self.assertIn("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", text)
-        self.assertIn("qwen/qwen3.8-27b:free", text)
-        self.assertNotIn("z-ai/glm-5.2:free", text)
-        self.assertNotIn("google/gemma-4-31b-it:free", text)
-        self.assertNotIn("nvidia/nemotron-nano-9b-v2:free", text)
+        self.assertIn("baidu/ernie-5.5-flash-preview:free", text)
+        self.assertIn("particle-ai/particle-1:free", text)
+        for removed in (
+            "qwen/qwen3.8-27b:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "apodex/apodex-1.1-mini:free",
+            "z-ai/glm-5.2:free",
+            "google/gemma-4-31b-it:free",
+            "nvidia/nemotron-nano-9b-v2:free",
+        ):
+            self.assertNotIn(removed, text)
+            self.assertNotIn(removed, vision)
         self.assertCountEqual(
             vision,
             [
                 "google/gemma-4-26b-a4b-it:free",
                 "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-                "qwen/qwen3.8-27b:free",
             ],
         )
 

@@ -39,7 +39,10 @@
         "animal-landscape": "images/animal-landscape/ghibli-style.webp",
         "materials": "images/materials/ghibli-style.webp",
         "panoramic-environment": "images/panoramic-environment/ghibli-style.webp"
-      }
+      },
+      "composition": "a lush hand-painted landscape is the main subject and the character is small in it; layered foreground, middle and sky, one soft diagonal path, and open sky as breathing room",
+      "palette": "leaf green, sky blue and cream clouds with one warm ochre accent; soft watercolour shading with clear light and dark separation",
+      "avoid": "glossy 3D, smooth vector fills, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "70s-anime",
@@ -5748,22 +5751,22 @@
     {
       "id": "cinematic_painterly",
       "order": 292,
-      "name": "luminous painterly poster",
-      "descriptor": "painterly digital illustration with visible brushstrokes, a glowing light source behind the character with a warm rim light, and swirling clouds or rain streaks",
+      "name": "glowing epic poster",
+      "descriptor": "painterly digital poster illustration with visible brushstrokes, one glowing light source behind the character with a warm rim light, and swirling clouds, mist or flame shapes that carry the eye along one diagonal",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "vertical poster composition; the character is small but luminous at the center of a vast glowing atmosphere with one strong diagonal or circular light shape",
-      "palette": "deep indigo and violet shadows with gold, cyan, and coral highlights; the brightest value sits on the main action",
+      "composition": "vertical poster composition; the character is large and grounded by one strong diagonal or S-curve of light, with a single glowing atmosphere around it and calm dark or flat space at the edges",
+      "palette": "one dominant hue family with deep shadows, one bright accent for the glow, and the brightest value on the character's face or main gesture",
       "motion": "in video, a locked or very slow camera while light, clouds, and particles drift around one clear character action",
-      "avoid": "muddy shadows, indiscriminate neon bloom, flat clip-art shapes, readable text, logos, watermarks, interface overlays"
+      "avoid": "muddy shadows, many competing light sources, flat clip-art shapes, readable text, logos, watermarks, interface overlays"
     },
     {
-      "id": "stylized_3d_game",
+      "id": "cozy_game_diorama",
       "order": 293,
       "name": "cozy painted game-world diorama",
-      "descriptor": "cozy stylized game-world illustration with rounded matte forms, soft global illumination, warm lamp light, and tactile painted materials",
+      "descriptor": "hand-painted gouache illustration of a cozy game world, visible brush strokes and soft pencil lines on every surface, painted warm lamp light and cool blue shadows, flat painted shapes rather than modelled forms",
       "categories": [
         "原有角色風格"
       ],
@@ -5771,21 +5774,91 @@
       "composition": "a detailed diorama-like environment seen from a gentle high angle, with the character small and readable inside it among glowing windows and layered props",
       "palette": "warm lamp-lit yellows and oranges against cool blue shadows with a few lively accents",
       "motion": "in video, a steady camera while the character moves through the space with weight and contact and the lamps flicker softly",
-      "avoid": "glossy plastic, flat stickers, game HUDs, readable text, logos, watermarks, interface overlays"
+      "avoid": "3D render, clay or plastic surfaces, glossy highlights, flat stickers, game HUDs, readable text, logos, watermarks, interface overlays"
     },
     {
       "id": "photographic_character_fusion",
       "order": 294,
       "name": "photograph with a tiny drawn character",
-      "descriptor": "a real photograph of an everyday place whose lower part dissolves into blank cream paper, with a tiny pencil-and-watercolor drawn character interacting with the photograph's edge",
+      "descriptor": "a real photograph of an everyday place whose lower part dissolves into blank cream paper; the one subject named in the scene is the only thing drawn by hand, in tiny pencil and watercolor, touching the photograph's edge, and everything else is photograph",
       "categories": [
         "原有角色風格"
       ],
       "previews": {},
-      "composition": "the photograph fills the upper two thirds and the drawn character is about 15 percent of the frame height, grounded by a small cast shadow, with generous negative space around it",
+      "composition": "the photograph fills the upper two thirds and the single hand-drawn subject is about 15 percent of the frame height, grounded by a small cast shadow, with generous negative space around it",
       "palette": "the photograph's natural color and exposure, with the character picking up its ambient light through soft pencil line and light watercolor",
       "motion": "in video, keep the photographic camera and environment coherent while the drawn character moves with grounded contact, matching shadow, and depth",
       "avoid": "oversized toy-like renders, synthetic studio backgrounds, sticker edges, floating characters, mismatched perspective, readable text, logos, watermarks, interface overlays"
+    },
+    {
+      "id": "ink_wash_frame",
+      "order": 295,
+      "name": "ink wash and woodblock frame",
+      "descriptor": "sumi-e ink wash and woodblock-print illustration on bright white paper, bold brush strokes with dry-brush edges, flat blocks of one ink colour, and fine line work inside the picture",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "frame within a frame: a calm scene seen through one swirling ink-brush or wave-shaped opening, with the character small and clear inside it and open white paper outside; one large circle or sweeping curve guides the eye",
+      "palette": "black ink and white paper with one indigo blue or cherry pink accent, flat colour blocks with clear light and dark separation",
+      "motion": "in video, keep the brush edges and paper white steady; one slow ink swirl or drifting petals around one clear character action",
+      "avoid": "photographic textures, glossy 3D, muddy grey wash, crowded detail, readable text, logos, watermarks, interface overlays"
+    },
+    {
+      "id": "tarot_gold_frame",
+      "order": 296,
+      "name": "tarot card gold frame",
+      "descriptor": "gouache and gold-ink tarot card illustration on a deep indigo night ground with speckled stars, fine gold line ornaments, and soft hand-painted glow on the character",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "a tall tarot card layout: a thin ornamental gold border, one large planet or moon in the upper third, the character small and seated in the lower centre, and a plain ribbon banner left empty at the bottom",
+      "palette": "deep navy and indigo with warm gold line work, one large amber or coral planet, and soft lilac highlights on the character",
+      "motion": "in video, keep the gold border still while stars twinkle and the character makes one slow gesture",
+      "avoid": "photographic textures, glossy 3D, crowded borders, readable text, logos, watermarks, interface overlays"
+    },
+    {
+      "id": "crayon_storybook",
+      "order": 297,
+      "name": "waxy crayon picture-book",
+      "descriptor": "children's crayon picture-book illustration on cream drawing paper, thick waxy crayon strokes with visible paper tooth and uneven layered fills, wobbly hand-drawn outlines in soft colored crayon, simplified rounded shapes",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "a simple flat-on view with one clear subject, the character small and round in a larger crayon-drawn world with open paper around it",
+      "palette": "macaron pastels of butter yellow, mint, peach and sky blue with one saturated crayon-red accent",
+      "motion": "in video, keep the waxy crayon texture and paper tooth steady; one lively readable action with a soft bouncy squash and stretch, and wobbly crayon-drawn secondary motion such as drifting petals or raindrops",
+      "avoid": "smooth gradients, glossy 3D, photographic detail, sharp digital edges, readable text, logos, watermarks"
+    },
+    {
+      "id": "marker_pastel",
+      "order": 298,
+      "name": "candy-pastel marker illustration",
+      "descriptor": "layered marker illustration with soft candy-pastel colours, visible overlapping marker strokes on smooth paper, clean thin ink outline",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "airy white margins around one clear focal gesture; the character is small and off-center in a larger quiet world with open paper space",
+      "palette": "candy pastels of peach, lilac, mint and baby blue with one coral accent",
+      "motion": "in video, keep the marker strokes, thin ink outline and candy pastels identical throughout; one cheerful readable action with a light bounce and tiny sparkle or droplet follow-through",
+      "avoid": "heavy dark shadows, glossy 3D, photographic detail, readable text, logos, watermarks"
+    },
+    {
+      "id": "cut_paper_collage",
+      "order": 299,
+      "name": "layered cut-paper collage",
+      "descriptor": "hand-cut paper collage picture-book illustration with layered textured papers, torn and scissor-cut edges, flat geometric shapes and subtle paper fibre, matte printed look",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "stacked paper layers form foreground, middle ground and sky; the character is a simple cut-paper shape, small in the scene, with open paper space around it",
+      "palette": "matte earth tones of ochre, brick red, olive and cream with one bright accent",
+      "motion": "in video, keep every element a flat cut-paper layer with paper fibre and torn edges; lively stop-motion-like movement with small sliding paper parallax between layers",
+      "avoid": "soft airbrush gradients, glossy 3D, photographic detail, readable text, logos, watermarks"
     }
   ],
   "source": {
@@ -5793,7 +5866,14 @@
     "repository": "https://github.com/matplinta/t2i-krea-2-style-library",
     "catalog_sha256": "e14df00be2e0e0a317a7482a6e598a2a231fd9805c23326d25386b06265e68dc",
     "imported_on": "2026-10-15",
-    "credit": "matplinta; descriptors based on the KREA 2 Styles / Wildcards.txt contributor credited upstream"
+    "credit": "matplinta; descriptors based on the KREA 2 Styles / Wildcards.txt contributor credited upstream",
+    "adapted_from": {
+      "repository": "https://github.com/yang0/handraw-style",
+      "author": "yang0",
+      "license": "MIT (with Attribution Requirement)",
+      "adapted_on": "2026-11-14",
+      "note": "crayon_storybook, marker_pastel and cut_paper_collage rewrite the crayon, marker and cut-paper concepts of that library as English descriptors with composition and palette fields; its original text was tested on Krea 2 and lost to the existing styles."
+    }
   },
   "preview_base_url": "https://matplinta.github.io/t2i-krea-2-style-library/",
   "scenes": [

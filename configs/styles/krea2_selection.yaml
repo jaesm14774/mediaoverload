@@ -3,7 +3,14 @@ enabled:
 - storybook_watercolor
 - soft_pastel_characters
 - bold_cartoon_comic
+- cinematic_painterly
+- ink_wash_frame
+- tarot_gold_frame
+- cozy_game_diorama
 - photographic_character_fusion
+- crayon_storybook
+- marker_pastel
+- cut_paper_collage
 - ghibli-style
 - children-s-book-drawing
 - vintage-children-s-book-drawing
@@ -14,4 +21,3 @@ enabled:
 - watercolor-anime-illustration
 - playful-hand-drawn-illustration
 - very-simplistic-doodle
-- crayola-colored-book-style

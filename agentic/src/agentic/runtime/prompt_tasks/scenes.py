@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 from agentic.minimax_prompting import require_h3_prompt
@@ -54,14 +55,7 @@ def _goal_subject_instruction(goal: GoalRequest) -> str:
             or goal.constraints.get("character_profile")
             or {}
         )
-        details = "; ".join(
-            part
-            for part in (
-                str(profile.get("role_description") or "").strip(),
-                str(profile.get("keywords") or "").strip(),
-            )
-            if part
-        )
+        details = str(profile.get("role_description") or "").strip()
         return "; ".join(part for part in (character, details) if part)
 
     cast = []
@@ -69,14 +63,7 @@ def _goal_subject_instruction(goal: GoalRequest) -> str:
         name = str(subject.get("name") or "").strip()
         role = str(subject.get("role") or "subject").strip()
         profile = dict(subject.get("profile") or {})
-        details = "; ".join(
-            part
-            for part in (
-                str(profile.get("role_description") or "").strip(),
-                str(profile.get("keywords") or "").strip(),
-            )
-            if part
-        )
+        details = str(profile.get("role_description") or "").strip()
         detail_clause = f" ({details})" if details else ""
         cast.append(f"{role}: {name}{detail_clause}")
 
@@ -170,7 +157,9 @@ NEWS_PREMISE_CONTRACT = (
     "This scene comes from the article, so a reader of the article must recognise it. From the article take one small, "
     "concrete, everyday happening that it actually reports, together with the object or place at its centre. The "
     "character lives that happening itself, in place of the people in the article, with one feeling that reads from its "
-    "face and whole body. Put the exact short source excerpt and its matching visual_mapping into source_anchors; each "
+    "face and whole body. Put the exact short source excerpt and its matching visual_mapping into source_anchors. The "
+    "source_excerpt is copied character for character from the article in the article's own language and is never "
+    "translated or paraphrased; it is the one field the English-only rule does not apply to. Each "
     "visual_mapping is a full clause with the character as its subject and the happening's own action as its verb, and "
     "include every visual_mapping verbatim in prompt. Keep what happened true to the article and add no fact it does not "
     "state. The picture shows the character and that object or place only: the reported people, officials, "
@@ -192,13 +181,16 @@ IMAGE_MOMENT_SET_CONTRACT = (
     "black could be told apart. Use the object's own physical properties, such as its size against the character, its "
     "shape, softness, openings, weight, and temperature, to find what the body does with it at each beat. Each feeling "
     "reads from the silhouette and face alone at thumbnail size. Write each prompt in this order: the pose field word "
-    "for word, then the face, then the object, then one sentence naming the selected medium with two or three observable "
-    "surface cues. Keep the character small in a larger world, about one fifth to one third of the frame height, with "
-    "open space around it, drawn so that its silhouette and face still read. The picture holds exactly the named "
-    "characters, once each, and that one object; it has no writing, numbers, labels, or signs, and no other prop, "
-    "creature, or person. Nothing in it reports or implies anything about a real person. Name every required subject "
-    "in every prompt with its defining traits, and keep the same medium and style in all of them. Give each item a "
-    "short unique label and a presentation that names its beat, feeling, and pose in a few words."
+    "for word, then the face, then the object, then one sentence for the world, then one sentence naming the selected "
+    "medium with two or three observable surface cues. The world sentence puts the character in the same setting in "
+    "every prompt, copied from the goal scene and never dropped, with one light source and a cast shadow under the "
+    "character, and states that the character is small, about one quarter of the frame height, placed off-center, so "
+    "the world is the main subject with open space around it and the silhouette and face still read. The picture holds "
+    "exactly the named characters, once each, and that one object; it has no writing, numbers, labels, or signs, and no "
+    "other prop, creature, or person. Nothing in it reports or implies anything about a real person. Name every "
+    "required subject by its exact name in every prompt without describing its looks, because the renderer adds the "
+    "appearance once, and keep the same medium and style in all of them. Give each item a short unique label and a "
+    "presentation that names its beat, feeling, and pose in a few words."
 )
 
 H3_SEGMENT_RESPONSE_CONTRACT = (
@@ -416,8 +408,19 @@ def validate_segment_response(payload: Any) -> dict[str, Any]:
     return payload
 
 
+# The only article fields the writer is shown and the validator searches; one
+# list keeps "what it may quote" and "what we accept as a quote" identical.
+QUOTABLE_NEWS_KEYS = ("title", "keyword", "content")
+
+
 def _normalize_anchor_text(value: Any) -> str:
-    return " ".join(re.sub(r"\s+", " ", str(value or "")).split()).casefold()
+    """Letters, digits and marks only, so width, punctuation and spacing never decide a match."""
+    folded = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return "".join(char for char in folded if unicodedata.category(char)[0] in "LNM")
+
+
+def _shown(value: str, limit: int = 120) -> str:
+    return value if len(value) <= limit else f"{value[:limit]}..."
 
 
 def validate_news_grounded_scene_response(
@@ -426,12 +429,10 @@ def validate_news_grounded_scene_response(
     if not isinstance(payload, dict):
         raise ValueError("news-grounded scene response must be an object.")
     prompt = require_h3_prompt(payload.get("prompt"))
-    source_text = _normalize_anchor_text(
-        "\n".join(
-            str(news_context.get(key) or "")
-            for key in ("title", "keyword", "content")
-        )
-    )
+    # Each field is searched on its own so a quote cannot be stitched across a boundary.
+    source_fields = [
+        _normalize_anchor_text(news_context.get(key)) for key in QUOTABLE_NEWS_KEYS
+    ]
     raw_anchors = payload.get("source_anchors")
     if not isinstance(raw_anchors, list) or not 1 <= len(raw_anchors) <= 2:
         raise ValueError("source_anchors must contain one or two source-to-scene mappings.")
@@ -445,13 +446,17 @@ def validate_news_grounded_scene_response(
         visual_mapping = str(raw_anchor.get("visual_mapping") or "").strip()
         normalized_excerpt = _normalize_anchor_text(source_excerpt)
         normalized_mapping = _normalize_anchor_text(visual_mapping)
-        if not normalized_excerpt or normalized_excerpt not in source_text:
+        if not normalized_excerpt or not any(
+            normalized_excerpt in field for field in source_fields
+        ):
             raise ValueError(
-                f"source_anchors[{index}] source_excerpt must quote the supplied article."
+                f"source_anchors[{index}] source_excerpt must quote the supplied article, "
+                f"but got {_shown(source_excerpt)!r}."
             )
         if not normalized_mapping or normalized_mapping not in normalized_prompt:
             raise ValueError(
-                f"source_anchors[{index}] visual_mapping must appear in the scene prompt."
+                f"source_anchors[{index}] visual_mapping must appear in the scene prompt, "
+                f"but got {_shown(visual_mapping)!r}."
             )
         validated_anchors.append(
             {"source_excerpt": source_excerpt, "visual_mapping": visual_mapping}
@@ -487,7 +492,16 @@ def generate_autonomous_scene_prompt(
                 f"Character: {character}",
                 f"Style: {style}",
                 f"Media type: {media_type}",
-                f"News context JSON: {json.dumps(normalized_news_context, ensure_ascii=False)}",
+                "News context JSON: "
+                + json.dumps(
+                    {
+                        key: normalized_news_context.get(key, "")
+                        for key in QUOTABLE_NEWS_KEYS
+                    }
+                    if news_grounding_required
+                    else normalized_news_context,
+                    ensure_ascii=False,
+                ),
                 "Create a generation prompt that follows the supplied creative brief.",
                 (
                     f"Video action direction: {VIDEO_MOTION_DIRECTION}"
@@ -529,7 +543,10 @@ def generate_autonomous_scene_prompt(
                 "items": {
                     "type": "object",
                     "properties": {
-                        "source_excerpt": {"type": "string"},
+                        "source_excerpt": {
+                            "type": "string",
+                            "description": "Verbatim words from the article in its original language; never translated.",
+                        },
                         "visual_mapping": {"type": "string"},
                     },
                     "required": ["source_excerpt", "visual_mapping"],
@@ -759,7 +776,7 @@ def expand_goal(
             variant_guidance = (
                 "Required cast and identity details: "
                 + _goal_subject_instruction(goal)
-                + ". Repeat the exact name and distinguishing traits of every required subject in every prompt."
+                + ". Name every required subject by its exact name in every prompt; the renderer adds its appearance."
                 if moment_set
                 else "Required cast and identity details: "
                 + _goal_subject_instruction(goal)

@@ -195,7 +195,7 @@ def test_user_given_a_news_driven_image_run_when_the_writer_is_briefed_then_it_m
 
     asked = writer.sent[0]
     assert "feeling" in asked and "pose" in asked
-    assert "larger world" in asked
+    assert "open space" in asked
     assert "quiet plain background" not in asked
 
 
@@ -300,3 +300,53 @@ def test_user_given_a_post_with_media_when_the_caption_is_written_then_the_words
     assert "tie the scene to the one thing in the article it" in rules
     assert "make the post about the article's central event" not in rules
     assert "Tag only" in rules
+
+
+MOMENT_PROFILE = {
+    "role_description": "Kirby is a small pink spherical creature with no mouth.",
+    "keywords": "Kirby, pink, spherical body, stubby arms, character",
+}
+
+
+def test_user_given_a_character_with_an_appearance_and_a_tag_list_when_the_moment_writer_is_briefed_then_it_gets_the_appearance_and_not_the_raw_tags():
+    """User Given a character whose profile has a written appearance and a raw tag list When a news-driven set is briefed Then the writer reads the appearance and never sees the tag list it could paste into a prompt."""
+    writer = _SetWriter(_six_moments())
+
+    scenes.expand_goal(
+        writer,
+        _image_goal(news_grounding_required=True, news_context=NEWS, character_profile=MOMENT_PROFILE),
+        "pastel",
+        [],
+    )
+
+    asked = writer.sent[0]
+    assert "no mouth" in asked
+    assert "spherical body, stubby arms" not in asked
+    assert "distinguishing traits" not in asked and "defining traits" not in asked
+
+
+def test_user_given_beats_that_only_name_the_character_when_candidates_are_planned_then_each_beat_describes_the_appearance_once():
+    """User Given a writer that names the character without restating its looks When the six candidates are planned Then every beat prompt carries the appearance exactly once."""
+    result = scenes.expand_goal(
+        _SetWriter(_six_moments()),
+        _image_goal(news_grounding_required=True, news_context=NEWS, character_profile=MOMENT_PROFILE),
+        "pastel",
+        [],
+    )
+
+    for item in result["prompt_sets"]:
+        assert item["prompt"].casefold().count("small pink spherical creature") == 1
+
+
+def test_user_given_a_news_driven_image_run_when_the_writer_is_briefed_then_every_beat_must_carry_the_same_setting_and_the_character_size():
+    """User Given a news-driven image run When the writer is briefed Then every beat prompt must restate the one setting with its light and shadow and the character's small share of the frame, so no beat becomes a floating close-up."""
+    writer = _SetWriter(_six_moments())
+
+    scenes.expand_goal(
+        writer, _image_goal(news_grounding_required=True, news_context=NEWS), "pastel", []
+    )
+
+    asked = writer.sent[0]
+    assert "same setting in every prompt" in asked
+    assert "cast shadow" in asked
+    assert "one quarter of the frame height" in asked

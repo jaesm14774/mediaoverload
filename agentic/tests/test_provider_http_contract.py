@@ -318,3 +318,144 @@ def test_user_given_a_provider_fallback_when_a_structured_call_is_recorded_then_
     )
     assert completed_event["payload"]["chat_completion_elapsed_seconds"] >= 0
     assert completed_event["payload"]["provider_attempts_count"] == 2
+
+
+def truncated_reasoning_completion():
+    return {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "reasoning": 'We need to decide suitability. Excerpt: "今天鋒面通過、各地',
+                },
+            }
+        ]
+    }
+
+
+def test_user_given_a_reasoning_only_completion_cut_off_by_the_output_limit_when_it_is_read_then_the_error_says_the_output_was_truncated(
+    endpoint,
+):
+    """User Given a provider that spends its whole output budget reasoning When the completion has no answer text Then the error says the output hit its length limit instead of passing reasoning off as the answer."""
+    endpoint.responses.put((200, truncated_reasoning_completion(), {}))
+    with pytest.raises(ProviderRequestError) as failure:
+        adapter(endpoint).chat_completion(
+            [{"role": "user", "content": "Continue."}], max_retries=1
+        )
+    assert "length" in str(failure.value)
+
+
+def test_user_given_a_provider_failure_when_the_attempt_is_recorded_then_the_reason_is_saved_with_it(
+    endpoint,
+    tmp_path,
+):
+    """User Given the first provider returns no answer and a later provider responds When the structured call is recorded Then the failed attempt carries its reason so the next outage can be diagnosed from the run log."""
+    endpoint.responses.put((200, truncated_reasoning_completion(), {}))
+    endpoint.responses.put((200, completion('{"ready":true}'), {}))
+    recorder = RunRecorder(tmp_path, "provider-attempt-reason")
+    manager = SimpleNamespace(
+        text_model=FallbackChatModel(
+            adapter(endpoint, model_name="primary-model"),
+            adapter(endpoint, model_name="fallback-model"),
+        )
+    )
+
+    chat_json(
+        JsonChatRequest(
+            manager=manager,
+            system_prompt="Return a small object.",
+            user_prompt="Return ready true.",
+            schema_name="provider_attempt_reason_v1",
+            schema={"type": "object"},
+            recorder=recorder,
+            max_retries=1,
+            repair_attempts=0,
+        )
+    )
+
+    call = json.loads(
+        next(recorder.run_dir.joinpath("llm").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    failed, succeeded = call["provider_attempts"]
+    assert "length" in failed["error"]
+    assert "error" not in succeeded
+
+
+def test_user_given_the_cloudflare_provider_when_it_is_built_then_it_asks_for_an_output_budget_beyond_the_provider_default(
+    monkeypatch,
+):
+    """User Given the free Cloudflare reasoning model whose own default output limit is 256 tokens When the provider is built Then it requests a budget large enough for reasoning plus a JSON answer."""
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "account")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "token")
+    model = OpenAICompatibleModel.from_provider(
+        "cloudflare", ModelConfig("@cf/openai/gpt-oss-120b")
+    )
+    assert model.config.max_tokens is not None and model.config.max_tokens >= 2048
+
+
+def test_user_given_a_provider_with_no_choices_when_a_fallback_follows_then_the_chain_moves_on_instead_of_aborting(
+    endpoint,
+):
+    """User Given the first provider returns an empty choices list and a later provider responds When the chain runs Then the later provider's answer is returned."""
+    endpoint.responses.put((200, {"choices": []}, {}))
+    endpoint.responses.put((200, completion("Recovered."), {}))
+    chain = FallbackChatModel(
+        adapter(endpoint, model_name="primary-model"),
+        adapter(endpoint, model_name="fallback-model"),
+    )
+    assert chain.chat_completion([{"role": "user", "content": "Continue."}], max_retries=1) == "Recovered."
+
+
+def test_user_given_an_answer_rejected_by_validation_when_the_provider_retries_then_the_model_is_told_what_was_wrong(
+    endpoint,
+):
+    """User Given a model whose first answer fails the caller's validation When the provider retries Then the retry shows the model its rejected answer and the reason, and the corrected answer is returned."""
+    endpoint.responses.put((200, completion('{"count": 3}'), {}))
+    endpoint.responses.put((200, completion('{"count": 4}'), {}))
+
+    def must_be_even(text):
+        if json.loads(text)["count"] % 2:
+            raise ValueError("count must be even")
+
+    result = adapter(endpoint).chat_completion(
+        [{"role": "user", "content": "Pick a count."}],
+        max_retries=2,
+        initial_retry_delay=0,
+        _response_validator=must_be_even,
+    )
+
+    assert json.loads(result)["count"] == 4
+    retry_messages = endpoint.requests[1]["payload"]["messages"]
+    retry_text = " ".join(str(message["content"]) for message in retry_messages)
+    assert "count must be even" in retry_text and '{"count": 3}' in retry_text
+    assert retry_messages[0]["content"] == "Pick a count."
+
+
+def test_user_given_repeated_validation_rejections_when_the_provider_keeps_retrying_then_only_the_latest_rejection_is_shown(
+    endpoint,
+):
+    """User Given three answers rejected for different reasons When the provider retries Then each retry carries only the previous rejection, so the conversation does not grow without bound."""
+    for count in (1, 3, 4):
+        endpoint.responses.put((200, completion(json.dumps({"count": count})), {}))
+
+    def must_be_even(text):
+        count = json.loads(text)["count"]
+        if count % 2:
+            raise ValueError(f"count {count} must be even")
+
+    adapter(endpoint).chat_completion(
+        [{"role": "user", "content": "Pick a count."}],
+        max_retries=3,
+        initial_retry_delay=0,
+        _response_validator=must_be_even,
+    )
+
+    last_request = " ".join(
+        str(message["content"]) for message in endpoint.requests[2]["payload"]["messages"]
+    )
+    assert "count 3 must be even" in last_request
+    assert "count 1 must be even" not in last_request
