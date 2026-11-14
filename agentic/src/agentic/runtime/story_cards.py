@@ -625,12 +625,29 @@ def _wrap_text(
             candidate = f"{current}{char}"
             if current and _text_width(draw, candidate, font) > max_width:
                 split_at = len(current)
-                # Keep common Chinese closing punctuation off the start of a line.
-                while split_at > 1 and (
-                    candidate[split_at] in "，。！？；：、）」』】》〉…"
-                    or candidate[split_at - 1] in "（「『【《〈"
-                ):
-                    split_at -= 1
+                # Keep closing punctuation off the start of a line, an opening bracket off
+                # its end, and a year or Latin word whole; only a run wider than the line
+                # may break. Each rule can expose the other, so repeat until stable.
+                moved = True
+                while moved:
+                    moved = False
+                    while split_at > 1 and (
+                        candidate[split_at] in "，。！？；：、）」』】》〉…"
+                        or candidate[split_at - 1] in "（「『【《〈"
+                    ):
+                        split_at -= 1
+                        moved = True
+                    run_start = split_at
+                    while (
+                        run_start > 0
+                        and candidate[run_start - 1].isascii() and candidate[run_start - 1].isalnum()
+                        and candidate[run_start].isascii() and candidate[run_start].isalnum()
+                    ):
+                        run_start -= 1
+                    # A lone opening bracket on its own line is worse than splitting the run.
+                    if 0 < run_start < split_at and (run_start > 1 or candidate[0] not in "（「『【《〈"):
+                        split_at = run_start
+                        moved = True
                 lines.append(candidate[:split_at])
                 current = candidate[split_at:]
             else:

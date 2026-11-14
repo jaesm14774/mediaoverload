@@ -18,7 +18,8 @@ from agentic.tools.style_picker import create_server
 
 CHARACTER_STYLE_IDS = (
     "storybook_watercolor", "soft_pastel_characters", "bold_cartoon_comic",
-    "cinematic_painterly", "stylized_3d_game", "photographic_character_fusion",
+    "cinematic_painterly", "cozy_game_diorama", "ink_wash_frame", "tarot_gold_frame",
+    "photographic_character_fusion",
 )
 
 
@@ -278,6 +279,23 @@ def test_user_given_an_ambiguous_style_source_when_starting_a_run_then_configura
     config["style"] = style
     with pytest.raises(ValueError):
         resolve_creative_profile(config, style_library=library)
+
+
+REFERENCE_FOLDER_STYLES = {
+    "10 glowing epic poster": "cinematic_painterly",
+    "11 ink wash and woodblock": "ink_wash_frame",
+    "11 tarot gold frame": "tarot_gold_frame",
+    "12 cozy game diorama": "cozy_game_diorama",
+}
+
+
+@pytest.mark.parametrize("style_id", REFERENCE_FOLDER_STYLES.values(), ids=REFERENCE_FOLDER_STYLES.keys())
+def test_user_given_each_reference_folder_when_a_style_is_drawn_then_that_look_is_in_the_pool_with_its_composition_and_palette(style_id):
+    """User Given the reference folders for epic posters, ink and tarot prints, and game dioramas When any style can be drawn at random Then each of those looks is enabled and states its own composition and palette."""
+    state = StyleLibrary().snapshot()
+    by_id = {style["id"]: style for style in state["styles"]}
+    assert style_id in state["enabled_ids"]
+    assert by_id[style_id]["composition"] and by_id[style_id]["palette"]
 
 
 PHOTO_OR_RENDER_CATEGORIES = {"Photography", "3D & Render", "Commercial & Editorial"}

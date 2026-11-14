@@ -132,9 +132,11 @@ Now:
   most one prop, and one visual motif from a crowded news brief. It is not told
   about the atlas, frame count, fps, or clip length.
 - The compiled keyframe prompt starts with the one-character, no-sheet,
-  plain-backdrop contract and the pixel-art rendering contract. The scene and
-  style come last and only supply palette and materials, so a painterly style
-  cannot override the game-art look.
+  plain-backdrop contract and the pixel-art rendering contract. The selected
+  style comes last and lends only its palette, never its medium, composition,
+  or exclusions, so a painterly style cannot override the game-art look. A
+  style that defines no palette adds nothing; the sprite keeps its default
+  colours.
 - The video prompt is one short paragraph plus a compact choreography
   contract, because the H3 text encoder reads every word.
 

@@ -616,6 +616,10 @@ def style_profile_direction(
         # Scene composition and unstructured exclusions can prohibit the very
         # isolation that sticker renderers require.
         profile = {key: profile.get(key) for key in ("prompt", "palette", "motion")}
+    if goal.media_type == "game_sprite" and isinstance(profile, dict):
+        # A sprite keeps its own pixel-art rendering; a catalog style appended
+        # last would override it, so the style lends colours only.
+        profile = {"palette": profile.get("palette")}
     if include_motion is None:
         include_motion = goal.media_type != "image"
     direction = visual_style_profile_direction(
@@ -643,12 +647,15 @@ def include_visual_style_profile(
     )
     if not direction:
         return prompt_text
-    treatment_label = (
-        "Selected subject rendering rules: "
-        if goal.media_type in _ISOLATED_STICKER_TYPES
-        else "Selected visual style is a rendering treatment; preserve the requested cast, action, setting, and framing. "
-        "Use its composition only when framing is unspecified, and do not let it add characters or props: "
-    )
+    if goal.media_type in _ISOLATED_STICKER_TYPES:
+        treatment_label = "Selected subject rendering rules: "
+    elif goal.media_type == "game_sprite":
+        treatment_label = "Selected colour palette, colours only: "
+    else:
+        treatment_label = (
+            "Selected visual style is a rendering treatment; preserve the requested cast, action, setting, and framing. "
+            "Use its composition only when framing is unspecified, and do not let it add characters or props: "
+        )
     normalized_prompt = prompt_text.casefold()
     if normalized_prompt.endswith(f"{treatment_label}{direction}".casefold()):
         return prompt_text
@@ -682,7 +689,7 @@ def visual_style_profile_direction(profile: object, *, include_motion: bool = Tr
 
 
 def style_profile_avoidance(goal: GoalRequest) -> str:
-    if goal.media_type in _ISOLATED_STICKER_TYPES:
+    if goal.media_type in _ISOLATED_STICKER_TYPES or goal.media_type == "game_sprite":
         return ""
     profile = goal.constraints.get("visual_style_profile")
     if not isinstance(profile, dict):

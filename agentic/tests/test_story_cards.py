@@ -699,7 +699,7 @@ class StoryCardPlanAndSkillTests(unittest.TestCase):
         self.assertEqual(captured[0].constraints["story_card_page_count"], "auto")
 
     def test_user_given_a_story_with_many_pages_when_the_vignettes_are_rendered_then_each_page_gets_its_own_scene_seed_and_style(self) -> None:
-        """User Given a ten-page story and a selected visual style When the vignettes are rendered Then the image provider is called once per page, each with that page scene, the style and a different seed."""
+        """User Given a ten-page story and a selected visual style When the vignettes are rendered Then the image provider is called once per page, each with that page scene, the style palette and a different seed."""
         style = {
             "label": "ink illustration", "prompt": "confident ink contours with clean cel shading",
             "composition": "one clear physical action with layered depth",
@@ -748,10 +748,11 @@ class StoryCardPlanAndSkillTests(unittest.TestCase):
             self.assertEqual(name, "comfy.workflow.text_to_image")
             self.assertIn("Meta Knight, masked, caped", payload["prompt"])
             self.assertIn(f"object number {index},", payload["prompt"])
-            for field in ("prompt", "composition", "palette"):
-                self.assertIn(style[field], payload["prompt"])
-            self.assertNotIn(style["motion"], payload["prompt"])
-            self.assertIn(style["avoid"], payload["negative_prompt"])
+            # The card owns its cream-paper look; the selected style lends colours only.
+            self.assertIn(style["palette"], payload["prompt"])
+            for field in ("prompt", "composition", "motion"):
+                self.assertNotIn(style[field], payload["prompt"])
+            self.assertNotIn(style["avoid"], payload["negative_prompt"])
             self.assertIn(story["negative_prompt"], payload["negative_prompt"])
             self.assertEqual((payload["width"] % 16, payload["height"] % 16), (0, 0))
 

@@ -7,7 +7,7 @@ import random
 import re
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Protocol
@@ -24,8 +24,9 @@ MAX_IMAGE_BYTES = 25 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 OPENAI_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 ATTEMPT_DIAGNOSTIC_FIELDS = frozenset(
-    {"provider", "model", "duration_seconds", "request_count", "status", "error_type"}
+    {"provider", "model", "duration_seconds", "request_count", "status", "error_type", "error"}
 )
+ATTEMPT_ERROR_CHARS = 300
 
 
 def _llm_attempt_record(
@@ -54,6 +55,7 @@ def _llm_attempt_record(
         record["request_count"] = request_count
     if error is not None:
         record["error_type"] = type(error).__name__
+        record["error"] = str(error)[:ATTEMPT_ERROR_CHARS]
     return record
 
 
@@ -404,6 +406,9 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
         "vision_model": "",
         "supports_vision": False,
         "supports_response_format": False,
+        # Workers AI defaults to 256 output tokens, which this reasoning model
+        # spends entirely on reasoning before it writes any answer.
+        "max_tokens": 16384,
     },
     "nvidia": {
         "base_url": "https://integrate.api.nvidia.com/v1",
@@ -529,6 +534,8 @@ class OpenAICompatibleModel:
     def from_provider(cls, provider: str, config: ModelConfig) -> "OpenAICompatibleModel":
         normalized = str(provider or "").strip().lower()
         spec = provider_spec(normalized)
+        if config.max_tokens is None and spec.get("max_tokens"):
+            config = replace(config, max_tokens=int(spec["max_tokens"]))
         return cls(
             config,
             provider_name=normalized,
@@ -648,6 +655,7 @@ class OpenAICompatibleModel:
         deadline: float | None,
     ) -> tuple[str | None, Exception | None, requests.Response | None, str | None]:
         response: requests.Response | None = None
+        finish_reason = ""
         try:
             remaining = _remaining_deadline(deadline)
             configured_read_timeout = (
@@ -681,7 +689,9 @@ class OpenAICompatibleModel:
                 if deadline is None
                 else self._read_streamed_json(response, deadline)
             )
-            message = body["choices"][0]["message"]
+            choice = body["choices"][0]
+            finish_reason = str(choice.get("finish_reason") or "")
+            message = choice["message"]
             text = self._extract_message_text(message)
         except requests.RequestException as exc:
             if deadline is not None and time.monotonic() >= deadline:
@@ -689,9 +699,10 @@ class OpenAICompatibleModel:
                     f"{self.provider_name} response exceeded its total deadline for model {model_name!r}"
                 ) from exc
             return None, exc, response, "response"
-        except (KeyError, ValueError, TypeError) as exc:
+        except (KeyError, IndexError, ValueError, TypeError, AttributeError) as exc:
             raise ProviderRequestError(
-                f"{self.provider_name} returned an invalid chat completion for model {model_name!r}: {exc}"
+                f"{self.provider_name} returned an invalid chat completion for model {model_name!r} "
+                f"(finish_reason={finish_reason or 'missing'}): {exc}"
             ) from exc
         if response_validator is not None:
             try:

@@ -318,3 +318,93 @@ def test_user_given_a_provider_fallback_when_a_structured_call_is_recorded_then_
     )
     assert completed_event["payload"]["chat_completion_elapsed_seconds"] >= 0
     assert completed_event["payload"]["provider_attempts_count"] == 2
+
+
+def truncated_reasoning_completion():
+    return {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "reasoning": 'We need to decide suitability. Excerpt: "今天鋒面通過、各地',
+                },
+            }
+        ]
+    }
+
+
+def test_user_given_a_reasoning_only_completion_cut_off_by_the_output_limit_when_it_is_read_then_the_error_says_the_output_was_truncated(
+    endpoint,
+):
+    """User Given a provider that spends its whole output budget reasoning When the completion has no answer text Then the error says the output hit its length limit instead of passing reasoning off as the answer."""
+    endpoint.responses.put((200, truncated_reasoning_completion(), {}))
+    with pytest.raises(ProviderRequestError) as failure:
+        adapter(endpoint).chat_completion(
+            [{"role": "user", "content": "Continue."}], max_retries=1
+        )
+    assert "length" in str(failure.value)
+
+
+def test_user_given_a_provider_failure_when_the_attempt_is_recorded_then_the_reason_is_saved_with_it(
+    endpoint,
+    tmp_path,
+):
+    """User Given the first provider returns no answer and a later provider responds When the structured call is recorded Then the failed attempt carries its reason so the next outage can be diagnosed from the run log."""
+    endpoint.responses.put((200, truncated_reasoning_completion(), {}))
+    endpoint.responses.put((200, completion('{"ready":true}'), {}))
+    recorder = RunRecorder(tmp_path, "provider-attempt-reason")
+    manager = SimpleNamespace(
+        text_model=FallbackChatModel(
+            adapter(endpoint, model_name="primary-model"),
+            adapter(endpoint, model_name="fallback-model"),
+        )
+    )
+
+    chat_json(
+        JsonChatRequest(
+            manager=manager,
+            system_prompt="Return a small object.",
+            user_prompt="Return ready true.",
+            schema_name="provider_attempt_reason_v1",
+            schema={"type": "object"},
+            recorder=recorder,
+            max_retries=1,
+            repair_attempts=0,
+        )
+    )
+
+    call = json.loads(
+        next(recorder.run_dir.joinpath("llm").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    failed, succeeded = call["provider_attempts"]
+    assert "length" in failed["error"]
+    assert "error" not in succeeded
+
+
+def test_user_given_the_cloudflare_provider_when_it_is_built_then_it_asks_for_an_output_budget_beyond_the_provider_default(
+    monkeypatch,
+):
+    """User Given the free Cloudflare reasoning model whose own default output limit is 256 tokens When the provider is built Then it requests a budget large enough for reasoning plus a JSON answer."""
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "account")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "token")
+    model = OpenAICompatibleModel.from_provider(
+        "cloudflare", ModelConfig("@cf/openai/gpt-oss-120b")
+    )
+    assert model.config.max_tokens is not None and model.config.max_tokens >= 2048
+
+
+def test_user_given_a_provider_with_no_choices_when_a_fallback_follows_then_the_chain_moves_on_instead_of_aborting(
+    endpoint,
+):
+    """User Given the first provider returns an empty choices list and a later provider responds When the chain runs Then the later provider's answer is returned."""
+    endpoint.responses.put((200, {"choices": []}, {}))
+    endpoint.responses.put((200, completion("Recovered."), {}))
+    chain = FallbackChatModel(
+        adapter(endpoint, model_name="primary-model"),
+        adapter(endpoint, model_name="fallback-model"),
+    )
+    assert chain.chat_completion([{"role": "user", "content": "Continue."}], max_retries=1) == "Recovered."

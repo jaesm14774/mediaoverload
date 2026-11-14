@@ -813,7 +813,15 @@ class AgentMediaSkills:
             int(context.node.inputs.get("height", STORY_CARD_DEFAULT_HEIGHT)),
         )
         run_dir = self._build_run_dir(context.plan.goal.prompt, "story_card_vignette")
-        image_goal = replace(context.plan.goal, media_type="image")
+        goal_style = context.plan.goal.constraints.get("visual_style_profile")
+        # The card owns its cream-paper look (STORY_CARD_VIGNETTE_STYLE); a catalog
+        # style appended last would override it, so the style lends colours only.
+        palette_only = {"palette": goal_style.get("palette")} if isinstance(goal_style, dict) else None
+        image_goal = replace(
+            context.plan.goal,
+            media_type="image",
+            constraints={**context.plan.goal.constraints, "visual_style_profile": palette_only},
+        )
         negative_prompt = "; ".join(
             part for part in (str(story["negative_prompt"]), style_profile_avoidance(image_goal)) if part
         )

@@ -69,13 +69,16 @@ def test_user_given_scene_style_when_rendering_assets_then_each_asset_keeps_its_
     assert submitted and all(Path(path).is_file() for path in result.outputs["saved_files"])
     for payload in submitted:
         prompt = payload["prompt"]
-        assert PROFILE["prompt"] in prompt and PROFILE["palette"] in prompt
+        assert PROFILE["palette"] in prompt
         if media_type == "game_sprite":
-            assert PROFILE["composition"] in prompt
-            assert PROFILE["avoid"] in prompt
+            # A sprite owns its pixel-art rendering; the style lends colours only.
+            assert PROFILE["prompt"] not in prompt
+            assert PROFILE["composition"] not in prompt
+            assert PROFILE["avoid"] not in prompt
             assert "chroma-key background" not in prompt.casefold()
-            assert PROFILE["avoid"] in payload["negative_prompt"]
+            assert PROFILE["avoid"] not in payload["negative_prompt"]
         else:
+            assert PROFILE["prompt"] in prompt
             assert "subject only" in prompt.casefold()
             assert "background requirements take priority" in prompt.casefold()
             assert "#18e06f" in prompt

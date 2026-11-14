@@ -143,7 +143,7 @@
 
 成品保存 `editorial_brief`、`source_context` 與 `writing_process.plan`，recorder 保留實際輸入輸出。`evidence_anchor` 只能檢查所指欄位確實存在且有非空訊號，不能證明整篇推論正確；語意與情感仍須閱讀。正文必須含中文、不得含 hashtag 或標記，每頁的 `scene`、`vignette_prompt` 與整篇的 `negative_prompt` 只接受英文；缺 `scene` 的頁面會被退回寫作者補上。簡繁檢查只攔常見簡體字，不把「皇后」這類正體用字當錯字。產稿時將模型誤輸出的字面 `\n` 還原為段落換行，再交給人審閱。
 
-規劃圖為 `story-card-write → story-card-image-asset-check → story-card-vignette → story-card-compose`。`story-card-vignette` 對每一頁呼叫一次 `comfy.workflow.text_to_image`（krea2_turbo），各頁使用不同的種子與獨立的輸出資料夾：提示詞由選定角色、角色包的 `story_card.visual`（場景風格、從屬配角）、該頁的 `scene` 與一組正面描述的畫風（單一小幅童書插畫、水彩彩鉛、奶油紙底、邊緣柔化融進紙張、表面不帶任何標記）組成。krea2_turbo 不理會 negative prompt，所以禁止文字等限制以正面措辭寫進提示詞，實際的字只由 Pillow 負責。主角身份只來自 resolved character 與 character profile，不能寫死 Kirby，也不能在選角失敗時 fallback。
+規劃圖為 `story-card-write → story-card-image-asset-check → story-card-vignette → story-card-compose`。`story-card-vignette` 對每一頁呼叫一次 `comfy.workflow.text_to_image`（krea2_turbo），各頁使用不同的種子與獨立的輸出資料夾：提示詞由選定角色、角色包的 `story_card.visual`（場景風格、從屬配角）、該頁的 `scene` 與一組正面描述的畫風（單一小幅童書插畫、水彩彩鉛、奶油紙底、邊緣柔化融進紙張、表面不帶任何標記）組成；選定的目錄畫風只借用它的色盤，不改畫法與構圖，否則排在最後的畫風會蓋掉奶油紙底；沒有定義色盤的畫風就不加任何東西。krea2_turbo 不理會 negative prompt，所以禁止文字等限制以正面措辭寫進提示詞，實際的字只由 Pillow 負責。主角身份只來自 resolved character 與 character profile，不能寫死 Kirby，也不能在選角失敗時 fallback。
 
 `story-card-compose` 先程序化產生奶油紙紋理，每頁再把自己的小插畫以羽化橢圓遮罩與正片疊底貼在紙張下方；插畫張數必須等於頁數。標題只出現在第一頁，正文字級自動縮放（基準 46、最小 28），一律排在插畫上方，不截字。可變字型使用 Regular 字重；常見中文標點避免在自動換行後落到行首。
 
