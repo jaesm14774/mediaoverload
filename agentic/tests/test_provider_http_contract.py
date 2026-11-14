@@ -408,3 +408,54 @@ def test_user_given_a_provider_with_no_choices_when_a_fallback_follows_then_the_
         adapter(endpoint, model_name="fallback-model"),
     )
     assert chain.chat_completion([{"role": "user", "content": "Continue."}], max_retries=1) == "Recovered."
+
+
+def test_user_given_an_answer_rejected_by_validation_when_the_provider_retries_then_the_model_is_told_what_was_wrong(
+    endpoint,
+):
+    """User Given a model whose first answer fails the caller's validation When the provider retries Then the retry shows the model its rejected answer and the reason, and the corrected answer is returned."""
+    endpoint.responses.put((200, completion('{"count": 3}'), {}))
+    endpoint.responses.put((200, completion('{"count": 4}'), {}))
+
+    def must_be_even(text):
+        if json.loads(text)["count"] % 2:
+            raise ValueError("count must be even")
+
+    result = adapter(endpoint).chat_completion(
+        [{"role": "user", "content": "Pick a count."}],
+        max_retries=2,
+        initial_retry_delay=0,
+        _response_validator=must_be_even,
+    )
+
+    assert json.loads(result)["count"] == 4
+    retry_messages = endpoint.requests[1]["payload"]["messages"]
+    retry_text = " ".join(str(message["content"]) for message in retry_messages)
+    assert "count must be even" in retry_text and '{"count": 3}' in retry_text
+    assert retry_messages[0]["content"] == "Pick a count."
+
+
+def test_user_given_repeated_validation_rejections_when_the_provider_keeps_retrying_then_only_the_latest_rejection_is_shown(
+    endpoint,
+):
+    """User Given three answers rejected for different reasons When the provider retries Then each retry carries only the previous rejection, so the conversation does not grow without bound."""
+    for count in (1, 3, 4):
+        endpoint.responses.put((200, completion(json.dumps({"count": count})), {}))
+
+    def must_be_even(text):
+        count = json.loads(text)["count"]
+        if count % 2:
+            raise ValueError(f"count {count} must be even")
+
+    adapter(endpoint).chat_completion(
+        [{"role": "user", "content": "Pick a count."}],
+        max_retries=3,
+        initial_retry_delay=0,
+        _response_validator=must_be_even,
+    )
+
+    last_request = " ".join(
+        str(message["content"]) for message in endpoint.requests[2]["payload"]["messages"]
+    )
+    assert "count 3 must be even" in last_request
+    assert "count 1 must be even" not in last_request

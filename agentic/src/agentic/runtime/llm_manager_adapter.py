@@ -5,6 +5,7 @@ from typing import Any
 
 from agentic.runtime.claude_brain import ClaudeBrainModel
 from agentic.runtime.model_backends import (
+    DEFAULT_STATIC_MODEL_MODES,
     AgenticLLMManager,
     FallbackChatModel,
     MAX_OPENROUTER_MODELS_PER_CALL,
@@ -16,7 +17,6 @@ from agentic.runtime.model_backends import (
     provider_credentials_present,
     provider_default_model,
     provider_spec,
-    static_openrouter_model_modes,
     static_openrouter_models,
 )
 
@@ -208,7 +208,7 @@ def _wrap_openrouter_text(
     if max_models is not None:
         limited = candidates[:max_models]
     cfg = ModelConfig(model_name=limited[0], temperature=0.3)
-    modes = static_openrouter_model_modes("text")
+    modes = DEFAULT_STATIC_MODEL_MODES
     if len(limited) == 1 and not bool(backend.get("openrouter_text_pool_mode")):
         primary: Any = OpenRouterModel(cfg)
     else:
@@ -228,7 +228,7 @@ def _wrap_openrouter_vision(backend: dict[str, Any], candidates: list[str]) -> A
     if max_models is not None:
         limited = candidates[:max_models]
     cfg = ModelConfig(model_name=limited[0], temperature=0.3)
-    modes = static_openrouter_model_modes("vision")
+    modes = DEFAULT_STATIC_MODEL_MODES
     if len(limited) == 1 and not bool(backend.get("openrouter_vision_pool_mode")):
         primary: Any = OpenRouterModel(cfg)
     else:

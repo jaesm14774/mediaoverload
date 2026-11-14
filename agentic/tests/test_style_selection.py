@@ -20,7 +20,9 @@ CHARACTER_STYLE_IDS = (
     "storybook_watercolor", "soft_pastel_characters", "bold_cartoon_comic",
     "cinematic_painterly", "cozy_game_diorama", "ink_wash_frame", "tarot_gold_frame",
     "photographic_character_fusion",
+    "crayon_storybook", "marker_pastel", "cut_paper_collage",
 )
+HANDRAW_ADAPTED_STYLE_IDS = ("crayon_storybook", "marker_pastel", "cut_paper_collage")
 
 
 @pytest.fixture
@@ -76,7 +78,7 @@ def creative_config():
 
 
 def test_user_given_imported_and_character_styles_when_reading_the_config_then_both_are_available():
-    """User Given 288 imported styles and the six original character styles When reading the library Then both collections retain their definitions and the imported previews."""
+    """User Given 288 imported styles and the original character styles When reading the library Then both collections retain their definitions and the imported previews."""
     state = StyleLibrary().snapshot()
     ids = {style["id"] for style in state["styles"]}
     character_ids = set(CHARACTER_STYLE_IDS)
@@ -86,6 +88,15 @@ def test_user_given_imported_and_character_styles_when_reading_the_config_then_b
     assert set(state["enabled_ids"]) <= ids
     assert all(style["descriptor"] for style in state["styles"])
     assert all(style["previews"] for style in imported)
+
+
+def test_user_given_styles_adapted_from_handraw_when_reading_the_catalog_then_the_upstream_author_is_credited():
+    """User Given styles adapted from the handraw-style repository When reading the catalog Then the upstream author and repository are credited and the styles are enabled for random selection."""
+    state = StyleLibrary().snapshot()
+    credit = state["source"]["adapted_from"]
+    assert credit["author"] == "yang0"
+    assert credit["repository"] == "https://github.com/yang0/handraw-style"
+    assert set(HANDRAW_ADAPTED_STYLE_IDS) <= set(state["enabled_ids"])
 
 
 @pytest.mark.parametrize("style_id", CHARACTER_STYLE_IDS)
