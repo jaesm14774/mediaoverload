@@ -1,4 +1,8 @@
-# Selected styles for uniform random generation.
+# Styles Krea 2 draws from; definitions live in catalog.json. To add a model, add
+# <model>.yaml next to this file listing the styles it is good at under `enabled`,
+# then name it in the character's generation.creative_profile.style.model.
+# `enabled` is the uniform random pool for images, videos and serial series (edited
+# by the style picker). A serial series draws once and keeps its style afterwards.
 enabled:
 - storybook_watercolor
 - soft_pastel_characters

@@ -236,59 +236,60 @@ def test_user_given_a_news_item_when_the_scene_is_written_then_the_character_liv
     assert result["source_anchors"][0]["source_excerpt"] == "湯圓"
 
 
-def test_user_given_an_article_with_no_gentle_happening_when_the_scene_is_written_then_no_scene_is_made_from_it():
-    """User Given an article the writer judges to hold no gentle everyday happening When the scene is written Then no scene is produced from it and the run is told the article is unsuitable."""
-    import pytest
-    from agentic.runtime.news_grounding import UnsuitableNewsError
+# Suitability gate disabled (UnsuitableNewsError / reselect); tests kept commented for re-enabling.
+# def test_user_given_an_article_with_no_gentle_happening_when_the_scene_is_written_then_no_scene_is_made_from_it():
+#     """User Given an article the writer judges to hold no gentle everyday happening When the scene is written Then no scene is produced from it and the run is told the article is unsuitable."""
+#     import pytest
+#     from agentic.runtime.news_grounding import UnsuitableNewsError
 
-    class Client:
-        def require_manager(self):
-            return object()
+#     class Client:
+#         def require_manager(self):
+#             return object()
 
-        def generate_json(self, manager, system, user_prompt, **kwargs):
-            return kwargs["validate_response"](
-                {"suitable": False, "prompt": "", "creative_seed": "", "source": "", "source_anchors": []}
-            )
+#         def generate_json(self, manager, system, user_prompt, **kwargs):
+#             return kwargs["validate_response"](
+#                 {"suitable": False, "prompt": "", "creative_seed": "", "source": "", "source_anchors": []}
+#             )
 
-    with pytest.raises(UnsuitableNewsError):
-        scenes.generate_autonomous_scene_prompt(
-            Client(), character="Kirby", style="pastel", media_type="image",
-            news_context={"title": "工廠意外", "keyword": "意外", "content": "事故調查中。"},
-            news_grounding_required=True,
-        )
+#     with pytest.raises(UnsuitableNewsError):
+#         scenes.generate_autonomous_scene_prompt(
+#             Client(), character="Kirby", style="pastel", media_type="image",
+#             news_context={"title": "工廠意外", "keyword": "意外", "content": "事故調查中。"},
+#             news_grounding_required=True,
+#         )
 
 
-def test_user_given_the_first_picked_article_is_unsuitable_when_a_bare_run_starts_then_another_article_is_picked():
-    """User Given a bare run whose first picked article is unsuitable When the run resolves its scene Then it picks another article and builds the scene from that one."""
-    from types import SimpleNamespace
-    from unittest.mock import patch
+# def test_user_given_the_first_picked_article_is_unsuitable_when_a_bare_run_starts_then_another_article_is_picked():
+#     """User Given a bare run whose first picked article is unsuitable When the run resolves its scene Then it picks another article and builds the scene from that one."""
+#     from types import SimpleNamespace
+#     from unittest.mock import patch
 
-    from agentic.app.generation_routing import _resolve_autonomous_prompt
-    from agentic.runtime.news_grounding import UnsuitableNewsError
+#     from agentic.app.generation_routing import _resolve_autonomous_prompt
+#     from agentic.runtime.news_grounding import UnsuitableNewsError
 
-    articles = iter(
-        SimpleNamespace(to_dict=lambda title=title: {"title": title, "keyword": "k", "content": title})
-        for title in ("工廠停工調查", "夜市老攤重新開張 湯圓半小時賣完")
-    )
+#     articles = iter(
+#         SimpleNamespace(to_dict=lambda title=title: {"title": title, "keyword": "k", "content": title})
+#         for title in ("工廠停工調查", "夜市老攤重新開張 湯圓半小時賣完")
+#     )
 
-    def write_scene(self, *, news_context, **kwargs):
-        if "湯圓" not in news_context["title"]:
-            raise UnsuitableNewsError(news_context["title"])
-        return {"prompt": "Kirby hugs an empty pot.", "source": "autonomous_llm", "source_anchors": []}
+#     def write_scene(self, *, news_context, **kwargs):
+#         if "湯圓" not in news_context["title"]:
+#             raise UnsuitableNewsError(news_context["title"])
+#         return {"prompt": "Kirby hugs an empty pot.", "source": "autonomous_llm", "source_anchors": []}
 
-    with patch(
-        "agentic.tools.context_services.NewsContextService.select_news",
-        side_effect=lambda: next(articles),
-    ), patch(
-        "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt", write_scene
-    ):
-        bundle = _resolve_autonomous_prompt(
-            prompt="", character_name="Kirby", style="pastel", media_type="image",
-            generation={}, generation_type="text2img",
-        )
+#     with patch(
+#         "agentic.tools.context_services.NewsContextService.select_news",
+#         side_effect=lambda: next(articles),
+#     ), patch(
+#         "agentic.runtime.llm_engine.LLMPromptEngine.generate_autonomous_scene_prompt", write_scene
+#     ):
+#         bundle = _resolve_autonomous_prompt(
+#             prompt="", character_name="Kirby", style="pastel", media_type="image",
+#             generation={}, generation_type="text2img",
+#         )
 
-    assert "湯圓" in bundle["news_context"]["title"]
-    assert bundle["prompt"] == "Kirby hugs an empty pot."
+#     assert "湯圓" in bundle["news_context"]["title"]
+#     assert bundle["prompt"] == "Kirby hugs an empty pot."
 
 
 def test_user_given_a_post_with_media_when_the_caption_is_written_then_the_words_follow_the_media_and_tie_back_to_the_source():

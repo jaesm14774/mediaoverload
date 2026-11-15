@@ -21,19 +21,6 @@ generation:
     # outlives every episode. 4 clips of up to 15 s keep the chained hand-offs few.
     default_duration_seconds: 60
     episodes_per_run: 1
-    # Each series draws one of these illustration styles (seeded by its series id)
-    # and keeps it, with its canvas, for every reference image and episode.
-    style_ids:
-      - storybook_watercolor
-      - soft_pastel_characters
-      - bold_cartoon_comic
-      - ghibli-style
-      - children-s-book-drawing
-      - collector-storybook-illustration
-      - whimsical-illustration
-      - watercolor-painting
-      - watercolor-anime-illustration
-      - playful-hand-drawn-illustration
     output_dir: output
     discord_review_timeout_seconds: 1800
     identity_references: []
@@ -69,8 +56,10 @@ generation:
           width: 512
           height: 512
     style:
+      # Styles come from the enabled list in configs/styles/<model>.yaml. A serial
+      # series draws one style and canvas once and keeps them for every episode.
       mode: random
-      catalog: krea2
+      model: krea2
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: flux3_image_klein_img2img
   # Keeps its own portrait page (576x1024) and ignores the selected run

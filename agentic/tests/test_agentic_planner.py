@@ -448,6 +448,28 @@ class AgenticPlannerTests(unittest.TestCase):
             ],
         )
 
+    def test_user_given_any_canvas_profile_when_a_sticker_pack_is_planned_then_every_sticker_is_rendered_on_a_square_canvas(self) -> None:
+        """User Given a run whose creative profile picked a portrait or a landscape canvas When a sticker pack is planned Then the stickers are rendered on a square canvas, so the character is never stretched or cropped to a poster shape."""
+        for width, height in ((512, 640), (640, 360), (512, 512)):
+            with self.subTest(canvas=f"{width}x{height}"):
+                goal = self.planner.create_goal(
+                    prompt="cute reaction pack for rainy ramen shop",
+                    media_type="sticker_pack",
+                    duration_seconds=30,
+                    style="sticker illustration",
+                    constraints={
+                        "character": "Kirby",
+                        "canvas_width": width,
+                        "canvas_height": height,
+                    },
+                )
+                plan = self.planner.build_plan(goal)
+                render_node = next(node for node in plan.nodes if node.node_id == "render-stickers")
+
+                side = render_node.inputs["width"]
+                self.assertEqual(side, render_node.inputs["height"])
+                self.assertAlmostEqual(side * side / (width * height), 1.0, delta=0.15)
+
     def test_sticker_pack_plan_respects_routed_workflow_constraint(self) -> None:
         goal = self.planner.create_goal(
             prompt="Kirby LINE sticker reactions with clean white outline",

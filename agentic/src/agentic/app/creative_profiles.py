@@ -10,6 +10,8 @@ from agentic.app.style_catalog import StyleLibrary
 
 ALLOWED_ASPECT_RATIOS = frozenset({"16:9", "4:5", "1:1"})
 _REQUIRED_STYLE_FIELDS = ("label", "prompt")
+_INLINE_STYLE_KEYS = frozenset({"profiles", "random_weights", "catalog", "ids"})
+DEFAULT_STYLE_MODEL = "krea2"
 _DEFAULT_CREATIVE_PROFILE = {
     "canvas": {
         "mode": "fixed",
@@ -18,20 +20,7 @@ _DEFAULT_CREATIVE_PROFILE = {
             "landscape_16_9": {"aspect_ratio": "16:9", "width": 640, "height": 360},
         },
     },
-    "style": {
-        "mode": "fixed",
-        "fixed": "bold_cartoon_comic",
-        "profiles": {
-            "bold_cartoon_comic": {
-                "label": "bold hand-inked cartoon and comic illustration",
-                "prompt": "a fully illustrated 2D scene with confident variable-weight dark ink contours and clean cel-shaded color blocks across the character, props, and background; no photographic or 3D surfaces",
-                "composition": "a full-frame illustrated environment with hand-drawn background details in the same 2D comic language; no blank space, sticker isolation, or cutout halo",
-                "palette": "saturated coral, cyan, and yellow with controlled contrast",
-                "motion": "clear anticipation, contact, and follow-through with stable linework",
-                "avoid": "blank white or cream backgrounds, isolated stickers, photorealistic textures, 3D rendering, fake lettering, random symbols, logos, and interface overlays",
-            },
-        },
-    },
+    "style": {"mode": "random", "model": DEFAULT_STYLE_MODEL},
 }
 
 
@@ -86,18 +75,22 @@ def _resolve_canvas(config: dict[str, Any], *, rng: random.Random | None) -> dic
 def _resolve_style(
     config: dict[str, Any], *, rng: random.Random | None, library: StyleLibrary | None,
 ) -> dict[str, Any]:
-    if "catalog" in config:
-        if config["catalog"] != "krea2":
-            raise ValueError("unknown style catalog; expected 'krea2'")
-        if "profiles" in config or "random_weights" in config:
-            raise ValueError("catalog styles use the saved selection instead of inline profiles or weights")
-        library = library or StyleLibrary()
-        profiles = (
-            library.profiles_for(config["ids"]) if "ids" in config else library.profiles()
+    """Draw from the model's style file; a character names the model, never the styles."""
+    if _INLINE_STYLE_KEYS & config.keys():
+        raise ValueError(
+            "styles are defined in configs/styles/<model>.yaml; remove profiles, random_weights, catalog and ids "
+            "from generation.creative_profile.style"
         )
-        config = {**config, "random_weights": dict.fromkeys(profiles, 1)}
-    else:
-        profiles = _mapping(config, "profiles", "generation.creative_profile.style.profiles")
+    model = str(config.get("model") or "").strip()
+    if not model:
+        raise ValueError(
+            "generation.creative_profile.style.model is required: the name of a file in configs/styles"
+        )
+    library = library or StyleLibrary(model)
+    if library.model != model:
+        raise ValueError(f"style library is for model '{library.model}', not '{model}'")
+    profiles = library.profiles()
+    config = {**config, "random_weights": dict.fromkeys(profiles, 1)}
     profile_id = _select_profile_id(config, profiles, "style", rng=rng)
     raw = _mapping(profiles, profile_id, f"style profile '{profile_id}'")
     missing = [field for field in _REQUIRED_STYLE_FIELDS if not str(raw.get(field) or "").strip()]

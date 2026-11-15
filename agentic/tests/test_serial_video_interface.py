@@ -27,7 +27,7 @@ def _write_config(
     *,
     episodes_per_run: int = 2,
     weighted_serial_only: bool = False,
-    style_ids: list[str] | None = ["storybook_watercolor"],
+    style_model: str = "krea2",
 ) -> Path:
     generation = {
         "output_dir": "output",
@@ -39,13 +39,12 @@ def _write_config(
                     "square_1_1": {"aspect_ratio": "1:1", "width": 512, "height": 512}
                 },
             },
-            "style": {"mode": "random", "catalog": "krea2"},
+            "style": {"mode": "random", "model": style_model},
         },
         "serial_video": {
             "enabled": True,
             "default_duration_seconds": 40,
             "episodes_per_run": episodes_per_run,
-            **({"style_ids": style_ids} if style_ids is not None else {}),
             "discord_review_timeout_seconds": 720,
             "identity_references": ["assets/kirby_identity.png"],
             "hashtags": ["#Kirby", "#連載"],
@@ -127,12 +126,12 @@ def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defau
     assert result["episodes_started"] == 2
 
 
-def test_user_given_a_character_config_without_style_ids_when_serial_video_starts_then_it_fails_before_any_episode_runs(tmp_path):
-    """User Given a serial character config that lists no illustration styles When serial_video is selected Then the run stops with an actionable error before the serial runner starts any review."""
-    config_path = _write_config(tmp_path / "kirby.yaml", style_ids=None)
+def test_user_given_a_character_config_naming_a_model_without_a_style_file_when_serial_video_starts_then_it_fails_before_any_episode_runs(tmp_path):
+    """User Given a serial character config whose model has no style file in configs/styles When serial_video is selected Then the run stops naming the model before the serial runner starts any review."""
+    config_path = _write_config(tmp_path / "kirby.yaml", style_model="no-such-model")
     serial = SerialRunnerBoundary()
 
-    with pytest.raises(ValueError, match="style_ids"):
+    with pytest.raises(ValueError, match="no-such-model"):
         run_media_interface.main(
             ["--config", str(config_path), "--generation-type", "serial_video"],
             serial_runner=serial,

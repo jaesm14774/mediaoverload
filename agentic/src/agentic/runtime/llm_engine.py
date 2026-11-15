@@ -80,6 +80,7 @@ class LLMPromptEngine:
         character: str,
         style: str,
         media_type: str,
+        subject_context: dict[str, Any] | None = None,
         news_context: dict[str, Any] | None = None,
         news_grounding_required: bool = False,
     ) -> dict[str, Any]:
@@ -88,6 +89,7 @@ class LLMPromptEngine:
             character=character,
             style=style,
             media_type=media_type,
+            subject_context=subject_context,
             news_context=news_context,
             news_grounding_required=news_grounding_required,
         )

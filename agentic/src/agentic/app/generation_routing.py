@@ -28,7 +28,7 @@ from agentic.runtime.contracts import (
     normalize_video_duration,
 )
 from agentic.runtime.news_grounding import (
-    UnsuitableNewsError,
+    # UnsuitableNewsError,
     is_usable_news_selection,
 )
 from agentic.tools.context_services import NewsContextService
@@ -989,6 +989,7 @@ def _resolve_autonomous_prompt(
     *,
     prompt: str,
     character_name: str,
+    subject_context: dict[str, Any] | None = None,
     style: str,
     media_type: str,
     generation: dict[str, Any],
@@ -1073,23 +1074,24 @@ def _resolve_autonomous_prompt(
                 "source_anchors": [],
             }
 
-        try:
-            bundle = LLMPromptEngine(
-                mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
-                recorder=recorder,
-            ).generate_autonomous_scene_prompt(
-                character=character_name,
-                style=style,
-                media_type=media_type,
-                news_context=news_context,
-                news_grounding_required=news_grounding_required,
-            )
-            break
-        except UnsuitableNewsError:
-            # Another article may hold a gentler happening; an article the
-            # caller supplied, or a last failed attempt, is an error.
-            if not picks_own_news or attempt == NEWS_RESELECT_ATTEMPTS - 1:
-                raise
+        # try:
+        bundle = LLMPromptEngine(
+            mode=os.environ.get("AGENTIC_LLM_MODE", "llm"),
+            recorder=recorder,
+        ).generate_autonomous_scene_prompt(
+            character=character_name,
+            subject_context=subject_context,
+            style=style,
+            media_type=media_type,
+            news_context=news_context,
+            news_grounding_required=news_grounding_required,
+        )
+        break
+        # except UnsuitableNewsError:
+        #     # Another article may hold a gentler happening; an article the
+        #     # caller supplied, or a last failed attempt, is an error.
+        #     if not picks_own_news or attempt == NEWS_RESELECT_ATTEMPTS - 1:
+        #         raise
     bundle.setdefault("prompt_mode", "template")
     bundle.setdefault("source", "autonomous_fallback")
     bundle["news_context"] = news_context

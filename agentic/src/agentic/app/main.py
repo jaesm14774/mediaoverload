@@ -1040,6 +1040,7 @@ def _resolve_serial_character_reference_paths(
     look = serial_series_look(
         dict(load_character_config(production_config).get("generation") or {}),
         series_id,
+        output_root=output_root,
     )
     style = look["style"]
     reference_prompt = build_serial_character_reference_prompt(
@@ -2013,7 +2014,7 @@ def _prepare_missing_auto_next_idea(
 
 
 def _apply_series_look(
-    args: argparse.Namespace, serial_context: dict[str, object]
+    args: argparse.Namespace, serial_context: dict[str, object], output_root: Path
 ) -> None:
     """Give every episode of a series the canvas and illustration style it was born with."""
     from agentic.app.character_config import load_character_config
@@ -2027,6 +2028,7 @@ def _apply_series_look(
     look = serial_series_look(
         dict(load_character_config(config_path).get("generation") or {}),
         str(serial_context["series_id"]),
+        output_root=output_root,
     )
     args.style = look["style"]["label"]
     args.width = int(look["canvas"]["width"])
@@ -2249,7 +2251,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object] | None:
         input_roots=[Path(root) for root in args.edit_input_roots or []],
     )
     if serial_context is not None:
-        _apply_series_look(args, serial_context)
+        _apply_series_look(args, serial_context, output_root or project_root / "output")
     _prepare_missing_auto_next_idea(args, serial_context, serial_store)
 
     _allow_serial_reference_evidence(

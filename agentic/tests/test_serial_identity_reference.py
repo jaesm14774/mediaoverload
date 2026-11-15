@@ -49,7 +49,7 @@ def test_user_given_an_identity_reference_request_when_prompts_are_expanded_then
     assert manager.text_model.requests == []
 
 
-def test_user_given_a_series_look_when_identity_references_are_requested_then_the_run_uses_that_style_and_canvas():
+def test_user_given_a_series_look_when_identity_references_are_requested_then_the_run_uses_that_style_and_canvas(tmp_path):
     """User Given a series with a locked look When its identity references are requested Then the run's style and canvas are exactly the series look, not a fresh random draw."""
     base = make_character_workflow_request(
         REPO_ROOT,
@@ -60,7 +60,7 @@ def test_user_given_a_series_look_when_identity_references_are_requested_then_th
     import yaml
 
     generation = yaml.safe_load(KIRBY_CONFIG.read_text(encoding="utf-8"))["generation"]
-    look = serial_series_look(generation, "auto-kirby-series-1")
+    look = serial_series_look(generation, "auto-kirby-series-1", output_root=tmp_path)
     request = dataclasses.replace(
         base,
         generation=dataclasses.replace(

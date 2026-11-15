@@ -28,7 +28,7 @@ Python 依賴只在 [agentic/pyproject.toml](agentic/pyproject.toml) 宣告；�
 
 ## 使用入口
 
-風格勾選頁：執行 `python scripts/style_picker.py`，開啟 <http://127.0.0.1:8766>。提供 288 種匯入風格與 6 種原有角色風格；取消不要的項目後按「儲存並套用」，下一次 random 生成只會使用保留的風格。詳見 [風格選擇操作](docs/style_picker.md)。
+風格勾選頁：執行 `python scripts/style_picker.py`，開啟 <http://127.0.0.1:8766>。提供 288 種匯入風格與 6 種原有角色風格；取消不要的項目後按「儲存並套用」，下一次 random 生成只會使用保留的風格。風格定義集中在 `configs/styles/catalog.json`，每個模型用 `configs/styles/<model>.yaml` 篩出自己擅長的風格池（`enabled` 清單供單圖、影片與連載系列隨機抽取；連載系列抽一次後存檔固定）；角色 YAML 只用 `generation.creative_profile.style.model` 指定模型，不再列風格。新增模型只要多一個 `<model>.yaml`。詳見 [風格選擇操作](docs/style_picker.md)。
 
 ```powershell
 # 查看角色介面所有選項

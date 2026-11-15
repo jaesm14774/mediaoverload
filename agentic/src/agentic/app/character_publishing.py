@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from agentic.app.character_config import MEDIA_EXTENSIONS, VIDEO_EXTENSIONS
-from agentic.runtime.series_carousel import SERIES_SLOT
 
 
 def collect_media_paths_from_run_result(run_result: dict[str, Any]) -> list[str]:
@@ -207,13 +206,18 @@ def _resolve_publish_prompt(
             return "\n".join(lines), "motion_comic"
         series = node_outputs.get("series-prompts")
         if isinstance(series, dict):
-            cast = ", ".join(item["character"] for item in series["prompt_sets"])
+            pages = "\n".join(
+                f"Page {index}: {item['moment']} (sits at the {item['placement'].replace('-', ' ')} of the frame)"
+                for index, item in enumerate(series["prompt_sets"], start=1)
+            )
             return (
                 "\n".join(
                     [
-                        f"Series: one fixed scene shown once for each of these characters, in page order: {cast}",
-                        f"Scene: {series['template'].replace(SERIES_SLOT, 'the character')}",
-                        "Write publish copy about the whole set: every page is the same scene with a different character.",
+                        "Series: one shared world, one page per character, each page its own moment.",
+                        f"World: {series['scene']}",
+                        pages,
+                        "Write publish copy about the whole set: say what the pages show together, and only claim "
+                        "what these pages and the attached images show.",
                     ]
                 ),
                 "series_carousel",

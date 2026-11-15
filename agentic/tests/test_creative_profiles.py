@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import unittest
 from tempfile import TemporaryDirectory
@@ -19,6 +20,18 @@ from agentic.runtime.prompting import (
     visual_style_profile_direction,
 )
 from character_workflow_helpers import make_character_workflow_request
+
+
+def _library(directory: str) -> StyleLibrary:
+    root = Path(directory)
+    (root / "catalog.json").write_text(json.dumps({"styles": [
+        {"id": name, "name": name, "descriptor": f"{name} visual texture"}
+        for name in ("paint", "graphic", "storybook_watercolor")
+    ]}), encoding="utf-8")
+    (root / "krea2.yaml").write_text(
+        yaml.safe_dump({"enabled": ["paint", "graphic", "storybook_watercolor"]}), encoding="utf-8",
+    )
+    return StyleLibrary("krea2", root)
 
 
 class CreativeProfileTests(unittest.TestCase):
@@ -116,18 +129,10 @@ class CreativeProfileTests(unittest.TestCase):
                         "portrait_4_5": {"aspect_ratio": "4:5", "width": 512, "height": 640},
                     },
                 },
-                "style": {
-                    "mode": "fixed",
-                    "fixed": "storybook_watercolor",
-                    "profiles": {
-                        "storybook_watercolor": {
-                            "label": "storybook watercolor",
-                            "prompt": "soft watercolor paper texture and hand-painted depth",
-                        },
-                    },
-                },
+                "style": {"mode": "fixed", "fixed": "storybook_watercolor", "model": "krea2"},
             },
             rng=random.Random(7),
+            style_library=_library(self.enterContext(TemporaryDirectory())),
         )
 
         self.assertEqual(profile["canvas"], {
@@ -149,15 +154,12 @@ class CreativeProfileTests(unittest.TestCase):
                     "square_1_1": {"aspect_ratio": "1:1", "width": 512, "height": 512},
                 },
             },
-            "style": {
-                "mode": "random",
-                "random_weights": {"a": 1, "b": 1},
-                "profiles": {"a": {"label": "a", "prompt": "a"}, "b": {"label": "b", "prompt": "b"}},
-            },
+            "style": {"mode": "random", "model": "krea2"},
         }
+        library = _library(self.enterContext(TemporaryDirectory()))
 
-        first = resolve_creative_profile(config, rng=random.Random(11))
-        second = resolve_creative_profile(config, rng=random.Random(11))
+        first = resolve_creative_profile(config, rng=random.Random(11), style_library=library)
+        second = resolve_creative_profile(config, rng=random.Random(11), style_library=library)
 
         self.assertEqual(first, second)
         self.assertIn(first["canvas"]["aspect_ratio"], {"16:9", "4:5", "1:1"})
@@ -176,17 +178,14 @@ class CreativeProfileTests(unittest.TestCase):
                     "square": {"aspect_ratio": "1:1", "width": 512, "height": 512},
                 },
             },
-            "style": {
-                "mode": "random",
-                "random_weights": {"paint": 1, "graphic": 1},
-                "profiles": {
-                    "paint": {"label": "paint", "prompt": "paint"},
-                    "graphic": {"label": "graphic", "prompt": "graphic"},
-                },
-            },
+            "style": {"mode": "random", "model": "krea2"},
         }
+        library = _library(self.enterContext(TemporaryDirectory()))
 
-        profiles = [resolve_creative_profile(config, rng=random.Random(seed)) for seed in range(12)]
+        profiles = [
+            resolve_creative_profile(config, rng=random.Random(seed), style_library=library)
+            for seed in range(12)
+        ]
 
         self.assertGreater(len({profile["canvas"]["id"] for profile in profiles}), 1)
         self.assertGreater(len({profile["style"]["id"] for profile in profiles}), 1)

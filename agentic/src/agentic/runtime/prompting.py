@@ -11,9 +11,6 @@ from agentic.video_directing import (
 )
 
 
-_ISOLATED_STICKER_TYPES = frozenset({"sticker_pack", "animated_sticker"})
-
-
 SINGLE_SUBJECT_MEDIA_TYPES = frozenset({"sticker_pack", "animated_sticker", "game_sprite"})
 
 
@@ -57,7 +54,7 @@ def include_role_description(prompt: object, goal: GoalRequest) -> str:
     prompt_text = str(prompt or "").strip()
     role_description = selected_role_description(goal)
     visual_identity = "; ".join(
-        _visual_identity_phrase(identity)
+        visual_identity_phrase(identity)
         for identity in role_description.split("; ")
         if identity.strip()
     )
@@ -66,7 +63,7 @@ def include_role_description(prompt: object, goal: GoalRequest) -> str:
     return "; ".join(part for part in (visual_identity, prompt_text) if part)
 
 
-def _visual_identity_phrase(identity: str) -> str:
+def visual_identity_phrase(identity: str) -> str:
     name, separator, description = identity.partition(": ")
     if not separator:
         return identity.strip()
@@ -114,7 +111,7 @@ def include_image_prompt_quality_clause(
     image_generation: bool = False,
 ) -> str:
     prompt_text = str(prompt or "").strip()
-    if goal.media_type in _ISOLATED_STICKER_TYPES or goal.media_type == "game_sprite":
+    if goal.media_type in SINGLE_SUBJECT_MEDIA_TYPES:
         return prompt_text
     if goal.media_type != "image" and not image_generation:
         return prompt_text
@@ -161,9 +158,9 @@ STICKER_SYSTEM_PROMPT = "Follow the user's sticker brief and selected character 
 
 
 DEFAULT_GAME_SPRITE_VISUAL_CONTRACT = (
-    "Crisp 2D pixel-art game asset: hard pixel clusters, a limited readable palette, clean silhouette edges, "
-    "deliberate pose exaggeration, and nearest-neighbor-friendly shapes; never painterly, photoreal, tabletop, "
-    "soft 3D, or cinematic concept art."
+    "Clean full-colour 2D game character in the selected style: its medium, line, and light stay on the "
+    "character, with a clear readable silhouette, a crisp clean edge against the backdrop, and deliberate "
+    "pose exaggeration."
 )
 
 
@@ -179,9 +176,9 @@ DYNAMIC_SPRITE_SYSTEM_PROMPT = (
     "theme's own action done at the character's size, never an attack, weapon swing, energy blast, or "
     "explosion. A long theme must be reduced to that one action and at most one prop; drop every "
     "other element, because the sprite is read at thumbnail size. Never mention frames, atlas, grid, "
-    "fps, seconds, loops, or the rendering pipeline. The configured game-sprite visual contract is "
-    "mandatory; selected styles may only guide palette and materials and cannot replace its game-art "
-    "rendering. Return image_prompt, video_prompt, and exactly five ordered beats."
+    "fps, seconds, loops, or the rendering pipeline. The selected style sets the "
+    "character's rendering; the configured game-sprite visual contract only requires a readable "
+    "silhouette against the backdrop. Return image_prompt, video_prompt, and exactly five ordered beats."
 )
 
 
@@ -440,7 +437,7 @@ def compile_dynamic_sprite_image_prompt(
     parts = [
         subject_contract,
         contract_clause,
-        f"Character and theme (palette and materials only): {prompt.rstrip('. ')}." if prompt else "",
+        f"Character and theme: {prompt.rstrip('. ')}." if prompt else "",
         closing_reminder,
     ]
     return " ".join(part for part in parts if part)
@@ -458,11 +455,11 @@ def compile_dynamic_sprite_video_prompt(
         "every phase; no cuts, no new characters, no camera drift, no idle holds, and no energy "
         "effects, blasts, or explosions. The character stays at the same position in the frame, its "
         "face stays visible, and nothing leaves the frame. The flat pure green backdrop stays solid and unchanged for the whole clip, with no "
-        "green in the character or its prop."
+        "bokeh, rain, particles, light spots, or shadows on it, and no green in the character or its prop."
     )
     configured_contract = str(visual_contract or "").strip()
     art_contract = (
-        f"Rendering takes priority over style references: {configured_contract}"
+        f"Rendering: {configured_contract}"
         if configured_contract
         else ""
     )
@@ -496,7 +493,7 @@ def build_dynamic_sprite_motion_fallback(goal: GoalRequest) -> dict[str, Any]:
     beats = _dynamic_sprite_fallback_beats(request)
     creative_prompt = (
         f"{request}; character identity and theme: {character}; style references "
-        f"(compatible palette, lighting, and materials only): {character_style}"
+        f"(rendering, palette, lighting, and materials): {character_style}"
     )
     return {
         "motion_name": "llm_defined_motion",
@@ -611,15 +608,14 @@ def style_profile_direction(
     goal: GoalRequest, *, include_motion: bool | None = None
 ) -> str:
     profile = goal.constraints.get("visual_style_profile")
-    isolated_subject = goal.media_type in _ISOLATED_STICKER_TYPES
+    isolated_subject = goal.media_type in SINGLE_SUBJECT_MEDIA_TYPES
     if isolated_subject and isinstance(profile, dict):
         # Scene composition and unstructured exclusions can prohibit the very
         # isolation that sticker renderers require.
-        profile = {key: profile.get(key) for key in ("prompt", "palette", "motion")}
-    if goal.media_type == "game_sprite" and isinstance(profile, dict):
-        # A sprite keeps its own pixel-art rendering; a catalog style appended
-        # last would override it, so the style lends colours only.
-        profile = {"palette": profile.get("palette")}
+        # A sprite clip keeps a fixed camera and a flat backdrop, so the style's
+        # scene motion (rain, drifting light) is left out for it.
+        kept = ("prompt", "palette") if goal.media_type == "game_sprite" else ("prompt", "palette", "motion")
+        profile = {key: profile.get(key) for key in kept}
     if include_motion is None:
         include_motion = goal.media_type != "image"
     direction = visual_style_profile_direction(
@@ -629,7 +625,7 @@ def style_profile_direction(
     if isolated_subject and direction:
         return (
             "Apply the selected visual style to the subject only. "
-            "Required sticker background requirements take priority. "
+            "Required subject background requirements take priority. "
             "Ignore scene and background instructions in the style descriptor; do not add scenery or a floor. "
             + direction
         )
@@ -647,10 +643,8 @@ def include_visual_style_profile(
     )
     if not direction:
         return prompt_text
-    if goal.media_type in _ISOLATED_STICKER_TYPES:
+    if goal.media_type in SINGLE_SUBJECT_MEDIA_TYPES:
         treatment_label = "Selected subject rendering rules: "
-    elif goal.media_type == "game_sprite":
-        treatment_label = "Selected colour palette, colours only: "
     else:
         treatment_label = (
             "Selected visual style is a rendering treatment; preserve the requested cast, action, setting, and framing. "
@@ -689,7 +683,7 @@ def visual_style_profile_direction(profile: object, *, include_motion: bool = Tr
 
 
 def style_profile_avoidance(goal: GoalRequest) -> str:
-    if goal.media_type in _ISOLATED_STICKER_TYPES or goal.media_type == "game_sprite":
+    if goal.media_type in SINGLE_SUBJECT_MEDIA_TYPES:
         return ""
     profile = goal.constraints.get("visual_style_profile")
     if not isinstance(profile, dict):

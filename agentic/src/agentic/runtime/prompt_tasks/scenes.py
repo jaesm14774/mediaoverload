@@ -22,6 +22,7 @@ from agentic.video_directing import (
 from agentic.runtime.prompting import (
     IMAGE_PROMPT_CONTRACT,
     LONG_VIDEO_SYSTEM_PROMPT,
+    SINGLE_SUBJECT_MEDIA_TYPES,
     build_autonomous_scene_prompt,
     build_goal_brief,
     include_image_prompt_quality_clause,
@@ -35,7 +36,17 @@ from agentic.runtime.prompting import (
     validate_story_segments,
 )
 from agentic.runtime.llm_client import PromptClient
-from agentic.runtime.news_grounding import UnsuitableNewsError, is_usable_news_selection
+from agentic.runtime.pair_interaction import pair_interaction_craft, required_pair_names
+# from agentic.runtime.news_grounding import UnsuitableNewsError, is_usable_news_selection
+from agentic.runtime.news_grounding import is_usable_news_selection
+
+
+def _goal_pair_craft(goal: GoalRequest) -> str:
+    """The pair craft for a goal, never for media that draws a single isolated subject."""
+
+    if goal.media_type in SINGLE_SUBJECT_MEDIA_TYPES:
+        return ""
+    return pair_interaction_craft(goal.constraints.get("subject_context"))
 
 
 def _goal_subject_instruction(goal: GoalRequest) -> str:
@@ -73,7 +84,8 @@ def _goal_subject_instruction(goal: GoalRequest) -> str:
             "Selected cast (exactly these required subjects): "
             + "; ".join(cast)
             + ". Keep both in the same readable frame, show their physical interaction, preserve their roles and identities, "
-            "and add no other characters."
+            "and add no other characters. "
+            + _goal_pair_craft(goal)
         )
 
     selected_names = {
@@ -153,45 +165,93 @@ IMAGE_VARIANT_RESPONSE_CONTRACT = (
     "Give each item a short unique label and a presentation description that names its compositional approach."
 )
 
-NEWS_PREMISE_CONTRACT = (
-    "This scene comes from the article, so a reader of the article must recognise it. From the article take one small, "
-    "concrete, everyday happening that it actually reports, together with the object or place at its centre. The "
-    "character lives that happening itself, in place of the people in the article, with one feeling that reads from its "
-    "face and whole body. Put the exact short source excerpt and its matching visual_mapping into source_anchors. The "
-    "source_excerpt is copied character for character from the article in the article's own language and is never "
-    "translated or paraphrased; it is the one field the English-only rule does not apply to. Each "
-    "visual_mapping is a full clause with the character as its subject and the happening's own action as its verb, and "
-    "include every visual_mapping verbatim in prompt. Keep what happened true to the article and add no fact it does not "
-    "state. The picture shows the character and that object or place only: the reported people, officials, "
-    "organisations, flags, logos, slogans, numbers, and writing stay out of it. Style controls medium, surface, palette, "
-    "and composition only. When the article is about harm, blame, punishment, loss, or a contest between sides, a cute "
-    "character has no gentle place in it: return suitable as false with an empty prompt and no source_anchors. "
-    "Otherwise return suitable as true."
-)
+def _news_premise_contract(*, pair: bool) -> str:
+    cast = "the two characters" if pair else "the character"
+    return (
+        "This scene comes from the article, so a reader of the article must recognise it. From the article take one small, "
+        "concrete, everyday happening that it actually reports, together with the object or place at its centre. "
+        + (
+            "The two characters live that happening together, in place of the people in the article, each with a feeling "
+            "that reads from its face and whole body, and each does something of its own in it. "
+            if pair
+            else "The character lives that happening itself, in place of the people in the article, with one feeling that reads from its "
+            "face and whole body. "
+        )
+        + "Put the exact short source excerpt and its matching visual_mapping into source_anchors. The "
+        "source_excerpt is copied character for character from the article in the article's own language and is never "
+        "translated or paraphrased; it is the one field the English-only rule does not apply to. Each "
+        f"visual_mapping is a full clause with {cast} as its subject and the happening's own action as its verb, and "
+        "include every visual_mapping verbatim in prompt. Keep what happened true to the article and add no fact it does not "
+        f"state. The picture shows {cast} and that object or place only: the reported people, officials, "
+        "organisations, flags, logos, slogans, numbers, and writing stay out of it. Style controls medium, surface, palette, "
+        "and composition only."
+        # Suitability gate disabled; re-enable together with the schema/validate/raise/reselect blocks below.
+        # "and composition only. When the article is about harm, blame, punishment, loss, or a contest between sides, "
+        # f"{'cute characters have' if pair else 'a cute character has'} no gentle place in it: return suitable as false with an empty prompt and no source_anchors. "
+        # "Otherwise return suitable as true."
+    )
 
-IMAGE_MOMENT_SET_CONTRACT = (
-    "Return exactly the requested number of image prompts. Together they are one carousel that tells, in time order, how "
-    "the character goes through the one happening the goal scene takes from the source, with the same object or place in "
-    "every picture, so every picture is still about what the source reports. Spread the prompts along that time line "
-    "from before the happening, through its start and its peak, to what it leaves behind and how the character ends up. "
-    "Each prompt is one frozen beat, and each beat changes what the character's whole body is doing and what it feels: "
-    "the pose, the silhouette, and the face in one prompt must not fit any other prompt. Standing and holding the object "
-    "is never a beat. Fill two fields for each item: feeling, one or two words that no other item shares, and pose, ten "
-    "to eighteen words on what the whole body is doing, written so that the silhouettes of any two poses filled in solid "
-    "black could be told apart. Use the object's own physical properties, such as its size against the character, its "
-    "shape, softness, openings, weight, and temperature, to find what the body does with it at each beat. Each feeling "
-    "reads from the silhouette and face alone at thumbnail size. Write each prompt in this order: the pose field word "
-    "for word, then the face, then the object, then one sentence for the world, then one sentence naming the selected "
-    "medium with two or three observable surface cues. The world sentence puts the character in the same setting in "
-    "every prompt, copied from the goal scene and never dropped, with one light source and a cast shadow under the "
-    "character, and states that the character is small, about one quarter of the frame height, placed off-center, so "
-    "the world is the main subject with open space around it and the silhouette and face still read. The picture holds "
-    "exactly the named characters, once each, and that one object; it has no writing, numbers, labels, or signs, and no "
-    "other prop, creature, or person. Nothing in it reports or implies anything about a real person. Name every "
-    "required subject by its exact name in every prompt without describing its looks, because the renderer adds the "
-    "appearance once, and keep the same medium and style in all of them. Give each item a short unique label and a "
-    "presentation that names its beat, feeling, and pose in a few words."
-)
+
+NEWS_PREMISE_CONTRACT = _news_premise_contract(pair=False)
+NEWS_PAIR_PREMISE_CONTRACT = _news_premise_contract(pair=True)
+
+def _image_moment_set_contract(*, pair: bool) -> str:
+    """One carousel of frozen beats; a pair's beats are the two answering each other."""
+
+    cast = "the two characters" if pair else "the character"
+    return (
+        "Return exactly the requested number of image prompts. Together they are one carousel that tells, in time order, how "
+        f"{cast} {'go' if pair else 'goes'} through the one happening the goal scene takes from the source, "
+        f"{'together, ' if pair else ''}with the same object or place in "
+        "every picture, so every picture is still about what the source reports. Spread the prompts along that time line "
+        "from before the happening, through its start and its peak, to what it leaves behind and how "
+        f"{'the two end up with each other' if pair else 'the character ends up'}. "
+        + (
+            "Each prompt is one frozen beat of the two answering each other, and each beat changes what both bodies are doing "
+            "to and with each other and what each one feels: "
+            if pair
+            else "Each prompt is one frozen beat, and each beat changes what the character's whole body is doing and what it feels: "
+        )
+        + "the pose, the silhouette, and the face in one prompt must not fit any other prompt. "
+        + (
+            "Standing side by side, or both only holding or looking at the object, is never a beat. "
+            if pair
+            else "Standing and holding the object is never a beat. "
+        )
+        + "Fill two fields for each item: feeling, one or two words that no other item shares, and pose, "
+        + (
+            "fourteen to twenty-six words on what each of the two bodies is doing and where they touch or pass the object "
+            "between them, written so that the joined silhouettes of any two poses filled in solid black could be told apart. "
+            "Use the object's own physical properties, such as its size against the characters, its shape, softness, "
+            "openings, weight, and temperature, to find what each body does with it at each beat and how one move hands the "
+            "object or the moment to the other. "
+            if pair
+            else "ten to eighteen words on what the whole body is doing, written so that the silhouettes of any two poses filled in solid "
+            "black could be told apart. Use the object's own physical properties, such as its size against the character, its "
+            "shape, softness, openings, weight, and temperature, to find what the body does with it at each beat. "
+        )
+        + "Each feeling reads from the silhouette and face alone at thumbnail size. Write each prompt in this order: the pose field word "
+        f"for word, then the {'faces' if pair else 'face'}, then the object, then one sentence for the world, then one sentence naming the selected "
+        "medium with two or three observable surface cues. The world sentence puts "
+        f"{cast} in the same setting in every prompt, copied from the goal scene and never dropped, with one light source and a cast shadow under "
+        f"{'each character' if pair else 'the character'}, and states that "
+        + (
+            "the two characters together are small, about one third of the frame height, placed off-center"
+            if pair
+            else "the character is small, about one quarter of the frame height, placed off-center"
+        )
+        + ", so the world is the main subject with open space around it and the silhouette and face still read. The picture holds "
+        + ("exactly the two named characters, one figure for each of the two cast slots, " if pair else "exactly the named characters, once each, ")
+        + "and that one object; it has no writing, numbers, labels, or signs, and no "
+        "other prop, creature, or person. Nothing in it reports or implies anything about a real person. Name every "
+        "required subject by its exact name in every prompt without describing its looks, because the renderer adds the "
+        "appearance once, and keep the same medium and style in all of them. Give each item a short unique label and a "
+        "presentation that names its beat, feeling, and pose in a few words."
+    )
+
+
+IMAGE_MOMENT_SET_CONTRACT = _image_moment_set_contract(pair=False)
+IMAGE_PAIR_MOMENT_SET_CONTRACT = _image_moment_set_contract(pair=True)
 
 H3_SEGMENT_RESPONSE_CONTRACT = (
     "Return a concise H3 scene description in prompt, separate from the two audio fields. "
@@ -473,9 +533,15 @@ def generate_autonomous_scene_prompt(
     character: str,
     style: str,
     media_type: str,
+    subject_context: dict[str, Any] | None = None,
     news_context: dict[str, Any] | None = None,
     news_grounding_required: bool = False,
 ) -> dict[str, Any]:
+    pair = (
+        required_pair_names(subject_context)
+        if media_type not in SINGLE_SUBJECT_MEDIA_TYPES
+        else None
+    )
     normalized_news_context = dict(news_context or {})
     news_grounding_required = bool(news_grounding_required)
     fallback = build_autonomous_scene_prompt(
@@ -489,7 +555,12 @@ def generate_autonomous_scene_prompt(
         manager = client.require_manager()
         user_prompt = "\n".join(
             [
-                f"Character: {character}",
+                (
+                    f"Characters (both required, in one frame): {' and '.join(pair)}. "
+                    f"{pair_interaction_craft(subject_context)}"
+                    if pair
+                    else f"Character: {character}"
+                ),
                 f"Style: {style}",
                 f"Media type: {media_type}",
                 "News context JSON: "
@@ -511,7 +582,7 @@ def generate_autonomous_scene_prompt(
                     else ""
                 ),
                 (
-                    NEWS_PREMISE_CONTRACT
+                    (NEWS_PAIR_PREMISE_CONTRACT if pair else NEWS_PREMISE_CONTRACT)
                     if news_grounding_required
                     else (
                         "The supplied article is optional creative inspiration. Draw on one or two concrete people, things, places, or events it names when shaping the scene, and make their visual relationship to the scene recognizable. A character may act as an imaginative stand-in, but keep reported facts distinct from invented action. Do not add unsupported claims about what a real person did."
@@ -524,7 +595,8 @@ def generate_autonomous_scene_prompt(
                 ),
                 "Return the requested JSON directly using the supplied information.",
                 (
-                    "Return JSON with keys: suitable, prompt, creative_seed, source, source_anchors. Each source_anchors item has exactly source_excerpt and visual_mapping."
+                    # "Return JSON with keys: suitable, prompt, creative_seed, source, source_anchors. Each source_anchors item has exactly source_excerpt and visual_mapping."
+                    "Return JSON with keys: prompt, creative_seed, source, source_anchors. Each source_anchors item has exactly source_excerpt and visual_mapping."
                     if news_grounding_required
                     else "Return JSON with keys: prompt, creative_seed, source."
                 ),
@@ -554,12 +626,12 @@ def generate_autonomous_scene_prompt(
                 },
             }
             required_fields.append("source_anchors")
-            schema_properties["suitable"] = {"type": "boolean"}
-            required_fields.append("suitable")
+            # schema_properties["suitable"] = {"type": "boolean"}
+            # required_fields.append("suitable")
         if news_grounding_required:
             def validate_response(payload: Any) -> dict[str, Any]:
-                if isinstance(payload, dict) and payload.get("suitable") is False:
-                    return payload
+                # if isinstance(payload, dict) and payload.get("suitable") is False:
+                #     return payload
                 return validate_news_grounded_scene_response(
                     payload, normalized_news_context
                 )
@@ -578,10 +650,10 @@ def generate_autonomous_scene_prompt(
             },
             validate_response=validate_response,
         )
-        if news_grounding_required and payload.get("suitable") is False:
-            raise UnsuitableNewsError(
-                f"No gentle everyday happening in: {normalized_news_context.get('title', '')}"
-            )
+        # if news_grounding_required and payload.get("suitable") is False:
+        #     raise UnsuitableNewsError(
+        #         f"No gentle everyday happening in: {normalized_news_context.get('title', '')}"
+        #     )
         result = {
             "prompt": str(payload.get("prompt") or fallback["prompt"]),
             "creative_seed": str(
@@ -594,8 +666,8 @@ def generate_autonomous_scene_prompt(
         if news_grounding_required:
             result["source_anchors"] = list(payload["source_anchors"])
         return client.mark_payload(result)
-    except UnsuitableNewsError:
-        raise
+    # except UnsuitableNewsError:
+    #     raise
     except Exception as exc:
         if news_grounding_required:
             raise client.generation_error("autonomous_scene_prompt", exc) from exc
@@ -720,7 +792,11 @@ def expand_goal(
         manager = client.require_manager()
         if image_prompt_request:
             response_contract = (
-                IMAGE_MOMENT_SET_CONTRACT
+                (
+                    IMAGE_PAIR_MOMENT_SET_CONTRACT
+                    if _goal_pair_craft(goal)
+                    else IMAGE_MOMENT_SET_CONTRACT
+                )
                 if moment_set
                 else IMAGE_VARIANT_RESPONSE_CONTRACT
             )
