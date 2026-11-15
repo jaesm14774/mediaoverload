@@ -457,7 +457,6 @@ def build_series_carousel(context: PlanningContext, goal: GoalRequest) -> Execut
                 "width": width,
                 "height": height,
                 "images_per_prompt": 1,
-                "shared_seed": True,
                 "suffix": "series_carousel",
             },
             depends_on=["series-prompts", "image-asset-check"],
@@ -486,5 +485,5 @@ def build_series_carousel(context: PlanningContext, goal: GoalRequest) -> Execut
         workflow_name="series_carousel_v1",
         nodes=nodes,
         metadata=metadata,
-        description=f"Series carousel: one fixed scene, one page per character, for goal '{goal.prompt}'",
+        description=f"Series carousel: one shared world, one page per character, each its own moment, for goal '{goal.prompt}'",
     )

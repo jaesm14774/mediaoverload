@@ -271,9 +271,9 @@ finally:
 
 ## 系列畫風鎖定
 
-每個系列由系列 ID 決定一組畫布與插畫風格，之後所有角色參考圖和每一集都用同一組，不再每次隨機重抽。風格只從 `generation.serial_video.style_ids` 的插畫風格池抽取（不含照片合成風格）；畫布取自 `generation.creative_profile.canvas` 的設定。因為抽取以系列 ID 為種子，不需要額外存檔，也不需要資料庫欄位。代價：若之後增刪或重排 `style_ids`、或改畫布權重，既有系列的抽取結果可能改變，與已生成的參考圖不一致；已有系列在 YAML 改動後應視為重新開始。串連載命令列的 `--style`、`--width`、`--height` 在連載路徑上會被系列畫風覆蓋。直接執行 `python -m agentic.app.main` 時，未傳 `--duration-seconds` 的預設仍是 30 秒；60 秒預設只適用於經角色 YAML 啟動的流程。
+每個系列第一次需要畫布與插畫風格時，由系列 ID 作種子，從角色 `generation.creative_profile.style.model` 指定模型的 `configs/styles/<model>.yaml` 的 `enabled` 風格抽一個（畫布取自 `generation.creative_profile.canvas`），並把結果存成該系列資料夾的 `look.json`。之後所有角色參考圖和每一集都讀這份存檔，不再重抽；之後在挑選頁增刪風格或改畫布權重，都不影響已有系列。串連載命令列的 `--style`、`--width`、`--height` 在連載路徑上會被系列畫風覆蓋。直接執行 `python -m agentic.app.main` 時，未傳 `--duration-seconds` 的預設仍是 30 秒；60 秒預設只適用於經角色 YAML 啟動的流程。
 
-設定缺少 `style_ids`、畫布，或列出不存在的風格 ID 時，載入角色 YAML 就會報錯，不會等到故事與角色卡審核之後。
+模型沒有對應的 `configs/styles/<model>.yaml`、`enabled` 列出不存在的風格 ID、或缺少畫布時，啟動連載的設定檢查就會報錯，不會等到故事與角色卡審核之後。
 
 同集內的跑位仍未解決。2026-11-13 在本機 ComfyUI 用 Klein 在每段之間重新對齊尾幀並實測 I2VA：整張重畫成水彩能穩住單段內的畫風，但把夜晚改成白天，接縫會跳；改成只修角色，接縫不跳，卻會把背對鏡頭、抱著信的 Kirby 改成正面並弄丟信；降低 denoise 到 0.4 則修不動。再試過把系列角色參考圖當第二張參考圖一起餵給 Klein：在夜晚賽璐珞、Kirby 較小的尾幀上，5 個 seed 都保住接縫與信，接著的 I2VA 也演出劇本動作，單段內畫風不翻轉；但在水彩場景、Kirby 佔滿畫面的尾幀上，5 個 seed 全部把 Kirby 畫成白底黑星花紋，影片也照著延續這個錯誤。結果取決於尾幀內容，失敗時沒有可靠的偵測方式（不用 LLM 品質關卡），所以流程仍然沒有加入這個步驟。
 
@@ -311,7 +311,6 @@ serial_video:
   default_duration_seconds: 60
   episodes_per_run: 1
   story_complexity: simple
-  style_ids: [storybook_watercolor, soft_pastel_characters, ghibli-style]
   output_dir: output
   discord_review_timeout_seconds: 1800
   identity_references: []

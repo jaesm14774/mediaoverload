@@ -13,7 +13,7 @@ from agentic.app.character_config import (
     normalize_discord_review_timeout_seconds,
 )
 from agentic.app.character_requests import CharacterWorkflowRequest
-from agentic.app.serial_look import serial_series_look
+from agentic.app.serial_look import draw_serial_look
 from agentic.app.serial_video_execution import run_serial_episodes
 
 
@@ -84,7 +84,7 @@ def load_serial_video_settings(
         raise ValueError(f"Character config has an invalid social_media section: {config_path}")
     # Every series draws its canvas and style from this config, so a missing or
     # unknown entry must stop the run now, not after the first Discord review.
-    serial_series_look(generation, "config-check")
+    draw_serial_look(generation, "config-check")
     name = str(character.get("name") or config_path.stem).strip()
     return name, dict(generation), dict(serial), dict(social)
 

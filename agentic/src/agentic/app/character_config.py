@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from agentic.app.creative_profiles import DEFAULT_STYLE_MODEL
 from agentic.app.style_catalog import StyleLibrary
 from agentic.runtime.contracts import DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS
 from agentic.runtime.yaml_config import safe_yaml_load
@@ -137,7 +138,6 @@ def _summarize_character_config(
     generation: dict[str, Any],
     social_media: dict[str, Any],
     platform_configs: dict[str, dict[str, Any]],
-    style_library: StyleLibrary | None = None,
 ) -> dict[str, Any]:
     return {
         "config_path": str(path),
@@ -163,17 +163,7 @@ def _summarize_character_config(
         "generation_type_weights": dict(
             generation.get("generation_type_weights", {}) or {}
         ),
-        "style_count": len((style_library or StyleLibrary()).profiles()) if (
-            dict(dict(generation.get("creative_profile", {}) or {}).get("style", {}) or {})
-            .get("catalog") == "krea2"
-        ) else len(
-            dict(
-                dict(generation.get("creative_profile", {}) or {})
-                .get("style", {})
-                .get("profiles", {})
-                or {}
-            )
-        ),
+        "style_count": len(_style_pool(generation)),
         "default_hashtags": [
             str(tag) for tag in (social_media.get("default_hashtags") or []) if tag
         ],
@@ -183,6 +173,11 @@ def _summarize_character_config(
             for name, config in platform_configs.items()
         },
     }
+
+
+def _style_pool(generation: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    style = dict(dict(generation.get("creative_profile") or {}).get("style") or {})
+    return StyleLibrary(str(style.get("model") or DEFAULT_STYLE_MODEL)).profiles()
 
 
 def _resolve_output_dir(

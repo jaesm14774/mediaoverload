@@ -52,14 +52,14 @@ def test_user_given_an_episode_length_when_it_is_planned_then_it_uses_the_fewest
     assert len(_planned_segments(duration_seconds)) == clips
 
 
-def test_user_given_a_series_when_any_episode_runs_then_it_uses_the_same_look_the_references_were_made_in():
+def test_user_given_a_series_when_any_episode_runs_then_it_uses_the_same_look_the_references_were_made_in(tmp_path):
     """User Given a series whose references were made in its locked look When one of its episodes runs Then the episode's style and canvas are that same look."""
     generation = yaml.safe_load(KIRBY_CONFIG.read_text(encoding="utf-8"))["generation"]
     args = argparse.Namespace(character="Kirby", character_config=str(KIRBY_CONFIG))
 
-    _apply_series_look(args, {"series_id": "auto-kirby-series-7"})
+    _apply_series_look(args, {"series_id": "auto-kirby-series-7"}, tmp_path)
 
-    look = serial_series_look(generation, "auto-kirby-series-7")
+    look = serial_series_look(generation, "auto-kirby-series-7", output_root=tmp_path)
     assert args.style == look["style"]["label"]
     assert (args.width, args.height) == (look["canvas"]["width"], look["canvas"]["height"])
     assert args.serial_style_profile == look["style"]

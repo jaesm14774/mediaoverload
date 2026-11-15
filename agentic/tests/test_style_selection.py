@@ -39,9 +39,8 @@ def library(tmp_path):
             for index, name in enumerate(("paper", "glass", "ink"))
         ],
     }), encoding="utf-8")
-    selection_path = tmp_path / "selection.yaml"
-    selection_path.write_text(yaml.safe_dump({"enabled": ["paper", "glass", "ink"]}), encoding="utf-8")
-    return StyleLibrary(catalog_path, selection_path)
+    (tmp_path / "krea2.yaml").write_text(yaml.safe_dump({"enabled": ["paper", "glass", "ink"]}), encoding="utf-8")
+    return StyleLibrary("krea2", tmp_path)
 
 
 @pytest.fixture
@@ -73,7 +72,7 @@ def creative_config():
         "canvas": {"mode": "fixed", "fixed": "wide", "profiles": {
             "wide": {"aspect_ratio": "16:9", "width": 640, "height": 360},
         }},
-        "style": {"mode": "random", "catalog": "krea2"},
+        "style": {"mode": "random", "model": "krea2"},
     }
 
 
@@ -106,9 +105,8 @@ def test_user_given_an_original_character_style_when_selected_from_krea_then_its
     original = next(style for style in catalog["styles"] if style["id"] == style_id)
     catalog_path = tmp_path / "catalog.json"
     catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-    selection_path = tmp_path / "selection.yaml"
-    selection_path.write_text(yaml.safe_dump({"enabled": [style_id]}), encoding="utf-8")
-    library = StyleLibrary(catalog_path, selection_path)
+    (tmp_path / "krea2.yaml").write_text(yaml.safe_dump({"enabled": [style_id]}), encoding="utf-8")
+    library = StyleLibrary("krea2", tmp_path)
     style = resolve_creative_profile(creative_config(), rng=random.Random(42), style_library=library)["style"]
     assert style["id"] == style_id
     assert style["prompt"] == original["descriptor"]
@@ -149,7 +147,7 @@ def test_user_given_unwanted_styles_when_saving_then_reload_and_random_use_only_
     reloaded = read_state(base)
     assert saved["revision"] == reloaded["revision"]
     assert set(reloaded["enabled_ids"]) == {"paper", "ink"}
-    assert yaml.safe_load(library.selection_path.read_text(encoding="utf-8"))["enabled"] == ["paper", "ink"]
+    assert yaml.safe_load(library.model_path.read_text(encoding="utf-8"))["enabled"] == ["paper", "ink"]
     profiles = [resolve_creative_profile(creative_config(), rng=random.Random(seed), style_library=library)
                 for seed in range(40)]
     assert {profile["style"]["id"] for profile in profiles} == {"paper", "ink"}
@@ -161,11 +159,11 @@ def test_user_given_unwanted_styles_when_saving_then_reload_and_random_use_only_
 def test_user_given_an_invalid_selection_when_saving_then_the_saved_pool_is_unchanged(picker, ids):
     """User Given an empty, unknown, duplicate, or malformed selection When saving Then a clear error preserves the last valid pool."""
     base, library = picker
-    before = library.selection_path.read_bytes()
+    before = library.model_path.read_bytes()
     with pytest.raises(HTTPError) as error:
         save(base, read_state(base), ids)
     assert error.value.code == 400
-    assert library.selection_path.read_bytes() == before
+    assert library.model_path.read_bytes() == before
 
 
 def test_user_given_an_older_page_when_saving_then_newer_config_changes_are_preserved(picker):
@@ -208,7 +206,7 @@ def test_user_given_a_fixed_catalog_style_when_it_is_excluded_then_the_configura
 def test_user_given_a_manually_broken_config_when_loading_then_the_page_reports_the_problem(picker):
     """User Given a manually edited config containing an unknown style When loading the picker Then it reports the invalid config instead of silently changing the pool."""
     base, library = picker
-    library.selection_path.write_text("enabled: [missing]\n", encoding="utf-8")
+    library.model_path.write_text("enabled: [missing]\n", encoding="utf-8")
     with pytest.raises(HTTPError) as error:
         read_state(base)
     assert error.value.code == 500
@@ -229,7 +227,7 @@ def test_user_given_a_malformed_save_when_submitting_then_the_saved_pool_remains
 def test_user_given_an_oversized_selection_request_when_saving_then_the_request_is_rejected_without_changing_the_pool(picker):
     """User Given a selection request larger than the local API limit When saving Then the server rejects it and preserves the last valid pool."""
     base, library = picker
-    before = library.selection_path.read_bytes()
+    before = library.model_path.read_bytes()
     request = Request(
         base + "/api/selection",
         method="PUT",
@@ -241,7 +239,7 @@ def test_user_given_an_oversized_selection_request_when_saving_then_the_request_
         urlopen(request)
 
     assert error.value.code == 400
-    assert library.selection_path.read_bytes() == before
+    assert library.model_path.read_bytes() == before
 
 
 def test_user_given_an_expired_page_token_when_saving_then_the_selection_is_not_changed(picker):
@@ -283,9 +281,16 @@ def test_user_given_an_incomplete_catalog_when_loading_it_then_invalid_style_def
         library.profiles()
 
 
-@pytest.mark.parametrize("style", [{"catalog": "unknown", "mode": "random"}, {"catalog": "krea2", "mode": "random", "profiles": {}}])
-def test_user_given_an_ambiguous_style_source_when_starting_a_run_then_configuration_is_rejected(library, style):
-    """User Given an unknown or ambiguous style source When starting a run Then configuration is rejected instead of guessing a source."""
+@pytest.mark.parametrize("style", [
+    {"model": "unknown", "mode": "random"},
+    {"mode": "random"},
+    {"model": "krea2", "mode": "random", "profiles": {"x": {"label": "x", "prompt": "x"}}},
+    {"model": "krea2", "mode": "random", "random_weights": {"paper": 1}},
+    {"model": "krea2", "mode": "random", "catalog": "krea2"},
+    {"model": "krea2", "mode": "random", "ids": ["paper"]},
+])
+def test_user_given_a_character_that_defines_its_own_styles_when_starting_a_run_then_configuration_is_rejected(library, style):
+    """User Given a character config that names no known model or defines styles inline When starting a run Then configuration is rejected, because styles come only from the model's file in configs/styles."""
     config = creative_config()
     config["style"] = style
     with pytest.raises(ValueError):
@@ -339,3 +344,26 @@ def test_user_given_an_image_request_when_the_render_prompt_is_built_then_charac
     folded = render_prompt.casefold()
     assert "small" in folded and "larger world" in folded
     assert "only the named characters" in folded
+
+
+def test_user_given_a_character_without_a_creative_profile_when_a_run_starts_then_a_style_is_drawn_from_the_enabled_ones(library):
+    """User Given a character with no creative profile When styles are unchecked in the picker Then the default still draws only from the remaining enabled styles instead of failing."""
+    library.save(["glass"], revision=library.snapshot()["revision"])
+    drawn = {resolve_creative_profile({}, rng=random.Random(seed), style_library=library)["style"]["id"] for seed in range(20)}
+    assert drawn == {"glass"}
+
+
+def test_user_given_two_models_with_different_strengths_when_styles_are_drawn_then_each_model_uses_only_its_own_file(library):
+    """User Given two image models whose style files list different styles When a style is drawn for each Then each draws only from its own file, with no code or character change."""
+    (library.config_dir / "other.yaml").write_text(yaml.safe_dump({"enabled": ["glass"]}), encoding="utf-8")
+    other = StyleLibrary("other", library.config_dir)
+    config = {**creative_config(), "style": {"mode": "random", "model": "other"}}
+    drawn = {resolve_creative_profile(config, rng=random.Random(seed), style_library=other)["style"]["id"] for seed in range(20)}
+    assert drawn == {"glass"}
+    assert set(library.profiles()) == {"paper", "glass", "ink"}
+
+
+def test_user_given_a_model_without_a_style_file_when_starting_a_run_then_it_fails_naming_the_model(tmp_path, library):
+    """User Given a character that names a model with no file in configs/styles When the library opens Then it fails naming the model instead of falling back to another model's styles."""
+    with pytest.raises(ValueError, match="no-such-model"):
+        StyleLibrary("no-such-model", library.config_dir)

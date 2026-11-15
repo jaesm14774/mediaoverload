@@ -9,7 +9,7 @@ story, Native H3, audio, review, publishing, or scheduler contracts.
 The mode passes the requested motion to image and video prompt generation and
 packages the rendered result as:
 
-- a 4x4 RGBA atlas with exactly 16 frames, preserving each frame's generated background;
+- a 4x4 RGBA atlas with exactly 16 frames of the character cut out of its backdrop;
 - individual RGBA PNG frames;
 - a looping GIF when the generated motion is periodic;
 - a lossless animated WebP;
@@ -26,9 +26,8 @@ freely decide the motion.
 
 The system records optional motion notes when the prompt model supplies them.
 They do not need a fixed beat count or causal structure, and the system does
-not rewrite them through an identity or scene repair pass. Packaging preserves
-the generated background instead of requiring a color key, but the keyframe
-prompt asks for a plain backdrop because the cell is read at thumbnail size.
+not rewrite them through an identity or scene repair pass. The keyframe is
+rendered on a flat green backdrop and packaging keys it out.
 
 The reference pack is sampled per request and recorded in the motion plan for
 lineage. Nothing is written back to the strategy config, and no character is
@@ -61,13 +60,27 @@ times under `sampling.timestamps_seconds`.
 ## Packaging
 
 The keyframe is rendered on a flat green backdrop and the clip keeps it. The
-packager cuts the backdrop out of every frame (green must lead red and blue,
-which tolerates the shade drift video models add), crops all frames to one
-shared box so the scale never changes, downsamples with premultiplied box
-resampling, and quantizes every frame to one 32-colour palette. The atlas and
-frames are transparent PNGs; `animation.gif` and `animation.webp` are
-enlarged with nearest-neighbour to about 384 pixels so the pixels stay crisp.
-A frame with no green backdrop is kept whole instead of being erased.
+packager works in full colour and never reduces the look the style gave the
+character:
+
+- **Keying.** Green leading red and blue by 60 is backdrop, by 30 or less is
+  subject, and the band between is feathered, so edges stay anti-aliased. The
+  green spill is removed from the edge.
+- **Specks.** H3 sometimes invents bokeh, rain, or light spots on the backdrop.
+  The character stays put while those drift, so only pixels the character
+  occupies in at least 30% of the frames, widened by 12 source pixels for its
+  motion, can survive, and tiny stray clusters inside that area are dropped.
+  The video prompt also forbids such specks. Specks that touch the character
+  can still leave a faint residue; review the atlas. A frame with no green
+  backdrop at all is kept whole instead of being erased.
+- **Resampling.** Every frame is cropped to one shared box so the scale never
+  changes, then resampled with premultiplied Lanczos. There is no palette
+  reduction, no block grid, and no nearest-neighbour enlargement.
+
+The atlas and frames are transparent PNGs with soft alpha. `animation.gif`
+cannot hold partial transparency, so its edge is a hard cut at half opacity and
+its colours are limited to 255 by the GIF format; `animation.webp` and the
+showcase clip keep the smooth edge.
 
 ## Render budget
 
@@ -114,9 +127,8 @@ Native H3 story fields such as `require_human_review: true`, 15-second story
 timing, and required audio remain unchanged and do not leak into this asset
 route.
 
-The adapter preserves sampled backgrounds and existing source transparency,
-computes one shared alpha bounding box across the frames, and fits them into one
-stable cell size. It rejects fully transparent source frames. The exported
+The adapter computes one shared alpha bounding box across the frames and fits
+them into one stable cell size. It rejects fully transparent source frames. The exported
 atlas contains exactly 16 sampled frames. These checks are deterministic;
 visual review of the resulting atlas is still recommended for art quality,
 silhouette readability, and game feel.
@@ -132,11 +144,12 @@ Now:
   most one prop, and one visual motif from a crowded news brief. It is not told
   about the atlas, frame count, fps, or clip length.
 - The compiled keyframe prompt starts with the one-character, no-sheet,
-  plain-backdrop contract and the pixel-art rendering contract. The selected
-  style comes last and lends only its palette, never its medium, composition,
-  or exclusions, so a painterly style cannot override the game-art look. A
-  style that defines no palette adds nothing; the sprite keeps its default
-  colours.
+  plain-backdrop contract and a short rendering contract: a clean full-colour
+  character with a readable silhouette and a crisp edge against the backdrop.
+  The contract does not ask for pixel art. The selected style comes last and
+  renders the character (medium, line, light, palette), the same way a sticker
+  takes its style: its scene, composition, and exclusions are dropped so it
+  cannot add scenery or turn the frame into a sheet.
 - The video prompt is one short paragraph plus a compact choreography
   contract, because the H3 text encoder reads every word.
 
@@ -170,7 +183,7 @@ readable or sufficiently animated; review the resulting atlas and animation.
 
 ## Output checks
 
-The packager checks frame count, configured cell and atlas dimensions, binary
-alpha, and nonempty frames. Subject size, identity, motion, background, and
+The packager checks frame count, configured cell and atlas dimensions, transparent
+cell corners, and nonempty frames. Subject size, identity, motion, background, and
 appearance remain creative review decisions. A pixel-area ratio is not a proxy
 for character quality.

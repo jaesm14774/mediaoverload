@@ -8,7 +8,9 @@ import math
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageFilter
+import numpy as np
+from PIL import Image, ImageFilter
+from scipy import ndimage
 
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 
@@ -19,20 +21,32 @@ SPRITE_FRAME_COUNT = SPRITE_GRID_ROWS * SPRITE_GRID_COLS
 SPRITE_DEFAULT_CELL_WIDTH = 128
 SPRITE_DEFAULT_CELL_HEIGHT = 128
 SPRITE_DEFAULT_FPS = 12
-# The master image is rendered on a flat green backdrop. A pixel is backdrop
-# when green leads both red and blue by at least this much, which tolerates the
-# shade drift video models add without touching Kirby's pinks, reds, or blues.
-SPRITE_KEY_DOMINANCE = 40
+# The master image is rendered on a flat green backdrop. A pixel is fully
+# backdrop when green leads both red and blue by SPRITE_KEY_FULL, fully subject
+# below SPRITE_KEY_NONE, and feathered in between, which tolerates the shade
+# drift video models add without touching Kirby's pinks, reds, or blues.
+SPRITE_KEY_NONE = 30
+SPRITE_KEY_FULL = 60
+# Video models invent bokeh, rain, and light spots on the backdrop. The subject
+# stays put while those specks drift, so a pixel is the subject's territory when
+# it is solid in at least SPRITE_SUBJECT_PERSISTENCE of the frames, widened by
+# SPRITE_SUBJECT_REACH source pixels for the motion. Inside that territory,
+# pieces closer than SPRITE_SUBJECT_GAP form one cluster and a cluster smaller
+# than SPRITE_SUBJECT_MIN_SHARE of the largest is dropped.
+SPRITE_SUBJECT_PERSISTENCE = 0.3
+SPRITE_SUBJECT_REACH = 12
+SPRITE_SUBJECT_GAP = 2
+SPRITE_SUBJECT_MIN_SHARE = 0.25
+# A frame that is almost entirely solid has no green backdrop to speck; it stays whole.
+SPRITE_NO_BACKDROP_SHARE = 0.9
+# When the territory keeps less than this share of the frame's own subject, the
+# subject is moving and its own cluster is kept whole.
+SPRITE_TRAVEL_SHARE = 0.5
 # A frame whose subject covers more than this multiple of the median area is an
 # outlier burst; it is cropped by the shared box rather than enlarging it.
 SPRITE_OUTLIER_AREA_RATIO = 1.5
 SPRITE_BOX_PADDING = 0.1
-# One palette across all frames keeps the sprite stable while it animates.
-SPRITE_PALETTE_COLORS = 32
-# Every logical sprite pixel is a block of this many cell pixels, so the sprite
-# reads as hard pixel clusters instead of a smoothed miniature.
-SPRITE_PIXEL_BLOCK = 2
-# Previews are enlarged with nearest-neighbor, never smoothed, to about this edge.
+# Previews are enlarged with smooth resampling to about this edge.
 SPRITE_PREVIEW_EDGE = 384
 # The clip people review and publish: the cut-out sprite looping on a flat
 # backdrop, on a square canvas with even sides for the video encoder.
@@ -42,7 +56,7 @@ SPRITE_SHOWCASE_SECONDS = 5
 
 
 class SpriteAdapter:
-    """Cut the green backdrop out of sampled frames and pack a pixel-art atlas."""
+    """Cut the green backdrop out of sampled frames and pack a full-colour atlas."""
 
     def __init__(self, ffmpeg: FFmpegAdapter | None = None) -> None:
         self.ffmpeg = ffmpeg or FFmpegAdapter()
@@ -137,6 +151,7 @@ class SpriteAdapter:
                 raise FileNotFoundError(f"Sprite frame does not exist: {source}")
             with Image.open(source) as image:
                 source_frames.append(_key_out_green_backdrop(image.convert("RGBA")))
+        source_frames = _isolate_subject(source_frames)
         shared_bbox = _shared_bbox(source_frames)
         if shared_bbox is None:
             raise ValueError("Sprite source frames are fully transparent")
@@ -144,14 +159,8 @@ class SpriteAdapter:
         frame_records: list[dict[str, Any]] = []
         for index, frame_path in enumerate(frame_paths):
             source = Path(frame_path).resolve()
-            normalized = _enlarge(
-                _fit_frame(
-                    source_frames[index],
-                    max(1, width // SPRITE_PIXEL_BLOCK),
-                    max(1, height // SPRITE_PIXEL_BLOCK),
-                    crop_bbox=shared_bbox,
-                ),
-                SPRITE_PIXEL_BLOCK,
+            normalized = _fit_frame(
+                source_frames[index], width, height, crop_bbox=shared_bbox
             )
             if _alpha_bbox(normalized) is None:
                 raise ValueError(f"Sprite source frame is fully transparent: {source}")
@@ -172,10 +181,6 @@ class SpriteAdapter:
                 }
             )
 
-        normalized_frames = _apply_shared_palette(normalized_frames)
-        for record, frame in zip(frame_records, normalized_frames):
-            frame.save(record["path"], format="PNG", optimize=True)
-            record["sha256"] = _sha256(Path(record["path"]))
         alpha_counts = [_opaque_pixel_count(frame) for frame in normalized_frames]
         atlas = Image.new("RGBA", (width * SPRITE_GRID_COLS, height * SPRITE_GRID_ROWS), (0, 0, 0, 0))
         for index, frame in enumerate(normalized_frames):
@@ -223,7 +228,7 @@ class SpriteAdapter:
                 "frame_count": len(normalized_frames) == SPRITE_FRAME_COUNT,
                 "cell_dimensions": all(frame.size == (width, height) for frame in normalized_frames),
                 "atlas_dimensions": atlas.size == (width * SPRITE_GRID_COLS, height * SPRITE_GRID_ROWS),
-                "binary_alpha": all(_has_binary_alpha(frame) for frame in normalized_frames),
+                "transparent_backdrop": all(_corners_transparent(frame) for frame in normalized_frames),
                 "nonempty_frames": all(count > 0 for count in alpha_counts),
             },
             "opaque_pixel_count": alpha_counts,
@@ -237,9 +242,8 @@ class SpriteAdapter:
             "fps": frame_rate,
             "loop": bool(loop),
             "animation_kind": "periodic" if loop else "one_shot",
-            "alpha": "binary",
+            "alpha": "soft",
             "background_mode": "green_keyed",
-            "palette_colors": SPRITE_PALETTE_COLORS,
             "preview_scale": preview_scale,
             "frames": frame_records,
             "outputs": {
@@ -278,8 +282,7 @@ class SpriteAdapter:
         """Loop the cut-out sprite on a flat backdrop as an mp4 a feed can play."""
         edge = SPRITE_SHOWCASE_EDGE
         frames: list[Image.Image] = []
-        # A whole-number scale keeps every sprite pixel a clean square.
-        scale = max(1, (edge * 9 // 10) // max(cell_frames[0].size))
+        scale = (edge * 9 // 10) / max(cell_frames[0].size)
         for frame in cell_frames:
             sprite = _enlarge(frame.convert("RGBA"), scale)
             canvas = Image.new("RGB", (edge, edge), SPRITE_SHOWCASE_BACKDROP)
@@ -328,19 +331,13 @@ def _fit_frame(
     available_width = max(1, width - safe_margin * 2)
     available_height = max(1, height - safe_margin * 2)
     scale = min(available_width / content.width, available_height / content.height)
-    # Premultiplied BOX resampling keeps hard cluster edges and never bleeds the
-    # transparent backdrop's color into the silhouette.
-    resized = (
-        content.convert("RGBa")
-        .resize(
-            (max(1, round(content.width * scale)), max(1, round(content.height * scale))),
-            Image.Resampling.BOX,
-        )
-        .convert("RGBA")
+    resized = _resample(
+        content,
+        (max(1, round(content.width * scale)), max(1, round(content.height * scale))),
     )
     result = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     result.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
-    return _binary_alpha(result)
+    return result
 
 
 def _shared_bbox(images: list[Image.Image]) -> tuple[int, int, int, int] | None:
@@ -374,68 +371,96 @@ def _shared_bbox(images: list[Image.Image]) -> tuple[int, int, int, int] | None:
 
 
 def _alpha_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
-    return image.getchannel("A").getbbox()
+    return image.getchannel("A").point(lambda value: 255 if value >= 128 else 0).getbbox()
 
 
-def _binary_alpha(image: Image.Image) -> Image.Image:
-    alpha = image.getchannel("A").point(lambda value: 255 if value >= 128 else 0)
-    image.putalpha(alpha)
-    return image
+def _corners_transparent(image: Image.Image) -> bool:
+    last_x, last_y = image.width - 1, image.height - 1
+    return all(
+        image.getpixel(corner)[3] == 0
+        for corner in ((0, 0), (last_x, 0), (0, last_y), (last_x, last_y))
+    )
 
 
 def _key_out_green_backdrop(image: Image.Image) -> Image.Image:
-    """Make the flat green backdrop transparent and remove its color spill from the edge."""
-    red, green, blue, _ = image.split()
-    dominance = ImageChops.subtract(green, ImageChops.lighter(red, blue))
-    keep = dominance.point(lambda value: 0 if value >= SPRITE_KEY_DOMINANCE else 255)
-    # Two pixels of erosion remove the half-blended green halo (olive on orange effects).
-    keep = keep.filter(ImageFilter.MinFilter(5))
-    despilled_green = ImageChops.darker(green, ImageChops.lighter(red, blue))
-    return Image.merge("RGBA", (red, despilled_green, blue, keep))
-
-
-def _apply_shared_palette(frames: list[Image.Image]) -> list[Image.Image]:
-    opaque_pixels = [
-        pixel[:3] for frame in frames for pixel in frame.getdata() if pixel[3] == 255
-    ]
-    sample = Image.new("RGB", (len(opaque_pixels), 1))
-    sample.putdata(opaque_pixels)
-    palette = sample.quantize(
-        colors=SPRITE_PALETTE_COLORS, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE
+    """Make the green backdrop transparent, feathered at the edge, and remove colour spill."""
+    pixels = np.asarray(image.convert("RGBA"), dtype=np.float32).copy()
+    red, green, blue = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    dominance = green - np.maximum(red, blue)
+    backdrop = np.clip(
+        (dominance - SPRITE_KEY_NONE) / (SPRITE_KEY_FULL - SPRITE_KEY_NONE), 0.0, 1.0
     )
-    result: list[Image.Image] = []
-    for frame in frames:
-        quantized = frame.convert("RGB").quantize(palette=palette, dither=Image.Dither.NONE).convert("RGBA")
-        quantized.putalpha(frame.getchannel("A"))
-        result.append(quantized)
-    return result
+    pixels[..., 1] = np.minimum(green, np.maximum(red, blue))
+    pixels[..., 3] = (1.0 - backdrop) * 255.0
+    keyed = Image.fromarray(pixels.round().astype(np.uint8), "RGBA")
+    # One pixel of erosion removes the half-blended green halo.
+    keyed.putalpha(keyed.getchannel("A").filter(ImageFilter.MinFilter(3)))
+    return keyed
 
 
-def _enlarge(image: Image.Image, scale: int) -> Image.Image:
-    return image.resize((image.width * scale, image.height * scale), Image.Resampling.NEAREST)
+def _isolate_subject(frames: list[Image.Image]) -> list[Image.Image]:
+    """Drop backdrop specks that drift across the clip while the subject stays."""
+    alphas = np.stack([np.asarray(frame.getchannel("A")) for frame in frames])
+    solid = alphas >= 128
+    territory = ndimage.binary_dilation(
+        solid.mean(axis=0) >= SPRITE_SUBJECT_PERSISTENCE, iterations=SPRITE_SUBJECT_REACH
+    )
+    isolated: list[Image.Image] = []
+    for frame, frame_solid, alpha in zip(frames, solid, alphas):
+        if frame_solid.mean() >= SPRITE_NO_BACKDROP_SHARE:
+            isolated.append(frame)
+            continue
+        keep = _subject_clusters(frame_solid & territory)
+        # A subject that travels is solid in few frames at any one pixel, so
+        # the territory shrinks and would erase it; fall back to its own cluster.
+        whole = _subject_clusters(frame_solid)
+        if keep.sum() < SPRITE_TRAVEL_SHARE * whole.sum():
+            keep = whole
+        result = frame.copy()
+        result.putalpha(Image.fromarray(np.where(keep, alpha, 0).astype(np.uint8)))
+        isolated.append(result)
+    return isolated
+
+
+def _subject_clusters(solid: np.ndarray) -> np.ndarray:
+    """Pixels of the clusters that are not tiny next to the largest one."""
+    clusters, count = ndimage.label(
+        ndimage.binary_dilation(solid, iterations=SPRITE_SUBJECT_GAP)
+    )
+    if count == 0:
+        return solid
+    sizes = np.asarray(ndimage.sum(solid, clusters, index=range(1, count + 1)))
+    big = 1 + np.flatnonzero(sizes >= sizes.max() * SPRITE_SUBJECT_MIN_SHARE)
+    return solid & np.isin(clusters, big)
+
+
+def _resample(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Premultiplied resampling never bleeds the transparent backdrop into the silhouette."""
+    return image.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
+
+
+def _enlarge(image: Image.Image, scale: float) -> Image.Image:
+    return _resample(image, (round(image.width * scale), round(image.height * scale)))
 
 
 def _to_transparent_palette(image: Image.Image) -> Image.Image:
     alpha = image.getchannel("A")
+    # A hard mask keeps edge colours unblended; a soft one would darken them.
     opaque = Image.new("RGB", image.size, (0, 0, 0))
-    opaque.paste(image.convert("RGB"), mask=alpha)
+    opaque.paste(image.convert("RGB"), mask=alpha.point(lambda value: 255 if value >= 128 else 0))
     palette = opaque.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     palette_data = list(palette.getpalette() or [])
     palette_data.extend([0] * (768 - len(palette_data)))
     transparent_index = 255
     palette_data[transparent_index * 3 : transparent_index * 3 + 3] = [0, 0, 0]
     palette.putpalette(palette_data[:768])
-    transparent_mask = alpha.point(lambda value: 255 if value == 0 else 0)
+    transparent_mask = alpha.point(lambda value: 255 if value < 128 else 0)
     palette.paste(transparent_index, mask=transparent_mask)
     return palette
 
 
 def _opaque_pixel_count(image: Image.Image) -> int:
     return sum(1 for value in image.getchannel("A").getdata() if value > 0)
-
-
-def _has_binary_alpha(image: Image.Image) -> bool:
-    return set(image.getchannel("A").getdata()).issubset({0, 255})
 
 
 def _sha256(path: Path) -> str:

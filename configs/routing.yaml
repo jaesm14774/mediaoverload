@@ -59,10 +59,10 @@ routing:
     game_sprite:
       reference_pack_version: game_sprite_action_references_v1
       visual_contract: >-
-        Crisp 2D pixel-art game asset: hard pixel clusters, a limited readable
-        palette, clean silhouette edges, deliberate pose exaggeration, and
-        nearest-neighbor-friendly shapes; never painterly, photoreal, tabletop,
-        soft 3D, or cinematic concept art.
+        Clean full-colour 2D game character in the selected style: its medium,
+        line, and light stay on the character, with a clear readable silhouette,
+        a crisp clean edge against the backdrop, and deliberate pose
+        exaggeration.
 
   workflow_stage_candidates:
     motion_comic:
@@ -539,7 +539,7 @@ routing:
           - "需求是單一角色的情緒或姿勢變化；改用 text2img 或 sticker_pack。"
           - "需求是影片、文字閱讀或有劇情的多格故事；改用影片策略、story_card 或 motion_comic。"
         hard_rules:
-          - "場景模板只能有一個 {character}，不得寫出任何成員名字；每位成員只換名字和一句不超過十二個字的外觀。"
+          - "場景模板只能有一個 {character}，不得寫出任何成員名字；每位成員只換名字，並在該頁最前面原文帶入名冊中該角色的外觀描述；場景不得依賴嘴、腳、手等身體部位。"
           - "每頁使用同一個種子與同一段提示，除角色外不得有差異；LLM 不可用時直接失敗，不使用寫死的場景。"
           - "成員必須來自設定角色所屬的群組，第一頁是當輪主角；群組成員數少於頁數時直接失敗。"
       story_card:

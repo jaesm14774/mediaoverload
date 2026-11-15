@@ -10,6 +10,17 @@ from agentic.runtime.contracts import (
 from agentic.runtime.planning.common import PlanningContext
 
 
+
+def square_canvas_side(width: int, height: int) -> int:
+    """Side of the square canvas that holds the same pixel budget as width x height.
+
+    A chat sticker is a square die-cut subject, so it is not rendered on a
+    poster-shaped canvas, but the run's configured resolution still decides
+    how many pixels it may cost. Rounded to a multiple of 16 for the latent.
+    """
+    return max(16, round((width * height) ** 0.5 / 16) * 16)
+
+
 def build_sticker_pack(context: PlanningContext, goal: GoalRequest) -> ExecutionPlan:
     image_manifest = context.manifest_from_goal_constraints(
         goal,
@@ -20,6 +31,7 @@ def build_sticker_pack(context: PlanningContext, goal: GoalRequest) -> Execution
     character = goal.constraints.get("character", "")
     expression_count = context.constraint_int(goal, "sticker_expression_count", 8)
     images_per_prompt = context.constraint_int(goal, "images_per_prompt", 1)
+    canvas_side = square_canvas_side(*context.canvas_dimensions(goal, image_manifest))
     nodes = [
         ExecutionNode(
             node_id="sticker-expressions",
@@ -55,8 +67,8 @@ def build_sticker_pack(context: PlanningContext, goal: GoalRequest) -> Execution
             skill_name="media.image.render_batch",
             inputs={
                 "workflow_name": image_manifest.name,
-                "width": context.canvas_dimensions(goal, image_manifest)[0],
-                "height": context.canvas_dimensions(goal, image_manifest)[1],
+                "width": canvas_side,
+                "height": canvas_side,
                 "images_per_prompt": images_per_prompt,
                 "suffix": "stickers",
             },

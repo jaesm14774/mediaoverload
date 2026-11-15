@@ -49,7 +49,6 @@ from agentic.app.character_config import (
     load_character_config,
     load_global_social_config,
 )
-from agentic.app.style_catalog import StyleLibrary
 from agentic.app.generation_routing import (
     _build_default_prompt,
     _build_routing_summary,
@@ -184,14 +183,12 @@ def build_goal_payload_from_character_config(
     if creative_rng is None and rng is not None and hasattr(rng, "getstate"):
         creative_rng = random.Random()
         creative_rng.setstate(rng.getstate())
-    style_library = StyleLibrary()
     creative_profile = (
         deepcopy(locked_creative_profile)
         if locked_creative_profile is not None
         else resolve_creative_profile(
             dict(generation.get("creative_profile") or {}),
             rng=creative_rng,
-            style_library=style_library,
         )
     )
     canvas_profile = dict(creative_profile["canvas"])
@@ -323,6 +320,7 @@ def build_goal_payload_from_character_config(
     autonomous_prompt = _resolve_autonomous_prompt(
         prompt=prompt,
         character_name=character_name,
+        subject_context=subject_context,
         style="; ".join(part for part in (style, style_guidance) if part),
         media_type=agentic_media_type,
         generation=generation,
@@ -814,7 +812,6 @@ def build_goal_payload_from_character_config(
         generation=generation,
         social_media=social_media,
         platform_configs=platform_configs,
-        style_library=style_library,
     )
     character_config_summary["subject_context"] = subject_context
     character_config_summary["creative_profile"] = creative_profile

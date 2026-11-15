@@ -812,11 +812,11 @@ class LLMEngineTests(unittest.TestCase):
                 news_grounding_required=True,
             )
 
-    def test_user_given_a_theme_when_sticker_reactions_are_written_then_each_becomes_one_drawable_sentence_with_its_own_framing_and_body(self) -> None:
-        """User Given a theme When the writer returns reactions with a framing, feeling, body, eyes and mark Then each reaction becomes one sentence that leads with how close the picture is, then what the body does, and says how the eyes and the mark are drawn."""
+    def test_user_given_a_theme_when_sticker_reactions_are_written_then_each_becomes_one_drawable_sentence_that_leads_with_its_body(self) -> None:
+        """User Given a theme When the writer returns reactions with a feeling, body, eyes and mark Then each reaction becomes one sentence that leads with what the body does and says how the eyes and the mark are drawn."""
         reactions = [
-            {"framing": "tight close-up with the face filling the frame", "feeling": "dread", "body": "Body squashed flat like a pancake with both arms limp", "eyes": "two spirals", "mark": "a small rain cloud"},
-            {"framing": "whole character seen small and far away with open space around it", "feeling": "joy", "body": "Body stretched tall on tiptoe with both arms thrown up", "eyes": "two upward arcs", "mark": "a small star"},
+            {"feeling": "dread", "body": "Body squashed flat like a pancake with both arms limp", "eyes": "two spirals", "mark": "a small rain cloud"},
+            {"feeling": "joy", "body": "Body stretched tall on tiptoe with both arms thrown up", "eyes": "two upward arcs", "mark": "a small star"},
         ]
         engine = LLMPromptEngine(mode="llm", manager=_FakeManager([json.dumps({"reactions": reactions})]))
         goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
@@ -824,29 +824,29 @@ class LLMEngineTests(unittest.TestCase):
         expressions = engine.sticker_expressions(goal, "ramen shop", "Kirby", 2)
 
         self.assertEqual(len(expressions), 2)
-        self.assertTrue(expressions[0].startswith("Tight close-up with the face filling the frame"))
-        self.assertLess(expressions[0].index("close-up"), expressions[0].index("Body squashed flat"))
+        self.assertTrue(expressions[0].startswith("Body squashed flat"))
         self.assertIn("eyes are drawn as two spirals", expressions[0])
-        self.assertTrue(expressions[1].startswith("Whole character seen small and far away"))
+        self.assertTrue(expressions[1].startswith("Body stretched tall"))
         self.assertIn("A small star floats beside the head", expressions[1])
 
-    def test_user_given_reactions_that_share_one_framing_when_checked_then_the_writer_is_asked_again(self) -> None:
-        """User Given every reaction is drawn at the same distance When the reactions are checked Then they are refused, so the pack never has one size for every sticker."""
-        base = {"framing": "full body at medium distance", "eyes": "two dots", "mark": "a star"}
-        reactions = [
-            {**base, "feeling": "joy", "body": "Body bouncing with both arms up"},
-            {**base, "feeling": "dread", "body": "Body squashed flat with both arms limp"},
-        ]
-        engine = LLMPromptEngine(mode="llm", manager=_FakeManager([json.dumps({"reactions": reactions})] * 12))
+    def test_user_given_a_sticker_brief_when_the_writer_is_asked_then_it_never_invites_close_ups_that_fill_the_frame(self) -> None:
+        """User Given a theme When the writer is briefed for sticker reactions Then the brief keeps the whole character visible and never asks for a close-up or a character filling the picture, so no sticker is cropped or overstretched."""
+        manager = _FakeManager([json.dumps({"reactions": [
+            {"feeling": "joy", "body": "Body bouncing with both arms up", "eyes": "two arcs", "mark": "a star"},
+        ]})])
+        engine = LLMPromptEngine(mode="llm", manager=manager)
         goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
 
-        with self.assertRaises(PromptGenerationError):
-            engine.sticker_expressions(goal, "ramen shop", "Kirby", 2)
+        engine.sticker_expressions(goal, "ramen shop", "Kirby", 1)
+
+        brief = json.dumps(manager.text_model.calls[0]["messages"]).casefold()
+        self.assertNotIn("close-up", brief)
+        self.assertNotIn("filling most of the picture", brief)
 
     def test_user_given_reactions_that_repeat_a_feeling_or_use_symbols_when_checked_then_the_writer_is_asked_again(self) -> None:
         """User Given the writer repeats one feeling or draws a mark as an emoji When the reactions are checked Then they are refused, so the pack is never built from them."""
-        same = {"framing": "tight close-up on the face", "feeling": "joy", "body": "Body bouncing with both arms up", "eyes": "two arcs", "mark": "a star"}
-        emoji = {"framing": "full body seen from far away", "feeling": "calm", "body": "Body sitting with arms on knees", "eyes": "two dots", "mark": "\u2728"}
+        same = {"feeling": "joy", "body": "Body bouncing with both arms up", "eyes": "two arcs", "mark": "a star"}
+        emoji = {"feeling": "calm", "body": "Body sitting with arms on knees", "eyes": "two dots", "mark": "\u2728"}
         for reactions in ([same, same], [same, emoji]):
             engine = LLMPromptEngine(mode="llm", manager=_FakeManager([json.dumps({"reactions": reactions})] * 12))
             goal = GoalRequest(prompt="ramen shop", media_type="sticker_pack", style="sticker")
@@ -878,6 +878,9 @@ class LLMEngineTests(unittest.TestCase):
             self.assertNotIn("parking lot", prompt)
             self.assertIn("one isolated subject", prompt)
             self.assertIn("white die-cut outline", prompt)
+            self.assertIn("whole character from head to feet", prompt)
+            self.assertIn("empty space on every side", prompt)
+            self.assertNotIn("close-up", prompt.casefold())
             self.assertTrue(item["self_contained"])
             self.assertLess(len(prompt.split()), 90)
 

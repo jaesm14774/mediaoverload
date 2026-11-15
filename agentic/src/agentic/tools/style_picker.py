@@ -1,4 +1,4 @@
-"""Loopback-only style picker; writes only the shared style selection config."""
+"""Loopback-only style picker; edits only the random pool of one model's style file."""
 
 from __future__ import annotations
 
@@ -93,10 +93,11 @@ def create_server(*, library: StyleLibrary | None = None, port: int = 8766) -> T
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="勾選 Krea 2 隨機生成風格")
+    parser = argparse.ArgumentParser(description="勾選模型的隨機生成風格")
+    parser.add_argument("--model", default="krea2", help="configs/styles/<model>.yaml 的模型名稱")
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
-    with create_server(port=args.port) as server:
+    with create_server(library=StyleLibrary(args.model), port=args.port) as server:
         print(f"Style picker: http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()

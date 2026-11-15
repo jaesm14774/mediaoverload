@@ -50,8 +50,8 @@ def test_user_given_sprite_prompt_when_planned_then_direct_prompt_and_render_met
     assert isinstance(plan["video_prompt"], str) and plan["video_prompt"].strip()
 
 
-def test_user_given_the_game_sprite_route_when_its_context_is_built_then_it_carries_the_pixel_art_contract_and_no_list_of_moves() -> None:
-    """User Given the game-sprite route When its context is built Then it carries the pixel-art look and no fixed list of moves to copy."""
+def test_user_given_the_game_sprite_route_when_its_context_is_built_then_it_asks_for_a_readable_character_in_the_selected_style_and_no_list_of_moves() -> None:
+    """User Given the game-sprite route When its context is built Then it lets the selected style render the character, never asks for pixel art, and has no fixed list of moves to copy."""
 
     repo_root = Path(__file__).resolve().parents[2]
     strategy_context = _load_global_routing_config(repo_root)["strategy_contexts"]["game_sprite"]
@@ -63,7 +63,9 @@ def test_user_given_the_game_sprite_route_when_its_context_is_built_then_it_carr
 
     context = build_game_sprite_reference_context(goal)
 
-    assert "crisp 2d pixel-art game asset" in context["visual_contract"].casefold()
+    contract = context["visual_contract"].casefold()
+    assert "selected style" in contract and "silhouette" in contract
+    assert "pixel" not in contract
     assert "creative_inspiration" not in strategy_context
     assert set(context) == {"pack_version", "visual_contract"}
 
@@ -182,14 +184,15 @@ def test_user_given_a_model_keyframe_prompt_when_compiled_then_single_subject_an
     from agentic.runtime.prompting import compile_dynamic_sprite_image_prompt
 
     compiled = compile_dynamic_sprite_image_prompt(
-        "Kirby in watercolor beside a ballot box", "Crisp 2D pixel-art game asset"
+        "Kirby in watercolor beside a ballot box", "Readable silhouette game character"
     ).casefold()
 
     assert "exactly one character" in compiled
     assert "sprite sheet" in compiled and "never" in compiled
     creative = compiled.index("kirby in watercolor")
     assert compiled.index("exactly one character") < creative
-    assert compiled.index("crisp 2d pixel-art game asset") < creative
+    assert compiled.index("readable silhouette game character") < creative
+    assert "palette and materials only" not in compiled, "the style must be allowed to render the character"
 
 
 def test_user_given_a_keyframe_prompt_when_compiled_then_the_backdrop_is_a_flat_green_the_pipeline_can_cut_out() -> None:
@@ -198,7 +201,7 @@ def test_user_given_a_keyframe_prompt_when_compiled_then_the_backdrop_is_a_flat_
     from agentic.runtime.prompting import compile_dynamic_sprite_image_prompt
 
     compiled = compile_dynamic_sprite_image_prompt(
-        "Kirby stands at the torn edge of a photograph of a building", "Crisp 2D pixel-art game asset"
+        "Kirby stands at the torn edge of a photograph of a building", "Readable silhouette game character"
     ).casefold()
 
     creative = compiled.index("kirby stands at the torn edge")
@@ -212,11 +215,12 @@ def test_user_given_a_video_prompt_when_compiled_then_the_green_backdrop_must_st
 
     from agentic.runtime.prompting import compile_dynamic_sprite_video_prompt
 
-    compiled = compile_dynamic_sprite_video_prompt("Kirby spins", "Crisp 2D pixel-art game asset").casefold()
+    compiled = compile_dynamic_sprite_video_prompt("Kirby spins", "Readable silhouette game character").casefold()
 
     assert "green" in compiled and "unchanged" in compiled
     assert "same position" in compiled and "face stays visible" in compiled
     assert "explosions" in compiled  # named so that they are forbidden
+    assert "bokeh" in compiled and "particles" in compiled  # specks on the backdrop cannot be cut out
 
 
 def test_user_given_a_photographic_news_run_when_sprite_prompts_are_requested_then_the_model_sees_the_headline_motif_but_no_photo_style() -> None:
@@ -535,37 +539,126 @@ def _green_backdrop_frames(directory: Path, backdrops: list[tuple[int, int, int]
     return paths
 
 
-def test_user_given_a_character_on_a_flat_green_backdrop_when_packaged_then_the_sprite_is_a_transparent_pixel_art_atlas(
+def _shaded_backdrop_frames(directory: Path, specks: bool) -> list[str]:
+    """One shaded character on green; optionally a light speck drifting on the backdrop."""
+    directory.mkdir()
+    paths = []
+    for index in range(16):
+        image = Image.new("RGB", (192, 192), (0, 255, 0))
+        draw = ImageDraw.Draw(image)
+        for step in range(40):
+            tone = 120 + step * 3
+            draw.ellipse(
+                (60 + index + step // 2, 50 + step // 2, 140 + index - step // 2, 150 - step // 2),
+                fill=(tone, 90 + step, 160 - step),
+            )
+        if specks:
+            left = 4 + index * 4
+            draw.ellipse((left, 6, left + 22, 28), fill=(235, 235, 250))
+        path = directory / f"frame-{index + 1:02d}.png"
+        image.save(path)
+        paths.append(str(path))
+    return paths
+
+
+def test_user_given_a_character_on_a_flat_green_backdrop_when_packaged_then_the_sprite_is_a_transparent_full_colour_atlas(
     tmp_path: Path,
 ) -> None:
-    """User Given sixteen frames of one character on a flat green backdrop When packaging runs Then the atlas shows only the character on transparency with a small palette and the preview is enlarged without blur."""
-    paths = _green_backdrop_frames(tmp_path / "source", [(0, 255, 0)] * 16)
+    """User Given sixteen frames of one shaded character on a flat green backdrop When packaging runs Then the atlas shows only the character on transparency, keeps its shading and soft edges, and is not reduced to a block grid."""
+    paths = _shaded_backdrop_frames(tmp_path / "source", specks=False)
 
     result = SpriteAdapter().build_from_frames(
-        paths, output_dir=str(tmp_path / "sprite"), cell_width=32, cell_height=32, fps=12, loop=True
+        paths, output_dir=str(tmp_path / "sprite"), cell_width=96, cell_height=96, fps=12, loop=True
     )
 
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     atlas = Image.open(result["atlas_path"])
     gif = Image.open(result["gif_path"])
-    first_cell = atlas.crop((0, 0, 32, 32))
-    opaque_colors = {
-        pixel[:3] for pixel in first_cell.getdata() if pixel[3] == 255
-    } | {pixel[:3] for pixel in atlas.getdata() if pixel[3] == 255}
+    first_cell = atlas.crop((0, 0, 96, 96))
+    alpha_values = set(first_cell.getchannel("A").getdata())
+    opaque_colors = {pixel[:3] for pixel in first_cell.getdata() if pixel[3] == 255}
 
     assert manifest["grid"] == {"rows": 4, "columns": 4}
     assert manifest["frame_count"] == 16
-    assert manifest["alpha"] == "binary"
     assert manifest["qa"]["passed"] is True
-    assert atlas.size == (128, 128)
+    assert atlas.size == (384, 384)
     assert first_cell.getpixel((0, 0))[3] == 0
     assert first_cell.getchannel("A").getbbox() is not None
     assert not any(color[1] > 200 and color[0] < 80 for color in opaque_colors)
-    assert len(opaque_colors) <= 32
+    assert len(opaque_colors) > 64, "gradient shading must survive packaging"
+    assert alpha_values - {0, 255}, "edges must be anti-aliased, not a hard cut"
     assert gif.n_frames == 16
     assert gif.info["loop"] == 0
-    assert gif.size[0] > 32 and gif.size[1] > 32
+    assert gif.size[0] > 96 and gif.size[1] > 96
     assert gif.convert("RGBA").getpixel((0, 0))[3] == 0
+
+
+def test_user_given_light_specks_drifting_over_the_backdrop_when_packaged_then_only_the_character_remains(
+    tmp_path: Path,
+) -> None:
+    """User Given a video whose backdrop gains light specks that drift while the character stays When packaging runs Then no speck is left beside the character in any frame."""
+    clean = SpriteAdapter().build_from_frames(
+        _shaded_backdrop_frames(tmp_path / "clean", specks=False),
+        output_dir=str(tmp_path / "clean-output"), cell_width=96, cell_height=96,
+    )
+    specked = SpriteAdapter().build_from_frames(
+        _shaded_backdrop_frames(tmp_path / "specked", specks=True),
+        output_dir=str(tmp_path / "specked-output"), cell_width=96, cell_height=96,
+    )
+
+    for clean_path, specked_path in zip(clean["frame_paths"], specked["frame_paths"]):
+        clean_box = Image.open(clean_path).getchannel("A").point(lambda v: 255 if v >= 128 else 0).getbbox()
+        specked_box = Image.open(specked_path).getchannel("A").point(lambda v: 255 if v >= 128 else 0).getbbox()
+        assert specked_box == clean_box
+
+
+def test_user_given_a_character_that_travels_across_the_frame_when_packaged_then_it_is_kept_in_every_frame(
+    tmp_path: Path,
+) -> None:
+    """User Given a skill where the character moves far between sampled frames When packaging runs Then the character is present in every frame instead of being erased as backdrop noise."""
+    directory = tmp_path / "travel"
+    directory.mkdir()
+    paths = []
+    for index in range(16):
+        image = Image.new("RGB", (240, 120), (0, 255, 0))
+        draw = ImageDraw.Draw(image)
+        left = 4 + index * 12
+        draw.rectangle((left, 40, left + 36, 76), fill=(250, 150, 190))
+        path = directory / f"frame-{index + 1:02d}.png"
+        image.save(path)
+        paths.append(str(path))
+
+    result = SpriteAdapter().build_from_frames(
+        paths, output_dir=str(tmp_path / "travel-output"), cell_width=96, cell_height=96
+    )
+
+    assert result["qa"]["passed"] is True
+    assert all(count > 0 for count in result["qa"]["opaque_pixel_count"])
+
+
+def test_user_given_a_bright_character_when_the_gif_preview_is_made_then_its_edge_is_not_darkened(
+    tmp_path: Path,
+) -> None:
+    """User Given a bright character with soft edges When the preview GIF is written Then its outline pixels are about as bright as the character, not a dark ring."""
+    directory = tmp_path / "bright"
+    directory.mkdir()
+    paths = []
+    for index in range(16):
+        image = Image.new("RGB", (128, 128), (0, 255, 0))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((34 + index, 34, 94 + index, 94), fill=(255, 235, 60))
+        path = directory / f"frame-{index + 1:02d}.png"
+        image.save(path)
+        paths.append(str(path))
+
+    result = SpriteAdapter().build_from_frames(
+        paths, output_dir=str(tmp_path / "bright-output"), cell_width=96, cell_height=96
+    )
+
+    gif = Image.open(result["gif_path"]).convert("RGBA")
+    opaque = [pixel for pixel in gif.getdata() if pixel[3] == 255]
+    brightness = [sum(pixel[:3]) / 3 for pixel in opaque]
+    assert min(brightness) > 0.75 * (sum(brightness) / len(brightness))
 
 
 def test_user_given_a_backdrop_whose_green_drifts_between_frames_when_packaged_then_every_frame_is_cut_out(

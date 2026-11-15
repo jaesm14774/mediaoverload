@@ -19,10 +19,9 @@ from agentic.runtime.prompting import (
     include_role_description,
     selected_role_description,
     style_profile_direction,
-    texts_are_alike,
 )
 from agentic.runtime.llm_client import PromptClient, PromptGenerationError
-from agentic.runtime.series_carousel import series_prompt_sets
+from agentic.runtime.series_carousel import PLACEMENTS, series_prompt_sets
 
 
 STICKER_ACTING = (
@@ -33,8 +32,9 @@ STICKER_ACTING = (
 )
 
 STICKER_FRAMING = (
-    "Cute chat sticker: one isolated subject with a thick white die-cut outline that stays fully inside the frame, "
-    "on a plain, flat, pale backdrop with no scenery, ground, crowd, or writing."
+    "Cute chat sticker: one isolated subject, the whole character from head to feet, small and centered, with a thick "
+    "white die-cut outline and wide empty space on every side of that outline, on a plain, flat, pale backdrop with "
+    "no scenery, ground, crowd, or writing."
 )
 
 
@@ -52,27 +52,23 @@ def _sticker_reaction(payload: Any, target_count: int) -> list[str]:
     if not isinstance(reactions, list) or len(reactions) != target_count:
         raise ValueError(f"sticker writer must return exactly {target_count} reactions.")
     feelings: set[str] = set()
-    framings: list[str] = []
     sentences: list[str] = []
     for index, reaction in enumerate(reactions, start=1):
         fields = {
             key: " ".join(
                 str((reaction or {}).get(key) or "").translate(_PLAIN_PUNCTUATION).split()
             ).rstrip(".")
-            for key in ("framing", "feeling", "body", "eyes", "mark")
+            for key in ("feeling", "body", "eyes", "mark")
         }
         if not all(fields.values()):
-            raise ValueError(f"sticker reaction {index} needs framing, feeling, body, eyes, and mark.")
+            raise ValueError(f"sticker reaction {index} needs feeling, body, eyes, and mark.")
         if not all(character.isascii() for character in "".join(fields.values())):
             raise ValueError(f"sticker reaction {index} must be plain English words without symbols.")
         if fields["feeling"].casefold() in feelings:
             raise ValueError("sticker reactions must each carry a different feeling.")
-        if any(texts_are_alike(fields["framing"], earlier) for earlier in framings):
-            raise ValueError("sticker reactions must each be drawn at a different distance.")
         feelings.add(fields["feeling"].casefold())
-        framings.append(fields["framing"])
         sentences.append(
-            f"{fields['framing'][:1].upper()}{fields['framing'][1:]}. {fields['body']}. "
+            f"{fields['body']}. "
             f"For this feeling the eyes are drawn as {fields['eyes']}. "
             f"{fields['mark'][:1].upper()}{fields['mark'][1:]} floats beside the head"
         )
@@ -99,11 +95,7 @@ def sticker_expressions(
             "whole experience, including its uncomfortable or funny low point, so the feelings differ in kind and are "
             "not several shades of happy.",
             STICKER_ACTING,
-            "Fill five fields for each reaction, in plain English words with no emoji or symbol characters. "
-            "framing: in one short clause, how much of the character the picture shows and how large it sits in "
-            "the frame, from the head and upper body filling most of the picture to the whole character full-length "
-            "at about half the frame height; the pack runs across that range, so no two reactions share a distance, "
-            "and the character and its white outline always stay completely inside the picture. "
+            "Fill four fields for each reaction, in plain English words with no emoji or symbol characters. "
             "feeling: the feeling in one or two words; no two reactions share it. "
             "body: starting with the word Body, what the whole body is doing, as a painter would draw it, in ten to "
             "eighteen words; the body's outline differs so much between reactions that their silhouettes filled in "
@@ -131,13 +123,12 @@ def sticker_expressions(
                         "items": {
                             "type": "object",
                             "properties": {
-                                "framing": {"type": "string"},
                                 "feeling": {"type": "string"},
                                 "body": {"type": "string"},
                                 "eyes": {"type": "string"},
                                 "mark": {"type": "string"},
                             },
-                            "required": ["framing", "feeling", "body", "eyes", "mark"],
+                            "required": ["feeling", "body", "eyes", "mark"],
                             "additionalProperties": False,
                         },
                     }
@@ -358,20 +349,7 @@ def _sprite_theme(goal: GoalRequest) -> str:
     must not inherit, so the theme is the source-to-scene mapping, or the
     headline when the run has none.
     """
-    anchors = goal.constraints.get("news_source_anchors")
-    mappings = [
-        str(anchor.get("visual_mapping") or "").strip()
-        for anchor in (anchors if isinstance(anchors, list) else [])
-        if isinstance(anchor, dict)
-    ]
-    news = goal.constraints.get("news_context")
-    headline = (
-        str(news.get("title") or news.get("keyword") or "").strip()
-        if isinstance(news, dict)
-        else ""
-    )
-    theme = "; ".join(part for part in (*mappings, headline) if part)
-    return theme or str(goal.prompt or "").strip()
+    return _source_happening(goal) or str(goal.prompt or "").strip()
 
 
 def build_dynamic_sprite_motion_plan(
@@ -493,23 +471,41 @@ def build_dynamic_sprite_motion_plan(
 
 
 SERIES_SCENE_CONTRACT = (
-    "Write one fixed scene as a template for a series of pictures that differ only in who is in them. The template "
-    "opens with one sentence naming the selected medium with two or three observable surface cues from the style "
-    "rules. It then fixes the camera, the one prop and where it sits, and where the character stands or lies and how "
-    "large it is drawn, so the same words give the same composition every time. The one place where the character "
-    "goes is written as {character}, exactly once, as a bare noun phrase with no possessive; the scene never writes a cast "
-    "member's name and never describes the character's body, species, or colour, because the look supplies that. The picture holds "
-    "that one character and the scene only, with no writing, numbers, labels, or signs. For every cast member give a "
-    "look of at most twelve words that starts with 'the' and names the shape, the colour, and the one feature that "
-    "tells it apart; the look is swapped into the slot of the fixed composition, so it describes the body only and "
-    "never an action, a prop, or a setting."
+    "Write one shared world and one page per cast member. The scene opens with one sentence naming the selected "
+    "medium with two or three observable surface cues from the style rules, then fixes only what every page "
+    "shares: the place, the weather and light, and the objects that make the scene recognisable. It holds no "
+    "character, writes no cast member's name, and fixes no camera angle, pose, or action. Each page is that member's "
+    "own moment inside the world: a moment is one or two sentences that name only that member, say what it is doing "
+    "and how large it is drawn, and use only the body parts and props that member's own description lists. Give every "
+    "page a different part of the happening, with the first page on its main part, so the set tells the whole "
+    "happening instead of repeating one picture. Do not give pages the same action, and do not default to a still "
+    "pose. Each page also names where the member sits in the frame, one of the nine grid spots; spread the pages "
+    "across the frame, put at most one page at the centre, and let no spot hold more than half the pages. Each picture holds that one character and the scene "
+    "only, with no writing, numbers, labels, or signs."
 )
+
+
+def _source_happening(goal: GoalRequest) -> str:
+    """The reported happening this run took from its source: source-to-scene mappings plus the headline."""
+    anchors = goal.constraints.get("news_source_anchors")
+    mappings = [
+        str(anchor.get("visual_mapping") or "").strip()
+        for anchor in (anchors if isinstance(anchors, list) else [])
+        if isinstance(anchor, dict)
+    ]
+    news = goal.constraints.get("news_context")
+    headline = (
+        str(news.get("title") or news.get("keyword") or "").strip()
+        if isinstance(news, dict)
+        else ""
+    )
+    return "; ".join(part for part in (*mappings, headline) if part)
 
 
 def build_series_template(
     client: PromptClient, goal: GoalRequest, members: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Write one scene template and a short look per member; no canned scene exists."""
+    """Write one shared world plus a moment and a spot per member. No canned scene exists."""
     if client.mode == "template":
         raise PromptGenerationError(
             "Series carousel requires an LLM; canned scenes are not supported"
@@ -517,20 +513,21 @@ def build_series_template(
     cast = [
         {
             "name": str(member["name"]),
-            "description": str(member.get("role_description") or "")[:300],
-            "keywords": str(member.get("keywords") or ""),
+            "description": str(member.get("role_description") or ""),
         }
         for member in members
     ]
+    happening = _source_happening(goal)
     user_prompt = "\n".join(
         [
             f"Scene idea: {goal.prompt}",
+            *([f"Source happening to keep recognisable: {happening}"] if happening else []),
             f"Style: {goal.style}",
             f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Cast JSON: {json.dumps(cast, ensure_ascii=False)}",
             SERIES_SCENE_CONTRACT,
-            "Return a JSON object with keys template and looks. looks has one item per cast member with keys name "
-            "(exactly as given) and look.",
+            "Return a JSON object with the keys scene and pages; pages has one item per cast member in cast "
+            "order, each with name, moment, and placement.",
         ]
     )
     manager = client.require_manager()
@@ -538,41 +535,40 @@ def build_series_template(
     def validate_response(payload: Any) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("series writer must return an object.")
-        series_prompt_sets(payload.get("template"), payload.get("looks") or [], members)
+        series_prompt_sets(payload.get("scene"), payload.get("pages") or [], members)
         return payload
 
     payload = client.generate_json(
         manager,
         LONG_VIDEO_SYSTEM_PROMPT,
         user_prompt,
-        schema_name="series_template",
+        schema_name="series_scene",
         schema={
             "type": "object",
             "properties": {
-                "template": {"type": "string"},
-                "looks": {
+                "scene": {"type": "string"},
+                "pages": {
                     "type": "array",
-                    "minItems": len(members),
-                    "maxItems": len(members),
                     "items": {
                         "type": "object",
                         "properties": {
                             "name": {"type": "string"},
-                            "look": {"type": "string"},
+                            "moment": {"type": "string"},
+                            "placement": {"type": "string", "enum": list(PLACEMENTS)},
                         },
-                        "required": ["name", "look"],
+                        "required": ["name", "moment", "placement"],
                         "additionalProperties": False,
                     },
                 },
             },
-            "required": ["template", "looks"],
+            "required": ["scene", "pages"],
             "additionalProperties": False,
         },
         validate_response=validate_response,
     )
     return client.mark_payload(
         {
-            "template": str(payload["template"]).strip(),
-            "prompt_sets": series_prompt_sets(payload["template"], payload["looks"], members),
+            "scene": " ".join(str(payload["scene"]).split()),
+            "prompt_sets": series_prompt_sets(payload["scene"], payload["pages"], members),
         }
     )

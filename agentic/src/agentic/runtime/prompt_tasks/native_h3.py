@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from agentic.runtime.pair_interaction import pair_interaction_craft
 from agentic.runtime.model_backends import scoped_model_sequence
 from agentic.runtime.reference_video import (
     format_reference_video_directive,
@@ -199,6 +200,9 @@ def generate_native_h3_storyboard(
         if character_names
         else "Selected cast: the protagonist."
     )
+    pair_craft = pair_interaction_craft(resolved_subject_context)
+    if pair_craft:
+        cast_directive = f"{cast_directive} {pair_craft}"
     character_profile = dict(resolved_subject_context.get("character_profile") or {})
     canonical_profiles = []
     if character_profile:

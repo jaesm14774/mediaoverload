@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -344,7 +343,7 @@ class AgentPlanningSkills:
             status="success",
             outputs=bundle,
             metrics={"prompt_count": len(bundle["prompt_sets"])},
-            logs=["Wrote one fixed scene and filled it once per cast member."],
+            logs=["Wrote one shared world with a moment and a spot per cast member."],
         )
 
     def write_story_card(self, context: SkillContext) -> SkillResult:
@@ -734,10 +733,6 @@ class AgentMediaSkills:
         item_runs: list[dict[str, str]] = []
         seed_value = context.node.inputs.get("seed", context.plan.goal.constraints.get("seed"))
         seed_base = int(seed_value) if seed_value is not None else None
-        # A series keeps one composition only if every page starts from the same noise.
-        shared_seed = bool(context.node.inputs.get("shared_seed"))
-        if shared_seed and seed_base is None:
-            seed_base = random.SystemRandom().randrange(1, 2**31)
         rendered_count = 0
         for index, (prompt_set, prompt_image_count) in enumerate(
             zip(prompt_sets, image_counts, strict=True), start=1
@@ -771,9 +766,7 @@ class AgentMediaSkills:
                 "run_dir": str(item_dir),
             }
             if seed_base is not None:
-                render_payload["seed"] = (
-                    seed_base if shared_seed else (seed_base + rendered_count) % (2**64)
-                )
+                render_payload["seed"] = (seed_base + rendered_count) % (2**64)
             result = self.tools.call(
                 "comfy.workflow.text_to_image", render_payload
             )
@@ -796,7 +789,6 @@ class AgentMediaSkills:
                 "run_dir": str(run_dir),
                 "saved_files": saved_files,
                 "items": item_runs,
-                **({"seed": seed_base} if shared_seed else {}),
             },
             metrics={"image_count": len(saved_files)},
             logs=[f"Rendered {len(saved_files)} images as a reusable batch primitive."],

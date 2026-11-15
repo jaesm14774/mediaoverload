@@ -27,7 +27,7 @@ PROFILE = {
 def test_user_given_scene_style_when_rendering_assets_then_each_asset_keeps_its_background_contract(
     tmp_path, media_type, renderer,
 ):
-    """User Given a scene-oriented style When a sticker or sprite reaches the renderer Then each asset type follows its background contract."""
+    """User Given a scene-oriented style When a sticker or sprite reaches the renderer Then the subject takes the style's rendering while the scene, composition and exclusions stay out."""
     request = (
         "Kirby waves in a colorful garden"
         if media_type == "game_sprite"
@@ -70,21 +70,14 @@ def test_user_given_scene_style_when_rendering_assets_then_each_asset_keeps_its_
     for payload in submitted:
         prompt = payload["prompt"]
         assert PROFILE["palette"] in prompt
-        if media_type == "game_sprite":
-            # A sprite owns its pixel-art rendering; the style lends colours only.
-            assert PROFILE["prompt"] not in prompt
-            assert PROFILE["composition"] not in prompt
-            assert PROFILE["avoid"] not in prompt
-            assert "chroma-key background" not in prompt.casefold()
-            assert PROFILE["avoid"] not in payload["negative_prompt"]
-        else:
-            assert PROFILE["prompt"] in prompt
-            assert "subject only" in prompt.casefold()
-            assert "background requirements take priority" in prompt.casefold()
+        assert PROFILE["prompt"] in prompt
+        assert "subject only" in prompt.casefold()
+        assert "background requirements take priority" in prompt.casefold()
+        if media_type != "game_sprite":
             assert "#18e06f" in prompt
-            assert PROFILE["composition"] not in prompt
-            assert PROFILE["avoid"] not in prompt
-            assert PROFILE["avoid"] not in payload["negative_prompt"]
+        assert PROFILE["composition"] not in prompt
+        assert PROFILE["avoid"] not in prompt
+        assert PROFILE["avoid"] not in payload["negative_prompt"]
         assert "watermark" in payload["negative_prompt"]
 
 
@@ -98,3 +91,19 @@ def test_user_given_scene_style_when_rendering_a_scene_then_composition_and_excl
     assert PROFILE["composition"] in brief["prompt"]
     assert PROFILE["avoid"] in brief["prompt"]
     assert PROFILE["avoid"] in brief["negative_prompt"]
+
+
+def test_user_given_a_style_with_scene_motion_when_a_sprite_clip_is_prompted_then_the_style_motion_stays_out():
+    """User Given a style whose motion adds drifting rain and light When a game sprite clip is prompted Then that motion text is not added, because the sprite keeps a fixed camera and a flat backdrop."""
+    from agentic.runtime.prompting import include_visual_style_profile
+
+    profile = {**PROFILE, "motion": "drifting rain and floating light particles"}
+    goal = GoalRequest(
+        prompt="Kirby waves", media_type="game_sprite", style=PROFILE["label"],
+        constraints={"visual_style_profile": profile},
+    )
+
+    prompt = include_visual_style_profile("Kirby waves", goal)
+
+    assert PROFILE["prompt"] in prompt
+    assert "drifting rain" not in prompt
