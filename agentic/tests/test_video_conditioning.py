@@ -74,7 +74,6 @@ class VideoConditioningTests(unittest.TestCase):
                     "width": 512,
                     "height": 288,
                     "length": 81,
-                    "steps": 16,
                 },
                 depends_on=["segment-prompt-01"],
             )
@@ -154,7 +153,6 @@ class VideoConditioningTests(unittest.TestCase):
                     "width": 512,
                     "height": 288,
                     "length": 81,
-                    "steps": 16,
                 },
                 depends_on=["segment-prompt-01"],
             )

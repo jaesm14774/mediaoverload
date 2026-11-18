@@ -85,6 +85,9 @@ def _write_video(path: Path, color: str, duration_seconds: float = 0.5) -> Path:
     return path
 
 
+LEDGER_SECTION = "\n\n四、線索帳本\n- 新增 主線｜燈塔為什麼熄滅\n- 下集目標｜找出熄滅的原因\n"
+
+
 def _write_reference(path: Path, content: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -409,7 +412,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             outline = store.save_series_episode_outline_draft(
                 series_id, 1, "The lighthouse goes dark", "Tide clears salt from the lantern."
             )
-            reviewed_text = "Episode 1: The lighthouse goes dark\n\nTide restores the harbor signal."
+            reviewed_text = "Episode 1: The lighthouse goes dark\n\nTide restores the harbor signal." + LEDGER_SECTION
             decision = HumanReviewDecision(
                 status="approved",
                 selected_paths=[],
@@ -578,7 +581,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 "Beat 1: Tide finds salt crystals blocking the lantern.\nShot 1: ...",
                 episode_direction="Show why the harbor signal disappears.",
             )
-            reviewed = "Episode 1: The lighthouse goes dark\n\nShot 1: Tide finds the salt crystals."
+            reviewed = "Episode 1: The lighthouse goes dark\n\nShot 1: Tide finds the salt crystals." + LEDGER_SECTION
             outline = store.record_series_episode_outline_decision(
                 draft["outline_id"],
                 "accepted",
@@ -1139,7 +1142,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             outline = store.record_series_episode_outline_decision(
                 outline_draft["outline_id"],
                 "accepted",
-                reviewed_outline="Episode 1 story and approved shot list.",
+                reviewed_outline="Episode 1 story and approved shot list." + LEDGER_SECTION,
             )
 
             context = store.prepare_series_context(
@@ -1194,7 +1197,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             store.record_series_episode_outline_decision(
                 outline_draft["outline_id"],
                 "accepted",
-                reviewed_outline="Episode 1 story and approved shot list.",
+                reviewed_outline="Episode 1 story and approved shot list." + LEDGER_SECTION,
             )
             reference.write_bytes(b"different Tide identity after approval")
 
@@ -1250,7 +1253,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             store.record_series_episode_outline_decision(
                 outline_one["outline_id"],
                 "accepted",
-                reviewed_outline="Episode 1: Tide cleans the lighthouse lens.",
+                reviewed_outline="Episode 1: Tide cleans the lighthouse lens." + LEDGER_SECTION,
             )
             context_one = store.prepare_series_context(
                 series_id, "Tide", require_story_first_for_new=True, require_episode_outline=True
@@ -1300,7 +1303,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             store.record_series_episode_outline_decision(
                 outline_two["outline_id"],
                 "accepted",
-                reviewed_outline="Episode 1: Morrow leads Tide to the second harbor.",
+                reviewed_outline="Episode 1: Morrow leads Tide to the second harbor." + LEDGER_SECTION,
             )
 
             context_two = store.prepare_series_context(
@@ -1439,7 +1442,7 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                     "series", "episodes", "episode_plans", "segments", "render_attempts",
                     "reviews", "reference_assets", "episode_publications",
                     "series_story_plans", "series_character_cards", "series_episode_outlines",
-                    "episode_onboarding_lineage",
+                    "episode_onboarding_lineage", "series_episode_ledger", "series_companions",
                 },
             )
             self.assertEqual(persisted_episode["episode_topic"], "星花引路，陪迷路火螢回家")
@@ -2939,7 +2942,6 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                     "longvideo_width": 608,
                     "longvideo_height": 352,
                     "longvideo_length": 120,
-                    "longvideo_steps": 16,
                 },
             )
 
@@ -2979,7 +2981,6 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                     "longvideo_width": 608,
                     "longvideo_height": 352,
                     "longvideo_length": 120,
-                    "longvideo_steps": 16,
                     "platforms": platforms,
                     "platform_configs": {name: {"enabled": True} for name in platforms},
                     "publish_mode": "live",
@@ -3086,7 +3087,6 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                     "longvideo_width": 608,
                     "longvideo_height": 352,
                     "longvideo_length": 360,
-                    "longvideo_steps": 16,
                 },
             )
 

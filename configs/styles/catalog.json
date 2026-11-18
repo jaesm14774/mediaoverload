@@ -5859,6 +5859,48 @@
       "palette": "matte earth tones of ochre, brick red, olive and cream with one bright accent",
       "motion": "in video, keep every element a flat cut-paper layer with paper fibre and torn edges; lively stop-motion-like movement with small sliding paper parallax between layers",
       "avoid": "soft airbrush gradients, glossy 3D, photographic detail, readable text, logos, watermarks"
+    },
+    {
+      "id": "starry_thick_paint",
+      "order": 300,
+      "name": "thick-brush starry night world",
+      "descriptor": "thick-brush painterly night-sky illustration with visible directional impasto-like strokes, layered ultramarine and indigo paint, a glowing moon and scattered stars painted as warm cream-yellow dabs, a soft halo around every light",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "a vast painted night sky or moonlit landscape is the main subject and the character is small, resting or travelling inside it; one large glowing moon or crescent and a sweeping band of stars lead the eye, with calm dark space around",
+      "palette": "deep navy and indigo with cream-yellow moon and star glow, one warm coral or lilac accent on the character, clear light and dark separation",
+      "motion": "in video, keep the thick brush strokes and painted star dabs steady; stars twinkle softly and clouds drift slowly while the character makes one lively readable action",
+      "avoid": "readable text, logos, watermarks, glossy 3D, flat clip-art shapes"
+    },
+    {
+      "id": "colored_pencil_sketch",
+      "order": 301,
+      "name": "coloured-pencil sketchbook drawing",
+      "descriptor": "hand-drawn coloured-pencil illustration on off-white sketchbook paper, thin visible pencil strokes with light hatching, a few pale colour washes inside the main shapes only, slightly unfinished sketch edges",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "one small simple vignette resting on mostly blank paper, the character small and round with one or two sketched props and a faint pencil ground shadow, wide white margins",
+      "palette": "mostly pencil grey on white paper with sparse touches of pale rose, butter yellow and sky blue; low contrast",
+      "motion": "in video, keep the pencil strokes, paper tooth and sparse pale colour identical throughout; one cheerful readable action with a light boil-like line wobble",
+      "avoid": "heavy dark fills, glossy 3D, photographic detail, readable text, logos, watermarks"
+    },
+    {
+      "id": "daylight_sky_anime",
+      "order": 302,
+      "name": "bright daytime sky anime painting",
+      "descriptor": "bright daytime anime-background painting with clean soft-edged digital brushwork, towering sunlit cumulus clouds, saturated cerulean sky, gentle bloom and crisp painted highlights",
+      "categories": [
+        "原有角色風格"
+      ],
+      "previews": {},
+      "composition": "a wide sky-and-landscape scene is the main subject, the character is small in the lower third standing on a rail, hill or rooftop, with layered clouds receding and open sky above",
+      "palette": "cerulean and cobalt blue sky with white cloud lights, fresh green and warm cream accents, one pink accent on the character",
+      "motion": "in video, keep the painted clouds and bloom steady; clouds drift slowly and a light breeze moves grass while the character makes one lively readable action",
+      "avoid": "glossy 3D, readable text, logos, watermarks, interface overlays"
     }
   ],
   "source": {

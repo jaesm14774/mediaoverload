@@ -103,6 +103,26 @@ def _goal_subject_instruction(goal: GoalRequest) -> str:
     return f"Selected cast: {'; '.join(cast)}. {cast_policy}"
 
 
+def _serial_cast_instruction(goal: GoalRequest) -> str:
+    """The recurring characters' real look, so writers never invent another design for them."""
+    roster = str(goal.constraints.get("serial_cast") or "").strip()
+    if not roster:
+        return ""
+    return (
+        "Recurring characters with a fixed look (use exactly this appearance, never invent another design):\n"
+        + roster
+    )
+
+
+SERIAL_H3_STORY_RULES = (
+    "Write the segment plan's own story action as an ordered chain of visible beats: what each character named in the plan does, to what or whom, and the visible result stated in the plan. Do not replace the planned action with generic bouncing, hopping or posing; characters may walk or move to the place the plan sends them. Start the prompt with what the characters do.",
+    "Keep every character named in the plan on screen for the whole clip, each with its own visible action or reaction, using the recurring cast's real look.",
+    "Start the prompt on a motion verb and never describe a still pose, sleeping, resting, breathing, glowing, drifting, watching or posing as the action: a calm planned action becomes the big physical move it leads to, so every character is moving from the first moment. Give each character two or three concrete action verbs chained into connected moves, with anticipation, then a big stretch-and-squash move, while props and scene elements respond on every beat. In every clip at least one character travels far across the frame (runs, leaps, flies, tumbles, is thrown or chases), because catching, tidying and handing things over in place render as an almost still video.",
+    "Sound and score follow the action's pace: quick, bouncy and playful, never a slow lullaby.",
+    "Every character is one separate figure with its own colours and props: name each recurring character exactly as listed above, name the protagonist exactly as Character, and never merge two characters into one body. The next clip continues from this clip's last frame, so the protagonist's beat comes last: the clip ends with the protagonist centred at about half the frame height, still moving, and every other named character fully inside the frame, one on the left and one on the right, face visible and at a readable size, with nobody cut off by the frame edge. Never bring the action to a halt, skid to a stop or settle into a group pose: the last second moves as fast as the first, with every character mid-move (hopping, waving, spinning, chasing or cheering).",
+)
+
+
 SCENE_RESPONSE_CONTRACT = (
     "The prompt field must contain only the final scene description as one non-empty string. "
     "Describe the subjects, appearance, setting, style, action, visible result, camera and optional sound. "
@@ -279,7 +299,7 @@ H3_INITIAL_ACTION_CONTRACT = (
     "anatomy, props, locations, or a second action. Keep the opening_keyframe_prompt as one frozen loaded pose "
     "that sets up the same action and follows the still-image composition, lighting, and material contract. "
     "Apply that still-image contract only to opening_keyframe_prompt; keep prompt motion-only. "
-    "Keep the illustrated look unchanged and the camera to at most one slow gentle push-in. Start the action in the "
+    "Keep the illustrated look unchanged and the camera locked. Start the action in the "
     "first tenth and keep the character moving energetically through the whole clip, chaining two or three connected "
     "moves with stretch and squash, still moving in the last frame. Apply this contract without "
     "copying it into prompt."
@@ -419,17 +439,11 @@ def _validate_image_prompt_set(
     return payload
 
 
-def _preserve_later_episode_action(
+def _preserve_planned_action(
     prompt: str, goal: GoalRequest, segment: dict[str, Any]
 ) -> str:
-    """Keep the current episode's planned event primary after vision prompt writing."""
+    """Keep the planned story event primary after vision prompt writing."""
     if not goal.constraints.get("serial_mode"):
-        return prompt
-    try:
-        episode_number = int(goal.constraints.get("serial_episode_number") or 1)
-    except (TypeError, ValueError):
-        episode_number = 1
-    if episode_number <= 1:
         return prompt
 
     action = str(segment.get("action") or "").strip()
@@ -437,6 +451,11 @@ def _preserve_later_episode_action(
     visual = str(segment.get("visual") or "").strip()
     if not any((action, effect, visual)):
         return prompt
+
+    try:
+        episode_number = int(goal.constraints.get("serial_episode_number") or 1)
+    except (TypeError, ValueError):
+        episode_number = 1
 
     required = [
         "Current episode action (required and visually primary): "
@@ -446,11 +465,16 @@ def _preserve_later_episode_action(
         required.append("Current episode visible outcome (required): " + effect)
     if visual and visual != action:
         required.append("Current episode visual direction: " + visual)
+    if episode_number > 1:
+        required.append(
+            "Cross-episode continuity: preserve character identity, world, and palette from the prior reference. Treat that image as the opening continuity point only; develop the current episode's new action immediately instead of repeating the prior pose or composition."
+        )
+    protagonist = str(goal.constraints.get("character") or "").strip() or "The protagonist"
     required.extend(
         [
-            "Cross-episode continuity: preserve character identity, world, and palette from the prior reference. Treat that image as the opening continuity point only; develop the current episode's new action immediately instead of repeating the prior pose or composition.",
             "The required action takes priority over reference-aware scene notes if they conflict. Use those notes for compatible appearance and camera details only.",
             "Reference-aware appearance and camera notes: " + prompt,
+            f"Last frame (required): {protagonist} is centred at about half the frame height and still moving, with every other named character fully inside the frame on the left and right of {protagonist}, face visible, at a readable size and as a separate figure; nobody is cut off by the frame edge, leaves the frame or merges with another; every character is still mid-move (hopping, waving, spinning, chasing or cheering), never frozen in a pose.",
         ]
     )
     return "\n\n".join(required)
@@ -1187,6 +1211,9 @@ def segment_story(
                 "and do not move events between segments. Each beat changes a visible state and causes the next. "
                 "The final segment shows the episode's small result and then its hook, an unanswered question or surprising closing image, "
                 "and never closes the series' standing question. "
+                "Every segment, including the first, is a fast chain of two or three big continuous physical moves by the named characters, starting in the first second and carrying that beat's one goal; "
+                "sleeping, resting, breathing, glowing, drifting, watching or posing is never the action, and the opening beat shows the characters already in motion. "
+                "A serial episode is never a still or solemn brief. "
                 if serial_episode
                 else "For a causal story, keep one visible goal, one obstacle, and one turn that changes the outcome; "
                 "each beat changes a visible state and causes the next, and the ending resolves or reframes the opening. "
@@ -1194,11 +1221,11 @@ def segment_story(
             )
             +
             "The first segment begins its action within its first tenth; the final segment reaches "
-            "a clear payoff before a brief ending hold. Keep the subject's body, face, and goal readable. "
+            "a clear payoff while the characters are still moving. Keep the subject's body, face, and goal readable. "
             "When the tone supports it, include a compact anticipation, action, follow-through, and charming "
             "reaction such as a blink, delighted glance, or proud bounce. Do not add cute business to solemn scenes. "
-            f"Each segment must include {direction_field_names}. The camera field names the starting framing and either a locked camera or "
-            "the single slow push-in, and what stays in frame; it never plans a pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane. "
+            f"Each segment must include {direction_field_names}. The camera field names the starting framing as a locked camera and what stays in frame; "
+            "it never plans a push-in, pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane. "
             "Keep the protagonist's face and every story-critical object within frame with clear edge margins for the whole segment, "
             "and show the visible result before any reaction. "
             f"Video action and camera direction: {VIDEO_MOTION_DIRECTION} "
@@ -1213,6 +1240,7 @@ def segment_story(
             f"Media type: {goal.media_type}",
             f"Character: {goal.constraints.get('character', '')}",
             _goal_subject_instruction(goal),
+            _serial_cast_instruction(goal),
             f"Style: {goal.style}",
             f"Resolved visual style rules: {style_profile_direction(goal)}",
             f"Creative brief: {creative_brief}",
@@ -1326,6 +1354,7 @@ def prepare_segment(
         f"Resolved visual style rules: {style_profile_direction(goal)}",
         f"Character: {goal.constraints.get('character', '')}",
         _goal_subject_instruction(goal),
+        _serial_cast_instruction(goal),
         f"News context JSON: {json.dumps(goal.constraints.get('news_context', {}), ensure_ascii=False)}",
     ]
     if previous_segment:
@@ -1412,15 +1441,27 @@ def prepare_h3_segment(
         image_context.append(f"Attached image {index} ({label}) is the {role}.")
 
     source_prompt = require_h3_prompt(draft_prompt)
+    serial_mode = bool(goal.constraints.get("serial_mode"))
+    if serial_mode:
+        motion_rules = [
+            *SERIAL_H3_STORY_RULES,
+            f"Keep the first frame's art style, colours, line quality and setting unchanged for the whole clip: do not restyle or re-render the scene, and show a place or prop the first frame lacks only as a small element drawn in that same style. Style rules: {style_profile_direction(goal)}",
+            f"Segment duration: {float(duration_seconds):.2f} seconds. Keep every character moving energetically at a fast, playful pace through the whole clip, still moving in the last frame, and end on the planned visible result. Do not jump directly to the ending frame.",
+        ]
+    else:
+        motion_rules = [
+            "Write an ordered chain of positive physical-action beats, not a list of prohibitions: from the first moment name what moves, its target and path, the next connected movement, and the visible resulting state. Use 2–3 concrete action verbs; do not describe a static pose and expect H3 to infer movement. Start the prompt with a motion verb for the character and never describe the picture as it stands; even when the image is calm or the draft has no action, give the character a lively physical action in its own scene, such as bouncing, hopping, swinging its feet, or reaching, chained into connected moves within the visible scene; the character never travels to a place the image does not show, and the camera stays locked rather than following it. When the draft's action needs a place or object the image does not show, such as a platform, a train, or a street, replace it with a lively action on the visible props, for example hopping on, around, or over the object it stands on.",
+            f"Segment duration: {float(duration_seconds):.2f} seconds. Start the action in the first moment and keep the character moving energetically through the whole segment: anticipation, a big action with stretch and squash, then the same action chained into two or three connected moves while props and scene elements respond on every beat, still moving in the last frame. Do not jump directly to the ending frame.",
+        ]
     prompt_context = [
         "Write the final scene prompt for MiniMax H3 after inspecting the attached conditioning image(s).",
         "Treat the visible image(s) as the source of truth for character identity and design, palette, art style, location, and important visible objects. The written draft supplies intended action and story meaning. When details conflict, preserve the image's identity and objects and adapt the action to them.",
         "For a comic page, contact sheet, collage, or other image with repeated depictions, interpret those poses as successive views of the same subject. Write one continuous scene with one instance of each requested character; do not turn gutters or repeated poses into extra characters or a persistent split-screen layout unless the brief explicitly asks for that. Keep the visible starting pose and subject-to-object relationship readable.",
-        "Keep one continuous shot with one main visible action and at most one slow gentle push-in; move the camera further only when the brief asks for it. Describe the visible starting state, physical movement, and readable ending state. Keep the H3 scene concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft.",
-        "Write an ordered chain of positive physical-action beats, not a list of prohibitions: from the first moment name what moves, its target and path, the next connected movement, and the visible resulting state. Use 2–3 concrete action verbs; do not describe a static pose and expect H3 to infer movement. Start the prompt with a motion verb for the character and never describe the picture as it stands; even when the image is calm or the draft has no action, give the character a lively physical action in its own scene, such as bouncing, hopping, swinging its feet, or reaching, chained into connected moves within the visible scene; the character never travels to a place the image does not show, and the camera only pushes in toward it rather than following it. When the draft's action needs a place or object the image does not show, such as a platform, a train, or a street, replace it with a lively action on the visible props, for example hopping on, around, or over the object it stands on.",
-        f"Segment duration: {float(duration_seconds):.2f} seconds. Start the action in the first moment and keep the character moving energetically through the whole segment: anticipation, a big action with stretch and squash, then the same action chained into two or three connected moves while props and scene elements respond on every beat, still moving in the last frame. Do not jump directly to the ending frame.",
+        "Keep one continuous shot with a locked camera; move the camera only when the brief asks for it. Describe the visible starting state, physical movement, and readable ending state. Keep the H3 scene concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft.",
+        *motion_rules,
         "Return only scene description in prompt, concrete environmental and physical-action sound in overall_soundscape, and an audience-only score in non_diegetic_music (or N/A). Do not put prompt-writing instructions, source analysis, or serialized objects inside prompt.",
         f"Character: {goal.constraints.get('character', '')}",
+        _serial_cast_instruction(goal),
         f"Selected style: {goal.style}",
         f"Scene draft: {source_prompt}",
         f"Segment plan: {json.dumps(segment, ensure_ascii=False)}",
@@ -1428,16 +1469,10 @@ def prepare_h3_segment(
         f"Existing score direction: {non_diegetic_music}",
         *image_context,
     ]
-    try:
-        serial_episode_number = int(
-            goal.constraints.get("serial_episode_number") or 1
-        )
-    except (TypeError, ValueError):
-        serial_episode_number = 1
-    if goal.constraints.get("serial_mode") and serial_episode_number > 1:
+    if serial_mode:
         prompt_context.insert(
             2,
-            "This is a later serial episode. The prior episode reference is only the opening continuity moment: preserve the character identity and world, then move away from the prior pose and composition as the current action unfolds. The structured current segment plan is authoritative for the new plot event. Explicit characters, props, and locations named in that plan must be shown even when they are absent from the prior reference image.",
+            "This is a serial episode. The attached image is only the opening continuity moment: preserve the character identity and world, then move away from the prior pose and composition as the current action unfolds. The structured current segment plan is authoritative for the new plot event. Explicit characters, props, and locations named in that plan must be shown even when they are absent from the attached image.",
         )
     news_context = goal.constraints.get("news_context")
     if isinstance(news_context, dict) and news_context:
@@ -1481,7 +1516,7 @@ def prepare_h3_segment(
         return client.mark_payload(
             {
                 "segment_id": str(segment.get("segment_id") or ""),
-                "prompt": _preserve_later_episode_action(
+                "prompt": _preserve_planned_action(
                     require_h3_prompt(payload.get("prompt")), goal, segment
                 ),
                 "overall_soundscape": payload["overall_soundscape"],

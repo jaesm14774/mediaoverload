@@ -1,14 +1,14 @@
 """ComfyUI model-file requirements for the MiniMax H3 routes.
 
-T2VA, I2VA, FL2VA and L2VA run the FastVideo FastH3 8-step distillation, which is only valid at
-its trained step count. Ref2VA has no distilled checkpoint and keeps the Q4 GGUF recipe with a
-selectable text-encoder profile.
+Every route is an 8-step distillation, which is only valid at its trained step count. T2VA, I2VA,
+FL2VA and L2VA run the FastVideo FastH3 checkpoint. Ref2VA runs the Q4 GGUF checkpoint patched by
+the lightx2v 8-step turbo LoRA, with a selectable text-encoder profile.
 """
 from __future__ import annotations
 
 from typing import Any
 
-FASTH3_STEPS = 8
+H3_STEPS = 8
 FASTH3_DIFFUSION = ("fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors", 22_128_378_696)
 FASTH3_TEXT_ENCODER = ("qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", 15_687_142_551)
 
@@ -17,6 +17,7 @@ REF2VA_TEXT_ENCODERS = {
     "q4": ("qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf", 14_576_977_888),
     "q2": ("qwen3vl-32B-MiniMax-H3-Q2_K.gguf", 8_487_968_160),
 }
+REF2VA_TURBO_LORA = ("minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors", 1_956_193_000)
 VIDEO_VAE = ("minimax_h3_video_vae_fp16.safetensors", 5_207_808_496)
 AUDIO_VAE = ("minimax_h3_audio_vae_fp32.safetensors", 605_254_808)
 
@@ -38,6 +39,7 @@ def h3_requirements(mode: str, profile: str = "q4") -> list[dict[str, Any]]:
         models = [
             (*REF2VA_DIFFUSION, "diffusion_model", "unet"),
             (*REF2VA_TEXT_ENCODERS[profile], "text_encoder", "clip"),
+            (*REF2VA_TURBO_LORA, "lora", "loras"),
         ]
     models += [(*VIDEO_VAE, "video_vae", "vae"), (*AUDIO_VAE, "audio_vae", "vae")]
     return [

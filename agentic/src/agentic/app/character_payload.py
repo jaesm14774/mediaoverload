@@ -777,10 +777,6 @@ def build_goal_payload_from_character_config(
                 native_recipe.get("length")
                 or dict(generation.get("video_defaults", {}) or {}).get("length", 362)
             ),
-            "native_h3_steps": int(
-                native_recipe.get("steps")
-                or dict(generation.get("video_defaults", {}) or {}).get("steps", 16)
-            ),
             "native_h3_frame_rate": int(
                 native_recipe.get("frame_rate")
                 or dict(generation.get("video_defaults", {}) or {}).get(

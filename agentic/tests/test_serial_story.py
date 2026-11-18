@@ -45,19 +45,23 @@ def test_user_given_any_complexity_when_the_series_story_is_requested_then_it_is
         assert "真正收尾" not in user_prompt
 
 
-def test_user_given_a_series_request_when_the_route_is_planned_then_only_the_next_few_episodes_are_laid_out_with_distinct_situations():
-    """User Given a series request When the episode route is planned Then the writer lays out only the first few episodes, each with its own place and action, so no episode repeats an earlier one's activity."""
-    _, user_prompt = build_serial_story_prompts(
-        "A lighthouse keeper helps a lost cloud.",
-        None,
-        news_mode="none",
-        character_name="Kirby",
-    )
+def test_user_given_a_series_request_when_the_route_is_planned_then_each_episode_is_the_consequence_of_the_last_and_a_small_cast_may_recur():
+    """User Given a series request When the episode route is planned Then the first few episodes are laid out as a causal chain (therefore or but, never meanwhile), each changing one visible thing, and up to two recurring characters are allowed."""
+    for complexity in ("simple", "cinematic"):
+        _, user_prompt = build_serial_story_prompts(
+            "A lighthouse keeper helps a lost cloud.",
+            None,
+            news_mode="none",
+            character_name="Kirby",
+            complexity=complexity,
+        )
 
-    assert "前三集" in user_prompt
-    assert "場景" in user_prompt and "動作" in user_prompt
-    assert "不重複" in user_prompt
-    assert "每集約一分鐘" in user_prompt
+        assert "前三集" in user_prompt
+        assert "場景" in user_prompt and "動作" in user_prompt
+        assert "因此" in user_prompt and "但是" in user_prompt
+        assert "看得見的改變" in user_prompt
+        assert "常駐角色" in user_prompt and "最多兩位" in user_prompt
+        assert "每集約一分鐘" in user_prompt
 
 
 def test_user_given_a_news_inspired_series_when_the_story_is_written_then_the_news_is_a_doorway_not_the_premise():

@@ -190,7 +190,7 @@ workflows:
       height: 352
       length: 124
       frame_rate: 24
-      steps: 16
+      steps: 8
       model_profile: q4
     conditioning:
       provider: comfyui

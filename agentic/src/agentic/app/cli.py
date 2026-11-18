@@ -15,7 +15,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", help="Optional output directory for artifact-producing workflows")
     parser.add_argument("--width", type=int, help="Output video canvas width in pixels")
     parser.add_argument("--height", type=int, help="Output video canvas height in pixels")
-    parser.add_argument("--longvideo-steps", type=int, help="Sampling steps for long-video H3 workflows")
     parser.add_argument("--comfy-host", help="Override ComfyUI host")
     parser.add_argument("--comfy-port", type=int, help="Override ComfyUI port")
     parser.add_argument(

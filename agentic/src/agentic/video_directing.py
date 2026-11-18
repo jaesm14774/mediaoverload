@@ -3,8 +3,8 @@ from __future__ import annotations
 
 VIDEO_MOTION_DIRECTION = (
     "Honor an explicitly still or solemn brief. Otherwise make the clip a lively, charming, readable loop. "
-    "The camera makes at most one slow gentle push-in of about 15 percent toward the character, with no pan, orbit, or cut, "
-    "and the character and the visible result stay fully inside the frame. "
+    "The camera stays locked, with no push-in, pan, orbit, or cut, and the speed comes from the character's fast, big movement; "
+    "the character and the visible result stay fully inside the frame. "
     "The illustrated look of the frame stays exactly the same, with the same colors, line quality, and painted surfaces; "
     "nothing morphs and no new objects appear. The character is in constant, energetic motion for the whole clip with no "
     "still pause: anticipation with a squat or wind-up, a big action with stretch and squash, then the same action chained "

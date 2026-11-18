@@ -821,10 +821,6 @@ def build_native_h3_ref2va(
     render_config = context.native_h3_render_config(goal, video_manifest)
     width, height = render_config["width"], render_config["height"]
     length, video_count = render_config["length"], render_config["video_count"]
-    steps = int(
-        goal.constraints.get("native_h3_steps")
-        or dict(video_manifest.recommended_defaults or {}).get("steps", 20)
-    )
     storyboard_path = context.native_h3_storyboard_path(goal, "native_h3_ref2va")
     reference_manifest = list(
         goal.constraints.get("native_h3_reference_manifest")
@@ -1034,7 +1030,6 @@ def build_native_h3_ref2va(
                     "width": width,
                     "height": height,
                     "length": length,
-                    "steps": steps,
                     "video_count": video_count,
                     "ref_image_size": str(
                         goal.constraints.get("native_h3_reference_image_size")
@@ -1103,7 +1098,6 @@ def build_native_h3_ref2va(
             "width": width,
             "height": height,
             "length": length,
-            "steps": steps,
             "target_duration": int(goal.duration_seconds),
             "reference_image_size": str(
                 goal.constraints.get("native_h3_reference_image_size") or "match"

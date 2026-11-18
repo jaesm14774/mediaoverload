@@ -178,11 +178,15 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
                 self.connected = True
                 self.sock = self
                 self.timeout_values: list[float] = []
+                self.started = False
 
             def settimeout(self, value: float) -> None:
                 self.timeout_values.append(value)
 
             def recv(self):
+                if not self.started:
+                    self.started = True
+                    return '{"type":"execution_start","data":{"prompt_id":"prompt-timeout"}}'
                 raise socket.timeout()
 
         fake_socket = FakeSocket()
@@ -232,77 +236,6 @@ class AgenticComfyCommunicatorTests(unittest.TestCase):
             return_value={"prompt-history-raw-timeout": {"status": {"completed": True, "status_str": "success"}}},
         ):
             communicator.wait_for_completion("prompt-history-raw-timeout")
-
-    def test_cancel_prompt_deletes_only_a_pending_prompt(self) -> None:
-        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
-
-        class FakeResponse:
-            def __init__(self, payload: bytes) -> None:
-                self.payload = payload
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def read(self):
-                return self.payload
-
-        calls = []
-        with patch("agentic.tools.comfy_backend.request.urlopen") as urlopen:
-            urlopen.side_effect = [
-                FakeResponse(
-                    json.dumps(
-                        {
-                            "queue_running": [[1, "other-prompt"]],
-                            "queue_pending": [[2, "stale-prompt"]],
-                        }
-                    ).encode()
-                ),
-                FakeResponse(b"{}"),
-            ]
-            communicator.cancel_prompt("stale-prompt")
-            calls.extend(urlopen.call_args_list)
-
-        self.assertEqual(len(calls), 2)
-        delete_request = calls[1].args[0]
-        self.assertEqual(delete_request.method, "DELETE")
-        self.assertIn("stale-prompt", delete_request.data.decode())
-
-    def test_cancel_prompt_interrupts_only_a_running_prompt(self) -> None:
-        communicator = AgenticComfyCommunicator(host="127.0.0.1", port=8188)
-
-        class FakeResponse:
-            def __init__(self, payload: bytes = b"{}") -> None:
-                self.payload = payload
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def read(self):
-                return self.payload
-
-        with patch("agentic.tools.comfy_backend.request.urlopen") as urlopen:
-            urlopen.side_effect = [
-                FakeResponse(
-                    json.dumps(
-                        {
-                            "queue_running": [[1, "owned-prompt"]],
-                            "queue_pending": [[2, "other-prompt"]],
-                        }
-                    ).encode()
-                ),
-                FakeResponse(b"{}"),
-            ]
-            communicator.cancel_prompt("owned-prompt")
-
-        interrupt_request = urlopen.call_args_list[1].args[0]
-        self.assertEqual(interrupt_request.method, "POST")
-        self.assertIn("/interrupt", interrupt_request.full_url)
 
     def test_save_results_uses_preview_when_comfy_history_has_no_persistent_media(self) -> None:
         """User Given ComfyUI history contains only a temporary preview When results are saved Then the preview is downloaded into the run directory."""

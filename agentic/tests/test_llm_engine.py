@@ -314,12 +314,34 @@ class LLMEngineTests(unittest.TestCase):
         self.assertEqual(segments[0]["effect"], "the hero lands safely and blinks with delight")
         story_prompt = manager.text_model.calls[0]["messages"][1]["content"]
         self.assertIn("each segment must include action, cause, effect, camera", story_prompt.casefold())
-        self.assertIn("a locked camera or the single slow push-in", story_prompt.casefold())
-        self.assertIn("never plans a pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane", story_prompt.casefold())
+        self.assertIn("a locked camera and what stays in frame", story_prompt.casefold())
+        self.assertNotIn("slow push-in", story_prompt.casefold())
+        self.assertIn("never plans a push-in, pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane", story_prompt.casefold())
         self.assertIn(VIDEO_MOTION_DIRECTION.casefold(), story_prompt.casefold())
         self.assertIn("every story-critical object within frame with clear edge margins", story_prompt.casefold())
         self.assertIn("one visible goal, one obstacle, and one turn that changes the outcome", story_prompt.casefold())
         self.assertIn("stable visible rules for medium and surface, palette and light, and motion or transitions", story_prompt.casefold())
+
+    def test_user_given_a_serial_episode_when_segments_are_planned_then_every_segment_including_the_first_is_a_big_fast_action(self) -> None:
+        """User: Given a serial episode where each clip decides whether a viewer stays, When its segments are planned, Then the writer must make every segment, the first included, a chain of big physical moves from the first second and never a sleeping or resting pose."""
+        manager = _FakeManager(
+            [
+                '{"segments":[{"segment_id":"segment-1","visual":"the hero bursts awake","narration":"wake up","action":"jolts up, stretches, and bounces twice","cause":"a boing shakes the hill","effect":"the hero is wide awake","camera":"locked wide"}]}'
+            ]
+        )
+        engine = LLMPromptEngine(mode="llm", manager=manager)
+        goal = GoalRequest(
+            prompt="a hero wakes",
+            media_type="long_video",
+            constraints={"serial_mode": True},
+        )
+
+        engine.segment_story(goal, "brief", 1, "playful")
+
+        story_prompt = manager.text_model.calls[0]["messages"][1]["content"].casefold()
+        self.assertIn("every segment, including the first, is a fast chain of two or three big continuous physical moves", story_prompt)
+        self.assertIn("sleeping, resting, breathing, glowing, drifting, watching or posing is never the action", story_prompt)
+        self.assertIn("a serial episode is never a still or solemn brief", story_prompt)
 
     def test_user_given_long_video_segment_when_llm_returns_shots_then_shot_count_is_not_forced(self) -> None:
         """User: Given an LLM returns extra shot details, When segments are prepared, Then the renderer uses the segment without a fixed internal shot contract."""

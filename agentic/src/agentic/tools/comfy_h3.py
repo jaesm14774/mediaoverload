@@ -19,10 +19,11 @@ from PIL import Image
 
 from agentic.assets.minimax_h3 import (
     FASTH3_DIFFUSION,
-    FASTH3_STEPS,
     FASTH3_TEXT_ENCODER,
+    H3_STEPS,
     REF2VA_DIFFUSION,
     REF2VA_TEXT_ENCODERS,
+    REF2VA_TURBO_LORA,
     h3_requirements,
     uses_fasth3,
 )
@@ -106,6 +107,9 @@ def _file_evidence(path: str, role: str) -> dict[str, Any]:
     return {"path": str(source), "role": role, "size_bytes": source.stat().st_size}
 
 
+REF2VA_LORA_NODE = "16"  # the LoraLoaderModelOnly node in configs/workflow/minimax_h3_ref2va.json
+
+
 def build_h3_workflow(template: dict[str, Any], mode: str | H3Mode,
                       payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Bind the model recipe and retain the existing H3 input/delivery contract."""
@@ -118,33 +122,31 @@ def build_h3_workflow(template: dict[str, Any], mode: str | H3Mode,
     if not (256 <= width <= 1344 and 256 <= height <= 1344):
         raise ValueError("H3 canvas dimensions must be between 256 and 1344")
     graph = json.loads(json.dumps(template))
+    # Every H3 checkpoint is distilled for exactly H3_STEPS; any other schedule silently degrades quality.
+    if payload.get("steps") not in (None, H3_STEPS):
+        raise ValueError(f"The distilled H3 route runs exactly {H3_STEPS} steps")
+    steps = H3_STEPS
+    graph["7"]["inputs"]["steps"] = steps
     if uses_fasth3(mode.value):
-        # The distilled checkpoint is trained for exactly FASTH3_STEPS and has no GGUF text-encoder profiles.
-        if payload.get("steps") not in (None, FASTH3_STEPS) or payload.get("model_profile"):
+        if payload.get("model_profile"):
             raise ValueError(
-                f"The distilled H3 route runs exactly {FASTH3_STEPS} steps with a fixed text encoder; "
-                "steps and model_profile apply only to Ref2VA"
+                "The distilled FastH3 route has a fixed text encoder; model_profile applies only to Ref2VA"
             )
-        steps, profile = FASTH3_STEPS, None
+        profile = None
         requirements = h3_requirements(mode.value)
         graph["1"]["inputs"]["unet_name"] = FASTH3_DIFFUSION[0]
         graph["2"]["inputs"]["clip_name"] = FASTH3_TEXT_ENCODER[0]
-        graph["7"]["inputs"]["steps"] = steps
     else:
-        steps, profile = int(payload.get("steps") or 16), str(payload.get("model_profile") or "q4")
+        profile = str(payload.get("model_profile") or "q4")
         requirements = h3_requirements(mode.value, profile)  # rejects an unknown profile
         graph["1"]["inputs"]["unet_name"] = REF2VA_DIFFUSION[0]
         graph["2"]["inputs"]["clip_name"] = REF2VA_TEXT_ENCODERS[profile][0]
-    if not (1 <= length <= 362 and 1 <= steps <= 32 and fps == 24):
-        raise ValueError("H3 supports 1-362 delivered frames, 1-32 steps and 24 fps in this workflow")
+        graph[REF2VA_LORA_NODE]["inputs"]["lora_name"] = REF2VA_TURBO_LORA[0]
+    if not (1 <= length <= 362 and fps == 24):
+        raise ValueError("H3 supports 1-362 delivered frames and 24 fps in this workflow")
     inputs = graph["5"]["inputs"]
     inputs.update(prompt=prompt, width=width // 32 * 32, height=height // 32 * 32,
                   length=max(107, math.ceil((length - 5) / 17) * 17 + 5))
-    if not uses_fasth3(mode.value):
-        shift = float(graph["6"]["inputs"]["shift_video"])
-        # The model's shifted flow schedule is supplied to Comfy's ManualSigmas node.
-        sigmas = [shift * t / (1 + (shift - 1) * t) for t in ((steps - i) / steps for i in range(steps + 1))]
-        graph["7"]["inputs"]["sigmas"] = ", ".join(format(value, ".12g") for value in sigmas)
     graph["9"]["inputs"]["noise_seed"] = int(payload.get("seed", random.randint(1, 999999999)))
     graph["14"]["inputs"]["fps"] = float(fps)
     evidence: dict[str, Any] = {"h3_mode": mode.value, "model_profile": profile, "steps": steps,

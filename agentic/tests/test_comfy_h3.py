@@ -41,17 +41,56 @@ def test_user_given_an_h3_mode_when_prepared_then_its_prompt_and_conditioning_co
     refs = [key for key in inputs if key.startswith("ref_images.")]
     assert len(refs) == (2 if mode == "ref2va" else 0)
     assert all("audio" not in key for key in inputs if key.startswith("ref_"))
+    # Every H3 route is distilled and only valid at its trained 8-step schedule.
+    assert graph["7"]["class_type"] == "BasicScheduler"
+    assert graph["7"]["inputs"]["steps"] == 8
+    assert evidence["steps"] == 8
     if mode == "ref2va":
         assert "Ref2VA" in graph["1"]["inputs"]["unet_name"]
         assert "Q2_K" in graph["2"]["inputs"]["clip_name"]
-        assert len(graph["7"]["inputs"]["sigmas"].split(",")) == payload["steps"] + 1
         assert [ref["path"] for ref in evidence["reference_manifest"]] == [str(first), str(last)]
     else:
-        # The distilled model is only valid at its trained 8-step schedule.
         assert "fasth3" in graph["1"]["inputs"]["unet_name"]
-        assert graph["7"]["class_type"] == "BasicScheduler"
+
+
+def test_user_given_ref2va_when_prepared_then_the_8_step_turbo_lora_sits_between_the_model_and_the_sampler(
+    tmp_path: Path,
+):
+    """User Given a Ref2VA request When the render graph is prepared Then the 8-step turbo LoRA patches the model before the shift and the sampler uses the schedule it was distilled for."""
+    registry = AssetRegistry(REPO)
+    template = registry.load_workflow_template(registry.get_manifest(mode_contract("ref2va").workflow_name))
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (512, 640), "pink").save(reference)
+    graph, evidence = build_h3_workflow(
+        template, "ref2va", {"prompt": "A hero naps.", "reference_image_paths": [str(reference)], "seed": 7}
+    )
+
+    lora = next(node for node in graph.values() if node["class_type"] == "LoraLoaderModelOnly")
+    assert "ref2v_turbo_8step" in lora["inputs"]["lora_name"]
+    patched_by_lora = lora["inputs"]["model"]
+    assert graph[patched_by_lora[0]]["class_type"] == "UnetLoaderGGUFDynamicVRAM"
+    shift = graph["6"]
+    assert graph[shift["inputs"]["model"][0]] is lora
+    assert (shift["inputs"]["shift_video"], shift["inputs"]["shift_audio"]) == (6.0, 3.0)
+    assert graph["7"]["inputs"]["model"] == ["6", 0]
+    assert graph["8"]["inputs"]["sampler_name"] == "euler"
+    assert any(item["name"] == lora["inputs"]["lora_name"] and item["target_dir"].endswith("models/loras")
+               for item in evidence["required_assets"])
+
+
+def test_user_given_ref2va_when_a_different_step_count_is_requested_then_it_is_rejected(tmp_path: Path):
+    """User Given the 8-step distilled Ref2VA route When another step count is requested Then the request is rejected instead of silently degrading quality."""
+    registry = AssetRegistry(REPO)
+    template = registry.load_workflow_template(registry.get_manifest(mode_contract("ref2va").workflow_name))
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (512, 640), "pink").save(reference)
+    base = {"prompt": "A hero naps.", "reference_image_paths": [str(reference)]}
+    for steps in (16, 20):
+        with pytest.raises(ValueError, match="distilled"):
+            build_h3_workflow(template, "ref2va", {**base, "steps": steps})
+    for profile in ("q4", "q2"):
+        graph, _ = build_h3_workflow(template, "ref2va", {**base, "steps": 8, "model_profile": profile})
         assert graph["7"]["inputs"]["steps"] == 8
-        assert evidence["steps"] == 8
 
 
 @pytest.mark.parametrize("mode", ["t2va", "i2va", "fl2va", "l2va"])
@@ -140,6 +179,17 @@ def test_user_given_missing_models_when_rendering_then_no_media_is_fabricated(tm
     with pytest.raises(RuntimeError, match="assets missing or corrupt"):
         tool.execute({"workflow_name": mode_contract("t2va").workflow_name,
                       "run_dir": str(tmp_path), "prompt": "A hero jumps."})
+    assert not list(tmp_path.rglob("*.mp4"))
+
+
+def test_user_given_a_missing_turbo_lora_when_rendering_ref2va_then_it_fails_before_gpu_submission(tmp_path: Path):
+    """User Given the Ref2VA turbo LoRA is not installed When a Ref2VA render starts Then the missing LoRA is reported before anything reaches ComfyUI."""
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (512, 640), "pink").save(reference)
+    tool = ComfyH3Toolset(AssetRegistry(REPO, asset_root=tmp_path / "missing"), tmp_path, comfy_port=1)
+    with pytest.raises(RuntimeError, match="ref2v_turbo_8step"):
+        tool.execute({"workflow_name": mode_contract("ref2va").workflow_name, "run_dir": str(tmp_path),
+                      "prompt": "A hero naps.", "reference_image_paths": [str(reference)]})
     assert not list(tmp_path.rglob("*.mp4"))
 
 

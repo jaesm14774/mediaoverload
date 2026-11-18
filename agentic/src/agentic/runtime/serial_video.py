@@ -17,6 +17,19 @@ import uuid
 import pymysql
 from pymysql.cursors import DictCursor
 
+from agentic.runtime.serial_episode_plan import episode_summary
+from agentic.runtime.serial_ledger import (
+    EpisodeDelta,
+    LedgerError,
+    PriorEpisodeNotAccepted,
+    Thread,
+    apply_delta,
+    parse_episode_delta,
+    render_ledger,
+    render_recap,
+    validate_episode_delta,
+)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -190,6 +203,26 @@ def continuity_state_text(outline: str) -> str:
     return state or text
 
 
+def _delta_to_json(delta: EpisodeDelta) -> dict[str, Any]:
+    return {
+        "adds": [[text, main] for text, main in delta.adds],
+        "advances": [list(item) for item in delta.advances],
+        "pays": [list(item) for item in delta.pays],
+        "present": list(delta.present),
+        "next_goal": delta.next_goal,
+    }
+
+
+def _delta_from_json(payload: dict[str, Any]) -> EpisodeDelta:
+    return EpisodeDelta(
+        adds=tuple((str(text), bool(main)) for text, main in payload["adds"]),
+        advances=tuple((str(a), str(b)) for a, b in payload["advances"]),
+        pays=tuple((str(a), str(b)) for a, b in payload["pays"]),
+        next_goal=str(payload["next_goal"]),
+        present=tuple(str(name) for name in payload["present"]),
+    )
+
+
 def _story_state_payload(value: str | dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -266,7 +299,11 @@ class _MySQLSession:
 class SerialVideoStore:
     """MySQL ledger for series, episode versions, renders, reviews, and publications."""
 
+    # The Ref2VA workflow takes four images: the prior episode's ending frame plus the
+    # protagonist and any recurring characters on screen in the first beat.
+    REFERENCE_BUNDLE_LIMIT = 4
     IDENTITY_REFERENCE_LIMIT = 3
+    MAX_COMPANIONS = 2
     DEFAULT_DATABASE = "mediaoverload_serial"
     _SCHEMA = (
         """CREATE TABLE IF NOT EXISTS series (
@@ -494,6 +531,29 @@ class SerialVideoStore:
             KEY idx_onboarding_lineage_outline(outline_id),
             CONSTRAINT fk_onboarding_lineage_episode FOREIGN KEY(episode_id) REFERENCES episodes(episode_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        """CREATE TABLE IF NOT EXISTS series_episode_ledger (
+            episode_id CHAR(32) PRIMARY KEY,
+            series_id VARCHAR(191) NOT NULL,
+            episode_number INT NOT NULL,
+            topic VARCHAR(512) NOT NULL,
+            summary LONGTEXT NOT NULL,
+            next_goal LONGTEXT NOT NULL,
+            delta_json LONGTEXT NOT NULL,
+            created_at VARCHAR(40) NOT NULL,
+            KEY idx_episode_ledger_series(series_id, episode_number),
+            CONSTRAINT fk_episode_ledger_episode FOREIGN KEY(episode_id) REFERENCES episodes(episode_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        """CREATE TABLE IF NOT EXISTS series_companions (
+            companion_id CHAR(32) PRIMARY KEY,
+            series_id VARCHAR(191) NOT NULL,
+            name VARCHAR(191) NOT NULL,
+            appearance LONGTEXT NOT NULL,
+            reference_path TEXT NOT NULL,
+            reference_sha256 CHAR(64) NOT NULL,
+            status VARCHAR(24) NOT NULL,
+            created_at VARCHAR(40) NOT NULL,
+            KEY idx_series_companions_series(series_id, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
     )
 
     def __init__(
@@ -592,11 +652,13 @@ class SerialVideoStore:
         rows = connection.execute(
             """SELECT path, sha256 FROM reference_assets
                WHERE series_id = ? AND episode_id IS NULL
-                 AND role = 'character_identity' AND status = 'active'
-               ORDER BY path""",
+                 AND role = 'character_identity' AND status = 'active'""",
             (series_id,),
         ).fetchall()
-        return [{"path": row["path"], "sha256": row["sha256"]} for row in rows]
+        return sorted(
+            ({"path": row["path"], "sha256": row["sha256"]} for row in rows),
+            key=lambda item: item["path"],
+        )
 
     @staticmethod
     def choose_auto_next_mode(
@@ -789,6 +851,10 @@ class SerialVideoStore:
                 connection.execute(
                     """UPDATE reference_assets SET status = 'stale'
                        WHERE series_id = ? AND role = 'character_identity' AND status = 'active'""",
+                    (plan["series_id"],),
+                )
+                connection.execute(
+                    "UPDATE series_companions SET status = 'stale' WHERE series_id = ? AND status = 'active'",
                     (plan["series_id"],),
                 )
                 self._stale_series_episode_trees(connection, str(plan["series_id"]))
@@ -1087,6 +1153,10 @@ class SerialVideoStore:
                        WHERE series_id = ? AND role = 'character_identity' AND status = 'active'""",
                     (card["series_id"],),
                 )
+                connection.execute(
+                    "UPDATE series_companions SET status = 'stale' WHERE series_id = ? AND status = 'active'",
+                    (card["series_id"],),
+                )
                 self._stale_series_episode_trees(connection, str(card["series_id"]))
             connection.execute(
                 """UPDATE series_character_cards SET status = ?, character_name = ?,
@@ -1287,6 +1357,13 @@ class SerialVideoStore:
         )
         now = _now()
         plan_id = str(outline_id or "").strip()
+        if normalized_decision == "accepted":
+            pending = self.get_series_episode_outline(plan_id)
+            if pending["status"] != "pending_review":
+                raise ValueError("Only a pending episode outline can receive a human decision.")
+            self.validate_episode_outline(
+                str(pending["series_id"]), int(pending["episode_number"]), reviewed_text
+            )
         with self._connection(write=True) as connection:
             outline = connection.execute(
                 "SELECT * FROM series_episode_outlines WHERE outline_id = ?", (plan_id,)
@@ -1576,6 +1653,157 @@ class SerialVideoStore:
             )
             if result.rowcount != 1:
                 raise ValueError("Only an active existing series can be completed or discarded.")
+
+    def _committed_ledger_rows(
+        self, connection: _MySQLSession, series_id: str, before_episode: int
+    ) -> list[dict[str, Any]]:
+        """Ledger rows of the series' current episodes the creator accepted, in order."""
+        return connection.execute(
+            """SELECT l.* FROM series_episode_ledger l
+               JOIN episodes e ON e.episode_id = l.episode_id
+               WHERE l.series_id = ? AND e.is_current = 1 AND l.episode_number < ?
+               ORDER BY l.episode_number""",
+            (series_id, int(before_episode)),
+        ).fetchall()
+
+    def _ledger_before(
+        self, connection: _MySQLSession, series_id: str, before_episode: int
+    ) -> tuple[Thread, ...]:
+        ledger: tuple[Thread, ...] = ()
+        for row in self._committed_ledger_rows(connection, series_id, before_episode):
+            ledger = apply_delta(
+                ledger,
+                _delta_from_json(json.loads(row["delta_json"])),
+                episode_number=int(row["episode_number"]),
+            )
+        return ledger
+
+    def _companions(
+        self, connection: _MySQLSession, series_id: str
+    ) -> list[dict[str, Any]]:
+        rows = connection.execute(
+            """SELECT * FROM series_companions
+               WHERE series_id = ? AND status = 'active' ORDER BY created_at, companion_id""",
+            (series_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _episode_delta(
+        self, connection: _MySQLSession, series_id: str, outline_text: str
+    ) -> EpisodeDelta:
+        card = connection.execute(
+            """SELECT character_name FROM series_character_cards
+               WHERE series_id = ? AND status = 'approved' ORDER BY version DESC LIMIT 1""",
+            (series_id,),
+        ).fetchone()
+        return parse_episode_delta(
+            outline_text, protagonist=str(card["character_name"]) if card else ""
+        )
+
+    def validate_episode_outline(
+        self, series_id: str, episode_number: int, outline_text: str
+    ) -> EpisodeDelta:
+        """Check an outline's ledger section against what the series has already shown."""
+        number = int(episode_number)
+        with self._connection() as connection:
+            if number > 1 and not any(
+                int(row["episode_number"]) == number - 1
+                for row in self._committed_ledger_rows(connection, series_id, number)
+            ):
+                raise PriorEpisodeNotAccepted(
+                    f"第 {number - 1} 集還沒有在最終審核被接受，線索帳本尚未記錄；請先完成上一集的最終審核。"
+                )
+            ledger = self._ledger_before(connection, series_id, number)
+            roster = [row["name"] for row in self._companions(connection, series_id)]
+            delta = self._episode_delta(connection, series_id, outline_text)
+        validate_episode_delta(delta, ledger, episode_number=number, roster_names=roster)
+        return delta
+
+    def get_series_planning_context(
+        self, series_id: str, episode_number: int
+    ) -> dict[str, str]:
+        """Readable ledger, recap and cast for the writer of the given episode."""
+        with self._connection() as connection:
+            ledger = self._ledger_before(connection, series_id, int(episode_number))
+            rows = self._committed_ledger_rows(connection, series_id, int(episode_number))
+            companions = self._companions(connection, series_id)
+        return {
+            "ledger_text": render_ledger(ledger, next_episode_number=int(episode_number)),
+            "recap_text": render_recap(rows),
+            "roster_text": "\n".join(
+                f"- {row['name']}：{row['appearance']}" for row in companions
+            ),
+        }
+
+    def register_series_companion(
+        self,
+        series_id: str,
+        name: str,
+        appearance: str,
+        reference_path: str | Path,
+    ) -> dict[str, Any]:
+        """Lock one recurring character's approved identity image for the whole series."""
+        normalized_series_id = str(series_id or "").strip()
+        normalized_name = str(name or "").strip()
+        look = str(appearance or "").strip()
+        if not normalized_series_id or not normalized_name or not look:
+            raise ValueError("A recurring character needs a series, a name and an appearance.")
+        (image_path,) = self._identity_paths([reference_path])
+        now = _now()
+        with self._connection(write=True) as connection:
+            onboarding = self._series_onboarding(connection, normalized_series_id)
+            if not onboarding["is_complete"]:
+                raise ValueError("Recurring characters need an approved story and character card first.")
+            if normalized_name == str(onboarding["character"]["character_name"]):
+                raise ValueError("A recurring character cannot share the protagonist's name.")
+            existing = self._companions(connection, normalized_series_id)
+            if any(row["name"] == normalized_name for row in existing):
+                raise ValueError(f"The recurring character {normalized_name} is already registered.")
+            identity_count = len(onboarding["character"]["reference_assets"])
+            if len(existing) >= self.MAX_COMPANIONS or (
+                identity_count + len(existing) + 1 > self.REFERENCE_BUNDLE_LIMIT - 1
+            ):
+                raise ValueError(
+                    "The first clip can carry only "
+                    f"{self.REFERENCE_BUNDLE_LIMIT} reference images including the prior ending frame; "
+                    "no room for another recurring character."
+                )
+            companion_id = uuid.uuid4().hex
+            connection.execute(
+                """INSERT INTO series_companions(
+                       companion_id, series_id, name, appearance, reference_path,
+                       reference_sha256, status, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
+                (
+                    companion_id,
+                    normalized_series_id,
+                    normalized_name,
+                    look,
+                    image_path,
+                    _sha256(Path(image_path)),
+                    now,
+                ),
+            )
+        return {"companion_id": companion_id, "name": normalized_name}
+
+    def get_series_companions(self, series_id: str) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            return self._companions(connection, str(series_id or "").strip())
+
+    def _companions_on_screen(
+        self, connection: _MySQLSession, series_id: str, names: Sequence[str]
+    ) -> list[dict[str, str]]:
+        by_name = {row["name"]: row for row in self._companions(connection, series_id)}
+        selected: list[dict[str, str]] = []
+        for name in names:
+            row = by_name.get(name)
+            if row is None:
+                raise ValueError(f"The recurring character {name} is not registered for this series.")
+            path = self._validate_asset(row["reference_path"], row["reference_sha256"])
+            selected.append(
+                {"name": name, "path": str(path), "sha256": str(row["reference_sha256"])}
+            )
+        return sorted(selected, key=lambda item: item["path"])
 
     def get_human_approved_story_state(self, series_id: str) -> dict[str, Any]:
         with self._connection() as connection:
@@ -1880,6 +2108,29 @@ class SerialVideoStore:
                         "notes": "Fixed character identity reference for this series.",
                     }
                 )
+            companion_references: list[dict[str, str]] = []
+            if onboarding_lineage is not None:
+                first_beat_cast = self._episode_delta(
+                    connection, normalized_series_id, onboarding_lineage["episode_outline"]
+                ).present
+                companion_references = self._companions_on_screen(
+                    connection, normalized_series_id, first_beat_cast
+                )
+            for item in companion_references:
+                reference_manifest.append(
+                    {
+                        "path": item["path"],
+                        "type": "image",
+                        "role": "identity",
+                        "retention": "Preserve this recurring character's identity while choosing a new pose, action, and shot composition.",
+                        "notes": f"Fixed identity reference of the recurring character {item['name']}.",
+                    }
+                )
+            if len(reference_manifest) > self.REFERENCE_BUNDLE_LIMIT:
+                raise ValueError(
+                    f"The first clip has {len(reference_manifest)} reference images; "
+                    f"the Ref2VA workflow takes at most {self.REFERENCE_BUNDLE_LIMIT}."
+                )
 
             return {
                 "series_id": normalized_series_id,
@@ -1889,6 +2140,7 @@ class SerialVideoStore:
                 "story_context": story_context,
                 "story_state": approved_story_state,
                 "identity_references": identity_files,
+                "companion_references": companion_references,
                 "previous_tail": previous_tail,
                 "reference_manifest": reference_manifest,
                 "onboarding_story": onboarding["story"],
@@ -2183,6 +2435,22 @@ class SerialVideoStore:
             if current_same_number is not None:
                 self._stale_episode_tree(connection, series_id, episode_number)
 
+            ledger_commit: dict[str, Any] | None = None
+            if normalized_lineage is not None:
+                delta = self._episode_delta(connection, series_id, outline_text)
+                validate_episode_delta(
+                    delta,
+                    self._ledger_before(connection, series_id, episode_number),
+                    episode_number=episode_number,
+                    roster_names=[row["name"] for row in self._companions(connection, series_id)],
+                )
+                ledger_commit = {
+                    "topic": topic,
+                    "summary": episode_summary(outline_text),
+                    "next_goal": delta.next_goal,
+                    "delta": _delta_to_json(delta),
+                }
+
             connection.execute(
                 """INSERT INTO episodes(
                        episode_id, series_id, episode_number, version, is_current, prompt,
@@ -2203,6 +2471,7 @@ class SerialVideoStore:
                             "story_context": context.get("story_context", ""),
                             "approved_story_state_before": approved_story_state_before or {},
                             "continuity_state_proposal": continuity_state_proposal,
+                            "ledger_commit": ledger_commit,
                             "automation_mode": context.get("automation_mode", "manual"),
                             "automation_source_series_id": context.get("automation_source_series_id", ""),
                             "automation_source_episode_id": context.get("automation_source_episode_id", ""),
@@ -2244,6 +2513,20 @@ class SerialVideoStore:
                     source_render_id=previous_tail["source_render_id"],
                     path=previous_tail["path"],
                     sha256=previous_tail["sha256"],
+                    now=now,
+                )
+            for companion in context.get("companion_references") or []:
+                # Recheck the image bytes at the moment the episode binds them.
+                self._validate_asset(companion["path"], companion["sha256"])
+                self._insert_reference(
+                    connection,
+                    series_id=series_id,
+                    episode_id=episode_id,
+                    segment_number=0,
+                    role="companion_identity",
+                    source_render_id=None,
+                    path=companion["path"],
+                    sha256=companion["sha256"],
                     now=now,
                 )
             connection.execute(
@@ -2546,6 +2829,27 @@ class SerialVideoStore:
                     "UPDATE series SET story_state_json = ?, updated_at = ? WHERE series_id = ?",
                     (_json(approved_state), now, episode["series_id"]),
                 )
+                commit = episode_context.get("ledger_commit")
+                if commit:
+                    connection.execute(
+                        "DELETE FROM series_episode_ledger WHERE episode_id = ?", (episode_id,)
+                    )
+                    connection.execute(
+                        """INSERT INTO series_episode_ledger(
+                               episode_id, series_id, episode_number, topic, summary,
+                               next_goal, delta_json, created_at
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            episode_id,
+                            episode["series_id"],
+                            int(episode["episode_number"]),
+                            commit["topic"],
+                            commit["summary"],
+                            commit["next_goal"],
+                            _json(commit["delta"]),
+                            now,
+                        ),
+                    )
 
     def record_publication_dispatch(
         self,
@@ -2860,16 +3164,18 @@ class SerialVideoStore:
     def _expected_episode_references(
         self, connection: _MySQLSession, episode: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        return connection.execute(
+        rows = connection.execute(
             """SELECT * FROM reference_assets
                WHERE series_id = ? AND status = 'active' AND (
                    (episode_id IS NULL AND role = 'character_identity') OR
-                   (episode_id = ? AND role = 'episode_opening')
-               )
-               ORDER BY CASE WHEN role = 'episode_opening' THEN 0 ELSE 1 END,
-                        created_at, asset_id""",
+                   (episode_id = ? AND role IN ('episode_opening', 'companion_identity'))
+               )""",
             (episode["series_id"], episode["episode_id"]),
         ).fetchall()
+        # Same order as the manifest that feeds Ref2VA: prior ending frame, protagonist
+        # images, then recurring characters, each group sorted by path.
+        rank = {"episode_opening": 0, "character_identity": 1, "companion_identity": 2}
+        return sorted(rows, key=lambda row: (rank[row["role"]], row["path"]))
 
     def _verify_reference_bundle(
         self,
@@ -2880,7 +3186,7 @@ class SerialVideoStore:
         expected = self._expected_episode_references(connection, episode)
         if not expected:
             raise ValueError("Ref2VA has no registered series identity references.")
-        if len(expected) > 4:
+        if len(expected) > self.REFERENCE_BUNDLE_LIMIT:
             raise ValueError("Ref2VA reference bundle exceeds the configured four-image workflow limit.")
         bound: list[dict[str, str]] = []
         for item in expected:
