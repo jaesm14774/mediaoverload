@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
 import yaml
 from dotenv import load_dotenv
@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from agentic.app.cli import parse_args
 
+from agentic.runtime.serial_ledger import LedgerError, PriorEpisodeNotAccepted
 from agentic.runtime.contracts import (
     DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS,
     ExecutionNode,
@@ -715,6 +716,7 @@ def _run_serial_character_draft(
     from agentic.runtime.serial_video import SerialVideoStore
     from agentic.runtime.serial_character import (
         build_serial_character_prompts,
+        extract_reference_prompt,
         serial_character_artifact_path,
     )
 
@@ -736,6 +738,7 @@ def _run_serial_character_draft(
         step_name="serial_series_character_card",
         language_contract="請使用自然、易讀的繁體中文。",
     ).rstrip() + "\n"
+    extract_reference_prompt(card_text)  # refuse a card that cannot produce reference images before it is saved
     card_id = uuid.uuid4().hex
     output_root = Path(args.output_dir).resolve() if args.output_dir else project_root / "output"
     artifact_path = serial_character_artifact_path(output_root, series_id, card_id)
@@ -823,24 +826,53 @@ def _run_serial_character_review(args: argparse.Namespace) -> None:
     )
 
 
-def _earlier_episode_actions(
-    store: SerialVideoStore, series_id: str, episode_number: int
-) -> list[str]:
-    """One line per approved earlier episode, so a new episode cannot replay it."""
-    from agentic.runtime.serial_episode_plan import episode_action_digest
+OUTLINE_ATTEMPTS = 3
 
-    digests: list[str] = []
-    for prior_number in range(max(1, episode_number - 10), episode_number):
-        prior = store.get_latest_approved_series_episode_outline(series_id, prior_number)
-        if prior is not None:
-            digests.append(
-                episode_action_digest(
-                    prior_number,
-                    str(prior["episode_topic"]),
-                    str(prior.get("approved_outline") or ""),
-                )
+
+def _generate_checked_episode_outline(
+    client: Any,
+    store: SerialVideoStore,
+    series_id: str,
+    episode_number: int,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    """Draft an outline whose ledger section passes the continuity checks, or fail with the reason.
+
+    A rejected ledger is rewritten on its own; the story that was already written is kept.
+    """
+    from agentic.runtime.serial_episode_plan import build_ledger_repair_prompt
+    from agentic.runtime.serial_ledger import replace_ledger_section
+
+    def generate(prompt: str) -> str:
+        return client.generate_text(
+            system_prompt,
+            prompt,
+            step_name="serial_episode_story_scenes_shots",
+            language_contract="請使用自然、易讀的繁體中文。",
+        ).rstrip() + "\n"
+
+    outline_text = generate(user_prompt)
+    for attempt in range(1, OUTLINE_ATTEMPTS + 1):
+        try:
+            store.validate_episode_outline(series_id, episode_number, outline_text)
+        except PriorEpisodeNotAccepted:
+            raise
+        except LedgerError as exc:
+            if attempt == OUTLINE_ATTEMPTS:
+                raise
+            planning = store.get_series_planning_context(series_id, episode_number)
+            repair_prompt = build_ledger_repair_prompt(
+                outline_text=outline_text,
+                episode_number=episode_number,
+                ledger_text=planning["ledger_text"],
+                roster_text=planning["roster_text"],
+                error=str(exc),
             )
-    return digests
+            outline_text = replace_ledger_section(outline_text, generate(repair_prompt))
+        else:
+            return outline_text
+    raise AssertionError("unreachable")
 
 
 def _run_serial_episode_outline_draft(
@@ -863,23 +895,16 @@ def _run_serial_episode_outline_draft(
     if character is None or character.get("story_plan_id") != story.get("story_plan_id"):
         raise ValueError("Approve a character card for the current series story before planning an episode.")
     episode_number = int(args.serial_episode_number)
-    previous_summaries: list[str] = []
-    for prior_number in range(max(1, episode_number - 2), episode_number):
-        prior = store.get_latest_approved_series_episode_outline(series_id, prior_number)
-        if prior is None:
-            continue
-        excerpt = str(prior.get("approved_outline") or "")[-1800:]
-        previous_summaries.append(
-            f"第 {prior_number} 集（{prior['episode_topic']}）核准內容尾段：\n{excerpt}"
-        )
+    planning = store.get_series_planning_context(series_id, episode_number)
     system_prompt, user_prompt = build_serial_episode_outline_prompts(
         approved_story=str(story.get("approved_treatment") or ""),
         approved_character=str(character.get("approved_card") or ""),
         episode_number=episode_number,
         episode_topic=str(args.episode_topic or ""),
         episode_direction=str(args.goal or ""),
-        previous_episode_summaries=previous_summaries,
-        earlier_episode_actions=_earlier_episode_actions(store, series_id, episode_number),
+        series_recap=planning["recap_text"],
+        ledger_text=planning["ledger_text"],
+        roster_text=planning["roster_text"],
         beat_count=minimum_segment_count(args.duration_seconds),
         approved_story_state=str(
             store.get_human_approved_story_state(series_id).get("state_text") or ""
@@ -887,12 +912,9 @@ def _run_serial_episode_outline_draft(
         complexity=str(args.serial_story_complexity or "simple"),
     )
     client = PromptClient(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
-    outline_text = client.generate_text(
-        system_prompt,
-        user_prompt,
-        step_name="serial_episode_story_scenes_shots",
-        language_contract="請使用自然、易讀的繁體中文。",
-    ).rstrip() + "\n"
+    outline_text = _generate_checked_episode_outline(
+        client, store, series_id, episode_number, system_prompt, user_prompt
+    )
     outline_id = uuid.uuid4().hex
     output_root = Path(args.output_dir).resolve() if args.output_dir else project_root / "output"
     artifact_path = serial_episode_outline_artifact_path(
@@ -1014,6 +1036,34 @@ def _resolve_serial_character_reference_paths(
     if reference_paths:
         return reference_paths, ""
 
+    from agentic.runtime.serial_character import (
+        build_serial_character_reference_prompt,
+    )
+
+    return _generate_identity_candidates(
+        args,
+        output_root=output_root,
+        series_id=series_id,
+        config_name=character_name,
+        build_prompt=lambda style_direction: build_serial_character_reference_prompt(
+            character_name=character_name,
+            character_card=card_text,
+            style_direction=style_direction,
+        ),
+        output_subdir="character_references",
+    )
+
+
+def _generate_identity_candidates(
+    args: argparse.Namespace,
+    *,
+    output_root: Path,
+    series_id: str,
+    config_name: str,
+    build_prompt: Callable[[str], str],
+    output_subdir: str,
+) -> tuple[list[str], str]:
+    """Render identity-image candidates for Discord review in the series' locked look."""
     from agentic.app.character_requests import (
         CharacterGenerationOptions,
         CharacterReviewOptions,
@@ -1022,15 +1072,12 @@ def _resolve_serial_character_reference_paths(
     )
     from agentic.app.character_workflow import run_character_workflow
 
-    from agentic.runtime.serial_character import (
-        build_serial_character_reference_prompt,
-    )
     from agentic.runtime.serial_paths import serial_series_artifact_root
 
     production_config = (
         Path(args.character_config).expanduser().resolve()
         if args.character_config
-        else REPO_ROOT / "configs" / "characters" / f"{character_name.lower()}.yaml"
+        else REPO_ROOT / "configs" / "characters" / f"{config_name.lower()}.yaml"
     )
     if not production_config.is_file():
         return [], f"Character production profile does not exist: {production_config}"
@@ -1043,19 +1090,13 @@ def _resolve_serial_character_reference_paths(
         output_root=output_root,
     )
     style = look["style"]
-    reference_prompt = build_serial_character_reference_prompt(
-        character_name=character_name,
-        character_card=card_text,
+    reference_prompt = build_prompt(
         # Only the medium and palette: a catalog style's own composition would pull the
         # character off-centre, which is the one thing an identity image must not do.
-        style_direction="; ".join(
-            part for part in (style["prompt"], style["palette"]) if part
-        ),
+        "; ".join(part for part in (style["prompt"], style["palette"]) if part)
     )
 
-    reference_output = (
-        serial_series_artifact_root(output_root, series_id) / "character_references"
-    )
+    reference_output = serial_series_artifact_root(output_root, series_id) / output_subdir
     reference_output.mkdir(parents=True, exist_ok=True)
     reference_request = CharacterWorkflowRequest(
         repo_root=REPO_ROOT,
@@ -1064,7 +1105,7 @@ def _resolve_serial_character_reference_paths(
             prompt=reference_prompt,
             preferred_generation_type="text2img",
             output_dir=str(reference_output),
-            selected_character_name=character_name,
+            selected_character_name=config_name,
             image_count=6,
             subject_mode="single",
             creative_profile=look,
@@ -1180,6 +1221,91 @@ def _record_serial_character_review(
         reference_paths=decision.selected_paths,
         reviewer=decision.reviewer,
     )
+    return None
+
+
+def _record_serial_companion_review(
+    serial_store: SerialVideoStore,
+    series_id: str,
+    name: str,
+    appearance: str,
+    decision: HumanReviewDecision,
+) -> dict[str, object] | None:
+    blocked = _serial_onboarding_review_blocked(serial_store, series_id, "companion", decision)
+    if blocked is not None:
+        return blocked
+    if not decision.selected_paths:
+        return _serial_onboarding_blocked(
+            series_id=series_id,
+            stage="companion",
+            reason=f"Discord accepted the recurring character {name} without selecting an identity image.",
+        )
+    try:
+        serial_store.register_series_companion(
+            series_id, name, appearance, decision.selected_paths[0]
+        )
+    except ValueError as exc:
+        return _serial_onboarding_blocked(
+            series_id=series_id, stage="companion", reason=str(exc), status="failed"
+        )
+    return None
+
+
+def _onboard_series_companions(
+    args: argparse.Namespace,
+    serial_store: SerialVideoStore,
+    review_stage: Callable[..., HumanReviewDecision],
+    *,
+    output_root: Path,
+    series_id: str,
+    character_name: str,
+    story_text: str,
+    card_text: str,
+) -> dict[str, object] | None:
+    """Lock an identity image for each recurring character the story promises (at most two)."""
+    from agentic.runtime.llm_engine import LLMPromptEngine
+    from agentic.runtime.serial_character import build_serial_companion_reference_prompt
+    from agentic.runtime.serial_paths import serial_series_artifact_root
+
+    companions = LLMPromptEngine(
+        mode=os.environ.get("AGENTIC_LLM_MODE", "llm")
+    ).propose_serial_companions(
+        story=story_text, character_card=card_text, protagonist_name=character_name
+    )
+    for index, companion in enumerate(companions, start=1):
+        name, appearance = companion["name"], companion["appearance"]
+        candidates, failure = _generate_identity_candidates(
+            args,
+            output_root=output_root,
+            series_id=series_id,
+            config_name=character_name,
+            build_prompt=lambda style_direction, name=name, appearance=appearance: (
+                build_serial_companion_reference_prompt(
+                    name=name, appearance=appearance, style_direction=style_direction
+                )
+            ),
+            output_subdir=f"companion_references/{index}",
+        )
+        if failure:
+            return _serial_onboarding_blocked(
+                series_id=series_id, stage="companion_reference", reason=failure, status="failed"
+            )
+        card_path = serial_series_artifact_root(output_root, series_id) / "companion_references" / f"{index}.md"
+        card_path.write_text(f"# {name}\n\n{appearance}\n", encoding="utf-8")
+        decision = review_stage(
+            stage="companion",
+            summary=(
+                f"【常駐角色審核】{name}：{appearance}。請檢查輪廓、配色和標誌細節是否清楚，且完整入鏡；"
+                "只選完全符合的一張，所選圖片會成為後續各集固定使用的身份參考。若候選圖都不符合，請拒絕。"
+            ),
+            document_path=str(card_path),
+            media_paths=candidates,
+        )
+        blocked = _record_serial_companion_review(
+            serial_store, series_id, name, appearance, decision
+        )
+        if blocked is not None:
+            return blocked
     return None
 
 
@@ -1352,15 +1478,34 @@ def _run_serial_new_series_onboarding(
     if blocked is not None:
         return blocked
 
+    blocked = _onboard_series_companions(
+        args,
+        serial_store,
+        review_stage,
+        output_root=output_root,
+        series_id=series_id,
+        character_name=character_name,
+        story_text=story_text,
+        card_text=card_text,
+    )
+    if blocked is not None:
+        return blocked
+
     episode_idea = LLMPromptEngine(mode=os.environ.get("AGENTIC_LLM_MODE", "llm")).generate_serial_episode_idea(
         character=character_name,
         automation_mode="new",
         story_context=story_text,
+        roster_text=serial_store.get_series_planning_context(series_id, 1)["roster_text"],
     )
     args.serial_episode_number = 1
     args.episode_topic = str(args.episode_topic or episode_idea["topic"])
     args.goal = str(args.goal or episode_idea["premise"])
-    outline = _run_serial_episode_outline_draft(args, project_root, emit=False)
+    try:
+        outline = _run_serial_episode_outline_draft(args, project_root, emit=False)
+    except LedgerError as exc:
+        return _serial_onboarding_blocked(
+            series_id=series_id, stage="episode_outline", reason=str(exc), status="failed"
+        )
     outline_review = review_stage(
         stage="episode_outline",
         summary="【首集大綱審核】請閱讀附件。接受後會直接進入本集影片生成和既有 Discord 片段審核。",
@@ -1545,19 +1690,30 @@ def _review_automatic_serial_outline(
         )
         if part
     )
+    planning = serial_store.get_series_planning_context(str(args.series_id), episode_number)
     episode_idea = LLMPromptEngine(
         mode=os.environ.get("AGENTIC_LLM_MODE", "llm")
     ).generate_serial_episode_idea(
         character=args.character,
         automation_mode="continue",
         story_context=idea_context,
-        previous_episodes=_earlier_episode_actions(
-            serial_store, str(args.series_id), episode_number
-        ),
+        recap_text=planning["recap_text"],
+        ledger_text=planning["ledger_text"],
+        roster_text=planning["roster_text"],
     )
     args.episode_topic = str(episode_idea["topic"])
     args.goal = str(episode_idea["premise"])
-    outline = _run_serial_episode_outline_draft(args, project_root, emit=False)
+    try:
+        outline = _run_serial_episode_outline_draft(args, project_root, emit=False)
+    except LedgerError as exc:
+        state.finished = True
+        state.result = _serial_onboarding_blocked(
+            series_id=str(args.series_id),
+            stage="episode_outline",
+            reason=str(exc),
+            status="failed",
+        )
+        return None
     review_service = DiscordHumanReviewService(
         output_root=output_root or project_root / "output"
     )
@@ -1997,17 +2153,18 @@ def _prepare_missing_auto_next_idea(
     if args.serial_auto_next and (not args.goal or not args.episode_topic):
         from agentic.runtime.llm_engine import LLMPromptEngine
 
+        planning = serial_store.get_series_planning_context(
+            str(serial_context["series_id"]), int(serial_context["episode_number"])
+        )
         idea = LLMPromptEngine(
             mode=os.environ.get("AGENTIC_LLM_MODE", "llm")
         ).generate_serial_episode_idea(
             character=args.character,
             automation_mode=str(serial_context.get("automation_mode") or "new"),
             story_context=str(serial_context.get("story_context") or ""),
-            previous_episodes=_earlier_episode_actions(
-                serial_store,
-                str(serial_context["series_id"]),
-                int(serial_context["episode_number"]),
-            ),
+            recap_text=planning["recap_text"],
+            ledger_text=planning["ledger_text"],
+            roster_text=planning["roster_text"],
         )
         args.goal = args.goal or str(idea["premise"])
         args.episode_topic = args.episode_topic or str(idea["topic"])
@@ -2107,7 +2264,6 @@ def _build_cli_goal(
         "edit_variant_seed": args.edit_variant_seed,
         "edit_require_audio": args.edit_require_audio,
         "edit_analyze_audio": args.edit_analyze_audio,
-        "longvideo_steps": args.longvideo_steps,
         "text": args.text,
         "character": args.character,
         "platforms": serial_platforms if serial_context is not None else (args.platforms or []),
@@ -2182,6 +2338,9 @@ def _build_cli_goal(
                 "publish_mode": args.publish_mode or "live",
                 "visual_style_profile": args.serial_style_profile,
                 "serial_story_context": serial_context["story_context"],
+                "serial_cast": serial_store.get_series_planning_context(
+                    str(serial_context["series_id"]), int(serial_context["episode_number"])
+                )["roster_text"],
                 "serial_story_review_context": {
                     "approved_start_state": str(
                         (serial_context.get("story_state") or {}).get("state_text") or ""
@@ -2200,8 +2359,13 @@ def _build_cli_goal(
         )
     if resume_episode_row is not None:
         constraints["serial_episode_id"] = str(resume_episode_row["episode_id"])
+    goal_prompt = args.goal
+    if serial_context is not None:
+        from agentic.runtime.serial_episode_plan import episode_story_text
+
+        goal_prompt = episode_story_text(args.goal)
     return planner.create_goal(
-        prompt=args.goal,
+        prompt=goal_prompt,
         media_type=args.media_type,
         duration_seconds=args.duration_seconds,
         style=args.style,

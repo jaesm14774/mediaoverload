@@ -129,8 +129,8 @@ prop, task, or character anatomy. Use style composition only when the brief leav
 Preserve the selected characters' canonical identities and essential source context while applying that treatment.
 Use source material as context and keep every reported actor, location, cause, and
 outcome tied to its source. When the user requests a causal story, follow that direction.
-For video, default to lively, continuous character action with a steady camera: at most one slow gentle push-in,
-no pan, orbit, or cut. Use the supplied image as the opening instant and keep its illustrated look unchanged; the
+For video, default to lively, continuous character action with a locked camera:
+no push-in, pan, orbit, or cut. Use the supplied image as the opening instant and keep its illustrated look unchanged; the
 character moves energetically through the whole clip, with anticipation, a big action with stretch and squash,
 and the same action chained into two or three connected moves, while the props and scene elements respond on
 every beat. Do not freeze, hold a long pose, or add a second goal. Move the camera further only when the brief asks

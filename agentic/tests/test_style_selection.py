@@ -21,6 +21,7 @@ CHARACTER_STYLE_IDS = (
     "cinematic_painterly", "cozy_game_diorama", "ink_wash_frame", "tarot_gold_frame",
     "photographic_character_fusion",
     "crayon_storybook", "marker_pastel", "cut_paper_collage",
+    "starry_thick_paint", "colored_pencil_sketch", "daylight_sky_anime",
 )
 HANDRAW_ADAPTED_STYLE_IDS = ("crayon_storybook", "marker_pastel", "cut_paper_collage")
 

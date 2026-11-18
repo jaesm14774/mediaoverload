@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -68,7 +69,8 @@ def build_run_dir(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_suffix = safe_path_component(suffix, field_name="run suffix")
     parts = (timestamp, safe_suffix, slug) if suffix_first and safe_suffix else (timestamp, slug, safe_suffix)
-    return output_root / "_".join(part for part in parts if part)
+    # Concurrent runs can share prompt, suffix and start second; the unique tail keeps their artifacts apart.
+    return output_root / "_".join(part for part in (*parts, uuid.uuid4().hex[:8]) if part)
 
 
 def resolve_dependency_value(

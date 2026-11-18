@@ -37,10 +37,19 @@ class SharedSkillHelperTests(unittest.TestCase):
             Path("output"), "A rainy Kirby scene", "img2img", default_slug="workflow", suffix_first=True
         )
 
-        self.assertRegex(image_path.name, r"^\d{8}_\d{6}_a-rainy-kirby-scene$")
-        self.assertRegex(workflow_path.name, r"^\d{8}_\d{6}_img2img_a-rainy-kirby-scene$")
+        self.assertRegex(image_path.name, r"^\d{8}_\d{6}_a-rainy-kirby-scene_[0-9a-f]{8}$")
+        self.assertRegex(workflow_path.name, r"^\d{8}_\d{6}_img2img_a-rainy-kirby-scene_[0-9a-f]{8}$")
         self.assertEqual(image_path.parent, Path("output"))
         self.assertEqual(workflow_path.parent, Path("output"))
+
+    def test_user_given_two_runs_start_in_the_same_second_with_the_same_prompt_when_run_directories_are_built_then_they_never_share_a_directory(self) -> None:
+        """User Given two concurrent runs share a prompt, suffix and start second When each builds its run directory Then the artifacts of one run can never overwrite the other's."""
+        directories = {
+            build_run_dir(Path("output"), "A rainy Kirby scene", "img2img", default_slug="workflow")
+            for _ in range(50)
+        }
+
+        self.assertEqual(len(directories), 50)
 
     def test_dependency_collector_can_preserve_first_matching_key_contract(self) -> None:
         context = self._context({"render": {"saved_files": ["first.mp4"], "video_path": "fallback.mp4"}})

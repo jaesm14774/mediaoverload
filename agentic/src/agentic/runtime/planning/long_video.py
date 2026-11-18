@@ -335,13 +335,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             "target_duration_seconds": segment_duration_seconds,
         }
         if recipe_name == "reference_bundle":
-            # Only Ref2VA still runs the step-configurable GGUF recipe; the other H3 modes are fixed 8-step.
-            render_inputs["steps"] = context.longvideo_int(
-                goal,
-                "longvideo_steps",
-                int(goal.constraints.get("longvideo_h3_steps") or 16),
-                100,
-            )
+            # Ref2VA keeps a selectable text-encoder profile; every H3 mode is a fixed 8-step distillation.
             render_inputs["model_profile"] = str(
                 goal.constraints.get("longvideo_model_profile")
                 or goal.constraints.get("native_h3_model_profile")

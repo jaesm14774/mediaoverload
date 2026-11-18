@@ -61,6 +61,10 @@ def get_object_info_for_nodes(
     return node_info
 
 
+# While a prompt is queued the wait has no deadline; it re-checks the queue this often.
+_QUEUE_POLL_SECONDS = 5.0
+
+
 class AgenticComfyCommunicator:
     def __init__(
         self,
@@ -218,54 +222,49 @@ class AgenticComfyCommunicator:
             return
 
     def cancel_prompt(self, prompt_id: str) -> None:
-        """Cancel only this communicator's queued/running Comfy prompt.
+        """Stop only this communicator's prompt: dequeue it, or interrupt it by id.
 
-        A client-side timeout does not stop ComfyUI by itself.  Leaving the
-        graph running can block every later strategy on the shared local GPU.
-        Inspect the queue first: delete a pending prompt by id, or interrupt
-        only when the exact id is currently running.  An unrelated user's
-        prompt is never interrupted.
+        The interrupt names the prompt id, so ComfyUI acts only while that exact
+        prompt is the running one; a prompt that finished a moment earlier can
+        never cause another run's render to be killed.  This relies on a
+        ComfyUI whose /interrupt honours ``prompt_id``; older builds ignore it
+        and interrupt whatever is running.  Cleanup failure must never hide the
+        original generation error.
         """
         target = str(prompt_id or "").strip()
         if not target:
             return
+        state = self._queue_state(target)
+        if state == "pending":
+            self._post_json("/queue", {"delete": [target]})
+        elif state == "running":
+            self._post_json("/interrupt", {"prompt_id": target})
+
+    def _post_json(self, path: str, payload: dict[str, Any]) -> None:
+        req = request.Request(
+            f"http://{self.server_address}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=10) as response:
+                response.read()
+        except Exception:
+            return
+
+    def _queue_state(self, prompt_id: str) -> str | None:
+        """Return "running", "pending" or "absent" from /queue, or None if it cannot be read."""
         try:
             with request.urlopen(f"http://{self.server_address}/queue", timeout=10) as response:
                 queue = json.loads(response.read())
-            running_ids = {
-                str(item[1])
-                for item in queue.get("queue_running", [])
-                if isinstance(item, (list, tuple)) and len(item) > 1
-            }
-            pending_ids = {
-                str(item[1])
-                for item in queue.get("queue_pending", [])
-                if isinstance(item, (list, tuple)) and len(item) > 1
-            }
-            if target in pending_ids:
-                payload = json.dumps({"delete": [target]}).encode("utf-8")
-                req = request.Request(
-                    f"http://{self.server_address}/queue",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="DELETE",
-                )
-                with request.urlopen(req, timeout=10) as response:
-                    response.read()
-            elif target in running_ids:
-                # ComfyUI's interrupt endpoint targets the current running
-                # prompt. Queue inspection above proves that it is ours.
-                req = request.Request(
-                    f"http://{self.server_address}/interrupt",
-                    data=b"{}",
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with request.urlopen(req, timeout=10) as response:
-                    response.read()
         except Exception:
-            # Cleanup must never hide the original generation failure.
-            return
+            return None
+        for key, state in (("queue_running", "running"), ("queue_pending", "pending")):
+            for item in queue.get(key, []):
+                if isinstance(item, (list, tuple)) and len(item) > 1 and str(item[1]) == prompt_id:
+                    return state
+        return "absent"
 
     def wait_for_completion(
         self,
@@ -274,13 +273,18 @@ class AgenticComfyCommunicator:
         timing_sink: ComfyPromptTiming | None = None,
         workflow_node_types: dict[str, str] | None = None,
     ) -> None:
-        deadline = time.monotonic() + max(0.1, float(self.timeout))
+        # The render timeout covers execution only: time spent queued behind
+        # other runs must not count, so the deadline starts with the render.
+        deadline: float | None = None
         wait_started = self._clock()
+        next_queue_check = wait_started + _QUEUE_POLL_SECONDS
         execution_started: float | None = None
         active_node: tuple[str, float] | None = None
         try:
             while True:
-                remaining = deadline - time.monotonic()
+                if execution_started is not None and deadline is None:
+                    deadline = self._clock() + max(0.1, float(self.timeout))
+                remaining = _QUEUE_POLL_SECONDS if deadline is None else deadline - self._clock()
                 if remaining <= 0:
                     raise TimeoutError(f"ComfyUI prompt timed out after {self.timeout} seconds: {prompt_id}")
                 history_completed, raw_message = self._receive_prompt_message(
@@ -290,24 +294,46 @@ class AgenticComfyCommunicator:
                 if history_completed:
                     self._finish_execution_timing(timing_sink, execution_started)
                     return
-                if raw_message is None or isinstance(raw_message, (bytes, bytearray)):
-                    continue
-                message = json.loads(raw_message)
-                execution_started, active_node, completed = self._process_prompt_message(
-                    message,
-                    prompt_id=prompt_id,
-                    wait_started=wait_started,
-                    execution_started=execution_started,
-                    active_node=active_node,
-                    workflow_node_types=workflow_node_types or {},
-                    timing_sink=timing_sink,
-                )
-                if completed:
-                    self._finish_execution_timing(timing_sink, execution_started)
-                    return
+                if raw_message is not None and not isinstance(raw_message, (bytes, bytearray)):
+                    message = json.loads(raw_message)
+                    execution_started, active_node, completed = self._process_prompt_message(
+                        message,
+                        prompt_id=prompt_id,
+                        wait_started=wait_started,
+                        execution_started=execution_started,
+                        active_node=active_node,
+                        workflow_node_types=workflow_node_types or {},
+                        timing_sink=timing_sink,
+                    )
+                    if completed:
+                        self._finish_execution_timing(timing_sink, execution_started)
+                        return
+                # Other runs' progress frames can keep the socket busy, so the queue is
+                # checked on the clock, not only when the socket goes quiet.
+                if execution_started is None and deadline is None and self._clock() >= next_queue_check:
+                    deadline = self._start_deadline_if_rendering(prompt_id)
+                    next_queue_check = self._clock() + _QUEUE_POLL_SECONDS
         except BaseException:
             self._finish_execution_timing(timing_sink, execution_started)
             raise
+
+    def _start_deadline_if_rendering(self, prompt_id: str) -> float | None:
+        """Check a still-queued prompt: start its render deadline, or fail if ComfyUI lost it."""
+        state = self._queue_state(prompt_id)
+        if state == "running":
+            return self._clock() + max(0.1, float(self.timeout))
+        if state == "absent":
+            try:
+                finished = self._history_reports_prompt_completion(prompt_id, _QUEUE_POLL_SECONDS)
+            except RuntimeError:
+                raise
+            except Exception:
+                return None
+            if not finished:
+                raise RuntimeError(
+                    f"ComfyUI prompt is no longer queued and has no history record: {prompt_id}"
+                )
+        return None
 
     def _finish_execution_timing(
         self,

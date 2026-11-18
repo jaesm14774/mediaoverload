@@ -56,6 +56,7 @@ Ref2VA（`minimax_h3_ref2va.json`）仍使用 Q4 GGUF 流程，下列檔名與�
 | `MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf` | `ComfyUI/models/unet` | 擴散模型 |
 | `qwen3vl-32B-MiniMax-H3-Q4_K_M.gguf` | `ComfyUI/models/clip` | 文字編碼器，預設 `q4` profile |
 | `qwen3vl-32B-MiniMax-H3-Q2_K.gguf` | `ComfyUI/models/clip` | 文字編碼器，`q2` profile |
+| `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` | `ComfyUI/models/loras` | 8 步 turbo LoRA（Apache-2.0，來源 `huggingface.co/lightx2v/Minimax-h3-Turbo`；MiniMax H3 本體仍受其社群授權約束） |
 
 取得並確認可公開引用的上游頁面後，再補入本頁；不要自行推測或拼造模型 URL。
 

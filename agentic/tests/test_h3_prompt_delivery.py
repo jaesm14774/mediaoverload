@@ -55,7 +55,7 @@ def segment_context(prompt: object) -> SkillContext:
     node = ExecutionNode(
         node_id="segment-video-01", skill_name="longvideo.render_segment_video",
         inputs={"segment_index": 0, "recipe": "t2v", "workflow_name": "minimax_h3_t2va",
-                "render_tool": "comfy.render_h3", "length": 120, "steps": 16,
+                "render_tool": "comfy.render_h3", "length": 120,
                 "h3_prompt_node": ""},
         depends_on=["segment-prompt-01"],
     )
@@ -219,7 +219,8 @@ def test_user_given_conditioning_images_and_scene_draft_when_h3_prompt_is_prepar
     assert "first-frame input" in str(vision_model.calls[0]["messages"][1]["content"])
     assert "interpret those poses as successive views of the same subject" in str(vision_model.calls[0]["messages"][1]["content"])
     assert "ordered chain of positive physical-action beats" in str(vision_model.calls[0]["messages"][1]["content"])
-    assert "one slow gentle push-in" in str(vision_model.calls[0]["messages"][1]["content"])
+    assert "slow gentle push-in" not in str(vision_model.calls[0]["messages"][1]["content"])
+    assert "a locked camera" in str(vision_model.calls[0]["messages"][1]["content"])
     assert "still moving in the last frame" in str(vision_model.calls[0]["messages"][1]["content"])
 
 
@@ -268,8 +269,117 @@ def test_user_given_later_episode_plan_when_vision_prompt_repeats_prior_prop_the
     assert "required action takes priority" in prepared["prompt"].casefold()
     assert "macro close-up" in prepared["prompt"]
     vision_request = str(vision_model.calls[0]["messages"][1]["content"])
-    assert "This is a later serial episode." in vision_request
+    assert "This is a serial episode." in vision_request
     assert "Explicit characters, props, and locations named in that plan must be shown" in vision_request
+
+
+SERIAL_CAST = "- Dede: Yellow duckling with a blue bow tied on its head"
+SERIAL_ACTION = "Kirby shows the key to Dede, who tilts his head."
+SERIAL_OUTCOME = "Dede stays beside Kirby, still looking at the key."
+
+
+def _serial_goal(episode_number: int) -> GoalRequest:
+    return GoalRequest(
+        prompt="Kirby finds a small key and shows it to Dede.",
+        media_type="long_video",
+        style="bold flat-color cartoon",
+        constraints={
+            "serial_mode": True,
+            "serial_episode_number": episode_number,
+            "serial_cast": SERIAL_CAST,
+        },
+    )
+
+
+def _vision_engine() -> tuple[LLMPromptEngine, RecordedTextModel]:
+    vision_model = RecordedTextModel(
+        [{"prompt": "Kirby lifts the key.", "overall_soundscape": "Soft grass.", "non_diegetic_music": "N/A"}]
+    )
+    engine = LLMPromptEngine(
+        mode="llm",
+        manager=SimpleNamespace(text_model=RecordedTextModel([]), vision_model=vision_model),
+    )
+    return engine, vision_model
+
+
+def test_user_given_the_first_serial_episode_when_an_h3_scene_is_written_then_the_planned_story_action_stays_primary() -> None:
+    """User Given the first episode of a series with a planned action and outcome per clip When the H3 scene is written Then the clip still receives that action and outcome, as later episodes do, instead of whatever the picture suggests."""
+    engine, _ = _vision_engine()
+
+    prepared = engine.prepare_h3_segment(
+        _serial_goal(1),
+        {"segment_id": "episode-1-segment-2", "action": SERIAL_ACTION, "effect": SERIAL_OUTCOME, "visual": "Kirby and Dede on the meadow."},
+        draft_prompt="Kirby holds up the key.",
+        overall_soundscape="Soft grass.",
+        non_diegetic_music="N/A",
+        duration_seconds=10.0,
+        image_references=[],
+    )
+
+    assert SERIAL_ACTION in prepared["prompt"]
+    assert SERIAL_OUTCOME in prepared["prompt"]
+    assert "prior reference" not in prepared["prompt"]
+
+
+def test_user_given_a_serial_episode_when_an_h3_scene_is_written_then_the_writer_knows_the_cast_and_must_keep_story_and_look() -> None:
+    """User Given a series with a recurring duckling When the H3 scene is written for any episode Then the writer is told the duckling's real look, to keep every planned character in frame, to keep the planned story action instead of generic bouncing, and to keep the first frame's art style."""
+    for episode_number in (1, 2):
+        engine, vision_model = _vision_engine()
+
+        engine.prepare_h3_segment(
+            _serial_goal(episode_number),
+            {"segment_id": "segment-1", "action": SERIAL_ACTION, "effect": SERIAL_OUTCOME},
+            draft_prompt="Kirby holds up the key.",
+            overall_soundscape="Soft grass.",
+            non_diegetic_music="N/A",
+            duration_seconds=10.0,
+            image_references=[],
+        )
+
+        request = str(vision_model.calls[0]["messages"][1]["content"])
+        assert "Yellow duckling with a blue bow" in request
+        assert "Keep every character named in the plan on screen" in request
+        assert "Do not replace the planned action with generic bouncing" in request
+        assert "Keep the first frame's art style" in request
+        assert "such as bouncing, hopping, swinging its feet" not in request
+
+
+def test_user_given_a_serial_clip_with_a_calm_planned_action_when_an_h3_scene_is_written_then_the_writer_must_keep_every_character_moving_fast_through_the_whole_clip() -> None:
+    """User Given a serial clip whose planned action is a sleeping or breathing pose When the H3 scene is written Then the writer is told to start on motion, keep every character moving at a playful pace to the last frame, turn calm actions into big physical moves, keep the score quick, and not stretch the action slowly across the clip."""
+    for episode_number in (1, 2):
+        engine, vision_model = _vision_engine()
+
+        engine.prepare_h3_segment(
+            _serial_goal(episode_number),
+            {"segment_id": "segment-1", "action": "Kirby sleeps while his belly rises and falls.", "effect": SERIAL_OUTCOME},
+            draft_prompt="Kirby sleeps.",
+            overall_soundscape="Soft grass.",
+            non_diegetic_music="A slow lullaby.",
+            duration_seconds=15.0,
+            image_references=[],
+        )
+
+        request = str(vision_model.calls[0]["messages"][1]["content"])
+        assert "Start the prompt on a motion verb" in request
+        assert "never describe a still pose, sleeping, resting, breathing, glowing, drifting, watching or posing as the action" in request
+        assert "still moving in the last frame" in request
+        assert "never a slow lullaby" in request
+        assert "at least one character travels far across the frame" in request
+        assert "Spread the planned action" not in request
+        assert "push-in" not in request
+        assert "such as bouncing, hopping, swinging its feet" not in request
+
+
+def test_user_given_a_serial_episode_when_the_clip_prompt_is_written_then_the_recurring_cast_look_is_given() -> None:
+    """User Given a series with a recurring duckling When a segment prompt is written Then the writer is given the duckling's real appearance instead of inventing one."""
+    text_model = RecordedTextModel(
+        [{"prompt": "Kirby shows Dede the key.", "narration": "A key.", "overall_soundscape": "Grass.", "non_diegetic_music": "N/A"}]
+    )
+    engine = LLMPromptEngine(mode="llm", manager=SimpleNamespace(text_model=text_model))
+
+    engine.prepare_segment(_serial_goal(1), {"segment_id": "segment-1", "visual": "Kirby and Dede."}, "")
+
+    assert "Yellow duckling with a blue bow" in str(text_model.calls[0]["messages"][1]["content"])
 
 
 def test_user_given_nested_llm_prompt_when_repaired_then_only_scene_text_is_accepted() -> None:
@@ -403,3 +513,35 @@ def test_user_given_native_description_when_rendered_then_every_h3_mode_validate
         assert description in renderer.payload["prompt"]
         if mode == "ref2va":
             assert renderer.payload["reference_manifest"] == references
+
+
+def test_user_given_a_serial_clip_when_the_h3_scene_is_written_then_it_ends_with_the_protagonist_centred_and_every_character_stays_a_separate_figure_under_its_exact_name() -> None:
+    """User Given a serial clip that the next clip continues from its last frame When the H3 scene is written Then the writer must end on the protagonist centred and fully visible, name every recurring character exactly as listed, and never merge two characters into one figure, and the finished prompt closes with that last-frame requirement."""
+    for episode_number in (1, 2):
+        engine, vision_model = _vision_engine()
+        goal = _serial_goal(episode_number)
+        goal.constraints["character"] = "Kirby"
+
+        prepared = engine.prepare_h3_segment(
+            goal,
+            {"segment_id": "segment-1", "action": SERIAL_ACTION, "effect": SERIAL_OUTCOME},
+            draft_prompt="Kirby holds up the key.",
+            overall_soundscape="Soft grass.",
+            non_diegetic_music="N/A",
+            duration_seconds=15.0,
+            image_references=[],
+        )
+
+        request = str(vision_model.calls[0]["messages"][1]["content"])
+        assert "exactly as listed" in request
+        assert "never merge two characters" in request
+        assert "protagonist's beat comes last" in request
+        last_line = prepared["prompt"].strip().splitlines()[-1]
+        assert "Last frame (required)" in last_line
+        assert "half the frame height" in last_line
+        assert "fully inside the frame on the left and right" in last_line
+        assert "large" not in last_line
+        assert "mid-move" in last_line
+        assert "Never bring the action to a halt" in request
+        assert "fully inside the frame, one on the left and one on the right" in request
+        assert "Kirby" in last_line and "centred" in last_line

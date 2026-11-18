@@ -30,19 +30,21 @@ def test_user_given_a_new_series_when_its_first_episode_is_ideated_then_it_is_on
     assert "hook" in prompt.casefold()
 
 
-def test_user_given_aired_episodes_when_the_next_idea_is_requested_then_their_actions_are_shown_and_must_not_be_repeated():
-    """User Given two aired episodes When the next episode is ideated Then the prompt lists what they already did and forbids repeating the same errand, so a delivered letter is never delivered again."""
+def test_user_given_a_ledger_and_recap_when_the_next_idea_is_requested_then_it_must_grow_from_the_last_hook_and_advance_an_open_thread():
+    """User Given the recap of aired episodes and the open threads When the next episode is ideated Then the prompt shows both and asks the writer to start from the goal the last episode handed on, advance an open thread and change one visible state, instead of inventing an unrelated errand."""
     prompt = _idea_request(
-        previous_episodes=[
-            "Episode 1: Kirby delivered a letter to a friend's door.",
-            "Episode 2: Kirby chased a hat across the harbor.",
-        ]
+        recap_text="第 1 集《信》：Kirby 撿到一封沒有地址的信｜交給下一集：追著星形印記去郵局",
+        ledger_text="目前開放中的線索：\n- T1 主線｜這封信到底是寫給誰的（第 1 集埋下，第 1 集最後被碰到）",
+        roster_text="- 小明：戴草帽的青年",
     )
 
-    assert "delivered a letter" in prompt
-    assert "chased a hat" in prompt
-    assert "do not repeat" in prompt.casefold()
-    assert "different place" in prompt.casefold()
+    assert "追著星形印記去郵局" in prompt
+    assert "這封信到底是寫給誰的" in prompt
+    assert "小明" in prompt
+    assert "goal the last episode handed on" in prompt.casefold()
+    assert "open thread" in prompt.casefold()
+    assert "visible state" in prompt.casefold()
+    assert "different place" not in prompt.casefold()
 
 
 def test_user_given_a_continuing_series_when_an_idea_is_requested_then_the_episode_ends_on_a_hook_and_never_wraps_up_the_series():
@@ -51,3 +53,18 @@ def test_user_given_a_continuing_series_when_an_idea_is_requested_then_the_episo
 
     assert "hook" in prompt.casefold()
     assert "not conclude" in prompt.casefold() or "do not finish" in prompt.casefold()
+
+
+def test_user_given_a_protagonist_and_story_when_recurring_characters_are_proposed_then_the_validated_list_comes_back():
+    """User Given an approved story and protagonist card When the writer proposes recurring characters Then the public engine returns the validated characters, at most two."""
+    manager = ScriptedLLMManager(
+        [{"companions": [{"name": "小明", "appearance": "戴草帽的青年"}]}]
+    )
+
+    companions = LLMPromptEngine(mode="llm", manager=manager).propose_serial_companions(
+        story="Kirby wonders where the star candy comes from.",
+        character_card="Kirby is a round pink creature.",
+        protagonist_name="Kirby",
+    )
+
+    assert companions == [{"name": "小明", "appearance": "戴草帽的青年"}]

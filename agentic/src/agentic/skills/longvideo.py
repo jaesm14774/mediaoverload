@@ -416,9 +416,6 @@ class LongVideoSkills:
             "video_count": int(context.node.inputs.get("video_count") or 1),
         }
         if h3_mode == "ref2va":
-            payload["steps"] = int(
-                context.node.inputs.get("steps") or constraints.get("longvideo_steps") or constraints.get("longvideo_h3_steps") or 16
-            )
             payload["model_profile"] = str(context.node.inputs.get("model_profile") or "q2")
         if first_frame:
             payload["image_path"] = first_frame
@@ -819,12 +816,6 @@ class LongVideoSkills:
                 name="length",
                 minimum=17,
                 maximum=362,
-            ),
-            "steps": _bounded_int(
-                context.node.inputs.get("steps") or context.plan.goal.constraints.get("native_h3_steps") or 20,
-                name="steps",
-                minimum=1,
-                maximum=32,
             ),
             "video_count": _bounded_int(context.node.inputs.get("video_count") or 1, name="video_count", minimum=1, maximum=4),
         }

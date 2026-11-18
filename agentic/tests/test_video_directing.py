@@ -13,8 +13,8 @@ from agentic.video_directing import (
 
 
 class VideoDirectingTests(unittest.TestCase):
-    def test_user_video_is_lively_all_the_way_with_a_gentle_camera(self) -> None:
-        """User wants a lively charming clip. Given a drifting-camera source, When directed, Then the character moves constantly through the last frame and the camera only pushes in gently."""
+    def test_user_video_is_lively_all_the_way_with_a_locked_camera(self) -> None:
+        """User wants a fast, lively clip nobody finds slow. Given a drifting-camera source, When directed, Then the character moves constantly through the last frame and the camera never pushes in slowly."""
         source = "Kracko slowly rotates as the camera slowly pushes in to a serene close-up."
 
         result = apply_video_motion_direction(source, "text2img2video")
@@ -22,8 +22,9 @@ class VideoDirectingTests(unittest.TestCase):
         self.assertLess(result.index(VIDEO_MOTION_DIRECTION_MARKER), result.index(source))
         self.assertIn("constant, energetic motion for the whole clip", result)
         self.assertIn("still moving in the last frame", result)
-        self.assertIn("one slow gentle push-in", result)
-        self.assertIn("no pan, orbit, or cut", result)
+        self.assertIn("camera stays locked", result)
+        self.assertIn("no push-in, pan, orbit, or cut", result)
+        self.assertNotIn("slow gentle push-in", result)
         self.assertEqual(apply_video_motion_direction(result, "text2img2video"), result)
 
     def test_user_video_keeps_the_character_visible_at_one_size_while_it_hops(self) -> None:

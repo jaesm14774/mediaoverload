@@ -22,14 +22,14 @@ generation:
     default_duration_seconds: 60
     episodes_per_run: 1
     output_dir: output
-    discord_review_timeout_seconds: 1800
+    discord_review_timeout_seconds: 10800
     identity_references: []
   # Use single, two_character_interaction, or random. random requires
   # subject_mode_weights with positive weights for the concrete modes.
   subject_mode: random
   # Change subject_mode to random to use these proportional weights.
   subject_mode_weights:
-    single: 3
+    single: 2
     two_character_interaction: 1
   two_character_interaction:
     is_same_group: false
@@ -173,7 +173,6 @@ generation:
     reference_max_videos: 3
     model_profile: q4
     length: 362
-    steps: 20
     frame_rate: 24
     require_audio: true
     require_stereo_audio: true
@@ -191,7 +190,6 @@ generation:
     model_profile: q4
     require_human_review: true
     length: 362
-    steps: 20
     frame_rate: 24
     require_audio: true
     require_stereo_audio: true
@@ -199,16 +197,15 @@ generation:
   video_defaults:
     length: 240
     frame_rate: 24
-    steps: 20
     # Keep image-to-video renders within this workflow's frame limit.
     max_i2v_frames: 240
   # Random pool. Check how often people accept each route with
   # `python scripts/strategy_acceptance.py`.
   generation_type_weights:
-    serial_video: 3
+    serial_video: 2
     text2img: 3
     text2image2video: 0.1
-    native_h3_story: 0.1
+    native_h3_story: 0.5
     # native_h3_t2v_story: 0.1
     # native_h3_fl2va_story: 0.1
     native_h3_loop_story: 1.5

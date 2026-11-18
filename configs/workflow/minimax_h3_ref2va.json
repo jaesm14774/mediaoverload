@@ -65,10 +65,10 @@
   "6": {
     "inputs": {
       "model": [
-        "1",
+        "16",
         0
       ],
-      "shift_video": 12.0,
+      "shift_video": 6.0,
       "shift_audio": 3.0
     },
     "class_type": "MiniMaxH3SigmaShift",
@@ -77,14 +77,34 @@
     }
   },
   "7": {
-    "class_type": "ManualSigmas",
+    "class_type": "BasicScheduler",
     "inputs": {
-      "sigmas": "1.000000000000, 0.994475126266, 0.988235294819, 0.981132090092, 0.972972989082, 0.963503658772, 0.952380955219, 0.939130425453, 0.923076927662, 0.903225779533, 0.878048777580, 0.845070421696, 0.800000011921, 0.734693884850, 0.631578922272, 0.444444447756, 0.000000000000"
+      "model": [
+        "6",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 8,
+      "denoise": 1.0
+    }
+  },
+  "16": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "lora_name": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+      "strength_model": 1.0
+    },
+    "_meta": {
+      "title": "MiniMax H3 Ref2VA 8-step turbo LoRA"
     }
   },
   "8": {
     "inputs": {
-      "sampler_name": "res_multistep"
+      "sampler_name": "euler"
     },
     "class_type": "KSamplerSelect",
     "_meta": {

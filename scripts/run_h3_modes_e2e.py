@@ -43,8 +43,7 @@ MODE_PROFILES: dict[H3Mode, dict[str, Any]] = {
     H3Mode.I2VA: {"length": 124, "duration": 124 / 24},
     H3Mode.FL2VA: {"length": 362, "duration": 362 / 24},
     H3Mode.L2VA: {"length": 362, "duration": 362 / 24},
-    # Only Ref2VA still runs the step-configurable Q4 GGUF recipe; the other modes are the fixed 8-step FastH3 route.
-    H3Mode.REF2VA: {"length": 124, "steps": 20, "duration": 124 / 24},
+    H3Mode.REF2VA: {"length": 124, "duration": 124 / 24},
 }
 
 
@@ -276,7 +275,6 @@ def _run_mode(
                 "reference_manifest": manifest,
                 "ref_image_size": "match",
                 "length": profile["length"],
-                "steps": profile["steps"],
             },
         )
         result.update({"reference_manifest": manifest, "generated_reference_video": reference_video})
