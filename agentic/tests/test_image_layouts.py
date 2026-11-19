@@ -47,6 +47,27 @@ def test_user_given_a_news_brief_when_the_scene_prompt_is_requested_then_the_wri
     assert "no writing" in sent[0]
 
 
+def test_user_given_an_image_brief_when_the_writer_is_briefed_then_the_picture_is_built_on_one_mechanism_the_brief_offers():
+    """User Given an image brief When the writer is briefed Then it must build the picture on one mechanism taken from the brief, show emotion through what light, body and objects physically do, and keep one plain moment when the brief offers no mechanism."""
+    contract = IMAGE_PROMPT_CONTRACT.casefold()
+
+    assert "one mechanism" in contract
+    for mechanism in ("pocket of warm light", "unbothered", "changing into scenery of a different place", "named graphic medium"):
+        assert mechanism in contract
+    assert "never through adjectives" in contract
+    assert "one plain moment" in contract
+
+
+def test_user_given_a_contrast_joke_when_the_writer_is_briefed_then_only_that_character_may_be_large_and_the_others_are_named_cast():
+    """User Given a brief whose joke is an earnest character among unbothered others When the writer is briefed Then the earnest character may fill up to half the frame, the others must be named cast members, and every other character stays small."""
+    contract = IMAGE_PROMPT_CONTRACT.casefold()
+
+    assert "one fifth to one third of the frame height" in contract
+    assert "up to half the frame" in contract
+    assert "named cast members" in contract
+    assert "no writing" in contract
+
+
 class _SetWriter:
     """Fake prompt client; its JSON contract is the one `LLMClient.generate_json` serves."""
 

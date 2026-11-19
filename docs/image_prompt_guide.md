@@ -16,6 +16,10 @@ User Given an image-to-video strategy creates multiple opening-frame candidates 
 
 User Given a video request includes a negative prompt When distinct opening-frame prompts are expanded and rendered Then every candidate retains that negative prompt alongside its own composition.
 
+User Given a creator submits an image brief that offers one picture-making idea (a quiet feeling, an earnest character among unbothered others, an object whose steam or trail can become scenery, or a fitting graphic medium) When MediaOverload writes the scene prompt Then the prompt is built on that one mechanism so the picture reads in one second, shows emotion through physical light, body and objects, and keeps one plain moment when the brief offers none.
+
+User Given a brief whose joke is an earnest character among unbothered others When MediaOverload writes the scene prompt Then only that character may fill up to half the frame and every other character stays smaller.
+
 本指南提供可重複使用的構圖與提示原則。參考素材裡的「直接複製」、解析度口號與品牌／工作室風格不會自動變成 runtime 指示。creative 欄位遵守 English-only contract；解說使用繁體中文，英文範本可交給影像模型。
 
 ## 1. 使用範圍與驗收
@@ -36,6 +40,52 @@ User Given a video request includes a negative prompt When distinct opening-fram
 5. **概念**：收集作品多半是一個可愛比喻（Kirby 躺在甜甜圈裡、排在壽司盒中），不是逐字報導。新聞場景要把角色放進故事的關鍵物件，例如躺在拿鐵杯裡、縮在外套裡、當成行動電源裡的膠囊；實測真實 LLM 在加入這條規則後，三則新聞都改寫成這種比喻構圖，之前則是「站在桌上指著招牌」的字面場景。
 
 簡單仍然是層級清楚，不是背景空白：保留紙張肌理、前中後景、光線與少量環境線索，只在去背素材或明確要求隔離主體時使用純色底。
+
+### 2.0.1 機制：Krea2 實測（2026-11-18，AIMediaPrompt 範本 × 本機 krea2_turbo）
+
+做法：把 AIMediaPrompt 十七個範本範例原文直接送 Krea2（一輪，單 seed），再用專案角色（Kirby、King Dedede、Waddle Dee）、4:5 畫布、兩個 seed、並附上 `IMAGE_PROMPT_QUALITY_CLAUSE`，做「現行契約寫法」對「借鑒範本結構」的同題對照（三題、各兩 seed）。對照圖是人工目視，prompt 是我手寫的，不是免費模型輸出。
+
+Krea2 擅長：
+
+- 有強烈圖像辨識度的插畫：浮世繪木刻、蠟筆塗鴉、白底細線 Q 版、設計稿加色票。
+- 名畫構圖惡搞（角色放進〈吶喊〉的構圖）、一個轉化機制（香煙煙霧變水墨山水）。
+- 柔光情緒（一束光只落在角色身上）、微距工藝質感。
+- 長達七千字、分段標籤的 prompt 仍會被遵守；超短英文字樣（三個字內，如 `'NAP RESULTS'`、`THANK YOU`）三次全對。
+
+Krea2 不擅長或沒有幫助：
+
+- 中文字幕、日期數字表（月曆、起承轉結漫畫格）會亂碼。
+- `Masterpiece, 8K, ray tracing, SSS` 之類口號沒有增益，單 seed 下反而讓質感變糊。
+- 把 `NOT 3D, NOT digital smooth` 寫進正向 prompt：同 seed 下畫面沒有可見差異，不需要。
+
+AIMediaPrompt 範本對 Krea2 的適用度（範例原文、單 seed、1024×1024；目視判斷）：
+
+| 適合（借結構） | 普通（不特別借） | 跳過 |
+|---|---|---|
+| IP 和洋折衷設計稿（分段標籤＋色票）、IP×名畫、Kirby×浮世繪、荒謬職場白領（白底細線＋旁人無感＋短英文標題）、金光雲朵擁抱、情書紙飛機（軌跡幾何＋留白）、春節香煙（煙變水墨）、童玩被窩守護隊（蠟筆媒材＋有作用的小細節）、便利袋大逃脫、花開御守（微距工藝） | 迷你劫匪存錢筒、中元普渡、童話散落、端午龍舟（畫面可以但擁擠、字幕亂碼） | Kirby God-Level 寫實口號版（糊）、Q 版日曆（數字亂碼）、愚人節四格（中文格內字亂碼） |
+
+勝出的結構（借結構，不借原文；上輪「逐字貼風格」輸給「重寫」）：
+
+1. 一個機制撐起畫面：柔光口袋加幾個有作用的小細節（例如多出一個被「蓋好被子」的小物，證明有人在守著）；嚴肅的角色對上無感的旁人；物件吐出的蒸氣／煙／火花／軌跡變成另一個地方的風景並引導視線；或選定一種圖像媒材／名畫構圖。
+2. 情緒用物理表達：光只落在誰身上、身體怎麼塌、物件怎麼被對待，不寫形容詞。
+3. 小細節都有工作：交代尺度、證明等待、完成笑點。
+4. 位置要寫（左下三分之一、上方三分之二），留白本身是構圖的一部分。
+
+同題對照結果：現行寫法在「麵包店最後一晚」「Dedede 認真開會」「Kirby 雨天喝茶」都畫得通順但平；借鑒機制的寫法在三題、兩個 seed 都更讀得出情緒、笑點或驚喜。其中只有「嚴肅對無感」會打破角色佔 1/5–1/3 的尺度規則（笑點在臉上，所以 Dedede 約佔半個畫面），因此契約只對這一種機制放寬到半個畫面，且旁人必須是已點名的角色；其餘機制仍維持小角色大世界。
+
+適用範圍：`IMAGE_PROMPT_CONTRACT` 只管單一場景 prompt：使用者自帶場景的 image、新聞驅動時先寫的 goal scene、以及影片的 opening keyframe 靜態圖。新聞驅動 text2img 的六張最終 prompt 由 `IMAGE_MOMENT_SET_CONTRACT`（一個物件、六個姿勢與情緒、小角色）改寫，那條路線只繼承 goal scene 的場景與物件，機制不會直接進入六張；要把機制放進六個瞬間是另一個實驗（有 feeling／pose 驗證器與一物件限制），尚未做。影片 opening keyframe 現在也會收到機制與半幅例外，該邊界未實測（H3 是否能接上蒸氣變風景的首幀、半幅角色）。`IMAGE_PROMPT_QUALITY_CLAUSE` 仍無條件寫「小角色」，比契約的例外更嚴；同題對照時已附該 clause，大 Dedede 仍勝出，故不改。
+
+寫手端：`IMAGE_PROMPT_CONTRACT` 的 Concept 與 Scale 已寫入以上機制與例外。
+
+真實免費模型寫手的對照（四則新聞 × 三次，舊契約與新契約各 12 條 prompt，同 seed、同 clause 渲染，圖在 `output/prompt_lab/r4/`，盲測頁 `blind_ab.html`）：
+
+- 試過兩版契約，使用者看完圖後選「只加機制」的版本，已採用；另一版多了「沒點名旁人就改選別機制」與「每個角色臉朝向觀眾或焦點物件」兩條限制，已拿掉。圖在 `output/prompt_lab/r4/`：`ab_old_*` 是舊契約、`ab_new_*` 是採用版、`ab_new2_*` 是被拿掉限制的那一版。
+- 採用版的特徵：蒸氣變風景、柔光口袋、排隊與開會時有旁人、故事感較強；代價是有些角色偏大或背對鏡頭，未點名的路人／同事較多（採用版 6/12、舊契約 4/12），樣本小，使用者接受這個取捨。
+- 被拿掉限制的那一版確實消除了背對鏡頭，但使用者不喜歡它的整體畫面；以後若要再收緊「只畫已點名角色」，要先對照這批圖。
+- JSON 殘渣寫進 prompt 字串：舊契約 2/12、採用版 1/12、另一版 0/12，是既有問題，不是新契約造成，本次未另外處理。
+- 評價依據是使用者目視，不是自動評分。
+
+簡短英文字樣是可用的槓桿，但生產環境仍維持「不寫字」：影片與 motion comic 路徑未測，中文觀眾也不會看英文字樣；要開放前需先測這兩處。
 
 ### 2.1 一個 visual thesis
 
@@ -305,6 +355,7 @@ explicitly required.
 1. 不看 prompt，先用縮圖判斷主體與主機制是否一秒可讀。
 2. 再放大檢查材料是否一致、幾何是否閉合、是否有 duplicate／pseudo-text。
 3. 逐項對照 constraints；缺少核心機制就淘汰，不用「很漂亮」補分。
-4. 需要 retry 時只改最弱的一個 dimension，保留已成功的 style signature。
-5. 若進入 90+ gate，保留 prompt、PNG、各 reviewer 分數與採用理由；
+4. 每張圖都問兩件事：用的是哪個機制，合不合這則 brief；有沒有意外之喜（比 brief 多給了一個畫面）。只是普通、讀不出機制的就跳過，不留；有驚喜的，記下它的結構（不是原文）當下次借鑒。這是人工審查步驟，不做成執行期 LLM 評分關卡。
+5. 需要 retry 時只改最弱的一個 dimension，保留已成功的 style signature。
+6. 若進入 90+ gate，保留 prompt、PNG、各 reviewer 分數與採用理由；
    未通過者不得寫入 guide。
