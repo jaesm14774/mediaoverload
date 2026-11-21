@@ -21,6 +21,11 @@ SERIAL_CLIP_SECONDS = 10
 SERIES_MAX_EPISODES = 7
 
 
+def count_open_threads(ledger_text: str) -> int:
+    """How many open threads a rendered ledger lists (render_ledger writes one "- T…" line each)."""
+    return len(re.findall(r"^- T\d+", str(ledger_text or ""), re.MULTILINE))
+
+
 def validate_episode_seconds(duration_seconds: int) -> None:
     """An episode is 1-4 whole ten-second clips, so the whole series stays under five minutes."""
     seconds = int(duration_seconds)
@@ -220,6 +225,42 @@ def validate_episode_delta(
         if name not in roster:
             known = "、".join(roster) or "（沒有常駐角色）"
             raise LedgerError(f"出場角色「{name}」不在常駐角色名單中；名單：{known}。")
+
+
+def validate_cast_matches_story(
+    delta: EpisodeDelta, story_text: str, *, roster_names: Iterable[str]
+) -> None:
+    """Raise LedgerError when the story writes in a recurring character the ledger does not list on screen.
+
+    Only listed characters get a reference image in the first clip and a look in the clip
+    writers' prompt, so a character who acts without being listed would be drawn from memory.
+    """
+    story = str(story_text or "").casefold()
+    listed = {name.casefold() for name in delta.present}
+    for name in roster_names:
+        if name.casefold() in story and name.casefold() not in listed:
+            raise LedgerError(
+                f"本集故事寫到常駐角色「{name}」，但線索帳本的「出場」沒有列出他；"
+                f"請在帳本加上「- 出場｜{name}」，影片才會帶上他的參考圖。"
+            )
+
+
+def validate_route_cast(
+    delta: EpisodeDelta, route_step: str, *, roster_names: Iterable[str]
+) -> None:
+    """Raise LedgerError when the story's step for this episode names a recurring character the ledger leaves out.
+
+    The creator approved that step, and each recurring character already cost a reviewed
+    identity image, so a character the story promised cannot silently vanish.
+    """
+    step = str(route_step or "").casefold()
+    listed = {name.casefold() for name in delta.present}
+    for name in roster_names:
+        if name.casefold() in step and name.casefold() not in listed:
+            raise LedgerError(
+                f"故事給本集的走向寫到常駐角色「{name}」，但線索帳本的「出場」沒有列出他；"
+                f"請在帳本加上「- 出場｜{name}」。"
+            )
 
 
 def apply_delta(

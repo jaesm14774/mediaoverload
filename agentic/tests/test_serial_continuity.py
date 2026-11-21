@@ -394,6 +394,27 @@ class SerialContinuityTests(unittest.TestCase):
                 [path.resolve() for path in identity],
             )
 
+    def test_user_given_two_recurring_characters_and_an_outline_that_puts_one_on_screen_when_the_video_cast_is_read_then_only_that_one_is_the_cast(self) -> None:
+        """User Given two registered recurring characters and an approved outline that puts only one of them on screen When the episode's video cast is read Then it holds only that character and their look, and an outline with nobody on screen gives an empty cast, so the clip writer is never told to draw a character whose reference image is not in the bundle."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            series_id = f"cast-video-{uuid.uuid4().hex[:8]}"
+            self._approve_series(root, series_id)
+            for name in ("小明", "阿福"):
+                self.store.register_series_companion(
+                    series_id, name, f"{name}的外觀", _write_image(root / f"{name}.png", name.encode())
+                )
+
+            with_one = _outline("第一集", "- 新增 主線｜問題", "- 出場｜小明")
+            with_nobody = _outline("第一集", "- 新增 主線｜問題")
+
+            cast = self.store.get_episode_cast_text(series_id, with_one)
+
+            self.assertIn("小明", cast)
+            self.assertIn("小明的外觀", cast)
+            self.assertNotIn("阿福", cast)
+            self.assertEqual(self.store.get_episode_cast_text(series_id, with_nobody), "")
+
     def test_user_given_a_protagonist_with_three_images_when_a_recurring_character_is_registered_then_it_is_refused(self) -> None:
         """User Given a protagonist that already uses three identity images When a recurring character is registered Then it is refused because the first clip would exceed four reference images with the prior ending frame."""
         with _workspace_temporary_directory() as temporary:

@@ -17,7 +17,8 @@ import uuid
 import pymysql
 from pymysql.cursors import DictCursor
 
-from agentic.runtime.serial_episode_plan import episode_summary
+from agentic.runtime.serial_character import MAX_COMPANIONS
+from agentic.runtime.serial_episode_plan import episode_route, episode_story_text, episode_summary
 from agentic.runtime.serial_ledger import (
     EpisodeDelta,
     LedgerError,
@@ -28,7 +29,9 @@ from agentic.runtime.serial_ledger import (
     parse_episode_delta,
     render_ledger,
     render_recap,
+    validate_cast_matches_story,
     validate_episode_delta,
+    validate_route_cast,
     validate_episode_seconds,
 )
 
@@ -305,7 +308,7 @@ class SerialVideoStore:
     # protagonist and any recurring characters on screen in the first beat.
     REFERENCE_BUNDLE_LIMIT = 4
     IDENTITY_REFERENCE_LIMIT = 3
-    MAX_COMPANIONS = 2
+    MAX_COMPANIONS = MAX_COMPANIONS
     DEFAULT_DATABASE = "mediaoverload_serial"
     _SCHEMA = (
         """CREATE TABLE IF NOT EXISTS series (
@@ -1724,6 +1727,8 @@ class SerialVideoStore:
     ) -> EpisodeDelta:
         """Check an outline's ledger section against what the series has already shown."""
         number = int(episode_number)
+        story = self.get_latest_approved_series_story(series_id)
+        route_step, _ = episode_route(str((story or {}).get("approved_treatment") or ""), number)
         with self._connection() as connection:
             if number > 1 and not any(
                 int(row["episode_number"]) == number - 1
@@ -1736,6 +1741,8 @@ class SerialVideoStore:
             roster = [row["name"] for row in self._companions(connection, series_id)]
             delta = self._episode_delta(connection, series_id, outline_text)
         validate_episode_delta(delta, ledger, episode_number=number, roster_names=roster)
+        validate_cast_matches_story(delta, episode_story_text(outline_text), roster_names=roster)
+        validate_route_cast(delta, route_step, roster_names=roster)
         return delta
 
     def get_series_planning_context(
@@ -1804,6 +1811,18 @@ class SerialVideoStore:
                 ),
             )
         return {"companion_id": companion_id, "name": normalized_name}
+
+    def get_episode_cast_text(self, series_id: str, outline_text: str) -> str:
+        """The recurring characters an approved outline puts on screen, one "- name：look" line each.
+
+        Only these have a reference image in the first clip's bundle, so only these may be
+        drawn, and the clip writers must be told about no one else.
+        """
+        normalized_series_id = str(series_id or "").strip()
+        with self._connection() as connection:
+            on_screen = self._episode_delta(connection, normalized_series_id, outline_text).present
+            looks = {row["name"]: row["appearance"] for row in self._companions(connection, normalized_series_id)}
+        return "\n".join(f"- {name}：{looks[name]}" for name in on_screen if name in looks)
 
     def get_series_companions(self, series_id: str) -> list[dict[str, Any]]:
         with self._connection() as connection:

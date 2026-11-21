@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Callable
 
+from agentic.runtime.serial_episode_plan import episode_route
 from agentic.runtime.serial_paths import serial_series_artifact_root
 
 
@@ -66,6 +68,20 @@ def build_serial_character_prompts(
         ]
     )
     return SERIAL_CHARACTER_SYSTEM_PROMPT, prompt
+
+
+def draft_character_card(generate: Callable[[], str], *, attempts: int = 3) -> str:
+    """A card whose reference image section is usable; a writer that skips it is asked again."""
+    failure = ValueError("A character card needs at least one attempt.")
+    for _ in range(attempts):
+        card = generate().rstrip() + "\n"
+        try:
+            extract_reference_prompt(card)
+        except ValueError as exc:
+            failure = exc
+        else:
+            return card
+    raise failure
 
 
 def extract_reference_prompt(card: str) -> str:
@@ -152,7 +168,7 @@ def build_serial_companion_proposal_prompts(
             "已核准的主角角色卡：",
             card,
             "",
-            f"請列出這個故事裡會在多集中回來的常駐角色，最多兩位；故事沒有提到、也不需要常駐角色時回傳空清單。常駐角色不可以是 {protagonist}，每位要有一個簡短的名字（名字必須與故事裡寫的完全一致，不翻譯、不改寫、不另取英文名），以及一句看得見的固定外觀描述（輪廓、配色、標誌配件），外觀描述不寫性格或劇情。",
+            f"請只列出這個故事已經寫出名字、而且會在多集中回來的常駐角色；故事寫「無」、沒有提到、或只是路過的角色一律不列，沒有就回傳空清單，不要為了湊人數新增角色。常駐角色不可以是 {protagonist}，每位要有一個簡短的名字（名字必須與故事裡寫的完全一致，不翻譯、不改寫、不另取英文名），以及一句看得見的固定外觀描述（輪廓、配色、標誌配件），外觀描述不寫性格或劇情。",
         ]
     )
     return SERIAL_COMPANION_SYSTEM_PROMPT, prompt
@@ -162,12 +178,17 @@ SERIAL_COMPANION_SYSTEM_PROMPT = """你是動畫短劇的角色設計師。只�
 
 
 def validate_serial_companion_proposal(
-    payload: object, *, protagonist_name: str
+    payload: object, *, protagonist_name: str, story: str
 ) -> list[dict[str, str]]:
-    """Return the proposed recurring characters, or raise when the proposal breaks a rule."""
+    """Return the proposed recurring characters, or raise when the proposal breaks a rule.
+
+    The cast belongs to the approved story: a name the story never wrote is refused.
+    """
     if not isinstance(payload, dict) or not isinstance(payload.get("companions"), list):
         raise ValueError("A recurring character proposal must be an object with a companions list.")
     protagonist = str(protagonist_name or "").strip().casefold()
+    story_text = " ".join(str(story or "").split()).casefold()
+    route_text = " ".join(" ".join(episode_route(story, 0)[1]).split()).casefold()
     companions: list[dict[str, str]] = []
     for item in payload["companions"]:
         if not isinstance(item, dict):
@@ -178,6 +199,13 @@ def validate_serial_companion_proposal(
             raise ValueError("A recurring character needs a name and a visible appearance.")
         if name.casefold() == protagonist:
             raise ValueError("A recurring character cannot be the protagonist.")
+        if name.casefold() not in story_text:
+            raise ValueError(f"The recurring character {name} is not named in the approved story.")
+        if name.casefold() not in route_text:
+            raise ValueError(
+                f"The recurring character {name} has no episode step in the approved story; "
+                "a recurring character must act in a named episode."
+            )
         if any(existing["name"] == name for existing in companions):
             raise ValueError(f"The recurring character {name} is listed twice.")
         companions.append({"name": name, "appearance": appearance})

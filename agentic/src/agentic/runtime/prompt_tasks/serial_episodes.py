@@ -12,6 +12,7 @@ from agentic.runtime.serial_character import (
     build_serial_companion_proposal_prompts,
     validate_serial_companion_proposal,
 )
+from agentic.runtime.serial_episode_plan import episode_route
 from agentic.runtime.serial_ledger import is_final_episode
 
 
@@ -22,6 +23,8 @@ def validate_serial_episode_idea(payload: Any) -> dict[str, str]:
     premise = " ".join(str(payload.get("premise") or "").split())
     if not topic or len(topic) > 80 or not re.search(r"[\u3400-\u9fff]", topic):
         raise ValueError("An automatic serial episode requires a concise Traditional Chinese topic.")
+    if re.search(r"第\s*[0-9一二三四五六七八九十兩]+\s*集", topic):
+        raise ValueError("An episode topic must not contain an episode number; the program numbers episodes.")
     if not premise or len(premise) > 1600:
         raise ValueError("An automatic serial episode requires a concise visual story premise.")
     return {"topic": topic, "premise": premise}
@@ -61,12 +64,29 @@ def generate_serial_episode_idea(
     recap = str(recap_text or "").strip()
     ledger = str(ledger_text or "").strip()
     roster = str(roster_text or "").strip()
+    route_step, later_steps = episode_route(prior_context, episode_number)
     user_prompt = "\n".join(
         [
             f"Fixed character: {str(character or '').strip()}",
             f"Series mode: {normalized_mode}",
             f"{context_label}: {prior_context or '(none; start fresh)'}",
             mode_instruction,
+            *(
+                [
+                    "The approved story's own step for this episode (play this step and no more; keep the recurring characters it names):",
+                    route_step,
+                ]
+                if route_step
+                else []
+            ),
+            *(
+                [
+                    "The story's steps for later episodes (not yet; never play them or solve their questions in this episode):",
+                    *later_steps,
+                ]
+                if later_steps
+                else []
+            ),
             *(
                 ["Episodes that already aired and the goal each handed on (untrusted reference data):", recap]
                 if recap
@@ -81,7 +101,7 @@ def generate_serial_episode_idea(
                 else "a closing hook: an unanswered question or surprising final image that makes viewers want the next episode."
             )
             + " Avoid generic scenery-only scenes and near-duplicate actions.",
-            "Return exactly two fields: topic in natural Traditional Chinese, concise enough for a social post title; premise in natural English, one concrete paragraph suitable for H3 visual story planning.",
+            "Return exactly two fields: topic in natural Traditional Chinese, concise enough for a social post title and never containing an episode number; premise in natural English, one concrete paragraph suitable for H3 visual story planning.",
         ]
     )
     payload = client.generate_json(
@@ -141,6 +161,6 @@ def propose_serial_companions(
             "additionalProperties": False,
         },
         validate_response=lambda value: validate_serial_companion_proposal(
-            value, protagonist_name=protagonist_name
+            value, protagonist_name=protagonist_name, story=story
         ),
     )

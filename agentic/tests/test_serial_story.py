@@ -62,8 +62,24 @@ def test_user_given_a_series_request_when_the_route_is_planned_then_each_episode
         assert "場景" in user_prompt and "動作" in user_prompt
         assert "因此" in user_prompt and "但是" in user_prompt
         assert "看得見的改變" in user_prompt
-        assert "常駐角色" in user_prompt and "最多兩位" in user_prompt
         assert "每集約 30 到 40 秒" in user_prompt
+
+
+def test_user_given_a_story_that_needs_no_sidekick_when_the_series_is_drafted_then_the_cast_slot_is_optional_and_never_filled_by_the_protagonist():
+    """User Given any story complexity When the series premise is requested Then recurring characters are optional, each one must earn a job in the plot, "none" is a stated acceptable answer, and the protagonist is never counted as one, so the cast size comes from the story and not from the size of an empty slot."""
+    for complexity in ("simple", "cinematic"):
+        _, user_prompt = build_serial_story_prompts(
+            "A lighthouse keeper helps a lost cloud.",
+            None,
+            news_mode="none",
+            character_name="Kirby",
+            complexity=complexity,
+        )
+
+        assert "常駐角色不是必填" in user_prompt
+        assert "寫「無」" in user_prompt
+        assert "主角也不算常駐角色" in user_prompt
+        assert "做了什麼推進劇情" in user_prompt
 
 
 def test_user_given_a_news_inspired_series_when_the_story_is_written_then_the_news_is_a_doorway_not_the_premise():
@@ -112,3 +128,17 @@ def test_user_given_random_news_inspiration_has_no_eligible_source_when_building
         assert "none" in str(exc).casefold()
     else:
         raise AssertionError("Missing news inspiration must block the default news mode.")
+
+
+def test_user_given_a_seven_episode_series_when_the_story_is_requested_then_it_must_write_a_step_for_every_episode_and_name_the_recurring_characters_in_them():
+    """User Given any story complexity When the series premise is requested Then the writer must lay out the first three episodes, a milestone for episodes four to six that only moves the standing question forward, and the finale, naming each recurring character in the steps where they act, so the middle of the series is planned instead of improvised."""
+    for complexity in ("simple", "cinematic"):
+        _, user_prompt = build_serial_story_prompts(
+            "A lighthouse keeper helps a lost cloud.", None, news_mode="none",
+            character_name="Kirby", complexity=complexity,
+        )
+
+        assert "第 4 到第 6 集" in user_prompt
+        assert "里程碑" in user_prompt
+        assert "不可解開長期懸念" in user_prompt
+        assert "出場的集數寫出名字" in user_prompt

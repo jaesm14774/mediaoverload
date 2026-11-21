@@ -720,7 +720,7 @@ def _run_serial_character_draft(
     from agentic.runtime.serial_video import SerialVideoStore
     from agentic.runtime.serial_character import (
         build_serial_character_prompts,
-        extract_reference_prompt,
+        draft_character_card,
         serial_character_artifact_path,
     )
 
@@ -736,13 +736,14 @@ def _run_serial_character_draft(
         complexity=str(args.serial_story_complexity or "simple"),
     )
     client = PromptClient(mode=os.environ.get("AGENTIC_LLM_MODE", "llm"))
-    card_text = client.generate_text(
-        system_prompt,
-        user_prompt,
-        step_name="serial_series_character_card",
-        language_contract="請使用自然、易讀的繁體中文。",
-    ).rstrip() + "\n"
-    extract_reference_prompt(card_text)  # refuse a card that cannot produce reference images before it is saved
+    card_text = draft_character_card(
+        lambda: client.generate_text(
+            system_prompt,
+            user_prompt,
+            step_name="serial_series_character_card",
+            language_contract="請使用自然、易讀的繁體中文。",
+        )
+    )
     card_id = uuid.uuid4().hex
     output_root = Path(args.output_dir).resolve() if args.output_dir else project_root / "output"
     artifact_path = serial_character_artifact_path(output_root, series_id, card_id)
@@ -2347,9 +2348,10 @@ def _build_cli_goal(
                 "publish_mode": args.publish_mode or "live",
                 "visual_style_profile": args.serial_style_profile,
                 "serial_story_context": serial_context["story_context"],
-                "serial_cast": serial_store.get_series_planning_context(
-                    str(serial_context["series_id"]), int(serial_context["episode_number"])
-                )["roster_text"],
+                "serial_cast": serial_store.get_episode_cast_text(
+                    str(serial_context["series_id"]),
+                    str((serial_context.get("onboarding_lineage") or {}).get("episode_outline") or ""),
+                ),
                 "serial_story_review_context": {
                     "approved_start_state": str(
                         (serial_context.get("story_state") or {}).get("state_text") or ""
