@@ -83,6 +83,7 @@ python run_media_interface.py --character kirby --generation-type series_carouse
 - [Story Card 編輯指南](docs/story_card_editorial_guide.md)
 - [Game Sprite 輸出契約](docs/game_sprite.md)
 - [連載影片策略與操作](docs/serial-video.md)
+- [新聞融合故事策略](docs/news-fusion-story.md)
 - [OpenAI 與相容供應商設定](docs/openai_compatible_providers.md)
 - [自動分格漫畫與隨機策略](docs/motion_comic.md)
 - [影片參考分析](docs/reference_video_remix.md)

@@ -6,6 +6,12 @@
 python run_media_interface.py --character kirby --generation-type news_fusion_story --no-publish
 ```
 
+## 設定
+
+- 候選策略：`configs/routing.yaml` 的 `routing.strategy_candidates` 列出 `news_fusion_story`；工作流程階段為 `krea2_turbo`（圖片）、`minimax_h3_i2va`（影片）、`flux3_image_klein_img2img`（Klein 編輯），三個階段各只有一個候選。
+- 隨機抽選：不指定 `--generation-type` 時，入口依角色 YAML 的 `generation.generation_type_weights` 抽策略。Kirby 的 `news_fusion_story` 權重為 0.5；權重表有列其他策略但沒列它的角色不會抽到它，但仍可用 `--generation-type news_fusion_story` 指定；權重表沒有任何有效項目時，會在所有候選策略間平均抽選。
+- 段落數：`news_fusion_beat_count`（2 到 5，預設 3）。
+
 ## 流程
 
 N 個關鍵幀段落（預設 3，`news_fusion_beat_count` 可設 2 到 5），N 段 I2VA 影片，N-1 個銜接點：
