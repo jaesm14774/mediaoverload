@@ -6,7 +6,12 @@ import hashlib
 import re
 from pathlib import Path
 
-from agentic.runtime.serial_ledger import SERIES_MAX_EPISODES, is_final_episode
+from agentic.runtime.serial_ledger import (
+    MAX_OPEN_THREADS,
+    SERIES_MAX_EPISODES,
+    count_open_threads,
+    is_final_episode,
+)
 
 
 SERIAL_EPISODE_PLAN_SYSTEM_PROMPT = """你是動畫短劇編劇。已核准的系列故事與角色卡是依據；本集方向只補充重點，不可更換主角或推翻設定。
@@ -24,7 +29,7 @@ LEDGER_PRESENT = "- 出場｜第一個節拍就在畫面上的常駐角色名字
 LEDGER_NEXT_GOAL = "- 下集目標｜這一集結尾留給下一集的未完成目標（必須剛好一行）"
 
 
-def ledger_format(episode_number: int) -> str:
+def ledger_format(episode_number: int, *, has_roster: bool, open_threads: int) -> str:
     """Ledger section format; ids are assigned by the program, so only earlier episodes' threads can be cited."""
     if episode_number == 1:
         lines = [
@@ -54,7 +59,35 @@ def ledger_format(episode_number: int) -> str:
             LEDGER_NEXT_GOAL,
             "本集新增的線索還沒有編號，不能在本集推進或回收；只能引用上面列出的編號。",
         ]
+    if not has_roster:
+        lines.remove(LEDGER_PRESENT)
+    if LEDGER_ADD in lines:
+        room = MAX_OPEN_THREADS - open_threads
+        position = lines.index(LEDGER_ADD)
+        if room <= 0:
+            lines[position] = f"開放中的線索已滿 {MAX_OPEN_THREADS} 條，本集不可新增線索，只能推進或回收。"
+        else:
+            lines[position] = (
+                f"- 新增｜本集埋下的新線索，一行一條，最多 {min(room, 2)} 條"
+                f"（開放中的線索已有 {open_threads} 條，上限 {MAX_OPEN_THREADS} 條）"
+            )
     return "\n".join(lines)
+
+
+_ROUTE_STEP = re.compile(r"^[\s*\-#>]*第\s*(\d+)\s*集[^：:\n]{0,12}[：:]\s*\**\s*(.+?)\s*$", re.MULTILINE)
+
+
+def episode_route(story_text: str, episode_number: int) -> tuple[str, list[str]]:
+    """The approved story's own step for this episode, and its steps for the episodes after it.
+
+    The story writes one "第 N 集：…" line per episode; a story without them gives ("", []).
+    """
+    steps: dict[int, str] = {}
+    for match in _ROUTE_STEP.finditer(str(story_text or "")):
+        steps.setdefault(int(match.group(1)), match.group(2))
+    number = int(episode_number)
+    later = [f"第 {n} 集：{steps[n]}" for n in sorted(steps) if n > number]
+    return steps.get(number, ""), later
 
 
 def build_serial_episode_outline_prompts(
@@ -108,6 +141,15 @@ def build_serial_episode_outline_prompts(
             else f"只演第 {number} 集（全劇共 {SERIES_MAX_EPISODES} 集，總長不到五分鐘）：已核准故事中的路線只當背景；本集只演它自己的部分，之後的集數是未來，不得提前演出，也不得完成長期懸念或主角的最終目標。"
         ),
     ]
+    route_step, later_steps = episode_route(story, number)
+    if route_step:
+        prompt_parts.extend(
+            ["", "故事給本集的走向（本集就演這一步，演到為止；其中提到的常駐角色要出場）：", route_step]
+        )
+    if later_steps:
+        prompt_parts.extend(
+            ["", "之後集數的走向（還沒發生，不得提前演出，也不得在本集解開它們的懸念）：", *later_steps]
+        )
     if normalized_complexity == "simple":
         prompt_parts.extend(
             [
@@ -146,7 +188,7 @@ def build_serial_episode_outline_prompts(
         prompt_parts.extend(
             [
                 "",
-                "本集的常駐角色班底（每個常駐角色都要在第一個節拍入鏡，並且每個節拍都有自己推進故事的動作，與主角互動，不是站在旁邊看）：",
+                "本集可用的常駐角色班底（不必全員出場：只有本集的小目標需要的角色才出場，不需要的不要硬塞進來；出場的角色要在第一個節拍入鏡，並且每個節拍都有自己推進故事的動作，與主角互動，不是站在旁邊看；「出場」只列真的出場的角色）：",
                 roster,
             ]
         )
@@ -180,7 +222,7 @@ def build_serial_episode_outline_prompts(
         prompt_parts.extend(
             [
                 "",
-                f"請輸出四部分：一、本集一句話，只寫看得見的事：主角想要什麼、遇到什麼麻煩、怎麼收尾（長期問題只寫在線索帳本，不要寫進這一句，也不要寫進節拍）；二、{_chinese_number(beats)}個節拍（{beat_names}），每個節拍對應一支 10 秒影片，每個節拍只寫一到兩句、約 40 字，只寫該段看得見的一個目標，以及完成它的 2 到 3 個連續、大幅度的肢體動作與因果；每個節拍（包含開場）都從第一秒就開始動，睡覺、發呆、呼吸、發光、靜靜漂浮、站著看都不算動作；每個節拍結束時，主角必須仍在畫面中央、清楚可見，每個常駐角色也必須完整留在畫面內、分站主角左右、看得見臉，不被畫面邊緣切到，不得離開畫面、飄走或退到背景，因為下一支影片只能接續上一支的最後一格，最後一格裡看不清楚的角色之後無法再畫回來；結束時所有角色仍在做動作（跳、揮手、轉圈、追逐、歡呼），不可站定、停步或擺姿勢，結尾狀態寫動作中的位置，不寫「站定」「面向鏡頭」；三、本集結尾狀態卡，逐項寫人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及{next_goal}；四、線索帳本（格式見下）。狀態卡要描述本集結尾後會實際延續的狀態，沒有變化的項目寫「不變」，沒有相關內容寫「無」。不用輸出 JSON、分鏡術語或鏡頭運動。",
+                f"請輸出四部分：一、本集一句話，只寫看得見的事：主角想要什麼、遇到什麼麻煩、怎麼收尾（長期問題只寫在線索帳本，不要寫進這一句，也不要寫進節拍）；二、{_chinese_number(beats)}個節拍（{beat_names}），每個節拍對應一支 10 秒影片，每個節拍只寫一到兩句、約 40 字，只寫該段看得見的一個目標，以及完成它的 2 到 3 個連續、大幅度的肢體動作與因果；每個節拍（包含開場）都從第一秒就開始動，睡覺、發呆、呼吸、發光、靜靜漂浮、站著看都不算動作；每個節拍結束時，主角必須仍在畫面中央、清楚可見，每個出場的常駐角色也必須完整留在畫面內、分站主角左右、看得見臉，不被畫面邊緣切到，不得離開畫面、飄走或退到背景，因為下一支影片只能接續上一支的最後一格，最後一格裡看不清楚的角色之後無法再畫回來；結束時所有角色仍在做動作（跳、揮手、轉圈、追逐、歡呼），不可站定、停步或擺姿勢，結尾狀態寫動作中的位置，不寫「站定」「面向鏡頭」；三、本集結尾狀態卡，逐項寫人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及{next_goal}；四、線索帳本（格式見下）。狀態卡要描述本集結尾後會實際延續的狀態，沒有變化的項目寫「不變」，沒有相關內容寫「無」。不用輸出 JSON、分鏡術語或鏡頭運動。",
             ]
         )
     else:
@@ -191,13 +233,13 @@ def build_serial_episode_outline_prompts(
                 "一、本集在全系列中的目的，以及它如何承接上集並推進主線。",
                 "二、按因果順序列出本集劇情節點：開場狀態、目標、阻礙如何升級、角色作出的選擇、高潮轉折、結尾狀態。",
                 f"三、依劇情節點拆成場景，再把場景拆成恰好 {beats} 個鏡頭，每個鏡頭對應一支影片（10 秒），劇情節點要依序分配到這 {beats} 個鏡頭裡，最後一個鏡頭收在本集的小結果與鉤子；不可多於或少於 {beats} 個鏡頭。",
-                "四、每個鏡頭依序列出目的、開場狀態、角色動作節拍、道具變化、構圖、結尾狀態。鏡頭固定，不要推近、旋轉、搖鏡、特寫切換或升降；變化全由角色和場景的動作帶來。每個鏡頭的角色動作節拍都是連續、大幅度的肢體動作，第一秒就開始動，且至少一個是大位移（奔跑、跳、飛、翻滾、被拋出、追逐或推著東西衝過畫面），只在原地整理、接球、遞東西或捲紙不算；睡覺、發呆、呼吸、發光、靜靜漂浮都不算動作。每個鏡頭的結尾狀態，主角必須仍在畫面中央、清楚可見，每個常駐角色也必須完整留在畫面內、分站主角左右、看得見臉，不被畫面邊緣切到，不得離開畫面、飄走或退到背景，因為下一支影片只能接續上一支的最後一格，最後一格裡看不清楚的角色之後無法再畫回來；結束時所有角色仍在做動作（跳、揮手、轉圈、追逐、歡呼），不可站定、停步或擺姿勢，結尾狀態寫動作中的位置，不寫「站定」「面向鏡頭」。描述要具體到能交給影片生成流程，並指出必要時人物、位置、道具或情緒如何延續。",
+                "四、每個鏡頭依序列出目的、開場狀態、角色動作節拍、道具變化、構圖、結尾狀態。鏡頭固定，不要推近、旋轉、搖鏡、特寫切換或升降；變化全由角色和場景的動作帶來。每個鏡頭的角色動作節拍都是連續、大幅度的肢體動作，第一秒就開始動，且至少一個是大位移（奔跑、跳、飛、翻滾、被拋出、追逐或推著東西衝過畫面），只在原地整理、接球、遞東西或捲紙不算；睡覺、發呆、呼吸、發光、靜靜漂浮都不算動作。每個鏡頭的結尾狀態，主角必須仍在畫面中央、清楚可見，每個出場的常駐角色也必須完整留在畫面內、分站主角左右、看得見臉，不被畫面邊緣切到，不得離開畫面、飄走或退到背景，因為下一支影片只能接續上一支的最後一格，最後一格裡看不清楚的角色之後無法再畫回來；結束時所有角色仍在做動作（跳、揮手、轉圈、追逐、歡呼），不可站定、停步或擺姿勢，結尾狀態寫動作中的位置，不寫「站定」「面向鏡頭」。描述要具體到能交給影片生成流程，並指出必要時人物、位置、道具或情緒如何延續。",
                 "五、本集結尾狀態卡：寫出人物位置／身體與情緒狀態／新知道的事、關係變化、線索狀態、重要道具持有人／位置／狀況、場景變化，以及留給下一集的未完成目標。沒有變化寫「不變」，沒有相關內容寫「無」。",
                 "六、線索帳本（格式見下）。",
                 "故事內容要完整推進本集的事件，鏡頭清單不可取代劇情；不確定集數時以最自然的篇幅規劃，不為增加集數重複事件。",
             ]
         )
-    prompt_parts.extend(["", ledger_format(number)])
+    prompt_parts.extend(["", ledger_format(number, has_roster=bool(roster), open_threads=count_open_threads(ledger))])
     return SERIAL_EPISODE_PLAN_SYSTEM_PROMPT, "\n".join(prompt_parts)
 
 
@@ -232,7 +274,11 @@ def build_ledger_repair_prompt(
             "",
             "請依上面的故事重寫線索帳本，只輸出線索帳本這一段（標題寫「線索帳本」），不要輸出大綱的其他部分。",
             "",
-            ledger_format(int(episode_number)),
+            ledger_format(
+                int(episode_number),
+                has_roster=bool(str(roster_text or "").strip()),
+                open_threads=count_open_threads(ledger_text),
+            ),
         ]
     )
     return "\n".join(parts)

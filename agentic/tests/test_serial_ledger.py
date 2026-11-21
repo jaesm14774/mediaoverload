@@ -9,6 +9,8 @@ from agentic.runtime.serial_ledger import (
     render_ledger,
     render_recap,
     replace_ledger_section,
+    validate_cast_matches_story,
+    validate_route_cast,
     validate_episode_delta,
 )
 
@@ -208,6 +210,32 @@ def test_user_given_a_recurring_cast_when_an_episode_lists_who_is_on_screen_then
     assert known.present == ("小明",)
     with pytest.raises(LedgerError, match="小明"):
         validate_episode_delta(unknown, ledger, episode_number=2, roster_names=("小明",))
+
+
+def test_user_given_an_outline_that_writes_a_recurring_character_into_the_story_when_the_ledger_forgets_to_list_them_then_it_is_refused():
+    """User Given a roster with a recurring character When the outline's story has that character act but the ledger's on-screen line leaves them out Then it is refused, because their reference image would be missing from the first clip and the clip writers would draw them from memory; a story that never mentions them, or a ledger that lists them, passes."""
+    story_with = "第 1 拍：Kirby 與小明一起追著信跑過廣場。"
+    story_without = "第 1 拍：Kirby 一個人追著信跑過廣場。"
+    listed = parse_episode_delta(_outline("- 新增 主線｜問題", "- 出場｜小明"))
+    forgotten = parse_episode_delta(_outline("- 新增 主線｜問題"))
+
+    validate_cast_matches_story(listed, story_with, roster_names=("小明",))
+    validate_cast_matches_story(forgotten, story_without, roster_names=("小明",))
+    with pytest.raises(LedgerError, match="小明"):
+        validate_cast_matches_story(forgotten, story_with, roster_names=("小明",))
+
+
+def test_user_given_a_story_step_that_names_a_recurring_character_when_the_outline_leaves_them_out_then_it_is_refused():
+    """User Given a story whose step for this episode names a registered recurring character When the outline's ledger does not list them on screen Then it is refused, so a character the story promised can no longer vanish for the whole series; a step that names nobody, or a ledger that lists them, passes."""
+    step = "矮屋簷／Kirby 與阿滿婆翻過屋頂／找到腳印"
+    listed = parse_episode_delta(_outline("- 新增 主線｜問題", "- 出場｜阿滿婆"))
+    left_out = parse_episode_delta(_outline("- 新增 主線｜問題"))
+
+    validate_route_cast(listed, step, roster_names=("阿滿婆", "小豆"))
+    validate_route_cast(left_out, "河邊／Kirby 跳過石頭", roster_names=("阿滿婆", "小豆"))
+    validate_route_cast(left_out, "", roster_names=("阿滿婆",))
+    with pytest.raises(LedgerError, match="阿滿婆"):
+        validate_route_cast(left_out, step, roster_names=("阿滿婆", "小豆"))
 
 
 def test_user_given_a_ledger_when_it_is_shown_to_the_next_writer_then_open_threads_and_due_warnings_are_readable():

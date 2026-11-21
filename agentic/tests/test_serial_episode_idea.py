@@ -66,6 +66,19 @@ def test_user_given_the_final_episode_of_a_series_when_an_idea_is_requested_then
     assert "closing hook" not in final_prompt
 
 
+def test_user_given_a_writer_that_numbers_its_own_episode_when_the_idea_is_validated_then_the_topic_is_refused_because_the_program_owns_the_numbering():
+    """User Given an episode idea whose topic carries an episode number When it is validated Then it is refused, since a wrong number (episode 7 written at episode 2) misleads every later writer who reads the recap; a topic without a number passes."""
+    import pytest
+
+    from agentic.runtime.prompt_tasks.serial_episodes import validate_serial_episode_idea
+
+    premise = "Kirby chases a lantern across the square."
+    assert validate_serial_episode_idea({"topic": "找回那盞燈", "premise": premise})["topic"] == "找回那盞燈"
+    for numbered in ("第 7 集：找回那盞燈", "找回那盞燈｜《燈》第7集", "找回那盞燈 第三集"):
+        with pytest.raises(ValueError):
+            validate_serial_episode_idea({"topic": numbered, "premise": premise})
+
+
 def test_user_given_a_protagonist_and_story_when_recurring_characters_are_proposed_then_the_validated_list_comes_back():
     """User Given an approved story and protagonist card When the writer proposes recurring characters Then the public engine returns the validated characters, at most two."""
     manager = ScriptedLLMManager(
@@ -73,7 +86,7 @@ def test_user_given_a_protagonist_and_story_when_recurring_characters_are_propos
     )
 
     companions = LLMPromptEngine(mode="llm", manager=manager).propose_serial_companions(
-        story="Kirby wonders where the star candy comes from.",
+        story="常駐角色：小明。\n第 1 集：Kirby 跟著小明找星星糖",
         character_card="Kirby is a round pink creature.",
         protagonist_name="Kirby",
     )

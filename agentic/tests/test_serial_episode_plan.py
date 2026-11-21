@@ -2,6 +2,7 @@ import pytest
 
 from agentic.runtime.serial_episode_plan import (
     build_serial_episode_outline_prompts,
+    episode_route,
 )
 from agentic.runtime.serial_ledger import SERIES_MAX_EPISODES
 
@@ -118,14 +119,16 @@ def test_user_given_a_one_minute_episode_when_planning_then_even_the_opening_bea
         assert static_action in prompt
 
 
-def test_user_given_recurring_characters_when_planning_an_episode_then_they_are_the_cast_who_act_in_the_beats_not_optional_extras():
-    """User Given a series with recurring characters When an episode is planned Then the prompt makes them the cast of the episode, on screen from the first beat and acting in every beat, so a viewer meets them instead of Kirby alone."""
+def test_user_given_recurring_characters_when_planning_an_episode_then_only_those_the_episode_needs_appear_and_they_act_in_every_beat():
+    """User Given a series with recurring characters When an episode is planned Then the roster is offered as an available cast, not a mandatory line-up: whoever the episode's goal needs appears from the first beat and acts in every beat, and the others stay out instead of standing in as extras."""
     prompt = _simple_outline_prompt(
         episode_number=1, roster_text="- Dede：頭上有葉子的橘色小圓人\n- Pupo：背郵包的企鵝"
     )
 
     assert "Dede" in prompt and "Pupo" in prompt
-    assert "每個常駐角色都要在第一個節拍入鏡" in prompt
+    assert "不必全員出場" in prompt
+    assert "每個常駐角色都要在第一個節拍入鏡" not in prompt
+    assert "出場的角色要在第一個節拍入鏡" in prompt
     assert "每個節拍都有自己推進故事的動作" in prompt
     assert "可以回歸" not in prompt
 
@@ -144,7 +147,7 @@ def test_user_given_clips_that_continue_from_each_others_last_frame_when_plannin
 
     for prompt in (simple, cinematic):
         assert "主角必須仍在畫面中央、清楚可見" in prompt
-        assert "每個常駐角色也必須完整留在畫面內、分站主角左右、看得見臉" in prompt
+        assert "每個出場的常駐角色也必須完整留在畫面內、分站主角左右、看得見臉" in prompt
         assert "不得離開畫面" in prompt
 
 
@@ -165,7 +168,7 @@ def test_user_given_aired_episodes_when_planning_the_next_one_then_the_recap_the
 
 def test_user_given_a_new_episode_when_the_outline_is_requested_then_the_ledger_section_has_a_strict_machine_readable_format():
     """User Given any episode When its outline is requested Then the prompt specifies the ledger section entries (新增, 推進, 回收, 下集目標, 出場) so the outline can be checked without a model."""
-    prompt = _simple_outline_prompt()
+    prompt = _simple_outline_prompt(roster_text="- 小明：戴草帽")
 
     for entry in ("新增 主線｜", "推進 T", "回收 T", "下集目標｜", "出場｜"):
         assert entry in prompt
@@ -376,3 +379,64 @@ def test_user_given_any_episode_when_planning_then_every_beat_travels_across_the
         assert "原地整理" in prompt
         assert "不可站定、停步或擺姿勢" in prompt
 
+
+
+ROUTE_STORY = """《找回那盞燈》
+長期懸念：誰把燈籠帶走了。
+前三集走向
+第 1 集：廟會廣場／Kirby 追著紅線／發現空鉤子／燈籠只剩一半
+第 2 集：矮屋簷／Kirby 與阿滿婆翻過屋頂／找到小貓的腳印／腳印通向河邊
+第 3 集：河邊／Kirby 跳過石頭／撿到紙燈碎片／碎片會發光
+第 4 到 6 集的里程碑
+第 4 集：Kirby 發現小貓不是第一個拿走燈的
+第 5 集：小豆說出誰把燈借走
+第 6 集：Kirby 追到借燈的人，但燈已被拆開
+第 7 集（最終集）：燈被拼回，掛回最高鉤，懸念解開
+"""
+
+
+def test_user_given_a_story_with_a_route_for_every_episode_when_an_episode_is_planned_then_it_gets_its_own_step_and_never_plays_a_later_one():
+    """User Given a story that writes a step for each of the seven episodes When episode 2 is planned Then the prompt shows episode 2's own step as the one to play and lists the later steps as future that must not be played, and an episode the story has no step for plans as before."""
+    this_step, later_steps = episode_route(ROUTE_STORY, 2)
+    prompt = _simple_outline_prompt(approved_story=ROUTE_STORY, episode_number=2)
+
+    assert "阿滿婆" in this_step and "燈被拼回" not in this_step
+    assert any("燈被拼回" in step for step in later_steps) and not any("廟會廣場" in step for step in later_steps)
+    assert "故事給本集的走向" in prompt
+    assert "不得提前演出" in prompt
+    assert episode_route("A story about a letter.", 2) == ("", [])
+
+
+def test_user_given_a_series_without_recurring_characters_when_an_episode_is_planned_then_the_ledger_never_offers_an_on_screen_line():
+    """User Given a series that registered no recurring character When an episode is planned and when a rejected ledger is repaired Then the ledger format has no on-screen line to fill, so the writer cannot invent a character the series does not have and loop on the rejection; with a roster the line is offered."""
+    from agentic.runtime.serial_episode_plan import build_ledger_repair_prompt
+
+    without = _simple_outline_prompt(episode_number=2, roster_text="")
+    with_roster = _simple_outline_prompt(episode_number=2, roster_text="- 小明：戴草帽")
+    repair = build_ledger_repair_prompt(
+        outline_text="一、本集一句話\nx", episode_number=2, ledger_text="", roster_text="", error="出場角色「山羊」不在名單中"
+    )
+
+    assert "- 出場｜" not in without and "- 出場｜" in with_roster
+    assert "- 出場｜" not in repair
+
+
+def test_user_given_a_ledger_that_is_already_full_when_an_episode_is_planned_then_the_writer_is_told_it_cannot_add_threads():
+    """User Given a series whose ledger already holds the most open threads allowed When the next episode and its ledger repair are planned Then the format offers no way to add a thread and says the ledger is full, so the writer cannot add one and loop on the rejection until the series dies; with room left the add line is offered."""
+    from agentic.runtime.serial_episode_plan import build_ledger_repair_prompt
+    from agentic.runtime.serial_ledger import MAX_OPEN_THREADS, Thread, render_ledger
+
+    def ledger_with(count: int) -> str:
+        threads = [Thread(id=f"T{i}", text=f"線索{i}", main=(i == 1), planted=1, touched=1) for i in range(1, count + 1)]
+        return render_ledger(threads, next_episode_number=2)
+
+    full = _simple_outline_prompt(episode_number=2, ledger_text=ledger_with(MAX_OPEN_THREADS))
+    roomy = _simple_outline_prompt(episode_number=2, ledger_text=ledger_with(2))
+    repair = build_ledger_repair_prompt(
+        outline_text="一、本集一句話\nx", episode_number=2, ledger_text=ledger_with(MAX_OPEN_THREADS),
+        roster_text="", error="開放中的線索最多 6 條",
+    )
+
+    assert "- 新增｜" not in full and "- 新增｜" in roomy
+    assert "不可新增線索" in full
+    assert "- 新增｜" not in repair and "不可新增線索" in repair
