@@ -14,6 +14,7 @@ routing:
     - native_h3_l2va_story
     - native_h3_ref2va
     - text2image2native_h3_ref2va
+    - news_fusion_story
     # Disabled because current output quality is not acceptable. This is the
     # canonical name for the text2img2img strategy.
     # - text2image2image
@@ -121,6 +122,13 @@ routing:
         - krea2_turbo
       video_workflow_name:
         - minimax_h3_fl2va
+    news_fusion_story:
+      image_workflow_name:
+        - krea2_turbo
+      video_workflow_name:
+        - minimax_h3_i2va
+      refine_workflow_name:
+        - flux3_image_klein_img2img
     native_h3_l2va_story:
       image_workflow_name:
         - krea2_turbo
@@ -440,6 +448,10 @@ routing:
       native_h3_loop_story:
         image_workflow_name: "Krea2 creates the opening keyframe candidates; the one frame chosen in review is bound as both first_frame and last_frame, so no second ending image is made."
         video_workflow_name: "Native H3 FL2VA stage. It receives the same approved image as first_frame and last_frame, so the clip ends where it began."
+      news_fusion_story:
+        image_workflow_name: "Krea2 draws the first beat keyframe; FLUX Klein edits each later keyframe from the previous one."
+        video_workflow_name: "Native H3 I2VA renders each beat from its approved keyframe; the FL2VA bridge workflow joins clips."
+        refine_workflow_name: "FLUX Klein reference edit that keeps the character while applying the next beat."
       native_h3_l2va_story:
         image_workflow_name: "Krea2 creates an identity source; FLUX edits it into the reviewed landing keyframe."
         video_workflow_name: "Native H3 L2VA stage. It receives last_frame and leaves the opening unconstrained."

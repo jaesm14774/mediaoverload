@@ -222,6 +222,23 @@ def _resolve_publish_prompt(
                 ),
                 "series_carousel",
             )
+        fusion = node_outputs.get("fusion-story")
+        if isinstance(fusion, dict):
+            news = fusion.get("news_context") or {}
+            scenes = "\n".join(
+                f"Beat {index}: {beat['clip_scene']}" for index, beat in enumerate(fusion["beats"], start=1)
+            )
+            return (
+                "\n".join(
+                    [
+                        f"News that inspired it: {news.get('title', '')}",
+                        f"Premise: {fusion['premise']}",
+                        scenes,
+                        "Write publish copy about this fused story, claiming only what the beats and the video show.",
+                    ]
+                ),
+                "news_fusion_story",
+            )
         native_story = node_outputs.get("native-story-prompt")
         if isinstance(native_story, dict):
             generated_storyboard = native_story.get("generated_storyboard")
