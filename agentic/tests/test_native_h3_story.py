@@ -229,8 +229,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertGreaterEqual(render.inputs["length"], 10 * 24)
         self.assertEqual(nodes["native-story-prompt"].inputs["render_mode"], "image_to_video")
 
-    def test_user_given_a_scheduled_loop_run_without_a_prompt_when_the_goal_is_built_then_no_news_is_attached(self) -> None:
-        """User Given a scheduled run with no prompt whose only strategy is the loop story, When the goal is built, Then no news item is attached, so the story is a replayable gag rather than a news story."""
+    def test_user_given_a_news_article_and_the_loop_story_when_the_goal_is_built_then_the_article_is_inspiration_not_a_fidelity_requirement(self) -> None:
+        """User Given a news article pinned to a run whose only strategy is the loop story, When the goal is built, Then the article travels with the goal as creative inspiration and the run is not marked as requiring news grounding."""
         import random
 
         import yaml
@@ -245,6 +245,11 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         config_path.write_text(
             yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
         )
+        article = {
+            "title": "Harbor lighthouse reopens after a long repair",
+            "keyword": "lighthouse",
+            "content": "The lamp turns again and boats line up to watch.",
+        }
 
         payload = build_goal_payload_from_character_config(
             make_character_workflow_request(
@@ -253,12 +258,15 @@ class NativeH3StoryPlanTests(unittest.TestCase):
                 prompt="",
                 rng=random.Random(5),
                 publish_after_generate=False,
+                news_driven=True,
+                news_context=article,
             )
         )
 
         self.assertEqual(payload["source_generation_type"], "native_h3_loop_story")
+        self.assertEqual(payload["constraints"]["news_context"]["title"], article["title"])
         self.assertFalse(payload["constraints"].get("news_driven"))
-        self.assertFalse(payload["constraints"].get("news_context"))
+        self.assertFalse(payload["constraints"].get("news_grounding_required"))
 
     def test_user_given_an_approved_loop_keyframe_when_h3_renders_then_the_same_image_is_the_first_and_last_frame(self) -> None:
         """User Given one approved loop keyframe, When H3 renders the ten second clip, Then the video model receives that one image as both first and last frame in FL2VA mode."""
@@ -1079,11 +1087,75 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertIn("resolved pose in the final tenth", prompt)
         self.assertNotIn("returns the character and every prop to the opening arrangement", prompt)
 
-    def test_user_given_a_loop_story_when_it_is_prepared_then_no_news_is_ever_requested(self) -> None:
-        """User Given a loop story run and a news service that has nothing, When the story is prepared, Then a ten second gag is written without asking for news, and its keyframe prompts do not demand a distinct ending."""
-        class NoNews:
-            def select_news(self) -> None:
-                raise AssertionError("a loop story must not ask for news")
+    def test_user_given_news_and_a_loop_story_when_the_story_prompt_is_built_then_the_article_is_a_free_springboard_for_a_replayable_gag(self) -> None:
+        """User Given a news article, When the loop story is requested, Then the writer receives the article as inspiration to stretch freely, is still told to return to the opening arrangement, and gets none of the news-faithful fact-card or held-pose rules."""
+        class ContractChatModel:
+            last_success_model = "local-contract-model"
+
+            def __init__(self) -> None:
+                self.calls: list[list[dict[str, object]]] = []
+
+            def chat_completion(self, *, messages: list[dict[str, object]], **_options: object) -> str:
+                self.calls.append(messages)
+                return json.dumps(
+                    {
+                        "story": {
+                            "native_shots": [
+                                {"time": "0-5s", "action": "Kirby swats a spinning lamp beam."},
+                                {"time": "5-10s", "action": "The beam swings back and Kirby lands in the starting spot."},
+                            ],
+                            "inspiration": "the sweeping lamp beam became a swinging prop",
+                        }
+                    }
+                )
+
+        model = ContractChatModel()
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=SimpleNamespace(text_model=model, vision_model=model),
+        )
+        payload = engine.generate_native_h3_storyboard(
+            character="Kirby",
+            style="polished 2D anime",
+            duration_seconds=10,
+            base_storyboard=load_storyboard(self.repo_root / "configs/storyboards/native_h3_15s.yaml"),
+            news_context={
+                "title": "Harbor lighthouse reopens after a long repair",
+                "keyword": "lighthouse",
+                "content": "The lamp turns again and boats line up to watch.",
+            },
+            replayable_loop=True,
+        )
+
+        prompt = " ".join(str(call["content"]) for messages in model.calls for call in messages).lower()
+        self.assertIn("harbor lighthouse reopens", prompt)
+        self.assertIn("returns the character and every prop to the opening arrangement", prompt)
+        for news_faithful_rule in (
+            "source and concept card",
+            "news_trace",
+            "preserve the article's defining subject",
+            "resolved pose in the final tenth",
+        ):
+            self.assertNotIn(news_faithful_rule, prompt)
+        self.assertEqual(
+            payload["story"]["inspiration"],
+            "the sweeping lamp beam became a swinging prop",
+        )
+
+    def test_user_given_a_loop_story_when_it_is_prepared_then_a_selected_article_inspires_a_ten_second_gag(self) -> None:
+        """User Given a loop story run with no pinned article and a news service that has one, When the story is prepared, Then that article is selected for the writer and a ten second gag is produced, and its keyframe prompts do not demand a distinct ending."""
+        selected_titles: list[str] = []
+
+        class OneArticle:
+            def select_news(self) -> SimpleNamespace:
+                selected_titles.append("Harbor lighthouse reopens after a long repair")
+                return SimpleNamespace(
+                    to_dict=lambda: {
+                        "title": "Harbor lighthouse reopens after a long repair",
+                        "keyword": "lighthouse",
+                        "content": "The lamp turns again and boats line up to watch.",
+                    }
+                )
 
         class ContractChatModel:
             last_success_model = "local-contract-model"
@@ -1110,7 +1182,7 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         skills = LongVideoSkills(
             SimpleNamespace(),
             self.repo_root / ".tmp-tests" / "loop-story-prepare",
-            story_service=NativeH3StoryService(llm_engine=engine, news_service=NoNews()),
+            story_service=NativeH3StoryService(llm_engine=engine, news_service=OneArticle()),
         )
         context = SimpleNamespace(
             plan=SimpleNamespace(
@@ -1137,7 +1209,85 @@ class NativeH3StoryPlanTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertEqual(result.outputs["duration_seconds"], 10)
-        self.assertFalse(result.outputs["news_context"])
+        self.assertTrue(selected_titles)
+        self.assertEqual(
+            result.outputs["news_context"]["title"],
+            "Harbor lighthouse reopens after a long repair",
+        )
+
+    def test_user_given_a_ten_second_loop_when_it_is_prepared_then_every_beat_lands_inside_the_clip(self) -> None:
+        """User Given a ten second loop story with four beats, When the story is prepared, Then the beats are timed across the ten seconds so the last beat starts before the clip ends."""
+        import re
+
+        class OneArticle:
+            def select_news(self) -> SimpleNamespace:
+                return SimpleNamespace(
+                    to_dict=lambda: {
+                        "title": "Harbor lighthouse reopens after a long repair",
+                        "keyword": "lighthouse",
+                        "content": "The lamp turns again and boats line up to watch.",
+                    }
+                )
+
+        class ContractChatModel:
+            last_success_model = "local-contract-model"
+
+            def chat_completion(self, *, messages: list[dict[str, object]], **_options: object) -> str:
+                return json.dumps(
+                    {
+                        "story": {
+                            "native_shots": [
+                                {"action": "Kirby eyes the lamp."},
+                                {"action": "Kirby winds up."},
+                                {"action": "Kirby swings at the beam."},
+                                {"action": "Kirby lands back in the starting spot."},
+                            ],
+                        }
+                    }
+                )
+
+        model = ContractChatModel()
+        engine = LLMPromptEngine(
+            mode="llm",
+            manager=SimpleNamespace(text_model=model, vision_model=model),
+        )
+        from agentic.runtime.story_service import NativeH3StoryService
+
+        skills = LongVideoSkills(
+            SimpleNamespace(),
+            self.repo_root / ".tmp-tests" / "loop-story-timing",
+            story_service=NativeH3StoryService(llm_engine=engine, news_service=OneArticle()),
+        )
+        context = SimpleNamespace(
+            plan=SimpleNamespace(
+                goal=SimpleNamespace(
+                    prompt="",
+                    media_type="native_h3_loop_story",
+                    duration_seconds=10,
+                    style="hand-drawn paper storybook animation",
+                    constraints={"character": "Kirby", "news_context": {}},
+                )
+            ),
+            node=SimpleNamespace(
+                inputs={
+                    "storyboard_path": str(self.repo_root / "configs/storyboards/native_h3_15s.yaml"),
+                    "duration_seconds": 10,
+                    "style": "hand-drawn paper storybook animation",
+                    "render_mode": "image_to_video",
+                }
+            ),
+            state=RunState(goal={}, metadata={}, node_outputs={}),
+        )
+
+        result = skills.prepare_native_h3_story(context)
+
+        windows = [
+            tuple(float(value) for value in re.findall(r"[\d.]+", shot["time"]))
+            for shot in result.outputs["generated_storyboard"]["native_shots"]
+        ]
+        self.assertEqual(len(windows), 4)
+        self.assertLessEqual(windows[-1][0], 10.0 - 1.0)
+        self.assertEqual(windows[-1][1], 10.0)
 
     def test_user_given_news_without_a_custom_brief_when_story_prompt_is_built_then_default_news_direction_is_included(self) -> None:
         """User Given news with no custom creative brief When the story prompt is built Then its default direction keeps the story character-led and emotionally honest."""

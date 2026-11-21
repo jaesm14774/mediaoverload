@@ -30,7 +30,6 @@ from agentic.app.serial_video_dispatch import (
 from agentic.app.serial_video_execution import run_serial_episodes
 from agentic.runtime.claude_brain import BRAIN_DIR_ENV
 from agentic.runtime.run_log import RunLog
-from agentic.runtime.strategies import NON_NEWS_NATIVE_STORY_TYPES
 from agentic.tools.context_services import NewsContextService
 from agentic.tools.social_services import complete_facebook_profile_handoff
 
@@ -257,8 +256,6 @@ def main(
         os.environ[BRAIN_DIR_ENV] = str(Path(args.claude_brain).resolve())
     pinned_news: dict[str, Any] | None = None
     if args.news_url:
-        if str(args.generation_type or "").strip().lower() in NON_NEWS_NATIVE_STORY_TYPES:
-            parser.error(f"--news-url does not apply to {args.generation_type}: it invents its own premise")
         pinned_news = NewsContextService().news_by_url(args.news_url).to_dict()
 
     # Keep strategy/character routing randomness independent from --seed,

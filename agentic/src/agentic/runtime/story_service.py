@@ -39,13 +39,10 @@ class NativeH3StoryService:
         reference_analysis: dict[str, Any] | None = None,
         replayable_loop: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        # A replayable loop writes its own gag and must never have a news item
-        # attached, so it never asks the news service for one.
-        news_required = not replayable_loop
-        resolved_news = dict(news_context or {}) if news_required else {}
+        resolved_news = dict(news_context or {})
         if resolved_news.get("error"):
             raise RuntimeError(f"Native H3 news context failed: {resolved_news['error']}")
-        if news_required and not is_usable_news_selection(
+        if not is_usable_news_selection(
             str(resolved_news.get("title") or ""),
             str(resolved_news.get("keyword") or ""),
         ):
@@ -54,7 +51,7 @@ class NativeH3StoryService:
                 raise RuntimeError("Native H3 requires a selectable news item; no news context was available")
             resolved_news = selected_news.to_dict()
         recorder = getattr(self.llm_engine, "recorder", None)
-        if recorder is not None and news_required:
+        if recorder is not None:
             recorder.record_event("news.selected", news_context=resolved_news)
 
         resolved_character = str(character or base_storyboard.get("character") or "").strip()
@@ -64,6 +61,8 @@ class NativeH3StoryService:
             or {}
         )
         resolved_base_storyboard = dict(base_storyboard)
+        # Shot windows must span the clip actually rendered, not the template's 15 s.
+        resolved_base_storyboard["native_duration_seconds"] = int(duration_seconds)
         if resolved_character:
             resolved_base_storyboard["character"] = resolved_character
         if resolved_subject_context:

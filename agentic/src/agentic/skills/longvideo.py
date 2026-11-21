@@ -24,7 +24,7 @@ from agentic.runtime.reference_video import format_reference_video_directive
 from agentic.runtime.prompting import include_visual_style_profile
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
-from agentic.runtime.strategies import NON_NEWS_NATIVE_STORY_TYPES
+from agentic.runtime.strategies import REPLAYABLE_LOOP_GENERATION_TYPES
 from agentic.runtime.serial_video import store_from_constraints
 from agentic.skills.news_fusion import register_news_fusion_skills
 from agentic.skills.shared import build_run_dir, slug_path_component
@@ -260,7 +260,7 @@ class LongVideoSkills:
             creative_brief=creative_brief,
             arc_guidance=arc_guidance,
             reference_analysis=reference_analysis if isinstance(reference_analysis, dict) else None,
-            replayable_loop=context.plan.goal.media_type in NON_NEWS_NATIVE_STORY_TYPES,
+            replayable_loop=context.plan.goal.media_type in REPLAYABLE_LOOP_GENERATION_TYPES,
         )
         prompt = format_native_h3_prompt(
             storyboard,
