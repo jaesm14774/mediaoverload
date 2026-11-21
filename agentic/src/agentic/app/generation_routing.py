@@ -17,7 +17,7 @@ from agentic.runtime.strategies import (
     GENERATION_STRATEGIES,
     NATIVE_STORY_GENERATION_TYPES,
     NEWS_GROUNDED_GENERATION_TYPES,
-    NON_NEWS_NATIVE_STORY_TYPES,
+    REPLAYABLE_LOOP_GENERATION_TYPES,
     WORKFLOW_STAGE_KEYS,
     active_count_policy,
     media_type_for_generation,
@@ -1050,19 +1050,6 @@ def _resolve_autonomous_prompt(
             "source_anchors": [],
         }
 
-    if generation_type in NON_NEWS_NATIVE_STORY_TYPES:
-        # The replayable loop invents its own premise: never attach a news item to it.
-        return {
-            "prompt": "",
-            "source": "autonomous",
-            "prompt_mode": "autonomous",
-            "creative_seed": "",
-            "news_context": news_context,
-            "news_driven": False,
-            "news_grounding_required": False,
-            "source_anchors": [],
-        }
-
     picks_own_news = not news_context
     for attempt in range(NEWS_RESELECT_ATTEMPTS):
         if picks_own_news:
@@ -1093,6 +1080,20 @@ def _resolve_autonomous_prompt(
             raise RuntimeError(
                 "News-driven generation did not receive a usable news context."
             )
+
+        if generation_type in REPLAYABLE_LOOP_GENERATION_TYPES:
+            # The loop takes any hook from the article as a springboard; the
+            # article is never a fact contract, so grounding is not required.
+            return {
+                "prompt": "",
+                "source": "news",
+                "prompt_mode": "news",
+                "creative_seed": "",
+                "news_context": news_context,
+                "news_driven": False,
+                "news_grounding_required": False,
+                "source_anchors": [],
+            }
 
         if generation_type in NEWS_GROUNDED_GENERATION_TYPES:
             return {

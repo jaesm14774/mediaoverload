@@ -23,6 +23,8 @@ class GenerationStrategy:
     image_only: bool = False
     news_grounded: bool = False
     native_story: bool = False
+    # The clip ends where it began, so it replays without a seam.
+    replayable_loop: bool = False
     # Pick one random tone-fit item as inspiration instead of the hottest event.
     news_random_inspiration: bool = False
 
@@ -58,11 +60,13 @@ GENERATION_STRATEGIES = {
         "native_h3_fl2va_story", _NATIVE, news_grounded=True, native_story=True
     ),
     # One approved keyframe is both the first and last frame, so the clip
-    # replays seamlessly. It is a no-news gag loop, not a news story.
+    # replays seamlessly. News is only a springboard for the gag, not a fact
+    # contract, so this is deliberately not news_grounded.
     "native_h3_loop_story": GenerationStrategy(
         "native_h3_loop_story",
         ("video_workflow_name", "image_workflow_name"),
         native_story=True,
+        replayable_loop=True,
     ),
     "native_h3_l2va_story": GenerationStrategy(
         "native_h3_l2va_story",
@@ -112,9 +116,9 @@ NATIVE_STORY_GENERATION_TYPES = frozenset(
 NEWS_GROUNDED_GENERATION_TYPES = frozenset(
     name for name, strategy in GENERATION_STRATEGIES.items() if strategy.news_grounded
 )
-# Native H3 stories that write their own premise (the replayable loop) and
-# must never have a news item attached.
-NON_NEWS_NATIVE_STORY_TYPES = NATIVE_STORY_GENERATION_TYPES - NEWS_GROUNDED_GENERATION_TYPES
+REPLAYABLE_LOOP_GENERATION_TYPES = frozenset(
+    name for name, strategy in GENERATION_STRATEGIES.items() if strategy.replayable_loop
+)
 IMAGE_ONLY_GENERATION_TYPES = frozenset(
     name for name, strategy in GENERATION_STRATEGIES.items() if strategy.image_only
 )

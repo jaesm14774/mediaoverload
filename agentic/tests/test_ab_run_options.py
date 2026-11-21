@@ -36,13 +36,20 @@ def test_user_given_claude_brain_when_run_starts_then_llm_calls_are_routed_to_th
     assert os.environ[BRAIN_DIR_ENV] == str((tmp_path / "brain").resolve())
 
 
-def test_user_given_a_news_url_for_the_loop_strategy_when_run_then_it_is_refused(capsys):
-    """User Given a story that invents its own premise When --news-url is supplied Then the CLI refuses instead of attaching news."""
-    with pytest.raises(SystemExit):
-        run_media_interface.main(
-            ["--character", "kirby", "--generation-type", "native_h3_loop_story", "--news-url", "https://example.test/a"],
-            workflow_runner=Boundary(),
-        )
+@pytest.mark.integration
+def test_user_given_a_news_url_for_the_loop_strategy_when_run_then_that_article_inspires_the_loop(capsys):
+    """User Given an article stored in the news database When --news-url names it for the loop strategy Then the run carries that article as inspiration."""
+    service = NewsContextService()
+    if not service.is_configured():
+        pytest.skip("news database is not configured")
+    picked = service.select_news()
+    assert picked is not None
+    workflow = Boundary()
+    run_media_interface.main(
+        ["--character", "kirby", "--generation-type", "native_h3_loop_story", "--news-url", picked.url],
+        workflow_runner=workflow,
+    )
+    assert workflow.requests[0].generation.news_context["url"] == picked.url
 
 
 @pytest.mark.integration
