@@ -14,6 +14,7 @@ from agentic.runtime.prompt_requests import GenerationRoutingRequest
 from agentic.runtime.route_selection import select_weighted_route
 from agentic.runtime.strategies import (
     CONFIG_MEDIA_TYPE_MAP,
+    GENERATION_STRATEGIES,
     NATIVE_STORY_GENERATION_TYPES,
     NEWS_GROUNDED_GENERATION_TYPES,
     NON_NEWS_NATIVE_STORY_TYPES,
@@ -644,6 +645,24 @@ def _collect_workflow_stage_candidates(
                     generation.get("identity_refine_workflow_name"),
                 ],
             }
+        elif generation_type == "news_fusion_story":
+            native_recipe = dict(generation.get("news_fusion_story", {}) or {})
+            inferred = {
+                "image_workflow_name": [
+                    native_recipe.get("keyframe_workflow_name"),
+                    generation.get("keyframe_workflow_name"),
+                    generation_workflows.get("text2img"),
+                ],
+                "video_workflow_name": [
+                    native_recipe.get("workflow_name"),
+                    generation_workflows.get("news_fusion_story"),
+                    generation_workflows.get("text2image2video"),
+                ],
+                "refine_workflow_name": [
+                    native_recipe.get("identity_refine_workflow_name"),
+                    generation.get("identity_refine_workflow_name"),
+                ],
+            }
         elif generation_type == "native_h3_loop_story":
             native_recipe = dict(generation.get("native_h3_loop_story", {}) or {})
             inferred = {
@@ -985,6 +1004,17 @@ def _build_default_prompt(character_name: str, media_type: str, style: str) -> s
 NEWS_RESELECT_ATTEMPTS = 3
 
 
+def news_selection_options(generation_type: str) -> dict[str, Any]:
+    """How a strategy wants its news picked; most take the default hot-event pick."""
+    strategy = GENERATION_STRATEGIES.get(generation_type)
+    if strategy is not None and strategy.news_random_inspiration:
+        return {
+            "random_inspiration": True,
+            "exclude_categories": list(NewsContextService.TONE_FIT_EXCLUDE_CATEGORIES),
+        }
+    return {}
+
+
 def _resolve_autonomous_prompt(
     *,
     prompt: str,
@@ -1041,7 +1071,9 @@ def _resolve_autonomous_prompt(
         if not news_context:
             try:
                 news_service = NewsContextService()
-                selected_news = news_service.select_news()
+                selected_news = news_service.select_news(
+                    **news_selection_options(generation_type)
+                )
                 if selected_news is not None:
                     selected_context = selected_news.to_dict()
                     selected_title = str(selected_context.get("title") or "")

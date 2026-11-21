@@ -217,6 +217,7 @@ generation:
     motion_comic: 0.8
     series_carousel: 0.5
     game_sprite: 0.5
+    news_fusion_story: 0.5
 
 social_media:
   # Hashtags are generated from the final article and visible media.

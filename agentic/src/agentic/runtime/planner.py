@@ -28,6 +28,7 @@ from agentic.runtime.planning.editing import (
     build_video_narrate,
     build_image_sequence_edit,
 )
+from agentic.runtime.planning.news_fusion import build_news_fusion_story
 from agentic.runtime.planning.publishing import build_publish_review
 from agentic.runtime.planning.motion_comic import build_motion_comic
 
@@ -50,6 +51,7 @@ PLAN_BUILDERS = {
     "native_h3_l2va_story": build_native_h3_l2va_story,
     "native_h3_ref2va": build_native_h3_ref2va,
     "text2image2native_h3_ref2va": build_native_h3_ref2va,
+    "news_fusion_story": build_news_fusion_story,
     "video_narrate": build_video_narrate,
     "image_sequence_edit": build_image_sequence_edit,
     "image": build_image,

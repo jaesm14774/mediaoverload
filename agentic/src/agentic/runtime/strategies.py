@@ -23,6 +23,8 @@ class GenerationStrategy:
     image_only: bool = False
     news_grounded: bool = False
     native_story: bool = False
+    # Pick one random tone-fit item as inspiration instead of the hottest event.
+    news_random_inspiration: bool = False
 
 
 _IMAGE = ("image_workflow_name",)
@@ -79,6 +81,14 @@ GENERATION_STRATEGIES = {
         ("video_workflow_name", "image_workflow_name"),
         news_grounded=True,
         native_story=True,
+    ),
+    # One news item and one character become a fused story: N keyframe beats
+    # joined by bridge clips so every seam lands on an exact picture.
+    "news_fusion_story": GenerationStrategy(
+        "news_fusion_story",
+        ("video_workflow_name", "image_workflow_name", "refine_workflow_name"),
+        news_grounded=True,
+        news_random_inspiration=True,
     ),
     "sticker_pack": GenerationStrategy(
         "sticker_pack", (*_IMAGE, "video_workflow_name"), image_only=True

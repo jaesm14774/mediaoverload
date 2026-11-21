@@ -107,6 +107,9 @@ class NewsContextService:
         "ETF",
         "外匯",
     )
+    # A cute character should not play in crime, accident, geopolitical or election news.
+    # This is a tone-fit filter for stories that fuse news with a character, not a variety list.
+    TONE_FIT_EXCLUDE_CATEGORIES = (*DEFAULT_EXCLUDE_CATEGORIES, "社會", "國際", "全球", "選舉")
 
     def __init__(self) -> None:
         _load_env_once()
