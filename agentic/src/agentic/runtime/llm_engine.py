@@ -298,6 +298,7 @@ class LLMPromptEngine:
         recap_text: str = "",
         ledger_text: str = "",
         roster_text: str = "",
+        episode_number: int,
     ) -> dict[str, Any]:
         return serial_episodes.generate_serial_episode_idea(
             self.client,
@@ -307,6 +308,7 @@ class LLMPromptEngine:
             recap_text=recap_text,
             ledger_text=ledger_text,
             roster_text=roster_text,
+            episode_number=episode_number,
         )
 
     def propose_serial_companions(

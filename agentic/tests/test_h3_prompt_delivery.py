@@ -263,14 +263,13 @@ def test_user_given_later_episode_plan_when_vision_prompt_repeats_prior_prop_the
         image_references=[],
     )
 
-    assert action in prepared["prompt"]
-    assert outcome in prepared["prompt"]
-    assert "opening continuity point only" in prepared["prompt"].casefold()
-    assert "required action takes priority" in prepared["prompt"].casefold()
-    assert "macro close-up" in prepared["prompt"]
+    scene = prepared["prompt"]
+    assert scene.count(action) == 1
+    assert scene.count(outcome) == 1
+    assert scene.index(action) < scene.index(outcome)
     vision_request = str(vision_model.calls[0]["messages"][1]["content"])
     assert "This is a serial episode." in vision_request
-    assert "Explicit characters, props, and locations named in that plan must be shown" in vision_request
+    assert "show the characters, props and locations it names in the opening description" in vision_request
 
 
 SERIAL_CAST = "- Dede: Yellow duckling with a blue bow tied on its head"
@@ -321,8 +320,8 @@ def test_user_given_the_first_serial_episode_when_an_h3_scene_is_written_then_th
     assert "prior reference" not in prepared["prompt"]
 
 
-def test_user_given_a_serial_episode_when_an_h3_scene_is_written_then_the_writer_knows_the_cast_and_must_keep_story_and_look() -> None:
-    """User Given a series with a recurring duckling When the H3 scene is written for any episode Then the writer is told the duckling's real look, to keep every planned character in frame, to keep the planned story action instead of generic bouncing, and to keep the first frame's art style."""
+def test_user_given_a_serial_episode_when_an_h3_scene_is_written_then_the_writer_knows_the_cast_and_describes_only_the_opening_look() -> None:
+    """User Given a series with a recurring duckling When the H3 scene is written for any episode Then the writer is told the duckling's real look and to keep the first frame's art style, and it writes only the opening look because the planned action is added to the scene after it."""
     for episode_number in (1, 2):
         engine, vision_model = _vision_engine()
 
@@ -338,36 +337,128 @@ def test_user_given_a_serial_episode_when_an_h3_scene_is_written_then_the_writer
 
         request = str(vision_model.calls[0]["messages"][1]["content"])
         assert "Yellow duckling with a blue bow" in request
-        assert "Keep every character named in the plan on screen" in request
-        assert "Do not replace the planned action with generic bouncing" in request
         assert "Keep the first frame's art style" in request
-        assert "such as bouncing, hopping, swinging its feet" not in request
+        assert "write only what the clip's opening shows" in request
+        assert "Describe nothing that moves" in request
 
 
-def test_user_given_a_serial_clip_with_a_calm_planned_action_when_an_h3_scene_is_written_then_the_writer_must_keep_every_character_moving_fast_through_the_whole_clip() -> None:
-    """User Given a serial clip whose planned action is a sleeping or breathing pose When the H3 scene is written Then the writer is told to start on motion, keep every character moving at a playful pace to the last frame, turn calm actions into big physical moves, keep the score quick, and not stretch the action slowly across the clip."""
+def test_user_given_a_serial_clip_with_a_calm_planned_action_when_an_h3_scene_is_written_then_the_plan_is_performed_as_written_and_the_score_stays_quick() -> None:
+    """User Given a serial clip and a slow lullaby score When the H3 scene is written Then the score direction asks for a quick playful pace and the planned action reaches H3 unchanged instead of being re-imagined by the picture writer."""
     for episode_number in (1, 2):
         engine, vision_model = _vision_engine()
+        planned = "Kirby rolls the big red ball down the slope while Dede chases it, hopping."
 
-        engine.prepare_h3_segment(
+        prepared = engine.prepare_h3_segment(
             _serial_goal(episode_number),
-            {"segment_id": "segment-1", "action": "Kirby sleeps while his belly rises and falls.", "effect": SERIAL_OUTCOME},
+            {"segment_id": "segment-1", "action": planned, "effect": SERIAL_OUTCOME},
             draft_prompt="Kirby sleeps.",
             overall_soundscape="Soft grass.",
             non_diegetic_music="A slow lullaby.",
-            duration_seconds=15.0,
+            duration_seconds=10.0,
             image_references=[],
         )
 
         request = str(vision_model.calls[0]["messages"][1]["content"])
-        assert "Start the prompt on a motion verb" in request
-        assert "never describe a still pose, sleeping, resting, breathing, glowing, drifting, watching or posing as the action" in request
-        assert "still moving in the last frame" in request
         assert "never a slow lullaby" in request
-        assert "at least one character travels far across the frame" in request
-        assert "Spread the planned action" not in request
         assert "push-in" not in request
-        assert "such as bouncing, hopping, swinging its feet" not in request
+        assert planned in prepared["prompt"]
+
+
+def test_user_given_a_serial_clip_when_its_h3_scene_is_written_then_it_reads_as_one_clean_scene_without_instruction_text() -> None:
+    """User Given a serial clip with a planned action, a visible result and a still-image brief When the H3 scene is written Then H3 gets the opening look, one continuous locked shot, the action once and the result once, and no instruction labels or still-image wording."""
+    engine, _ = _vision_engine()
+
+    prepared = engine.prepare_h3_segment(
+        _serial_goal(2),
+        {
+            "segment_id": "segment-1",
+            "action": SERIAL_ACTION,
+            "effect": SERIAL_OUTCOME,
+            "visual": "Frozen instant on the meadow: Kirby holds the key.",
+        },
+        draft_prompt="Kirby holds up the key.",
+        overall_soundscape="Soft grass.",
+        non_diegetic_music="N/A",
+        duration_seconds=10.0,
+        image_references=[],
+    )
+
+    scene = prepared["prompt"]
+    assert scene.startswith("Kirby lifts the key.")
+    assert "one continuous shot with a locked camera" in scene.casefold()
+    assert scene.count(SERIAL_ACTION) == 1
+    assert scene.count(SERIAL_OUTCOME) == 1
+    for instruction_text in (
+        "required", "visually primary", "takes priority", "Reference-aware",
+        "Last frame (", "Current episode", "Frozen instant", "continuity point",
+    ):
+        assert instruction_text.casefold() not in scene.casefold()
+
+
+def _serial_scene_with(segment_extra: dict) -> str:
+    engine, _ = _vision_engine()
+    prepared = engine.prepare_h3_segment(
+        _serial_goal(2),
+        {"segment_id": "segment-1", "action": SERIAL_ACTION, "effect": SERIAL_OUTCOME, **segment_extra},
+        draft_prompt="Kirby holds up the key.",
+        overall_soundscape="Soft grass.",
+        non_diegetic_music="N/A",
+        duration_seconds=10.0,
+        image_references=[],
+    )
+    return prepared["prompt"]
+
+
+def test_user_given_a_serial_clip_with_a_planned_camera_when_its_h3_scene_is_written_then_that_camera_is_what_h3_reads_instead_of_a_fixed_locked_shot() -> None:
+    """User Given a serial clip whose plan says the camera tracks sideways level with the chase When the H3 scene is written Then H3 reads that camera once, in place of the fixed locked-camera sentence, and the action and result still appear once each."""
+    camera = "Low camera tracking sideways level with the chase from left to right."
+
+    scene = _serial_scene_with({"camera": camera})
+
+    assert scene.count(camera) == 1
+    assert "locked camera" not in scene.casefold()
+    assert scene.count(SERIAL_ACTION) == 1
+    assert scene.count(SERIAL_OUTCOME) == 1
+
+
+def test_user_given_a_planned_camera_that_carries_a_shot_label_when_the_h3_scene_is_written_then_the_label_is_dropped_so_h3_sees_one_clean_shot_marker() -> None:
+    """User Given a serial plan whose camera text starts with a [Shot 1] label When the H3 scene is written Then the label is removed from the camera text, so the final H3 prompt cannot carry two [Shot 1] markers."""
+    scene = _serial_scene_with({"camera": "[Shot 1] Medium shot tracking sideways along the counter."})
+
+    assert "[Shot" not in scene
+    assert "Medium shot tracking sideways along the counter." in scene
+
+
+def test_user_given_shot_labels_in_any_case_or_spacing_when_the_h3_scene_is_written_then_h3_sees_no_extra_first_shot_marker() -> None:
+    """User Given a plan whose camera, action or opening carries [shot 1] or [Shot 1] labels in odd case or spacing When the H3 scene is written Then no first-shot label is left in the scene and later planned cuts in the action are kept."""
+    scene = _serial_scene_with(
+        {
+            "camera": "[shot 1]Wide tracking, then a hard cut.[Shot 2] Close-up on Kirby's face.",
+            "action": "[Shot 1] 0.00-3.00 s: Kirby runs. [Shot 2] 3.00-6.00 s: a close-up of Kirby's grin.",
+        }
+    )
+
+    assert "[shot 1]" not in scene.casefold()
+    assert "Wide tracking, then a hard cut. Close-up on Kirby's face." in scene
+    assert "[Shot 2] 3.00-6.00 s" in scene
+
+
+def test_user_given_a_tracking_plan_whose_action_still_marks_shots_when_the_h3_scene_is_written_then_the_marks_are_dropped_so_the_clip_stays_one_continuous_shot() -> None:
+    """User Given a plan whose camera is one sideways tracking shot but whose action marks [Shot 2] and [Shot 3] When the H3 scene is written Then no shot marks reach H3, because marks that the camera plan does not back make H3 cut to places the plan never showed."""
+    scene = _serial_scene_with(
+        {
+            "camera": "A low tracking shot moves sideways with Kirby the whole time.",
+            "action": "0.00-3.00 s: Kirby grabs the key. 3.00-6.50 s: [Shot 2] Kirby is yanked forward. 6.50-10.00 s: [Shot 3] Kirby weaves past the lanterns.",
+        }
+    )
+
+    assert "[Shot" not in scene
+    assert "3.00-6.50 s: Kirby is yanked forward." in scene
+
+
+def test_user_given_a_serial_clip_without_a_planned_camera_when_its_h3_scene_is_written_then_it_is_one_locked_shot() -> None:
+    """User Given a serial clip whose plan carries no camera When the H3 scene is written Then H3 still gets one continuous locked shot, so a plan without a camera never leaves the shot undefined."""
+    assert "one continuous shot with a locked camera" in _serial_scene_with({}).casefold()
 
 
 def test_user_given_a_serial_episode_when_the_clip_prompt_is_written_then_the_recurring_cast_look_is_given() -> None:
@@ -516,7 +607,7 @@ def test_user_given_native_description_when_rendered_then_every_h3_mode_validate
 
 
 def test_user_given_a_serial_clip_when_the_h3_scene_is_written_then_it_ends_with_the_protagonist_centred_and_every_character_stays_a_separate_figure_under_its_exact_name() -> None:
-    """User Given a serial clip that the next clip continues from its last frame When the H3 scene is written Then the writer must end on the protagonist centred and fully visible, name every recurring character exactly as listed, and never merge two characters into one figure, and the finished prompt closes with that last-frame requirement."""
+    """User Given a serial clip that the next clip continues from its last frame When the H3 scene is written Then the writer must name every recurring character exactly as listed and never merge two characters into one figure, and the finished scene closes on the protagonist centred, still moving, with every other character fully in frame."""
     for episode_number in (1, 2):
         engine, vision_model = _vision_engine()
         goal = _serial_goal(episode_number)
@@ -535,13 +626,11 @@ def test_user_given_a_serial_clip_when_the_h3_scene_is_written_then_it_ends_with
         request = str(vision_model.calls[0]["messages"][1]["content"])
         assert "exactly as listed" in request
         assert "never merge two characters" in request
-        assert "protagonist's beat comes last" in request
-        last_line = prepared["prompt"].strip().splitlines()[-1]
-        assert "Last frame (required)" in last_line
-        assert "half the frame height" in last_line
-        assert "fully inside the frame on the left and right" in last_line
-        assert "large" not in last_line
-        assert "mid-move" in last_line
-        assert "Never bring the action to a halt" in request
-        assert "fully inside the frame, one on the left and one on the right" in request
-        assert "Kirby" in last_line and "centred" in last_line
+        assert "colours, clothing and accessories" in request
+        last_sentence = prepared["prompt"].strip().split(". ")[-1]
+        assert "Kirby" in last_sentence and "centred" in last_sentence
+        assert "half the frame height" in last_sentence
+        assert "still moving" in last_sentence
+        assert "every other character stays in frame beside Kirby" in last_sentence
+        assert "on either side" not in last_sentence
+        assert "visible face" in last_sentence

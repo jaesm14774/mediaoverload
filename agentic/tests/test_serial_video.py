@@ -41,6 +41,7 @@ from agentic.runtime.contracts import (
 from agentic.runtime.planner import TaskPlanner
 from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.runner import WorkflowRunner
+from agentic.runtime.serial_ledger import SERIES_MAX_EPISODES
 from agentic.runtime.serial_video import SerialVideoStore
 from agentic.skills.agent_primitives import AgentMediaSkills, AgentPlanningSkills
 from agentic.skills.agent_social import register_agent_social_skills
@@ -803,6 +804,55 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
             self.assertEqual(selected["episode_prompt"], "A hero enters a station")
             self.assertEqual(selected["episode_topic"], "月台盡頭的微光")
 
+    def test_user_given_a_blocked_episode_longer_than_the_forty_second_cap_when_auto_next_selects_work_then_that_series_is_discarded_instead_of_resumed_or_stalling_every_run(self) -> None:
+        """User Given a blocked episode planned at 60 seconds before the five-minute rule When automatic serial work is prepared Then that series is discarded and a conforming series is selected, so the series never runs past five minutes and the pipeline does not stall on it."""
+        with _workspace_temporary_directory() as temporary:
+            root = Path(temporary)
+            store = self._new_store()
+            identity = _write_reference(root / "identity.png", b"identity")
+            context = store.prepare_series_context("too-long-series", "Hero", [identity])
+            episode = store.start_episode(context, "A hero enters a station", topic="月台盡頭的微光")
+            store.record_plan(
+                episode["episode_id"],
+                segment_count=2,
+                plan_payload={"goal": {"duration_seconds": 20}},
+            )
+            store.record_story(
+                episode["episode_id"],
+                [
+                    {"visual": "The hero enters", "end_state": "A light appears"},
+                    {"visual": "The hero follows", "end_state": "A door opens"},
+                ],
+            )
+            store.fail_episode(episode["episode_id"], "Discord review timed out")
+            with store._connection(write=True) as connection:
+                connection.execute(
+                    "UPDATE episodes SET target_duration_seconds = 60 WHERE episode_id = ?",
+                    (episode["episode_id"],),
+                )
+
+            selected = store.prepare_auto_next_context("Hero")
+
+            self.assertEqual(self._series_lifecycle(store, "too-long-series"), "discarded")
+            self.assertNotEqual(selected["series_id"], "too-long-series")
+            self.assertNotEqual(selected["automation_mode"], "resume")
+
+    def test_user_given_a_long_episode_still_waiting_for_the_creators_review_when_auto_next_runs_then_the_series_is_not_discarded_under_the_creator(self) -> None:
+        """User Given an episode stored at 60 seconds whose clip is still waiting in Discord review and has been silent for hours When automatic serial work is prepared Then the series stays active, because only a stopped episode may be discarded."""
+        with _workspace_temporary_directory() as temporary:
+            episode = self._start_rendering_episode(Path(temporary), "reviewing-long-series")
+            store = self._new_store()
+            with store._connection(write=True) as connection:
+                connection.execute(
+                    "UPDATE episodes SET target_duration_seconds = 60 WHERE episode_id = ?",
+                    (episode["episode_id"],),
+                )
+            self._make_episode_silent(store, episode["episode_id"], hours=12)
+
+            store.prepare_auto_next_context("Hero")
+
+            self.assertEqual(self._series_lifecycle(store, "reviewing-long-series"), "active")
+
     def _start_rendering_episode(self, root: Path, series_id: str) -> dict[str, object]:
         identity = _write_reference(root / f"{series_id}-identity.png", b"identity")
         store = self._new_store()
@@ -922,6 +972,43 @@ class SerialVideoAcceptanceTests(unittest.TestCase):
                 "SELECT lifecycle_status FROM series WHERE series_id = ?", (series_id,)
             ).fetchone()
         return str(row["lifecycle_status"])
+
+    def _accept_episode_numbered(self, store: SerialVideoStore, root: Path, series_id: str, number: int) -> None:
+        identity = _write_reference(root / "identity.png", b"identity")
+        context = store.prepare_series_context(series_id, "Hero", [identity])
+        episode = store.start_episode(context, "A hero protects a glowing flower", topic="守護星花")
+        final_video = _write_video(root / "final.mp4", "blue")
+        with store._connection(write=True) as connection:
+            connection.execute(
+                """UPDATE episodes SET episode_number = ?, status = 'ready', final_video_path = ?,
+                       final_video_sha256 = ? WHERE episode_id = ?""",
+                (number, str(final_video.resolve()), hashlib.sha256(final_video.read_bytes()).hexdigest(), episode["episode_id"]),
+            )
+        attempt = store.begin_publication_attempt(
+            episode["episode_id"],
+            platforms=["youtube"],
+            episode_topic="守護星花",
+            caption="A tiny flower shines.",
+            hashtags="#Hero",
+            media_path=final_video,
+        )
+        store.record_publication_review(episode["episode_id"], attempt["attempt_number"], decision="accepted")
+
+    def test_user_given_a_mid_series_episode_when_the_creator_accepts_it_then_the_series_stays_open_for_the_next_episode(self) -> None:
+        """User Given a series that is still within its seven episodes When the creator accepts a middle episode Then the series stays active so the next episode can be made."""
+        with _workspace_temporary_directory() as temporary:
+            store = self._new_store()
+            self._accept_episode_numbered(store, Path(temporary), "mid-series", SERIES_MAX_EPISODES - 1)
+
+            self.assertEqual(self._series_lifecycle(store, "mid-series"), "active")
+
+    def test_user_given_the_final_episode_when_the_creator_accepts_it_then_the_series_is_completed(self) -> None:
+        """User Given a series on its last allowed episode When the creator accepts it Then the series is completed, so the whole story stays under five minutes."""
+        with _workspace_temporary_directory() as temporary:
+            store = self._new_store()
+            self._accept_episode_numbered(store, Path(temporary), "final-series", SERIES_MAX_EPISODES)
+
+            self.assertEqual(self._series_lifecycle(store, "final-series"), "completed")
 
     def test_user_given_a_run_died_before_its_plan_was_saved_when_auto_next_selects_work_then_the_unresumable_series_is_discarded(self) -> None:
         """User Given an episode was created and its run died before any plan was saved When the episode has been silent for hours Then automatic serial work discards that series instead of leaving it active but unselectable."""

@@ -24,10 +24,12 @@ from agentic.runtime.serial_ledger import (
     PriorEpisodeNotAccepted,
     Thread,
     apply_delta,
+    is_final_episode,
     parse_episode_delta,
     render_ledger,
     render_recap,
     validate_episode_delta,
+    validate_episode_seconds,
 )
 
 
@@ -1468,10 +1470,11 @@ class SerialVideoStore:
         )
 
     def discard_unrecoverable_series(self, character: str | None = None) -> list[str]:
-        """Discard active series whose latest episode stopped before its plan was saved.
+        """Discard active series that automatic work can never finish.
 
         Without a persisted plan and segments there is nothing to resume, so the series
-        would stay active but unselectable forever.
+        would stay active but unselectable forever. A stranded episode longer than the
+        serial length rule would resume past five minutes or fail every run, so it goes too.
         """
         stranded = self._list_stranded_episodes(
             character, plan_persisted=False, lifecycles=("active",)
@@ -1488,6 +1491,21 @@ class SerialVideoStore:
                 ),
             )
             discarded.append(series_id)
+        for row in self._list_stranded_episodes(
+            character, plan_persisted=True, lifecycles=("active",)
+        ):
+            if row["episode_status"] != "blocked":
+                continue
+            try:
+                validate_episode_seconds(int(row["target_duration_seconds"]))
+            except ValueError as error:
+                series_id = str(row["series_id"])
+                self.set_series_lifecycle_status(
+                    series_id,
+                    "discarded",
+                    note=f"Episode {row['resumable_episode_number']} breaks the serial length rule: {error}",
+                )
+                discarded.append(series_id)
         return discarded
 
     def _list_stranded_episodes(
@@ -1510,6 +1528,7 @@ class SerialVideoStore:
         query = f"""SELECT s.series_id, s.character_name, s.lifecycle_status,
                           e.episode_id AS resumable_episode_id,
                           e.episode_number AS resumable_episode_number,
+                          e.status AS episode_status,
                           e.prompt AS episode_prompt,
                           e.episode_topic,
                           e.target_duration_seconds,
@@ -2848,6 +2867,18 @@ class SerialVideoStore:
                             commit["next_goal"],
                             _json(commit["delta"]),
                             now,
+                        ),
+                    )
+                if is_final_episode(int(episode["episode_number"])):
+                    connection.execute(
+                        """UPDATE series SET lifecycle_status = 'completed', lifecycle_note = ?,
+                               lifecycle_updated_at = ?, updated_at = ?
+                           WHERE series_id = ? AND lifecycle_status = 'active'""",
+                        (
+                            f"Final episode {int(episode['episode_number'])} accepted; the series ends within five minutes.",
+                            now,
+                            now,
+                            episode["series_id"],
                         ),
                     )
 

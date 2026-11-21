@@ -326,7 +326,7 @@ class LLMEngineTests(unittest.TestCase):
         """User: Given a serial episode where each clip decides whether a viewer stays, When its segments are planned, Then the writer must make every segment, the first included, a chain of big physical moves from the first second and never a sleeping or resting pose."""
         manager = _FakeManager(
             [
-                '{"segments":[{"segment_id":"segment-1","visual":"the hero bursts awake","narration":"wake up","action":"jolts up, stretches, and bounces twice","cause":"a boing shakes the hill","effect":"the hero is wide awake","camera":"locked wide"}]}'
+                '{"segments":[{"segment_id":"segment-1","visual":"the hero bursts awake","narration":"wake up","action":"jolts up, sprints across the hill, and bounces over a rock","cause":"a boing shakes the hill","effect":"the hero is wide awake","camera":"locked wide"}]}'
             ]
         )
         engine = LLMPromptEngine(mode="llm", manager=manager)
@@ -445,15 +445,15 @@ class LLMEngineTests(unittest.TestCase):
             constraints={"serial_mode": True},
         )
 
-        segments = engine.segment_story(
-            goal,
-            "current brief",
-            6,
-            "playful cinematic escalation",
-        )
+        with self.assertRaises(Exception):
+            engine.segment_story(
+                goal,
+                "current brief",
+                6,
+                "playful cinematic escalation",
+            )
 
         user_prompt = manager.text_model.calls[0]["messages"][1]["content"]
-        self.assertEqual(len(segments), 6)
         self.assertIn("current brief", user_prompt)
         self.assertNotIn("storyboard_path", user_prompt)
 

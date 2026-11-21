@@ -126,6 +126,43 @@ def test_user_given_serial_video_is_selected_when_interface_runs_then_yaml_defau
     assert result["episodes_started"] == 2
 
 
+@pytest.mark.parametrize("seconds", [60, 35, 5])
+def test_user_given_an_episode_that_is_not_one_to_four_whole_ten_second_clips_when_serial_video_is_requested_then_it_is_refused_before_any_episode_runs(tmp_path, seconds):
+    """User Given a series that must stay under five minutes When an episode longer than 40 seconds, or not made of whole 10 second clips, is requested Then the request is refused with the reason and no episode starts."""
+    config_path = _write_config(tmp_path / "kirby.yaml")
+    serial = SerialRunnerBoundary()
+    request = CharacterWorkflowRequest(
+        repo_root=tmp_path,
+        config_path=config_path,
+        generation=CharacterGenerationOptions(prompt="A firefly finds a way home.", duration_seconds=seconds),
+        review=CharacterReviewOptions(dry_run_publish=True),
+    )
+
+    with pytest.raises(ValueError, match="whole 10 second clips"):
+        dispatch_serial_video_request(request, serial_runner=serial)
+
+    assert serial.calls == []
+
+
+@pytest.mark.parametrize("seconds", [10, 30, 40])
+def test_user_given_an_episode_of_whole_ten_second_clips_within_forty_seconds_when_serial_video_is_requested_then_it_starts(tmp_path, seconds):
+    """User Given a 10, 30 or 40 second episode When serial video is requested Then the episode starts at that length."""
+    config_path = _write_config(tmp_path / "kirby.yaml", episodes_per_run=1)
+    serial = SerialRunnerBoundary()
+    request = CharacterWorkflowRequest(
+        repo_root=tmp_path,
+        config_path=config_path,
+        generation=CharacterGenerationOptions(prompt="A firefly finds a way home.", duration_seconds=seconds),
+        review=CharacterReviewOptions(dry_run_publish=True),
+    )
+
+    dispatch_serial_video_request(request, serial_runner=serial)
+
+    assert len(serial.calls) == 1
+    argv = serial.calls[0]
+    assert argv[argv.index("--duration-seconds") + 1] == str(seconds)
+
+
 def test_user_given_a_character_config_naming_a_model_without_a_style_file_when_serial_video_starts_then_it_fails_before_any_episode_runs(tmp_path):
     """User Given a serial character config whose model has no style file in configs/styles When serial_video is selected Then the run stops naming the model before the serial runner starts any review."""
     config_path = _write_config(tmp_path / "kirby.yaml", style_model="no-such-model")
@@ -206,7 +243,7 @@ def test_user_given_a_character_request_selects_serial_video_when_the_shared_dis
         config_path=config_path,
         generation=CharacterGenerationOptions(
             prompt="A firefly finds a way home.",
-            duration_seconds=60,
+            duration_seconds=30,
             output_dir=str(tmp_path / "renders"),
         ),
         review=CharacterReviewOptions(
@@ -227,7 +264,7 @@ def test_user_given_a_character_request_selects_serial_video_when_the_shared_dis
     command = serial.calls[0]
     assert "--serial-auto-next" in command
     assert "--goal" in command and command[command.index("--goal") + 1] == "A firefly finds a way home."
-    assert "--duration-seconds" in command and command[command.index("--duration-seconds") + 1] == "60"
+    assert "--duration-seconds" in command and command[command.index("--duration-seconds") + 1] == "30"
     assert "--platform" in command and command[command.index("--platform") + 1] == "youtube"
     assert "--dry-run-publish" in command
     assert "--comfy-host" in command and command[command.index("--comfy-host") + 1] == "127.0.0.1"
@@ -319,7 +356,7 @@ def test_user_given_cli_overrides_and_an_episode_limit_when_serial_video_runs_th
         [
             "--config", str(config_path),
             "--generation-type", "serial_video",
-            "--duration-seconds", "60",
+            "--duration-seconds", "30",
             "--serial-episodes", "3",
             "--prompt", "A new firefly adventure",
             "--episode-topic", "火螢的新冒險",
@@ -332,7 +369,7 @@ def test_user_given_cli_overrides_and_an_episode_limit_when_serial_video_runs_th
 
     assert len(serial.calls) == 3
     first, second, third = serial.calls
-    assert first[first.index("--duration-seconds") + 1] == "60"
+    assert first[first.index("--duration-seconds") + 1] == "30"
     assert first[first.index("--goal") + 1] == "A new firefly adventure"
     assert first[first.index("--episode-topic") + 1] == "火螢的新冒險"
     assert first[first.index("--output-dir") + 1] == str(output_dir)

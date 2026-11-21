@@ -2,6 +2,7 @@ import pytest
 
 from agentic.runtime.serial_ledger import (
     DUE_AFTER_EPISODES,
+    SERIES_MAX_EPISODES,
     LedgerError,
     apply_delta,
     parse_episode_delta,
@@ -114,13 +115,52 @@ def test_user_given_an_episode_that_cites_an_unknown_thread_when_it_is_validated
         validate_episode_delta(delta, ledger, episode_number=2, roster_names=())
 
 
-def test_user_given_the_standing_question_when_one_episode_tries_to_pay_it_off_then_it_is_refused():
-    """User Given the series' standing question is open When an episode tries to pay it off Then it is refused because only the creator ends a series."""
+def test_user_given_the_standing_question_when_an_early_episode_tries_to_pay_it_off_then_it_is_refused():
+    """User Given the series' standing question is open When an episode before the final one tries to pay it off Then it is refused because only the final episode closes the series."""
     ledger = _open_ledger()
     delta = parse_episode_delta(_outline("- 回收 T1｜信是寫給自己的"))
 
     with pytest.raises(LedgerError, match="主線"):
         validate_episode_delta(delta, ledger, episode_number=2, roster_names=())
+
+
+def _final_outline(*lines: str) -> str:
+    return _outline(*lines, goal="無：全劇完結")
+
+
+def test_user_given_the_final_episode_when_it_pays_off_every_open_thread_then_the_series_has_nothing_left_open():
+    """User Given a series on its final episode When the episode pays off the standing question and every other open thread Then it passes and the ledger has no open thread left, so the story is finished within its seven episodes."""
+    ledger = _open_ledger()
+    delta = parse_episode_delta(
+        _final_outline("- 回收 T1｜信是寫給自己的", "- 回收 T2｜印記是郵局的暗號")
+    )
+
+    validate_episode_delta(delta, ledger, episode_number=SERIES_MAX_EPISODES, roster_names=())
+    after = apply_delta(ledger, delta, episode_number=SERIES_MAX_EPISODES)
+
+    assert [thread for thread in after if thread.paid is None] == []
+
+
+def test_user_given_the_final_episode_when_a_thread_is_left_open_or_a_new_one_is_added_then_it_is_refused_with_the_reason():
+    """User Given a series on its final episode When the episode leaves a thread open, or plants a new one Then it is refused and names what to fix, because a finished series cannot keep a promise to viewers."""
+    ledger = _open_ledger()
+    leaves_open = parse_episode_delta(_final_outline("- 回收 T1｜信是寫給自己的"))
+    plants_new = parse_episode_delta(
+        _final_outline("- 回收 T1｜答案", "- 回收 T2｜答案二", "- 新增｜又一個謎")
+    )
+
+    with pytest.raises(LedgerError, match="T2"):
+        validate_episode_delta(leaves_open, ledger, episode_number=SERIES_MAX_EPISODES, roster_names=())
+    with pytest.raises(LedgerError, match="新增"):
+        validate_episode_delta(plants_new, ledger, episode_number=SERIES_MAX_EPISODES, roster_names=())
+
+
+def test_user_given_a_series_that_already_aired_its_final_episode_when_another_is_planned_then_it_is_refused():
+    """User Given a five-minute series whose seventh episode has aired When an eighth is planned Then it is refused, so the series cannot grow past five minutes."""
+    delta = parse_episode_delta(_outline("- 新增 主線｜新問題"))
+
+    with pytest.raises(LedgerError, match="最多"):
+        validate_episode_delta(delta, (), episode_number=SERIES_MAX_EPISODES + 1, roster_names=())
 
 
 def test_user_given_an_ordinary_thread_when_an_episode_pays_it_off_then_it_closes_and_stays_closed():

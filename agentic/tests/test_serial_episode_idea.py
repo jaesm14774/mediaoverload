@@ -1,4 +1,5 @@
 from agentic.runtime.llm_engine import LLMPromptEngine
+from agentic.runtime.serial_ledger import SERIES_MAX_EPISODES
 from provider_fakes import ScriptedLLMManager
 
 
@@ -11,6 +12,7 @@ def _idea_request(**overrides) -> str:
         character="Kirby",
         automation_mode="continue",
         story_context="Kirby wonders where the star candy comes from.",
+        episode_number=2,
     )
     arguments.update(overrides)
     idea = LLMPromptEngine(mode="llm", manager=manager).generate_serial_episode_idea(**arguments)
@@ -53,6 +55,15 @@ def test_user_given_a_continuing_series_when_an_idea_is_requested_then_the_episo
 
     assert "hook" in prompt.casefold()
     assert "not conclude" in prompt.casefold() or "do not finish" in prompt.casefold()
+
+
+def test_user_given_the_final_episode_of_a_series_when_an_idea_is_requested_then_it_closes_the_story_instead_of_hooking_another_episode():
+    """User Given a series that has reached its last allowed episode When the idea is requested Then the writer is asked to close the story and the prompt no longer asks for a hook toward a next episode."""
+    final_prompt = _idea_request(episode_number=SERIES_MAX_EPISODES).casefold()
+    middle_prompt = _idea_request(episode_number=2).casefold()
+
+    assert "closing hook" in middle_prompt
+    assert "closing hook" not in final_prompt
 
 
 def test_user_given_a_protagonist_and_story_when_recurring_characters_are_proposed_then_the_validated_list_comes_back():

@@ -15,6 +15,7 @@ from agentic.app.character_config import (
 from agentic.app.character_requests import CharacterWorkflowRequest
 from agentic.app.serial_look import draw_serial_look
 from agentic.app.serial_video_execution import run_serial_episodes
+from agentic.runtime.serial_ledger import validate_episode_seconds
 
 
 _SERIAL_STORY_COMPLEXITIES = ("simple", "cinematic")
@@ -111,7 +112,7 @@ def build_serial_video_argv(
         duration = int(
             duration_seconds
             if duration_seconds is not None
-            else serial.get("default_duration_seconds", 60)
+            else serial.get("default_duration_seconds", 30)
         )
         timeout = normalize_discord_review_timeout_seconds(
             serial.get("discord_review_timeout_seconds")
@@ -120,6 +121,7 @@ def build_serial_video_argv(
         raise ValueError("Serial video duration and review timeout must be integers") from exc
     if duration < 1 or timeout < 1:
         raise ValueError("Serial video duration and Discord review timeout must be positive")
+    validate_episode_seconds(duration)
 
     complexity = _resolve_story_complexity(serial, story_complexity)
 
