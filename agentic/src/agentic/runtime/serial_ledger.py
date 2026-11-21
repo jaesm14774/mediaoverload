@@ -14,6 +14,26 @@ from typing import Iterable, Mapping, Sequence
 DUE_AFTER_EPISODES = 3
 MAX_OPEN_THREADS = 6
 MAX_PAYOFFS_PER_EPISODE = 1
+# A micro-drama: episodes run 30-40 s, so seven of them stay under five minutes.
+MAX_EPISODE_SECONDS = 40
+# One H3 clip carries one beat, so an episode is a whole number of clips.
+SERIAL_CLIP_SECONDS = 10
+SERIES_MAX_EPISODES = 7
+
+
+def validate_episode_seconds(duration_seconds: int) -> None:
+    """An episode is 1-4 whole ten-second clips, so the whole series stays under five minutes."""
+    seconds = int(duration_seconds)
+    if seconds < SERIAL_CLIP_SECONDS or seconds > MAX_EPISODE_SECONDS or seconds % SERIAL_CLIP_SECONDS:
+        raise ValueError(
+            f"A serial episode runs {SERIAL_CLIP_SECONDS}, 20, 30 or {MAX_EPISODE_SECONDS} seconds "
+            f"(whole {SERIAL_CLIP_SECONDS} second clips, at most {MAX_EPISODE_SECONDS}) so the whole series stays under five minutes; got {seconds}"
+        )
+
+
+def is_final_episode(episode_number: int) -> bool:
+    """The last episode the series may have: it closes the main thread instead of hooking a next one."""
+    return int(episode_number) >= SERIES_MAX_EPISODES
 
 
 class LedgerError(ValueError):
@@ -152,6 +172,9 @@ def validate_episode_delta(
     roster_names: Iterable[str],
 ) -> None:
     """Raise LedgerError when the delta breaks a continuity rule against the current ledger."""
+    final = is_final_episode(episode_number)
+    if int(episode_number) > SERIES_MAX_EPISODES:
+        raise LedgerError(f"全劇最多 {SERIES_MAX_EPISODES} 集（總長不超過五分鐘），第 {SERIES_MAX_EPISODES} 集已是最終集。")
     open_threads = _open(ledger)
     open_ids = {thread.id: thread for thread in open_threads}
     listed = "、".join(open_ids) or "（目前沒有開放中的線索）"
@@ -163,9 +186,19 @@ def validate_episode_delta(
     if len(set(cited)) != len(cited):
         raise LedgerError("同一條線索在一集內只能推進或回收一次。")
     for thread_id, _ in delta.pays:
-        if open_ids[thread_id].main:
-            raise LedgerError(f"{thread_id} 是主線，不能由單集回收；系列只由創作者按「完成」結束。")
-    if len(delta.pays) > MAX_PAYOFFS_PER_EPISODE:
+        if open_ids[thread_id].main and not final:
+            raise LedgerError(
+                f"{thread_id} 是主線，只有最終集（第 {SERIES_MAX_EPISODES} 集）才能回收；之前的集數只能推進它。"
+            )
+    if final:
+        if delta.adds:
+            raise LedgerError("最終集不能再新增線索；請把開放中的線索收掉。")
+        unpaid = [thread.id for thread in open_threads if thread.id not in {i for i, _ in delta.pays}]
+        if unpaid:
+            raise LedgerError(
+                f"最終集必須回收所有開放中的線索（含主線），還沒回收：{'、'.join(unpaid)}。"
+            )
+    elif len(delta.pays) > MAX_PAYOFFS_PER_EPISODE:
         raise LedgerError(f"一集最多回收 {MAX_PAYOFFS_PER_EPISODE} 條線索。")
 
     if open_threads and not cited:
@@ -177,7 +210,7 @@ def validate_episode_delta(
 
     after = apply_delta(ledger, delta, episode_number=episode_number)
     open_after = _open(after)
-    if not any(thread.main for thread in open_after):
+    if not final and not any(thread.main for thread in open_after):
         raise LedgerError("系列必須一直有一條開放中的主線；請用「新增 主線｜…」寫出觀眾想知道答案的長期問題。")
     if len(open_after) > MAX_OPEN_THREADS:
         raise LedgerError(f"開放中的線索最多 {MAX_OPEN_THREADS} 條；請少新增，或回收一條舊的。")

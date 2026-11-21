@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 from agentic.minimax_prompting import require_h3_prompt
 from agentic.runtime.contracts import GoalRequest
@@ -115,12 +116,108 @@ def _serial_cast_instruction(goal: GoalRequest) -> str:
 
 
 SERIAL_H3_STORY_RULES = (
-    "Write the segment plan's own story action as an ordered chain of visible beats: what each character named in the plan does, to what or whom, and the visible result stated in the plan. Do not replace the planned action with generic bouncing, hopping or posing; characters may walk or move to the place the plan sends them. Start the prompt with what the characters do.",
-    "Keep every character named in the plan on screen for the whole clip, each with its own visible action or reaction, using the recurring cast's real look.",
-    "Start the prompt on a motion verb and never describe a still pose, sleeping, resting, breathing, glowing, drifting, watching or posing as the action: a calm planned action becomes the big physical move it leads to, so every character is moving from the first moment. Give each character two or three concrete action verbs chained into connected moves, with anticipation, then a big stretch-and-squash move, while props and scene elements respond on every beat. In every clip at least one character travels far across the frame (runs, leaps, flies, tumbles, is thrown or chases), because catching, tidying and handing things over in place render as an almost still video.",
-    "Sound and score follow the action's pace: quick, bouncy and playful, never a slow lullaby.",
-    "Every character is one separate figure with its own colours and props: name each recurring character exactly as listed above, name the protagonist exactly as Character, and never merge two characters into one body. The next clip continues from this clip's last frame, so the protagonist's beat comes last: the clip ends with the protagonist centred at about half the frame height, still moving, and every other named character fully inside the frame, one on the left and one on the right, face visible and at a readable size, with nobody cut off by the frame edge. Never bring the action to a halt, skid to a stop or settle into a group pose: the last second moves as fast as the first, with every character mid-move (hopping, waving, spinning, chasing or cheering).",
+    "The segment plan's action and visible result are appended to your text afterwards, word for word, so write only what the clip's opening shows: the art style, the setting, and each character's look and place in the frame, in two or three plain sentences. Describe nothing that moves, changes or happens, and do not repeat the plan.",
+    "Every character is one separate figure with its own colours and props: name each recurring character exactly as listed above, name the protagonist exactly as Character, use the recurring cast's real look, and never merge two characters into one body. State each character's colours, clothing and accessories exactly as the first frame shows them, the protagonist's included, so the clip keeps their look.",
+    "Sound and score follow the pace of the planned action: quick, bouncy and playful, never a slow lullaby.",
 )
+
+
+# Measured on the fresh "last dumpling" micro-drama (output/serial_ab/r1..r3, 2026-11-20): a camera plan
+# plus timed beats made clips perform the whole beat (tracking chase motion 12-15 against 5 for the
+# single locked-camera sentence), planned [Shot n] cuts landed at the planned seconds, and a
+# concrete picture ("plainly empty, floor bare") drew a visible change where "empty" did not.
+SERIAL_ACTION_RULE = (
+    "Each segment is a ten-second clip: write its action as three timed beats that cover the whole clip, in the form "
+    "'0.00-3.00 s: ...; 3.00-6.50 s: ...; 6.50-10.00 s: ...', about 60 to 90 words in all, in plain visible terms of what moves, "
+    "to or from where, with which prop. The main chase or big move starts by about 4 seconds and is written with strong verbs "
+    "such as 'bounds after it in long springy strides'; a change the audience must see is written as a concrete picture "
+    "(a basket plainly empty with its floor bare, a key lying on the counter), and nothing the camera cannot see, "
+    "so no readable text, notes, posters, signs, phone or screen messages, and no dialogue or sound as plot. "
+    "When recurring characters are listed above, name every recurring character listed above in every beat, even only to follow along: "
+    "a tracking shot carries the whole cast, so the cast is still in the last frame that the next clip continues from. "
+)
+SERIAL_CAMERA_DIRECTION = (
+    "The camera field plans how the clip is shot, in one or two plain sentences, and the camera follows the beat, so choose the camera from the beat: "
+    "a low camera tracking sideways level with the action for a chase or a big move, "
+    "a close-up on the protagonist's face for an emotional turn, "
+    "or at most three planned shots joined by hard cuts for a reveal, and then the camera field says 'hard cuts' and the second and third timed beats of the action "
+    "begin with [Shot 2] and [Shot 3]; use those labels only when the camera field plans hard cuts, so a tracking or close-up clip has no [Shot] label anywhere. "
+    "The camera field itself never contains a [Shot] label. "
+    "Never a push-in, zoom, orbit or crane. "
+)
+SERIAL_VIDEO_DIRECTION = (
+    "The painted look of the frame stays exactly the same, with the same colours and line quality, and nothing morphs. "
+    "On a wide or tracking shot the protagonist keeps the same size and moves side to side or up and down in the frame, never toward or away from the camera, "
+    "so it never shrinks into the distance; on a close-up the face stays large. The protagonist is still moving in the last frame. "
+    "Expressions are big and readable and change as the beat turns. "
+    "Any sign, board or paper in the scene stays blank. Do not add a second goal, obstacle or subplot. "
+)
+
+# The shared system prompt tells every video writer to keep a locked camera with no cut; a serial
+# writer plans its own camera, so it gets the same prompt with only that sentence replaced.
+_SHARED_LOCKED_CAMERA = (
+    "For video, default to lively, continuous character action with a locked camera:\nno push-in, pan, orbit, or cut."
+)
+assert _SHARED_LOCKED_CAMERA in LONG_VIDEO_SYSTEM_PROMPT, "shared system prompt changed; update the serial copy"
+SERIAL_LONG_VIDEO_SYSTEM_PROMPT = LONG_VIDEO_SYSTEM_PROMPT.replace(
+    _SHARED_LOCKED_CAMERA,
+    "For video, default to lively, continuous character action, with the camera exactly as the segment's camera plan says "
+    "(never a push-in, zoom, orbit or crane).",
+)
+
+
+def _video_system_prompt(goal: GoalRequest) -> str:
+    return SERIAL_LONG_VIDEO_SYSTEM_PROMPT if goal.constraints.get("serial_mode") else LONG_VIDEO_SYSTEM_PROMPT
+
+# A serial clip that only presses, sways or hops in place renders near-static (measured 5
+# against 11-17 for the same beat), so a planned action needs a verb of travel or impact,
+# or an in-place verb that is given a destination.
+_SERIAL_TRAVEL_VERB = re.compile(
+    r"\b(run|runs|sprint|dash|race|rush|chase|charge|leap|vault|dive|fly|flies|soar|glide|slide|skate|roll|"
+    r"tumble|somersault|flip|throw|toss|hurl|kick|climb|push|pull|drag|haul|launch|burst|swoop|stomp|"
+    r"waddle|scramble|fling|hurtle|gallop|skid|plunge|catapult|slam|dodge)\w*",
+    re.IGNORECASE,
+)
+_SERIAL_IN_PLACE_VERB = re.compile(r"\b(hop|jump|bound|bounce|spring|spin|twirl|swing|dance)\w*", re.IGNORECASE)
+_SERIAL_DESTINATION = re.compile(
+    r"\b(toward|towards|across|over|into|onto|past|through|along|around|off|up to|down to|away from|out of)\b",
+    re.IGNORECASE,
+)
+
+
+def _serial_cast_names(goal: GoalRequest) -> list[str]:
+    roster = str(goal.constraints.get("serial_cast") or "")
+    # The ledger writes "- name：look" with a full-width colon.
+    names = (re.split(r"[：:]", line.strip().lstrip("-* "), maxsplit=1)[0].strip() for line in roster.splitlines())
+    return [name for name in names if name]
+
+
+def validate_serial_story_actions(
+    payload: Any, cast_names: Sequence[str] = (), segment_count: int | None = None
+) -> Any:
+    segments = payload.get("segments") if isinstance(payload, dict) else None
+    if segment_count is not None and (
+        not isinstance(segments, list) or len(segments) != segment_count
+    ):
+        raise ValueError(f"the plan must have exactly {segment_count} segments, one beat for each clip.")
+    for index, segment in enumerate(segments if isinstance(segments, list) else [], start=1):
+        action = str(segment.get("action") or "") if isinstance(segment, dict) else ""
+        travels = _SERIAL_TRAVEL_VERB.search(action) or (
+            _SERIAL_IN_PLACE_VERB.search(action) and _SERIAL_DESTINATION.search(action)
+        )
+        if not travels:
+            raise ValueError(
+                f"segment {index}'s action must be big continuous movement that goes somewhere or hits something "
+                "(run across, leap over, bounce off, roll into, chase, throw), "
+                "not pressing, swaying, standing, watching, posing or hopping on the spot."
+            )
+        missing = [name for name in cast_names if name.casefold() not in action.casefold()]
+        if missing:
+            raise ValueError(
+                f"segment {index}'s action must name every recurring character, even only to follow along; "
+                f"it never names {', '.join(missing)}."
+            )
+    return payload
 
 
 SCENE_RESPONSE_CONTRACT = (
@@ -439,45 +536,52 @@ def _validate_image_prompt_set(
     return payload
 
 
-def _preserve_planned_action(
-    prompt: str, goal: GoalRequest, segment: dict[str, Any]
+def _compose_serial_scene(
+    opening: str, goal: GoalRequest, segment: dict[str, Any]
 ) -> str:
-    """Keep the planned story event primary after vision prompt writing."""
+    """One plain scene for a serial clip: the opening look, then the planned action and result once each.
+
+    The planned action is appended word for word, never rewritten, so the clip performs the
+    beat the episode outline gave it. The text carries no instructions to the video model:
+    H3 reads a visible timeline, not labels such as "required" or "takes priority".
+    """
     if not goal.constraints.get("serial_mode"):
-        return prompt
+        return opening
 
     action = str(segment.get("action") or "").strip()
     effect = str(segment.get("effect") or segment.get("end_state") or "").strip()
-    visual = str(segment.get("visual") or "").strip()
-    if not any((action, effect, visual)):
-        return prompt
+    if not (action or effect):
+        return opening
 
-    try:
-        episode_number = int(goal.constraints.get("serial_episode_number") or 1)
-    except (TypeError, ValueError):
-        episode_number = 1
-
-    required = [
-        "Current episode action (required and visually primary): "
-        + (action or visual),
-    ]
-    if effect:
-        required.append("Current episode visible outcome (required): " + effect)
-    if visual and visual != action:
-        required.append("Current episode visual direction: " + visual)
-    if episode_number > 1:
-        required.append(
-            "Cross-episode continuity: preserve character identity, world, and palette from the prior reference. Treat that image as the opening continuity point only; develop the current episode's new action immediately instead of repeating the prior pose or composition."
-        )
     protagonist = str(goal.constraints.get("character") or "").strip() or "The protagonist"
-    required.extend(
-        [
-            "The required action takes priority over reference-aware scene notes if they conflict. Use those notes for compatible appearance and camera details only.",
-            "Reference-aware appearance and camera notes: " + prompt,
-            f"Last frame (required): {protagonist} is centred at about half the frame height and still moving, with every other named character fully inside the frame on the left and right of {protagonist}, face visible, at a readable size and as a separate figure; nobody is cut off by the frame edge, leaves the frame or merges with another; every character is still mid-move (hopping, waving, spinning, chasing or cheering), never frozen in a pose.",
-        ]
+    others = (
+        " and every other character stays in frame beside "
+        f"{protagonist} with a visible face, each still mid-move"
+        if str(goal.constraints.get("serial_cast") or "").strip()
+        else ""
     )
-    return "\n\n".join(required)
+    # H3 marks the first shot itself, so no field may carry its own [Shot 1]; the camera text is a
+    # summary and carries no shot labels at all, while the action may mark its later cuts.
+    def _drop_shot_labels(text: Any, pattern: str = r"\[shot\s*\d+\]\s*") -> str:
+        return " ".join(re.sub(pattern, " ", str(text or ""), flags=re.IGNORECASE).split())
+
+    camera = _drop_shot_labels(segment.get("camera")) or "One continuous shot with a locked camera."
+    opening = _drop_shot_labels(opening, r"\[shot\s*1\]\s*")
+    # Later cuts are kept only when the camera text plans cuts; otherwise the clip is one continuous shot.
+    plans_cuts = bool(re.search(r"\bcuts?\b|\bcutting\b", camera, re.IGNORECASE))
+    action = _drop_shot_labels(action, r"\[shot\s*\d+\]\s*" if not plans_cuts else r"\[shot\s*1\]\s*")
+    effect = _drop_shot_labels(effect, r"\[shot\s*1\]\s*")
+    parts = [
+        opening,
+        camera,
+        action,
+        effect,
+        f"In the final second {protagonist} is centred at about half the frame height and still moving{others}.",
+    ]
+    sentences = [part.strip() for part in parts if part.strip()]
+    return " ".join(
+        sentence if sentence[-1] in ".!?" else f"{sentence}." for sentence in sentences
+    )
 
 
 def validate_segment_response(payload: Any) -> dict[str, Any]:
@@ -1182,12 +1286,7 @@ def segment_story(
         str(news_context.get(key) or "").strip()
         for key in ("title", "content", "keyword")
     )
-    try:
-        manager = client.require_manager()
-    except Exception:
-        if bool(goal.constraints.get("serial_mode")):
-            return validate_story_segments(fallback, segment_count)
-        raise
+    manager = client.require_manager()
     reference_directive = format_reference_video_directive(
         reference_analysis, max_chars=2200
     )
@@ -1213,7 +1312,8 @@ def segment_story(
                 "and never closes the series' standing question. "
                 "Every segment, including the first, is a fast chain of two or three big continuous physical moves by the named characters, starting in the first second and carrying that beat's one goal; "
                 "sleeping, resting, breathing, glowing, drifting, watching or posing is never the action, and the opening beat shows the characters already in motion. "
-                "A serial episode is never a still or solemn brief. "
+                + SERIAL_ACTION_RULE
+                + "A serial episode is never a still or solemn brief. "
                 if serial_episode
                 else "For a causal story, keep one visible goal, one obstacle, and one turn that changes the outcome; "
                 "each beat changes a visible state and causes the next, and the ending resolves or reframes the opening. "
@@ -1224,11 +1324,16 @@ def segment_story(
             "a clear payoff while the characters are still moving. Keep the subject's body, face, and goal readable. "
             "When the tone supports it, include a compact anticipation, action, follow-through, and charming "
             "reaction such as a blink, delighted glance, or proud bounce. Do not add cute business to solemn scenes. "
-            f"Each segment must include {direction_field_names}. The camera field names the starting framing as a locked camera and what stays in frame; "
-            "it never plans a push-in, pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane. "
-            "Keep the protagonist's face and every story-critical object within frame with clear edge margins for the whole segment, "
+            f"Each segment must include {direction_field_names}. "
+            + (
+                SERIAL_CAMERA_DIRECTION
+                if serial_episode
+                else "The camera field names the starting framing as a locked camera and what stays in frame; "
+                "it never plans a push-in, pan, tilt, dolly, tracking move, orbit, zoom, close-up cut, or crane. "
+            )
+            + "Keep the protagonist's face and every story-critical object within frame with clear edge margins for the whole segment, "
             "and show the visible result before any reaction. "
-            f"Video action and camera direction: {VIDEO_MOTION_DIRECTION} "
+            f"Video action and camera direction: {SERIAL_VIDEO_DIRECTION if serial_episode else VIDEO_MOTION_DIRECTION} "
             "Describe the selected style with stable visible rules for medium and surface, palette and light, and motion or transitions; keep them consistent across shots."
         )
     else:
@@ -1277,9 +1382,16 @@ def segment_story(
     try:
         payload = client.generate_json(
             manager,
-            LONG_VIDEO_SYSTEM_PROMPT,
+            _video_system_prompt(goal),
             user_prompt,
             schema_name="story_segments",
+            validate_response=(
+                lambda payload: validate_serial_story_actions(
+                    payload, _serial_cast_names(goal), segment_count
+                )
+            )
+            if serial_episode
+            else None,
             schema={
                 "type": "object",
                 "properties": {
@@ -1321,8 +1433,10 @@ def segment_story(
                 fallback_item = dict(fallback[len(normalized)])
                 normalized.append(fallback_item)
             return validate_story_segments(normalized, segment_count)
-    except Exception as exc:
-        del exc
+    except Exception:
+        # A serial clip is never planned from nothing: a plan that never validates stops the episode.
+        if serial_episode:
+            raise
     return validate_story_segments(fallback, segment_count)
 
 
@@ -1374,7 +1488,8 @@ def prepare_segment(
             "source records, or instructions about how to write a prompt. narration must be a string. "
             "overall_soundscape describes only concrete environmental and physical-action sounds; "
             "non_diegetic_music describes an audience-only score or is N/A when no score is requested.",
-            f"Writing guidance (apply it to the scene; do not copy it into prompt): {VIDEO_MOTION_DIRECTION}",
+            "Writing guidance (apply it to the scene; do not copy it into prompt): "
+            + (SERIAL_VIDEO_DIRECTION if goal.constraints.get("serial_mode") else VIDEO_MOTION_DIRECTION),
             "Follow the user's requested scene, action, framing, style, and pacing.",
             "Keep claims about supplied news context within the source; use its visual treatment as requested.",
         ]
@@ -1382,7 +1497,7 @@ def prepare_segment(
     try:
         payload = client.generate_json(
             manager,
-            LONG_VIDEO_SYSTEM_PROMPT,
+            _video_system_prompt(goal),
             "\n".join(continuity_lines),
             schema_name="segment_prompt",
             output_contract=H3_SEGMENT_RESPONSE_CONTRACT,
@@ -1446,7 +1561,6 @@ def prepare_h3_segment(
         motion_rules = [
             *SERIAL_H3_STORY_RULES,
             f"Keep the first frame's art style, colours, line quality and setting unchanged for the whole clip: do not restyle or re-render the scene, and show a place or prop the first frame lacks only as a small element drawn in that same style. Style rules: {style_profile_direction(goal)}",
-            f"Segment duration: {float(duration_seconds):.2f} seconds. Keep every character moving energetically at a fast, playful pace through the whole clip, still moving in the last frame, and end on the planned visible result. Do not jump directly to the ending frame.",
         ]
     else:
         motion_rules = [
@@ -1457,7 +1571,11 @@ def prepare_h3_segment(
         "Write the final scene prompt for MiniMax H3 after inspecting the attached conditioning image(s).",
         "Treat the visible image(s) as the source of truth for character identity and design, palette, art style, location, and important visible objects. The written draft supplies intended action and story meaning. When details conflict, preserve the image's identity and objects and adapt the action to them.",
         "For a comic page, contact sheet, collage, or other image with repeated depictions, interpret those poses as successive views of the same subject. Write one continuous scene with one instance of each requested character; do not turn gutters or repeated poses into extra characters or a persistent split-screen layout unless the brief explicitly asks for that. Keep the visible starting pose and subject-to-object relationship readable.",
-        "Keep one continuous shot with a locked camera; move the camera only when the brief asks for it. Describe the visible starting state, physical movement, and readable ending state. Keep the H3 scene concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft.",
+        (
+            "Keep the opening description concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft."
+            if serial_mode
+            else "Keep one continuous shot with a locked camera; move the camera only when the brief asks for it. Describe the visible starting state, physical movement, and readable ending state. Keep the H3 scene concise and specific; remove redundant style adjectives and invented details. Do not add characters, props, costume changes, scene changes, text, or actions unsupported by the image or the source draft."
+        ),
         *motion_rules,
         "Return only scene description in prompt, concrete environmental and physical-action sound in overall_soundscape, and an audience-only score in non_diegetic_music (or N/A). Do not put prompt-writing instructions, source analysis, or serialized objects inside prompt.",
         f"Character: {goal.constraints.get('character', '')}",
@@ -1472,7 +1590,7 @@ def prepare_h3_segment(
     if serial_mode:
         prompt_context.insert(
             2,
-            "This is a serial episode. The attached image is only the opening continuity moment: preserve the character identity and world, then move away from the prior pose and composition as the current action unfolds. The structured current segment plan is authoritative for the new plot event. Explicit characters, props, and locations named in that plan must be shown even when they are absent from the attached image.",
+            "This is a serial episode. The attached image is the clip's opening moment (identity references show how the characters look): preserve the character identity and world. The segment plan decides what happens next; show the characters, props and locations it names in the opening description when they are absent from the attached image.",
         )
     news_context = goal.constraints.get("news_context")
     if isinstance(news_context, dict) and news_context:
@@ -1495,7 +1613,7 @@ def prepare_h3_segment(
     try:
         payload = client.generate_json(
             manager,
-            LONG_VIDEO_SYSTEM_PROMPT,
+            _video_system_prompt(goal),
             "\n".join(prompt_context),
             schema_name="h3_scene_prompt",
             output_contract=H3_SEGMENT_RESPONSE_CONTRACT,
@@ -1516,7 +1634,7 @@ def prepare_h3_segment(
         return client.mark_payload(
             {
                 "segment_id": str(segment.get("segment_id") or ""),
-                "prompt": _preserve_planned_action(
+                "prompt": _compose_serial_scene(
                     require_h3_prompt(payload.get("prompt")), goal, segment
                 ),
                 "overall_soundscape": payload["overall_soundscape"],

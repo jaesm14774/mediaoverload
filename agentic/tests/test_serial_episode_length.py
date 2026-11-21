@@ -16,6 +16,14 @@ KIRBY_CONFIG = PROJECT_ROOT.parent / "configs" / "characters" / "kirby.yaml"
 
 
 def _planned_segments(duration_seconds: int) -> list[str]:
+    return sorted(
+        node.node_id
+        for node in _plan(duration_seconds).nodes
+        if node.node_id.startswith("segment-review-")
+    )
+
+
+def _plan(duration_seconds: int):
     planner = TaskPlanner(
         asset_registry=AssetRegistry(PROJECT_ROOT, asset_root=PROJECT_ROOT)
     )
@@ -38,18 +46,26 @@ def _planned_segments(duration_seconds: int) -> list[str]:
                 "require_human_review": True,
             },
         )
-        plan = planner.build_plan(goal)
-    return sorted(node.node_id for node in plan.nodes if node.node_id.startswith("segment-review-"))
+        return planner.build_plan(goal)
 
 
 @pytest.mark.parametrize(
-    ("duration_seconds", "clips"), [(15, 1), (30, 2), (60, 4), (180, 12)]
+    ("duration_seconds", "clips"), [(10, 1), (30, 3), (40, 4), (60, 6)]
 )
-def test_user_given_an_episode_length_when_it_is_planned_then_it_uses_the_fewest_clips_that_cover_it(
+def test_user_given_a_short_episode_when_it_is_planned_then_every_clip_is_ten_seconds_and_carries_one_beat(
     duration_seconds, clips
 ):
-    """User Given an episode of a given length When it is planned Then it is cut into the fewest clips H3 can render, so a one-minute episode is four clips with three hand-offs rather than six clips with five, and the character has fewer chances to drift."""
+    """User Given a 30-40 second episode When it is planned Then it is cut into ten-second clips, so the script has exactly one beat per clip and no clip has to stretch a thin beat over fifteen seconds."""
+    plan = _plan(duration_seconds)
+
     assert len(_planned_segments(duration_seconds)) == clips
+    assert plan.metadata["segment_count"] == clips
+    render_lengths = {
+        node.inputs["length"]
+        for node in plan.nodes
+        if node.node_id.startswith("segment-video-")
+    }
+    assert render_lengths == {240}
 
 
 def test_user_given_a_series_when_any_episode_runs_then_it_uses_the_same_look_the_references_were_made_in(tmp_path):

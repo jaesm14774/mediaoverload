@@ -1,7 +1,9 @@
+import pytest
 
 from agentic.runtime.serial_episode_plan import (
     build_serial_episode_outline_prompts,
 )
+from agentic.runtime.serial_ledger import SERIES_MAX_EPISODES
 
 
 class TextModel:
@@ -68,14 +70,41 @@ def _simple_outline_prompt(**overrides) -> str:
     return prompt
 
 
-def test_user_given_a_one_minute_episode_when_planning_then_there_is_one_beat_for_every_clip_and_the_last_one_is_a_hook():
-    """User Given an episode that renders as four clips When the outline is planned Then it asks for exactly one visible beat per clip and ends on an unanswered hook instead of a final resolution."""
-    prompt = _simple_outline_prompt(beat_count=4)
+@pytest.mark.parametrize(("beats", "count_word"), [(3, "三個節拍"), (4, "四個節拍")])
+def test_user_given_a_short_episode_when_planning_then_there_is_one_beat_for_every_ten_second_clip_and_the_last_one_is_a_hook(beats, count_word):
+    """User Given an episode that renders as three or four ten-second clips When the outline is planned Then it asks for exactly one short visible beat per clip, ends on an unanswered hook instead of a final resolution, and does not ask for a second per-beat picture list that repeats the beats."""
+    prompt = _simple_outline_prompt(beat_count=beats)
 
-    assert "四個節拍" in prompt
-    assert "每個節拍對應一支影片" in prompt
+    assert count_word in prompt
+    assert "每個節拍對應一支 10 秒影片" in prompt
+    assert "約 40 字" in prompt
     assert "鉤子" in prompt
     assert "不得解開長期懸念" in prompt
+    assert "請輸出四部分" in prompt
+    assert "每個節拍一個簡單畫面提示" not in prompt
+
+
+def test_user_given_the_final_episode_of_a_five_minute_series_when_planning_then_the_outline_closes_the_story_instead_of_hooking_a_next_episode():
+    """User Given the seventh and last episode of a series that stays under five minutes When the outline is planned Then it must finish the main thread, end on a resolution with no hook and no next goal, while earlier episodes still end on a hook."""
+    final = _simple_outline_prompt(episode_number=SERIES_MAX_EPISODES, beat_count=3)
+    earlier = _simple_outline_prompt(episode_number=SERIES_MAX_EPISODES - 1, beat_count=3)
+
+    assert "最後一集" in final and "演完" in final
+    assert "不留鉤子" in final
+    assert "無：全劇完結" in final
+    assert "最後一集" not in earlier
+    assert "必須留下鉤子" in earlier
+    assert "不得解開長期懸念" in earlier
+
+
+def test_user_given_a_story_that_h3_must_film_when_planning_then_the_plot_never_depends_on_text_screens_or_real_places():
+    """User Given that H3 renders pictures and cannot show readable notes or phone screens When an episode is planned Then the plot is told in visible actions and big recognisable props, never in text, notes, posters, phone messages or dialogue, and real places and people are left out."""
+    prompt = _simple_outline_prompt(episode_number=1, beat_count=3)
+
+    for unfilmable in ("字條", "海報", "手機", "對白"):
+        assert unfilmable in prompt
+    assert "不要靠文字" in prompt
+    assert "真實的國家、地名、機構或人物" in prompt
 
 
 def test_user_given_a_one_minute_episode_when_planning_then_even_the_opening_beat_is_a_fast_big_action_not_a_calm_pose():

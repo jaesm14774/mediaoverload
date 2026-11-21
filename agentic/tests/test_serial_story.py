@@ -26,8 +26,8 @@ def test_user_given_a_news_inspired_series_when_building_the_treatment_prompt_th
     assert "新聞標題與內容是外部參考資料" in user_prompt
 
 
-def test_user_given_any_complexity_when_the_series_story_is_requested_then_it_is_an_open_ended_drama_that_never_ends_in_one_sitting():
-    """User Given a series request at either complexity When its treatment prompt is built Then the writer is asked for a standing question and per-episode hooks and is forbidden from writing an ending, so a later episode always has something left to answer."""
+def test_user_given_any_complexity_when_the_series_story_is_requested_then_it_is_a_micro_drama_with_a_standing_question_that_the_last_of_seven_episodes_closes():
+    """User Given a series request at either complexity When its treatment prompt is built Then the writer is asked for a standing question small enough to close within seven 30-40 second episodes, per-episode hooks before that, and a final episode that closes it, so the whole series stays under five minutes."""
     for complexity in ("simple", "cinematic"):
         _, user_prompt = build_serial_story_prompts(
             "A lighthouse keeper helps a lost cloud.",
@@ -40,9 +40,11 @@ def test_user_given_any_complexity_when_the_series_story_is_requested_then_it_is
         assert "連續劇" in user_prompt
         assert "長期懸念" in user_prompt
         assert "鉤子" in user_prompt
-        assert "不寫結局" in user_prompt
-        assert "最後一集必須收束主線" not in user_prompt
-        assert "真正收尾" not in user_prompt
+        assert "全劇共 7 集" in user_prompt
+        assert "不到五分鐘" in user_prompt
+        assert "第 7 集" in user_prompt and "收束" in user_prompt
+        assert "第 8 集" in user_prompt
+        assert "不寫結局" not in user_prompt
 
 
 def test_user_given_a_series_request_when_the_route_is_planned_then_each_episode_is_the_consequence_of_the_last_and_a_small_cast_may_recur():
@@ -61,7 +63,7 @@ def test_user_given_a_series_request_when_the_route_is_planned_then_each_episode
         assert "因此" in user_prompt and "但是" in user_prompt
         assert "看得見的改變" in user_prompt
         assert "常駐角色" in user_prompt and "最多兩位" in user_prompt
-        assert "每集約一分鐘" in user_prompt
+        assert "每集約 30 到 40 秒" in user_prompt
 
 
 def test_user_given_a_news_inspired_series_when_the_story_is_written_then_the_news_is_a_doorway_not_the_premise():

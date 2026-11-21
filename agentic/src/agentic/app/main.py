@@ -20,7 +20,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from agentic.app.cli import parse_args
 
-from agentic.runtime.serial_ledger import LedgerError, PriorEpisodeNotAccepted
+from agentic.runtime.serial_ledger import (
+    LedgerError,
+    PriorEpisodeNotAccepted,
+    validate_episode_seconds,
+)
 from agentic.runtime.contracts import (
     DEFAULT_DISCORD_REVIEW_TIMEOUT_SECONDS,
     ExecutionNode,
@@ -880,7 +884,7 @@ def _run_serial_episode_outline_draft(
 ) -> dict[str, object]:
     from agentic.runtime.llm_client import PromptClient
     from agentic.runtime.serial_video import SerialVideoStore
-    from agentic.runtime.planning.long_video import minimum_segment_count
+    from agentic.runtime.planning.long_video import serial_segment_count
     from agentic.runtime.serial_episode_plan import (
         build_serial_episode_outline_prompts,
         serial_episode_outline_artifact_path,
@@ -905,7 +909,7 @@ def _run_serial_episode_outline_draft(
         series_recap=planning["recap_text"],
         ledger_text=planning["ledger_text"],
         roster_text=planning["roster_text"],
-        beat_count=minimum_segment_count(args.duration_seconds),
+        beat_count=serial_segment_count(args.duration_seconds),
         approved_story_state=str(
             store.get_human_approved_story_state(series_id).get("state_text") or ""
         ),
@@ -1496,6 +1500,7 @@ def _run_serial_new_series_onboarding(
         automation_mode="new",
         story_context=story_text,
         roster_text=serial_store.get_series_planning_context(series_id, 1)["roster_text"],
+        episode_number=1,
     )
     args.serial_episode_number = 1
     args.episode_topic = str(args.episode_topic or episode_idea["topic"])
@@ -1617,6 +1622,7 @@ def _prepare_auto_next_serial_context(
         args.goal = str(serial_context["episode_prompt"])
         args.episode_topic = str(serial_context["episode_topic"])
         args.duration_seconds = int(serial_context["target_duration_seconds"])
+        validate_episode_seconds(args.duration_seconds)
     return serial_context
 
 
@@ -1700,6 +1706,7 @@ def _review_automatic_serial_outline(
         recap_text=planning["recap_text"],
         ledger_text=planning["ledger_text"],
         roster_text=planning["roster_text"],
+        episode_number=episode_number,
     )
     args.episode_topic = str(episode_idea["topic"])
     args.goal = str(episode_idea["premise"])
@@ -1846,6 +1853,7 @@ def _prepare_serial_execution_state(
     state = _SerialExecutionState()
     if not args.serial_mode:
         return state
+    validate_episode_seconds(args.duration_seconds)
 
     from agentic.runtime.serial_video import SerialVideoStore
 
@@ -2165,6 +2173,7 @@ def _prepare_missing_auto_next_idea(
             recap_text=planning["recap_text"],
             ledger_text=planning["ledger_text"],
             roster_text=planning["roster_text"],
+            episode_number=int(serial_context["episode_number"]),
         )
         args.goal = args.goal or str(idea["premise"])
         args.episode_topic = args.episode_topic or str(idea["topic"])

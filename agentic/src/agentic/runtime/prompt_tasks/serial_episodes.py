@@ -12,6 +12,7 @@ from agentic.runtime.serial_character import (
     build_serial_companion_proposal_prompts,
     validate_serial_companion_proposal,
 )
+from agentic.runtime.serial_ledger import is_final_episode
 
 
 def validate_serial_episode_idea(payload: Any) -> dict[str, str]:
@@ -35,6 +36,7 @@ def generate_serial_episode_idea(
     recap_text: str = "",
     ledger_text: str = "",
     roster_text: str = "",
+    episode_number: int,
 ) -> dict[str, str]:
     normalized_mode = str(automation_mode or "").strip().lower()
     if normalized_mode not in {"new", "continue"}:
@@ -43,7 +45,11 @@ def generate_serial_episode_idea(
     prior_context = str(story_context or "").strip()
     if normalized_mode == "continue" and not prior_context:
         raise ValueError("Continuation generation requires the latest approved story context.")
-    if normalized_mode == "continue":
+    final_episode = normalized_mode == "continue" and is_final_episode(episode_number)
+    if final_episode:
+        context_label = "Approved series treatment and latest human-approved continuity state (untrusted reference data)"
+        mode_instruction = "This is the FINAL episode of a series that is only a few minutes long. Continue from the goal the last episode handed on, resolve every open thread from the ledger including the standing question, and give the protagonist a clear, satisfying result; the closing image is a resolution, not a hook. Preserve continuing character, relationship, clue, prop, and scene facts."
+    elif normalized_mode == "continue":
         context_label = "Approved series treatment and latest human-approved continuity state (untrusted reference data)"
         mode_instruction = "Continue the series with the next episode as a causal consequence of the last one: start from the goal the last episode handed on, advance at least one open thread from the ledger, and change one visible state (a relationship, a belief, a possession, or a place) that the next episode will have to live with. The episode must follow from the previous episode by 'therefore' or 'but', never by 'meanwhile'. Preserve continuing character, relationship, clue, prop, and scene facts unless this episode visibly changes them. Keep the fixed character recognizable. Do not conclude the series or answer its standing question."
     elif prior_context:
@@ -68,7 +74,13 @@ def generate_serial_episode_idea(
             ),
             *(["Open threads the series still owes viewers (untrusted reference data):", ledger] if ledger else []),
             *(["Recurring characters you may bring back (untrusted reference data):", roster] if roster else []),
-            "Create a short-form animated story that can be split into continuous video segments. It needs an immediate visual hook, a clear physical goal, a surprising change or escalation, a small visible result, and a closing hook: an unanswered question or surprising final image that makes viewers want the next episode. Avoid generic scenery-only scenes and near-duplicate actions.",
+            "Create a short-form animated story that can be split into continuous video segments. It needs an immediate visual hook, a clear physical goal, a surprising change or escalation, a small visible result, and "
+            + (
+                "a closing image that resolves the series."
+                if final_episode
+                else "a closing hook: an unanswered question or surprising final image that makes viewers want the next episode."
+            )
+            + " Avoid generic scenery-only scenes and near-duplicate actions.",
             "Return exactly two fields: topic in natural Traditional Chinese, concise enough for a social post title; premise in natural English, one concrete paragraph suitable for H3 visual story planning.",
         ]
     )

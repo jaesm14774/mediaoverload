@@ -6,13 +6,13 @@
 
 新系列沿用命令列選定的角色作為主角。連載是一部會一直演下去的連續劇，不是有結局的單篇故事：
 
-- **長期懸念**：整部劇有一個單集內解不開的問題或心願，前三集不會被解決。
-- **每集約一分鐘**：每集是一個看得懂的完整小故事，有自己的小目標、麻煩和小結果，同時把長期懸念推進一小步。
+- **長期懸念**：整部劇有一個單集內解不開的問題或心願，要到第 7 集（最後一集）才會被收掉。
+- **每集 30 到 40 秒**：每集是一個看得懂的完整小故事，有自己的小目標、麻煩和小結果，同時把長期懸念推進一小步。
 - **鉤子**：每集結尾留一個尚未回答的小問題或意外畫面，讓人想看下一集；單集內不得完成主角的最終目標。
-- **每集是上一集的後果**：故事只寫前三集的場景和動作，不寫結局。每一集都要用「因此」或「但是」接上上一集交出的目標，並留下一個看得見的改變（關係、知情內容、持有物或地點）。下一集的提案收到的是已播出集數的摘要與交給下一集的目標、系列還欠觀眾的線索，而不是要它換題材，所以續集是接下去演，不是重演。詳見下方「連續性：線索帳本與常駐角色」。
+- **每集是上一集的後果**：故事只寫開頭幾集的場景和動作，最後一集由故事規劃收尾。每一集都要用「因此」或「但是」接上上一集交出的目標，並留下一個看得見的改變（關係、知情內容、持有物或地點）。下一集的提案收到的是已播出集數的摘要與交給下一集的目標、系列還欠觀眾的線索，而不是要它換題材，所以續集是接下去演，不是重演。詳見下方「連續性：線索帳本與常駐角色」。
 - **新聞只是入口**：只借一種情緒或小難題，不使用新聞中的國家、地名、機構或真實人物。
 
-預設 `simple` 複雜度保持單集簡單；想要較大的事件規模與角色成長時選 `cinematic`，但單集仍是一分鐘內的完整小故事。`episodes_per_run` 只限制單次執行製作幾集，不限制總集數；要結束系列請在最終審核按「完成系列並發布本集」。
+預設 `simple` 複雜度保持單集簡單；想要較大的事件規模與角色成長時選 `cinematic`，但單集仍是 40 秒內的完整小故事。系列最多 7 集（每集至多 40 秒，全系列不超過五分鐘）；`episodes_per_run` 只限制單次執行製作幾集。第 7 集由故事規劃收掉主線，創作者接受後系列自動標為 completed；中途想提早結束，仍可在最終審核按「完成系列並發布本集」。
 
 從 repo 根目錄啟動完整流程：
 
@@ -290,11 +290,11 @@ finally:
 
 ## 片長與 H3 段落
 
---duration-seconds 是整集目標片長，預設 60 秒（消費端上限約 3 至 5 分鐘，先做一分鐘左右）。每集用最少的 H3 片段涵蓋：單段最長約 15 秒，所以 60 秒是 4 段、30 秒是 2 段、15 秒是 1 段。片段越少，接力次數越少，角色跑位累積得越少。每多一段，就多一次 H3 生成、技術 QA、Discord 人工接受與尾幀銜接。節拍數等於片段數：本集大綱會寫出同樣數量的節拍，分段編劇逐段只演自己的那一拍，最後一段演完小結果後接上鉤子。
+--duration-seconds 是整集目標片長，預設 30 秒，上限 40 秒（超過會在啟動時被拒絕）。連載是短短劇，約為真正電視劇的十分之一到二十分之一：每個片段固定 10 秒、只演一拍，所以 30 秒是 3 段、40 秒是 4 段。系列最多 7 集，全系列不超過五分鐘，最後一集要把主線收掉。片段越少，接力次數越少，角色跑位累積得越少。每多一段，就多一次 H3 生成、技術 QA、Discord 人工接受與尾幀銜接。節拍數等於片段數：本集大綱每拍約 40 字、只寫鏡頭拍得到的動作，分段編劇逐段只演自己的那一拍，最後一段演完小結果後接上鉤子（最後一集改為收尾）。每段的動作寫成三個分秒節拍（0.00-3.00 s、3.00-6.50 s、6.50-10.00 s，約 60 到 90 字），主要追逐或大動作在約 4 秒前開始，需要被看見的變化寫成具體畫面；鏡頭由編劇依節拍規劃（追逐用貼地橫向跟拍、情緒轉折用臉部特寫、揭露可用最多三個預先規劃的切換，不用推近或變焦），沒有鏡頭計畫時才退回單一固定鏡頭。量測與限制見 `docs/minimax_h3_prompting.md`。
 
 ## 系列畫風鎖定
 
-每個系列第一次需要畫布與插畫風格時，由系列 ID 作種子，從角色 `generation.creative_profile.style.model` 指定模型的 `configs/styles/<model>.yaml` 的 `enabled` 風格抽一個（畫布取自 `generation.creative_profile.canvas`），並把結果存成該系列資料夾的 `look.json`。之後所有角色參考圖和每一集都讀這份存檔，不再重抽；之後在挑選頁增刪風格或改畫布權重，都不影響已有系列。串連載命令列的 `--style`、`--width`、`--height` 在連載路徑上會被系列畫風覆蓋。直接執行 `python -m agentic.app.main` 時，未傳 `--duration-seconds` 的預設仍是 30 秒；60 秒預設只適用於經角色 YAML 啟動的流程。
+每個系列第一次需要畫布與插畫風格時，由系列 ID 作種子，從角色 `generation.creative_profile.style.model` 指定模型的 `configs/styles/<model>.yaml` 的 `enabled` 風格抽一個（畫布取自 `generation.creative_profile.canvas`），並把結果存成該系列資料夾的 `look.json`。之後所有角色參考圖和每一集都讀這份存檔，不再重抽；之後在挑選頁增刪風格或改畫布權重，都不影響已有系列。串連載命令列的 `--style`、`--width`、`--height` 在連載路徑上會被系列畫風覆蓋。直接執行 `python -m agentic.app.main` 時，未傳 `--duration-seconds` 的預設同為 30 秒，時長必須是 10、20、30 或 40 秒（整數個 10 秒片段，最長 40 秒）。
 
 模型沒有對應的 `configs/styles/<model>.yaml`、`enabled` 列出不存在的風格 ID、或缺少畫布時，啟動連載的設定檢查就會報錯，不會等到故事與角色卡審核之後。
 
@@ -304,10 +304,10 @@ finally:
 
 參考圖不是通用的官方設定圖。角色卡要依故事設計這個系列專屬的造型（來自故事的世界與處境，跨集固定），並把主角性格演在預設神情上：眼神有焦點、看向某個對象，眉眼、嘴角、重心都在說牠想要什麼。提示詞不再要求「中性表情」或「不加任何配件」，那兩條會讓指定卡比的每個系列都畫成同一隻置中、超大、呆望鏡頭的標準卡比。圖片生成器只讀角色卡「角色參考圖提示：」之後的單一段落，所以外觀錨點、專屬造型與預設神情都要寫在這一段；取景、視角、背景與大小由系統決定，卡片不寫。預設神情會隨參考圖進入每集首段，各集再依劇情改變表情與動作。已鎖定的舊系列仍沿用舊參考圖，需另行決定是否重做。
 
-例如 60 秒：
+例如 30 秒：
 
 ~~~powershell
-python -m agentic.app.main --goal "Kirby guides a lost firefly home with the star flower." --episode-topic "星花引路，陪迷路火螢回家" --media-type long_video --duration-seconds 60 --serial-mode --series-id kirby-continuity-20261024 --character Kirby --output-dir "agentic/output/kirby_continuity_20261024" --execute
+python -m agentic.app.main --goal "Kirby guides a lost firefly home with the star flower." --episode-topic "星花引路，陪迷路火螢回家" --media-type long_video --duration-seconds 30 --serial-mode --series-id kirby-continuity-20261024 --character Kirby --output-dir "agentic/output/kirby_continuity_20261024" --execute
 ~~~
 
 ## 從既有入口自動產生連載
@@ -320,12 +320,12 @@ python run_media_interface.py --character kirby --generation-type serial_video
 
 不指定 `--generation-type` 時，入口會依角色 YAML 的 `generation.generation_type_weights` 隨機選策略。Kirby 的 `serial_video` 權重為 3；若抽中連載，會直接交給同一個連載 runner，執行故事、角色與首集大綱的 Discord 審核，再接續影片流程。審核遭拒、逾時或生成失敗時，入口會回報 blocked／failed，不會假裝整個流程成功。
 
-預設 `simple` 是連載短劇模式：全系列沒有預設結局，由創作者按「完成系列並發布本集」收尾；每集是一件小事、最多兩位常駐角色和簡單結果，單集最多一個小反轉；分集路線沒有三集上限，且會把人審核准的狀態和線索帳本帶到下一集。要提高故事層次時可加 `--story-complexity cinematic`；也能在角色 YAML 的 `generation.serial_video.story_complexity` 設定預設值。`episodes_per_run` 控制一次生成的集數，和故事規劃集數分開。
+預設 `simple` 是連載短劇模式：全系列最多 7 集，第 7 集收掉主線，創作者也可提早按「完成系列並發布本集」收尾；每集是一件小事、最多兩位常駐角色和簡單結果，單集最多一個小反轉；分集路線以 7 集為上限，且會把人審核准的狀態和線索帳本帶到下一集。要提高故事層次時可加 `--story-complexity cinematic`；也能在角色 YAML 的 `generation.serial_video.story_complexity` 設定預設值。`episodes_per_run` 控制一次生成的集數，和故事規劃集數分開。
 
-Kirby 預設每次跑一集、每集 60 秒。想一次連跑五集、每集 90 秒：
+Kirby 預設每次跑一集、每集 30 秒。想一次連跑三集、每集 40 秒（上限）：
 
 ~~~powershell
-python run_media_interface.py --character kirby --generation-type serial_video --serial-episodes 5 --duration-seconds 90
+python run_media_interface.py --character kirby --generation-type serial_video --serial-episodes 3 --duration-seconds 40
 ~~~
 
 也可以在 `configs/characters/kirby.yaml` 的 `generation.serial_video` 設定預設值：
@@ -333,7 +333,7 @@ python run_media_interface.py --character kirby --generation-type serial_video -
 ~~~yaml
 serial_video:
   enabled: true
-  default_duration_seconds: 60
+  default_duration_seconds: 30
   episodes_per_run: 1
   story_complexity: simple
   output_dir: output
@@ -345,7 +345,7 @@ serial_video:
 
 每集送 Discord 審核、核准狀態並完成發布流程後，才會開始下一集。自動策略先查找目前格式的最新未完成集並從該集恢復：已接受的片段會重用，第一段就失敗時則從第一段重做。若片段審核逾時或失敗，這次連跑立即停止，資料庫把該集標為 blocked。若執行被強制中斷（程式被關閉、當機、斷電），該集會停在 rendering 或 planned；超過 2 小時沒有任何寫入就視為被中斷，和 blocked 一樣被恢復，不會變成永遠選不到的孤兒系列。2 小時內仍有寫入的 rendering／planned 集視為另一個執行中的 run，不會被重複生成。下次啟動會先恢復符合目前格式的待處理集，不會先抽新系列或下一集。沒有待重試集時，符合條件的舊系列會依 `generation.serial_video.series_selection_weights` 隨機選擇新系列或續集；若續集尚無下一集大綱，系統會先依完整故事路線和人審核准狀態產生大綱，等待 Discord 接受後才產片。若沒有符合條件的舊系列，系統會建立新系列並在同一次執行中等待 Discord 核准故事、角色與首集分鏡，再接續產片。權重預設 `new: 0.5`、`continue: 0.5`，可在角色 YAML 中調整。completed 和 discarded 系列不會被當成新續集候選；completed 系列若有尚未完成的發布失敗，允許重試該集。
 
-使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加約 15 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
+使用 `--prompt` 可提供新系列故事草稿的想法；選到既有系列時，它會作為本集方向。後續集數仍由自動故事規劃產生。CLI 的 `--duration-seconds` 會覆蓋 YAML 預設，片長每增加 10 秒就會多一次 H3 render、技術 QA、Discord 片段審核和尾幀銜接。新系列的角色參考圖在故事核准後產生並由創作者挑選核准，無須預先設定固定身份圖。
 
 每張首輪候選圖依角色卡「角色參考圖提示」段落（外觀錨點、專屬造型、預設神情）生成：單一角色、正面略帶四分之三角度、完整入鏡、置中、四周留白、素色背景，使用該系列鎖定的畫風。Discord 審核時對照輪廓、臉部或頭部特徵、配色、服裝或身體表面和標誌細節，只接受完全符合的一張；若候選圖都不符合就拒絕，避免把錯誤設計鎖成後續各集的身份參考。接受後，選定圖片的 SHA-256 會和角色卡一起保存。
 
