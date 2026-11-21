@@ -26,6 +26,7 @@ from agentic.runtime.registry import SkillRegistry, ToolRegistry
 from agentic.runtime.story_service import NativeH3StoryService
 from agentic.runtime.strategies import NON_NEWS_NATIVE_STORY_TYPES
 from agentic.runtime.serial_video import store_from_constraints
+from agentic.skills.news_fusion import register_news_fusion_skills
 from agentic.skills.shared import build_run_dir, slug_path_component
 from agentic.storyboard import (
     format_native_h3_keyframe_prompt,
@@ -1055,6 +1056,12 @@ def register_longvideo_skills(
     output_root: Path,
     story_service: NativeH3StoryService | None = None,
 ) -> None:
+    register_news_fusion_skills(
+        skill_registry,
+        tool_registry,
+        output_root,
+        llm_engine=story_service.llm_engine if story_service else None,
+    )
     skills = LongVideoSkills(
         tool_registry,
         output_root,
