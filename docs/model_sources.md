@@ -32,18 +32,19 @@
 
 以上資產供 `flux3_image_klein_img2img.json` 使用；工作流包含 prompt upsampler，並需要 CLIPLoader 支援 `flux3` 類型的 ComfyUI（已在 0.41.0 測試）。該 Hugging Face 儲存庫需要符合其存取條件，使用與商業輸出須遵守 FLUX Kommunity License v1；詳見 [`workflow_config.yaml`](../configs/workflow/workflow_config.yaml)。FLUX Klein 產生靜態圖片，影片仍由 H3 工作流生成。
 
-## MiniMax FastH3（T2VA、I2VA、FL2VA、L2VA）
+## MiniMax pi-H3（T2VA、I2VA、FL2VA、L2VA）
 
-模型頁：[FastVideo-FastH3-Comfy](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy)
+模型頁：[Lakonik/pi-H3](https://huggingface.co/Lakonik/pi-H3)（2／4 步 DWD adapter）、[Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)（基礎模型）。ComfyUI 節點：[ComfyUI-piFlow](https://github.com/Lakonik/ComfyUI-piFlow)（`git clone` 到 `custom_nodes`）與 [Spark-H3](https://github.com/zechengtang/Spark-H3/releases)（取 Windows、`sm89`、`cu130` 壓縮檔解到 `custom_nodes`，再用 ComfyUI 自己的 Python 執行 `install.py`，並核對 `SHA256SUMS.txt`）。
 
 | 資產 | ComfyUI 目錄 | 下載網址 |
 |---|---|---|
-| `fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors` | `ComfyUI/models/diffusion_models` | [Hugging Face 檔案](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors) |
+| `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | `ComfyUI/models/diffusion_models` | [Hugging Face 檔案](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors) |
+| `pi_h3_2step_dwd_adapter_int8_convrot.safetensors` | `ComfyUI/models/loras` | [Hugging Face 檔案](https://huggingface.co/Lakonik/pi-H3/resolve/main/pi_h3_2step_dwd_adapter_int8_convrot.safetensors) |
 | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | `ComfyUI/models/text_encoders` | [Hugging Face 檔案](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors) |
 | `minimax_h3_video_vae_fp16.safetensors` | `ComfyUI/models/vae` | [Hugging Face 檔案](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors) |
 | `minimax_h3_audio_vae_fp32.safetensors` | `ComfyUI/models/vae` | [Hugging Face 檔案](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors) |
 
-這些資產供 `minimax_h3_t2va.json`、`minimax_h3_i2va.json`、`minimax_h3_fl2va.json` 與 `minimax_h3_l2va.json` 使用。FastH3 是 8 步蒸餾模型，只能在 8 步下執行；兩個 VAE 同時供 Ref2VA 使用。
+這些資產供 `minimax_h3_t2va.json`、`minimax_h3_i2va.json`、`minimax_h3_fl2va.json` 與 `minimax_h3_l2va.json` 使用。pi-H3 adapter 是 2 步蒸餾，只能在 2 步下執行；兩個 VAE 同時供 Ref2VA 使用。
 
 權重受 MiniMax H3 Community License 約束（部分地區不得使用），商業使用前請先閱讀其條款。
 

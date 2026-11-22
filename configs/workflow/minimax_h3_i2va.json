@@ -2,11 +2,11 @@
   "1": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors",
+      "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "weight_dtype": "default"
     },
     "_meta": {
-      "title": "FastH3 V2 8-step diffusion (int8 ConvRot)"
+      "title": "MiniMax H3 FL2VA base (int8 ConvRot)"
     }
   },
   "2": {
@@ -62,10 +62,10 @@
   "6": {
     "inputs": {
       "model": [
-        "1",
+        "22",
         0
       ],
-      "shift_video": 10.0,
+      "shift_video": 12.0,
       "shift_audio": 3.0
     },
     "class_type": "MiniMaxH3SigmaShift",
@@ -74,23 +74,24 @@
     }
   },
   "7": {
-    "class_type": "BasicScheduler",
+    "class_type": "pi-Flow Scheduler",
     "inputs": {
       "model": [
         "21",
         0
       ],
-      "scheduler": "simple",
-      "steps": 8,
-      "denoise": 1.0
+      "steps": 2,
+      "min_raw_t": 0.0,
+      "max_raw_t": 0.93,
+      "final_step_size_scale": 0.6
     },
     "_meta": {
-      "title": "H3 8-step scheduler"
+      "title": "pi-H3 2-step scheduler"
     }
   },
   "8": {
     "inputs": {
-      "sampler_name": "res_multistep"
+      "sampler_name": "euler"
     },
     "class_type": "KSamplerSelect",
     "_meta": {
@@ -151,19 +152,15 @@
     }
   },
   "12": {
+    "class_type": "DWD Decode",
     "inputs": {
       "samples": [
         "11",
         0
-      ],
-      "vae": [
-        "3",
-        0
       ]
     },
-    "class_type": "VAEDecode",
     "_meta": {
-      "title": "H3 video decode"
+      "title": "DWD pixel decode (no video VAE decode)"
     }
   },
   "13": {
@@ -215,38 +212,47 @@
       "title": "Save Kirby H3 video"
     }
   },
-  "20": {
-    "class_type": "ModelAttentionBackend",
+  "21": {
+    "class_type": "MiniMaxH3SparkAttentionSM89",
     "inputs": {
       "model": [
         "6",
         0
       ],
-      "attention": "comfy kitchen attention"
+      "mode": "speed",
+      "steps": 2,
+      "warmup_mode": "warmup_ratio",
+      "warmup_ratio": 0.0,
+      "warmup_steps": 4,
+      "topk_mode": "topk_ratio",
+      "topk_ratio": 0.2,
+      "topk_blocks": 228,
+      "dense_layers": 0,
+      "min_tokens": 12288,
+      "strict": true,
+      "dense_backend": "inherit",
+      "tail_granularity": "query",
+      "reblock_layout": "q_reuse_k",
+      "sparse_scope": "target-video",
+      "producer_chunk": 16384,
+      "chunk_path": "none"
     },
     "_meta": {
-      "title": "Attention backend"
+      "title": "Spark sparse attention for RTX 40 series (SM89)"
     }
   },
-  "21": {
-    "class_type": "BlockSparseAttention",
+  "22": {
+    "class_type": "Load LakonLab Adapter",
     "inputs": {
       "model": [
-        "20",
+        "1",
         0
       ],
-      "selection": "vsa",
-      "selection.keep_percent": 10.0,
-      "start_percent": 0.2,
-      "end_percent": 1.0,
-      "dense_blocks": "",
-      "min_tokens": 12288,
-      "extra_tokens": 256,
-      "sink_conditioning": "exact_kv_and_rows",
-      "verbose": false
+      "adapter_name": "pi_h3_2step_dwd_adapter_int8_convrot.safetensors",
+      "adapter_strength": 1.0
     },
     "_meta": {
-      "title": "VSA keep 10% (FastH3)"
+      "title": "pi-H3 2-step DWD adapter"
     }
   }
 }

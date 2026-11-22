@@ -41,16 +41,59 @@ def test_user_given_an_h3_mode_when_prepared_then_its_prompt_and_conditioning_co
     refs = [key for key in inputs if key.startswith("ref_images.")]
     assert len(refs) == (2 if mode == "ref2va" else 0)
     assert all("audio" not in key for key in inputs if key.startswith("ref_"))
-    # Every H3 route is distilled and only valid at its trained 8-step schedule.
-    assert graph["7"]["class_type"] == "BasicScheduler"
-    assert graph["7"]["inputs"]["steps"] == 8
-    assert evidence["steps"] == 8
+    # Every H3 route is distilled and only valid at its trained schedule.
+    assert graph["7"]["inputs"]["steps"] == evidence["steps"] == (8 if mode == "ref2va" else 2)
     if mode == "ref2va":
+        assert graph["7"]["class_type"] == "BasicScheduler"
         assert "Ref2VA" in graph["1"]["inputs"]["unet_name"]
         assert "Q2_K" in graph["2"]["inputs"]["clip_name"]
         assert [ref["path"] for ref in evidence["reference_manifest"]] == [str(first), str(last)]
     else:
-        assert "fasth3" in graph["1"]["inputs"]["unet_name"]
+        assert graph["7"]["class_type"] == "pi-Flow Scheduler"
+        assert "fl2va_pruned_int8_convrot" in graph["1"]["inputs"]["unet_name"]
+
+
+@pytest.mark.parametrize("mode", ["t2va", "i2va", "fl2va", "l2va"])
+def test_user_given_a_pi_h3_mode_when_prepared_then_two_step_adapter_and_pixel_decode_replace_the_vae_decode(
+    tmp_path: Path, mode: str
+):
+    """User Given a text, first-frame, last-frame or both request When the render graph is prepared Then the base model is patched by the 2-step pi-H3 adapter, sampled in 2 steps, and the video pixels come straight from the sampler without the video VAE decoder."""
+    registry = AssetRegistry(REPO)
+    template = registry.load_workflow_template(registry.get_manifest(mode_contract(mode).workflow_name))
+    frame = tmp_path / "frame.png"
+    Image.new("RGB", (608, 352), "green").save(frame)
+    payload = {"prompt": "A hero jumps.", "seed": 3}
+    if mode in {"i2va", "fl2va"}:
+        payload["image_path"] = str(frame)
+    if mode in {"l2va", "fl2va"}:
+        payload["last_image_path"] = str(frame)
+    graph, evidence = build_h3_workflow(template, mode, payload)
+
+    def upstream(node_id: str) -> list[str]:
+        """class_type of every node feeding `node_id`, nearest first."""
+        seen, order, queue = set(), [], [node_id]
+        while queue:
+            current = queue.pop(0)
+            for value in graph[current]["inputs"].values():
+                if isinstance(value, list) and value[0] not in seen:
+                    seen.add(value[0])
+                    order.append(graph[value[0]]["class_type"])
+                    queue.append(value[0])
+        return order
+
+    classes = {node["class_type"] for node in graph.values()}
+    assert "DWD Decode" in classes and "VAEDecode" not in classes
+    adapter = next(node for node in graph.values() if node["class_type"] == "Load LakonLab Adapter")
+    assert "2step_dwd" in adapter["inputs"]["adapter_name"]
+    sampler = next(node_id for node_id, node in graph.items() if node["class_type"] == "SamplerCustomAdvanced")
+    # The adapter patches the base model before it reaches the sampler, and the video comes from the sampler output.
+    assert {"UNETLoader", "Load LakonLab Adapter"} <= set(upstream(sampler))
+    save_chain = upstream(next(n for n, node in graph.items() if node["class_type"] == "SaveVideo"))
+    assert "DWD Decode" in save_chain and "SamplerCustomAdvanced" in save_chain
+    spark = next(node for node in graph.values() if node["class_type"].startswith("MiniMaxH3SparkAttention"))
+    assert spark["inputs"]["steps"] == evidence["steps"] == 2
+    assert {item["name"] for item in evidence["required_assets"]} >= {
+        adapter["inputs"]["adapter_name"], graph["1"]["inputs"]["unet_name"]}
 
 
 def test_user_given_ref2va_when_prepared_then_the_8_step_turbo_lora_sits_between_the_model_and_the_sampler(
@@ -97,7 +140,7 @@ def test_user_given_ref2va_when_a_different_step_count_is_requested_then_it_is_r
 def test_user_given_a_distilled_h3_mode_when_a_different_step_count_or_profile_is_requested_then_it_is_rejected(
     tmp_path: Path, mode: str
 ):
-    """User Given the 8-step distilled H3 route When another step count or a GGUF profile is requested Then the request is rejected instead of silently degrading quality."""
+    """User Given the 2-step distilled pi-H3 route When another step count or a GGUF profile is requested Then the request is rejected instead of silently degrading quality."""
     registry = AssetRegistry(REPO)
     template = registry.load_workflow_template(registry.get_manifest(mode_contract(mode).workflow_name))
     frame = tmp_path / "frame.png"
@@ -106,11 +149,11 @@ def test_user_given_a_distilled_h3_mode_when_a_different_step_count_or_profile_i
     base = {key: value for key, value in base.items()
             if (key == "prompt") or (key == "image_path" and mode in {"i2va", "fl2va"})
             or (key == "last_image_path" and mode in {"l2va", "fl2va"})}
-    for override in ({"steps": 16}, {"model_profile": "q4"}):
+    for override in ({"steps": 8}, {"steps": 16}, {"model_profile": "q4"}):
         with pytest.raises(ValueError, match="distilled"):
             build_h3_workflow(template, mode, {**base, **override})
-    graph, _ = build_h3_workflow(template, mode, {**base, "steps": 8})
-    assert graph["7"]["inputs"]["steps"] == 8
+    graph, _ = build_h3_workflow(template, mode, {**base, "steps": 2})
+    assert graph["7"]["inputs"]["steps"] == 2
 
 
 def test_user_given_a_reference_video_when_preparing_ref2va_then_digest_is_deferred_until_upload(tmp_path: Path):

@@ -6,7 +6,7 @@
 
 1. **每個 job 內部大多已經是「同模型先做完再換」**。真正反覆來回換的只有兩處：
    - `news_fusion_story`：Krea → Klein → H3 → Klein → H3 → Klein → H3，3 個 beat 有 6 次家族切換，5 個 beat 有 10 次。依賴圖允許重排成固定 4 次，但實測（見「實測結果」）在這台機器上切換只花 0 到 6 秒，重排沒有可量測的加速，所以沒有採用。
-   - `serial_video`：每集 Ref2VA（第 1 段）→ FastH3（第 2..N 段），下一集又回 Ref2VA。每集至少 2 次切換，7 集的系列約 13 次。依賴鏈限制，**無法用重排解決**，只能靠 A/B 決定是否改配方（見下）。
+   - `serial_video`：每集 Ref2VA（第 1 段）→ pi-H3（第 2..N 段），下一集又回 Ref2VA。每集至少 2 次切換，7 集的系列約 13 次。依賴鏈限制，**無法用重排解決**，只能靠 A/B 決定是否改配方（見下）。
 2. **跨 job 批次化目前不值得做**。scheduler 是單執行緒、一次一個 job（`scheduler/scheduler.py:254-256`），目前環境檔設為每 1 小時一次（`SCHEDULER_INTERVAL_HOURS=1`，程式預設值是 4）。一個 job 在 H3 上就花數十分鐘，job 之間多一次切換相對很小。串行劇集還因為人工審核與 ledger 而不能並行（見提案 B）。手動連跑多個策略（例如 A/B 比較）時，把只用 Krea 的策略排在一起即可，不需要程式支援。
 3. **ComfyUI 端的佇列排序幫不上忙**。runner 每次只送一個 `/prompt` 並等它完成（`runner.py:56-143`、`comfy_backend.py:101-115`），ComfyUI 的 `front` / `number` 優先級無事可排。排程必須在 planner 端做。
 4. **不要在家族之間呼叫 `/free`**。Dynamic VRAM 本來就按「最近載入者優先」自行驅逐，`docs/krea2_comfyui_best_practice.md:51-65` 也已有同樣結論。
@@ -22,7 +22,7 @@ ComfyUI 新版預設啟用 Dynamic VRAM（aimdo）。權重以檔案映射（mma
 
 ## 每個策略的家族順序與切換次數
 
-「家族」＝同一組模型檔。H3 的 `t2va / i2va / fl2va / l2va` 四個 workflow 的 UNET、CLIP、VAE 檔名與載入參數完全相同（已逐一核對），所以 FastH3 內部換 workflow 不算切換。`Ref2VA` 用不同的 UNET（GGUF）、不同的 32B 文字編碼器檔、再加一個 LoRA，與 FastH3 是兩個家族。
+「家族」＝同一組模型檔。H3 的 `t2va / i2va / fl2va / l2va` 四個 workflow 的 UNET、adapter、CLIP、VAE 檔名與載入參數完全相同（已逐一核對），所以 pi-H3 內部換 workflow 不算切換。`Ref2VA` 用不同的 UNET（GGUF）、不同的 32B 文字編碼器檔、再加一個 LoRA，與 pi-H3 是兩個家族。
 
 「現況切換次數」只算一個 job 內相鄰 GPU 送件的家族變化，不含人工審核等待。
 
@@ -37,7 +37,7 @@ ComfyUI 新版預設啟用 Dynamic VRAM（aimdo）。權重以檔案映射（mma
 | native_h3_fl2va_story | Krea ×6 → Klein ×6 → H3 | 2 | 2 | 不動：結尾幀依賴審核後的開場幀 |
 | native_h3_l2va_story | Krea ×1 → Klein ×6 → H3 | 2 | 2 | 不動 |
 | **news_fusion_story** | Krea → Klein → H3 → Klein → H3 → Klein → H3 | **2N**（N 為 beat 數；3 個 beat＝6，5 個＝10） | **4** | **重排節點順序** |
-| **serial_video** | 每集 Ref2VA → FastH3 ×（N-1）；下一集再 Ref2VA | 每集 2 | 每集 2 | 配方 A/B（可選） |
+| **serial_video** | 每集 Ref2VA → pi-H3 ×（N-1）；下一集再 Ref2VA | 每集 2 | 每集 2 | 配方 A/B（可選） |
 
 另兩點屬於「單一 workflow 內部」：
 
@@ -93,13 +93,13 @@ concat → QA → GIF
 
 事實（皆已核對程式碼）：
 
-- 第 1 段固定走 Ref2VA，第 2..N 段固定走 FastH3 i2va（`long_video.py:78`；`workflow_config.yaml:118-122, 198-206`）。
+- 第 1 段固定走 Ref2VA，第 2..N 段固定走 pi-H3 i2va（`long_video.py:78`；`workflow_config.yaml:118-122, 198-206`）。
 - 第 k 集第 1 段需要第 k-1 集已組裝完成的結尾幀當 `continuation` 參考（`serial_video.py:1842-1884`、`1952-1957`），且每段都要人工驗收才能做下一段。所以**不能把多集的第 1 段集中先渲**。
 - 每段驗收時 runner 被 Discord 審核阻塞，ComfyUI 閒置（`discord_review_view.py:817`）。這是閒置，不是換模型。
 
 可能的槓桿，都需要先證明品質不掉：
 
-1. 第 1 段改用 FastH3 i2va，以上一集結尾幀當首幀，則整個系列只用一個 H3 家族，每集省 2 次切換。代價是失去 Ref2VA 的多參考身份綁定，**需要盲測**（做成單頁、勾選投票的 HTML，不要給零散的影片檔）。
+1. 第 1 段改用 pi-H3 i2va，以上一集結尾幀當首幀，則整個系列只用一個 H3 家族，每集省 2 次切換。代價是失去 Ref2VA 的多參考身份綁定，**需要盲測**（做成單頁、勾選投票的 HTML，不要給零散的影片檔）。
 2. 兩個 32B 文字編碼器是不同量化檔（Q4_K_M GGUF 與 NVFP4 AWQ）。若兩者可互換，CLIP 就能共用；程式碼目前刻意把 `model_profile` 限定在 Ref2VA（`comfy_h3.py:131-135`），不確定能否互換，要先驗證。
 
 兩項都不是「重排」，而是產品決策，我不建議沒有 A/B 資料就動。
@@ -149,7 +149,7 @@ concat → QA → GIF
 
 結論：**在這台機器、這個條件下，news_fusion 的重排沒有帶來可量測的加速**，切換不是瓶頸。這個重排正確、有測試，但新增了「接縫失敗要等 N 個 clip 跑完才發現」的代價（見提案 A 的副作用），收益不夠抵銷時應還原。
 
-這個量測沒有涵蓋：RAM 被其他程式吃掉、作業系統快取被擠掉時的切換成本；`serial_video` 的 Ref2VA 與 FastH3 互換（兩個不同的 32B 文字編碼器檔）；`nova-anime-xl` 一張圖載入三個 SDXL checkpoint 的情形。這三處的成本可能比上面大，需要各自量。
+這個量測沒有涵蓋：RAM 被其他程式吃掉、作業系統快取被擠掉時的切換成本；`serial_video` 的 Ref2VA 與 pi-H3 互換（兩個不同的 32B 文字編碼器檔）；`nova-anime-xl` 一張圖載入三個 SDXL checkpoint 的情形。這三處的成本可能比上面大，需要各自量。
 
 ## 實作順序（照 AGENTS.md「分層成長」）
 

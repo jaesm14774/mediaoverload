@@ -18,14 +18,15 @@ from typing import Any
 from PIL import Image
 
 from agentic.assets.minimax_h3 import (
-    FASTH3_DIFFUSION,
-    FASTH3_TEXT_ENCODER,
-    H3_STEPS,
+    H3_TEXT_ENCODER,
+    PIH3_ADAPTER,
+    PIH3_DIFFUSION,
     REF2VA_DIFFUSION,
     REF2VA_TEXT_ENCODERS,
     REF2VA_TURBO_LORA,
     h3_requirements,
-    uses_fasth3,
+    h3_steps,
+    uses_pih3,
 )
 from agentic.assets.registry import AssetRegistry, AssetRequirement, WorkflowManifest
 from agentic.h3_reference import build_reference_lineage, normalize_reference_manifest
@@ -108,6 +109,8 @@ def _file_evidence(path: str, role: str) -> dict[str, Any]:
 
 
 REF2VA_LORA_NODE = "16"  # the LoraLoaderModelOnly node in configs/workflow/minimax_h3_ref2va.json
+PIH3_ADAPTER_NODE = "22"  # the "Load LakonLab Adapter" node in the t2va/i2va/fl2va/l2va templates
+PIH3_ATTENTION_NODE = "21"  # the Spark sparse-attention node there; it must run the sampler's step count
 
 
 def build_h3_workflow(template: dict[str, Any], mode: str | H3Mode,
@@ -122,20 +125,22 @@ def build_h3_workflow(template: dict[str, Any], mode: str | H3Mode,
     if not (256 <= width <= 1344 and 256 <= height <= 1344):
         raise ValueError("H3 canvas dimensions must be between 256 and 1344")
     graph = json.loads(json.dumps(template))
-    # Every H3 checkpoint is distilled for exactly H3_STEPS; any other schedule silently degrades quality.
-    if payload.get("steps") not in (None, H3_STEPS):
-        raise ValueError(f"The distilled H3 route runs exactly {H3_STEPS} steps")
-    steps = H3_STEPS
+    # Every H3 route is distilled for exactly its trained step count; any other schedule silently degrades quality.
+    steps = h3_steps(mode.value)
+    if payload.get("steps") not in (None, steps):
+        raise ValueError(f"The distilled H3 route runs exactly {steps} steps")
     graph["7"]["inputs"]["steps"] = steps
-    if uses_fasth3(mode.value):
+    if uses_pih3(mode.value):
         if payload.get("model_profile"):
             raise ValueError(
-                "The distilled FastH3 route has a fixed text encoder; model_profile applies only to Ref2VA"
+                "The distilled pi-H3 route has a fixed text encoder; model_profile applies only to Ref2VA"
             )
         profile = None
         requirements = h3_requirements(mode.value)
-        graph["1"]["inputs"]["unet_name"] = FASTH3_DIFFUSION[0]
-        graph["2"]["inputs"]["clip_name"] = FASTH3_TEXT_ENCODER[0]
+        graph["1"]["inputs"]["unet_name"] = PIH3_DIFFUSION[0]
+        graph[PIH3_ADAPTER_NODE]["inputs"]["adapter_name"] = PIH3_ADAPTER[0]
+        graph[PIH3_ATTENTION_NODE]["inputs"]["steps"] = steps
+        graph["2"]["inputs"]["clip_name"] = H3_TEXT_ENCODER[0]
     else:
         profile = str(payload.get("model_profile") or "q4")
         requirements = h3_requirements(mode.value, profile)  # rejects an unknown profile

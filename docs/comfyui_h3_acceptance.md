@@ -2,7 +2,8 @@
 
 - User Given 既有角色生成策略與設定 When 建立執行計畫 Then 文生影、圖生影、首尾幀、尾幀、參考素材、長影片與動態貼圖都使用同一個 ComfyUI 服務，保留原本的節點依賴、審查、QA、編輯與發布政策。
 - User Given 完整的 H3 場景描述 When 從生成工具入口提交 Then 原始 prompt、seed、長寬與影片長度傳入 ComfyUI（Ref2VA 另含模型 profile）；不加入提示詞增強或其他生成引擎。
-- User Given 任一 H3 模式請求帶有非 8 的步數 When 提交 Then 在 GPU 提交前拒絕，因為所有 H3 模型都是 8 步蒸餾；T2VA、I2VA、FL2VA、L2VA 另外拒絕模型 profile。
+- User Given T2VA、I2VA、FL2VA 或 L2VA 請求帶有非 2 的步數、或 Ref2VA 請求帶有非 8 的步數 When 提交 Then 在 GPU 提交前拒絕，因為這些模型都是固定步數的蒸餾模型；T2VA、I2VA、FL2VA、L2VA 另外拒絕模型 profile。
+- User Given T2VA、I2VA、FL2VA 或 L2VA 請求 When 建立算圖 Then 基礎模型先經 2 步 pi-H3 adapter、以 2 步取樣，影像由 DWD 直接輸出而不經 video VAE 解碼。
 - User Given Ref2VA 請求 When 建立算圖 Then 8 步 turbo LoRA 接在擴散模型與 shift 之間（強度 1、video shift 6／audio shift 3、euler），且缺少該 LoRA 檔時在 GPU 提交前報錯。
 - User Given 文字、首圖、首尾圖、尾圖或參考素材 When 渲染對應 H3 模式 Then 各模式只接收其允許的條件，缺少必要素材或有無效 prompt 時在 GPU 提交前拒絕。
 - User Given 已審查的圖片或影片參考素材 When 執行 Ref2VA Then 保留素材順序與角色，使用 Ref2VA 模型，且不傳入參考音軌。

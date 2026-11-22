@@ -320,7 +320,7 @@ def build_long_video(context: PlanningContext, goal: GoalRequest) -> ExecutionPl
             "target_duration_seconds": segment_duration_seconds,
         }
         if recipe_name == "reference_bundle":
-            # Ref2VA keeps a selectable text-encoder profile; every H3 mode is a fixed 8-step distillation.
+            # Ref2VA keeps a selectable text-encoder profile; every H3 mode is a fixed-step distillation (pi-H3 2 steps, Ref2VA 8 steps).
             render_inputs["model_profile"] = str(
                 goal.constraints.get("longvideo_model_profile")
                 or goal.constraints.get("native_h3_model_profile")
