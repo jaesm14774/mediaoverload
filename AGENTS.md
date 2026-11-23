@@ -24,3 +24,9 @@
 - Prefer end-to-end tests that start at the user entry point and verify the visible result. Use lower-level tests only where an E2E test is unsuitable, and keep the boundary explicit. During iteration run the smallest focused scope affected by the change; run the full suite at integration, pre-merge, and release checkpoints. Report unrun external boundaries such as ComfyUI, GPU, LLM, or social providers instead of implying that local tests proved them.
 - Treat branch coverage as a diagnostic target, with `90%` as the default goal after behavior-oriented tests are sound. Investigate uncovered branches, especially failure paths, and document why important branches remain untested. Never add brittle or tautological tests merely to raise the percentage.
 - Enforce mechanical parts of these rules with lint or static checks where practical. Keep tests focused on business behavior and contracts that tooling cannot infer.
+
+## Documentation principles
+
+- Put each document in the one `docs/README.md` category that answers its question: architecture (what is true now), guide (how to do it), reference (what to look up), plans (what comes next). Never mix current fact and future plan in one page.
+- A behavior change is not done until the architecture page describing it is updated. When a plan lands, move its facts into architecture and delete the plan.
+- Every doc must be linked from `docs/README.md`, and every link in README or docs must resolve.

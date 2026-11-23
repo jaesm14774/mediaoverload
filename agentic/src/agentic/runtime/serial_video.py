@@ -21,7 +21,6 @@ from agentic.runtime.serial_character import MAX_COMPANIONS
 from agentic.runtime.serial_episode_plan import episode_route, episode_story_text, episode_summary
 from agentic.runtime.serial_ledger import (
     EpisodeDelta,
-    LedgerError,
     PriorEpisodeNotAccepted,
     Thread,
     apply_delta,

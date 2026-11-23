@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agentic/pyproject.toml
+      # Tests exercise real FFmpeg/ffprobe and CJK text rendering, same as the Dockerfile.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+      - run: pip install -e "./agentic[dev]"
+      - run: python -m ruff check agentic/src agentic/tests scripts scheduler run_media_interface.py --config agentic/pyproject.toml
+      - run: python -m pytest agentic/tests -m "not integration" -q
