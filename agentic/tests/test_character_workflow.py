@@ -175,6 +175,7 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
             prompt="one pink hero pushes one glowing cube",
             preferred_generation_type="text2image2video",
             subject_mode="single",
+            selected_character_name="Kirby",
             publish_after_generate=False,
         )
         selection = resolve_character_selection(request)

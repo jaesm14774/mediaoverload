@@ -8,6 +8,19 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Serial-video and run-log behavior tests use a real MySQL, never a stand-in.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,5 +31,13 @@ jobs:
       # Tests exercise real FFmpeg/ffprobe and CJK text rendering, same as the Dockerfile.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
       - run: pip install -e "./agentic[dev]"
+      # The tests read their MySQL account from media_overload.env (gitignored); CI writes it for the service above.
+      - run: |
+          {
+            echo mysql_host=127.0.0.1
+            echo mysql_port=3306
+            echo mysql_user=root
+            echo mysql_password=ci-root-password
+          } > media_overload.env
       - run: python -m ruff check agentic/src agentic/tests scripts scheduler run_media_interface.py --config agentic/pyproject.toml
       - run: python -m pytest agentic/tests -m "not integration" -q
