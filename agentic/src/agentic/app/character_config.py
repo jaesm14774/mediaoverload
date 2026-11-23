@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from agentic.app.creative_profiles import DEFAULT_STYLE_MODEL
@@ -186,7 +187,27 @@ def _resolve_output_dir(
     base = _resolve_repo_path(
         repo_root, str(configured_output_dir or (repo_root / "output"))
     )
-    return Path(base) / character_name.lower()
+    return Path(base) / _path_safe_name(character_name)
+
+
+_RESERVED_DEVICE_NAMES = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+    }
+)
+
+
+def _path_safe_name(name: str) -> str:
+    """Turn a role name into one portable folder name; the role keeps its own name."""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(name or "")).strip(" .")
+    if cleaned.split(".", 1)[0].casefold() in _RESERVED_DEVICE_NAMES:
+        cleaned = f"_{cleaned}"
+    return cleaned.lower() or "character"
 
 
 def _resolve_repo_path(repo_root: Path, raw_path: str) -> Path:

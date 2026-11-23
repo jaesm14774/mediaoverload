@@ -46,30 +46,6 @@ def _fixed_character_selection(name: str, *, group_name: str = "") -> dict[str, 
     }
 
 
-def _validate_character_path_component(name: str) -> None:
-    value = str(name or "").strip()
-    if not value:
-        return
-    invalid_path_characters = "<>:/\\|?*\x00"
-    reserved_device_name = value.split(".", 1)[0].casefold() in {
-        "con",
-        "prn",
-        "aux",
-        "nul",
-        *(f"com{index}" for index in range(1, 10)),
-        *(f"lpt{index}" for index in range(1, 10)),
-    }
-    if (
-        value in {".", ".."}
-        or value.endswith((".", " "))
-        or any(character in value for character in invalid_path_characters)
-        or reserved_device_name
-    ):
-        raise ValueError(
-            "Character name used for output paths must be a safe path component."
-        )
-
-
 def _subject_mode(config: dict[str, Any]) -> str:
     generation = dict(config.get("generation", {}) or {})
     mode = str(generation.get("subject_mode") or SUBJECT_MODE_SINGLE).strip().lower()
@@ -183,12 +159,6 @@ def _annotate_subject_selection(
     subject_mode_weights: dict[str, float] | None,
 ) -> dict[str, Any]:
     resolved = dict(selection)
-    _validate_character_path_component(str(resolved.get("selected_character") or ""))
-    raw_subjects = resolved.get("subjects")
-    if isinstance(raw_subjects, list):
-        for subject in raw_subjects:
-            if isinstance(subject, dict):
-                _validate_character_path_component(str(subject.get("name") or ""))
     resolved["subject_mode"] = effective_subject_mode
     if configured_subject_mode == SUBJECT_MODE_RANDOM:
         resolved["configured_subject_mode"] = configured_subject_mode

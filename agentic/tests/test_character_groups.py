@@ -147,23 +147,36 @@ class CharacterGroupSelectionTests(unittest.TestCase):
         self.assertNotIn("Kirby", payload["constraints"]["native_h3_creative_brief"])
         self.assertEqual(payload["character_config_summary"]["character_name"], "MetaKnight")
 
-    def test_user_given_single_character_name_when_it_contains_a_path_then_reject_before_workflow(self) -> None:
-        """User Given a single-character request When its name contains a path Then workflow selection rejects it."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config = Path(temp_dir) / "single.yaml"
-            config.write_text(
-                "character:\n  name: Kirby\ngeneration:\n  subject_mode: single\n",
-                encoding="utf-8",
-            )
-            for unsafe_name in ("../outside", "..\\outside", "C:outside"):
-                with self.subTest(name=unsafe_name), self.assertRaisesRegex(ValueError, "safe path component"):
-                    resolve_character_selection(
-                        make_character_workflow_request(
-                            self.repo_root,
-                            config,
-                            selected_character_name=unsafe_name,
-                        )
+    def test_user_given_drawn_role_name_with_path_characters_then_outputs_stay_in_one_folder(self) -> None:
+        """User Given a drawn role whose name ends in a period or holds path characters When the payload is built Then the run keeps the role's name and writes into one folder under the output root."""
+        output_root = (self.repo_root / "output").resolve()
+        for role_name in ("Bowser Jr.", "../outside", "C:outside", "NUL"):
+            with self.subTest(role=role_name):
+                selection = {
+                    "mode": "group",
+                    "group_name": "Kirby",
+                    "selected_character": role_name,
+                    "candidate_count": 1,
+                    "candidates": [{"name": role_name, "status": 1, "weight": 1.0}],
+                    "selected_profile": {},
+                    "selection_source": "group_weighted_random",
+                }
+                payload = build_goal_payload_from_character_config(
+                    make_character_workflow_request(
+                        self.repo_root,
+                        self.kirby_config,
+                        prompt="one quiet moment",
+                        preferred_generation_type="native_h3_story",
+                        selected_character_name=role_name,
+                        character_selection=selection,
+                        publish_after_generate=False,
                     )
+                )
+
+                run_folder = Path(payload["resolved_output_dir"]).resolve()
+                self.assertEqual(payload["character_name"], role_name)
+                self.assertEqual(run_folder.parent, output_root)
+                self.assertFalse(run_folder.name.endswith((".", " ")))
 
     def test_group_name_cannot_be_used_as_prompt_identity_without_selection(self) -> None:
         """User Given a group config has no selected character When a goal payload is built Then construction rejects the ambiguous group identity."""
