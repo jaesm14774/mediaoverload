@@ -28,7 +28,7 @@ Python 依賴只在 [agentic/pyproject.toml](agentic/pyproject.toml) 宣告；�
 
 ## 使用入口
 
-風格勾選頁：執行 `python scripts/style_picker.py`，開啟 <http://127.0.0.1:8766>。提供 288 種匯入風格與 6 種原有角色風格；取消不要的項目後按「儲存並套用」，下一次 random 生成只會使用保留的風格。風格定義集中在 `configs/styles/catalog.json`，每個模型用 `configs/styles/<model>.yaml` 篩出自己擅長的風格池（`enabled` 清單供單圖、影片與連載系列隨機抽取；連載系列抽一次後存檔固定）；角色 YAML 只用 `generation.creative_profile.style.model` 指定模型，不再列風格。新增模型只要多一個 `<model>.yaml`。詳見 [風格選擇操作](docs/style_picker.md)。
+風格勾選頁：執行 `python scripts/style_picker.py`，開啟 <http://127.0.0.1:8766>。提供 288 種匯入風格與 6 種原有角色風格；取消不要的項目後按「儲存並套用」，下一次 random 生成只會使用保留的風格。風格定義集中在 `configs/styles/catalog.json`，每個模型用 `configs/styles/<model>.yaml` 篩出自己擅長的風格池（`enabled` 清單供單圖、影片與連載系列隨機抽取；連載系列抽一次後存檔固定）；角色 YAML 只用 `generation.creative_profile.style.model` 指定模型，不再列風格。新增模型只要多一個 `<model>.yaml`。
 
 ```powershell
 # 查看角色介面所有選項
@@ -74,7 +74,7 @@ python run_media_interface.py --character kirby --generation-type series_carouse
 
 ## 架構與維護
 
-- [MediaOverload 工程交接指南](docs/engineering-handover/index.md)：依一筆媒體請求理解角色流程、審查關卡、run 記錄與維護邊界。
+- [文件索引](docs/README.md)：依 architecture、guide、reference、plans 分類。
 - [ComfyUI H3 工作流與輸入契約](docs/comfyui_h3.md)
 - [H3 提示契約](docs/minimax_h3_prompting.md)
 - [Krea2 工作流操作](docs/krea2_comfyui_best_practice.md)
@@ -84,7 +84,6 @@ python run_media_interface.py --character kirby --generation-type series_carouse
 - [Game Sprite 輸出契約](docs/game_sprite.md)
 - [連載影片策略與操作](docs/serial-video.md)
 - [新聞融合故事策略](docs/news-fusion-story.md)
-- [OpenAI 與相容供應商設定](docs/openai_compatible_providers.md)
 - [自動分格漫畫與隨機策略](docs/motion_comic.md)
 - [影片參考分析](docs/reference_video_remix.md)
 
@@ -98,4 +97,4 @@ python -m pytest agentic/tests/integration --collect-only -q
 
 本機測試包含真實 Pillow、FFmpeg、ffprobe 與本機 HTTP provider 契約，以及模型邊界的明確替身。計畫測試驗證真實 manifests、技能與工具可連接，但不代表 GPU 已生成。需要真實 DB、LLM、GPU、ComfyUI 或社群憑證的測試標為 `integration`，必須另行安排受控驗收。
 
-目前 repo 未包含 CI workflow；上述命令是可重現的本機檢查，不宣稱有 hosted CI 或已完成正式環境驗收。
+[.github/workflows/ci.yml](.github/workflows/ci.yml) 在每次 PR 與 main push 執行前兩條命令（ruff 與非 integration 測試）；integration 測試與 GPU、ComfyUI、真實 LLM 的驗收不在 CI 內，也不宣稱已完成正式環境驗收。

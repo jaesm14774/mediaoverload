@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
+import pytest
 
 from agentic.app.character_publishing import _effective_publish_after_generate, _publish_selection_limit, _resolve_publish_prompt, collect_media_paths_from_run_result
 from agentic.app.character_workflow import _extract_failure_details, run_character_workflow
@@ -168,6 +169,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(default_short["constraints"]["max_i2v_frames"], 240)
 
 
+    # Needs the maintainer's own MySQL (anime.anime_roles group data), which CI cannot have.
+    @pytest.mark.integration
     def test_explicit_subject_mode_override_keeps_benchmark_subject_count_stable(self) -> None:
         request = make_character_workflow_request(
             self.repo_root,
@@ -193,6 +196,8 @@ class CharacterWorkflowRoutingTests(unittest.TestCase):
         self.assertEqual(payload["constraints"]["subject_mode"], "single")
         self.assertEqual(len(payload["constraints"]["subjects"]), 1)
 
+    # Needs the maintainer's own MySQL (anime.anime_roles group data), which CI cannot have.
+    @pytest.mark.integration
     def test_user_given_named_character_when_single_subject_is_resolved_then_group_randomization_is_bypassed(self) -> None:
         """User Given a named Kirby protagonist When a single subject is resolved Then the requested profile remains selected."""
         request = make_character_workflow_request(

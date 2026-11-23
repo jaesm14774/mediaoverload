@@ -5,6 +5,7 @@ from agentic.runtime.prompt_tasks.native_h3 import format_native_h3_arc_guidance
 
 import json
 import unittest
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -479,6 +480,8 @@ class NativeH3StoryPlanTests(unittest.TestCase):
         self.assertNotIn("native-opening-review", [node.node_id for node in plan.nodes])
         self.assertFalse(plan.metadata["native_h3"]["require_human_review"])
 
+    # Needs the maintainer's own MySQL (the news table), which CI cannot have.
+    @pytest.mark.integration
     def test_stage_probe_keeps_six_candidates_and_adds_explicit_auto_selection_node(self) -> None:
         payload = build_goal_payload_from_character_config(make_character_workflow_request(
             self.repo_root,
