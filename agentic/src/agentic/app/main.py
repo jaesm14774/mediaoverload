@@ -118,6 +118,10 @@ def build_runtime(
     )
     register_comfy_h3_tools(tool_registry, asset_registry, resolved_output_root, comfy_host, comfy_port)
     register_comfy_nvidia_vfx_tools(tool_registry, comfy_host, comfy_port)
+    if os.environ.get("AGENTIC_RENDER_BACKEND", "").strip().lower() == "flow_handoff":
+        from agentic.tools.flow_handoff import register_flow_handoff_tools
+
+        register_flow_handoff_tools(tool_registry, resolved_output_root)
     register_media_service_tools(tool_registry, resolved_output_root, input_roots=input_roots)
     register_social_service_tools(tool_registry, resolved_output_root)
     register_motion_graphics_skills(
@@ -2230,6 +2234,11 @@ def _resolve_cli_serial_targets(
     serial_platforms: list[str] = []
     serial_platform_configs: dict[str, dict[str, object]] = {}
     if serial_context is None:
+        if args.media_type == "publish_review" and args.platforms:
+            # Standalone review of existing media still needs per-platform publisher configs.
+            return _serial_publish_configuration(
+                REPO_ROOT, args.character, args.platforms, args.character_config
+            )
         return serial_platforms, serial_platform_configs
     serial_platforms, serial_platform_configs = _serial_publish_configuration(
         REPO_ROOT, args.character, args.platforms, args.character_config

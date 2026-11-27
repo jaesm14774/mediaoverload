@@ -18,6 +18,7 @@
 - [motion_comic.md](motion_comic.md)：分格漫畫策略
 - [game_sprite.md](game_sprite.md)：Game Sprite 輸出契約
 - [run-log.md](run-log.md)：Run Log 營運帳本
+- [llm-providers.md](llm-providers.md)：文字 LLM 供應商、備援鏈與 token 帳
 
 ## guide
 
@@ -36,5 +37,6 @@
 ## plans
 
 - [comfyui-model-swap-scheduling.md](comfyui-model-swap-scheduling.md)：換模型排程研究與方案
+- [pixelle-video-study.md](pixelle-video-study.md)：Pixelle-Video 研究，素材導向流程與非 H3 輸出的音訊後製
 
 `oauth/` 是 OAuth 申請用的靜態頁面（隱私權與條款），不屬於上述文件。

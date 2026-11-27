@@ -459,3 +459,71 @@ def test_user_given_repeated_validation_rejections_when_the_provider_keeps_retry
     )
     assert "count 3 must be even" in last_request
     assert "count 1 must be even" not in last_request
+
+
+def usage(prompt, completion, reasoning):
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "completion_tokens_details": {"reasoning_tokens": reasoning},
+    }
+
+
+def test_user_given_a_provider_reporting_usage_when_the_call_is_recorded_then_each_attempt_shows_the_tokens_it_spent_including_reasoning(
+    endpoint,
+):
+    """User Given a provider that reports token usage When a call completes Then the saved attempt shows prompt, completion and reasoning tokens so the daily quota can be budgeted."""
+    body = completion("done")
+    body["usage"] = usage(prompt=40, completion=120, reasoning=90)
+    endpoint.responses.put((200, body, {}))
+    model = adapter(endpoint)
+    model.chat_completion([{"role": "user", "content": "Go."}], max_retries=1)
+    tokens = model.last_attempts[0]["tokens"]
+    assert tokens == {"prompt": 40, "completion": 120, "reasoning": 90, "total": 160}
+
+
+def test_user_given_an_answer_that_never_arrived_when_the_call_fails_then_the_tokens_it_burned_are_still_recorded(
+    endpoint,
+):
+    """User Given a provider that spends tokens reasoning and returns no answer When the call fails Then the failed attempt still shows the tokens that were drained from the quota."""
+    body = truncated_reasoning_completion()
+    body["usage"] = usage(prompt=30, completion=600, reasoning=600)
+    endpoint.responses.put((200, body, {}))
+    model = adapter(endpoint)
+    with pytest.raises(ProviderRequestError):
+        model.chat_completion([{"role": "user", "content": "Go."}], max_retries=1)
+    attempt = model.last_attempts[0]
+    assert attempt["status"] == "failed"
+    assert attempt["tokens"]["total"] == 630
+
+
+def test_user_given_a_rejected_answer_when_the_provider_retries_then_the_recorded_tokens_cover_every_request_of_the_call(
+    endpoint,
+):
+    """User Given an answer rejected by validation and then accepted on retry When the call is recorded Then its tokens add up every request, because each retry spends quota again."""
+    first, second = completion("not json"), completion('{"ok":true}')
+    first["usage"] = usage(prompt=50, completion=10, reasoning=0)
+    second["usage"] = usage(prompt=80, completion=12, reasoning=0)
+    endpoint.responses.put((200, first, {}))
+    endpoint.responses.put((200, second, {}))
+    model = adapter(endpoint)
+    model.chat_completion(
+        [{"role": "user", "content": "Return JSON."}],
+        max_retries=2,
+        initial_retry_delay=0,
+        _response_validator=json.loads,
+    )
+    attempt = model.last_attempts[0]
+    assert attempt["request_count"] == 2
+    assert attempt["tokens"]["total"] == 152
+
+
+def test_user_given_a_provider_without_usage_when_the_call_is_recorded_then_no_token_figure_is_invented(
+    endpoint,
+):
+    """User Given a provider that omits usage When a call completes Then the attempt carries no tokens entry instead of a made-up zero."""
+    endpoint.responses.put((200, completion("done"), {}))
+    model = adapter(endpoint)
+    model.chat_completion([{"role": "user", "content": "Go."}], max_retries=1)
+    assert "tokens" not in model.last_attempts[0]

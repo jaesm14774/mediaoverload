@@ -23,7 +23,7 @@ MAX_IMAGE_BYTES = 25 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 OPENAI_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 ATTEMPT_DIAGNOSTIC_FIELDS = frozenset(
-    {"provider", "model", "duration_seconds", "request_count", "status", "error_type", "error"}
+    {"provider", "model", "duration_seconds", "request_count", "status", "tokens", "error_type", "error"}
 )
 ATTEMPT_ERROR_CHARS = 300
 
@@ -52,6 +52,9 @@ def _llm_attempt_record(
     request_count = getattr(model, "last_request_attempts", None)
     if isinstance(request_count, int) and not isinstance(request_count, bool):
         record["request_count"] = request_count
+    tokens = getattr(model, "last_token_usage", None)
+    if isinstance(tokens, dict) and tokens:
+        record["tokens"] = dict(tokens)
     if error is not None:
         record["error_type"] = type(error).__name__
         record["error"] = str(error)[:ATTEMPT_ERROR_CHARS]
@@ -239,7 +242,7 @@ class FallbackChatModel:
                 # Reserve an equal share of the remaining chain budget for
                 # every provider still available.  Without this slice, an
                 # OpenRouter pool can consume the entire deadline before
-                # Gemini/Groq/Mistral ever gets a chance to run.
+                # Gemini/Groq ever gets a chance to run.
                 remaining = _deadline - time.monotonic()
                 providers_left = max(1, len(self._models) - index)
                 attempt_deadline = time.monotonic() + (remaining / providers_left)
@@ -337,15 +340,16 @@ OPENAI_COMPATIBLE_PROVIDER_SPECS: dict[str, dict[str, Any]] = {
         # structured-output parameter and keep the existing JSON validator.
         "supports_response_format": False,
     },
-    "mistral": {
-        "base_url": "https://api.mistral.ai/v1",
-        "api_key_env": ("MISTRAL_API_KEY",),
-        "text_model": "ministral-14b-2512",
+    # Experiential gateway: the free plan shares 1M tokens/day across GPT-6
+    # Luna, DeepSeek V4.1 Flash and Clef.  Luna reasons before it answers and
+    # that reasoning counts against any output cap, so no `max_tokens` is set.
+    # Vision and `json_schema` stay off until verified against the live gateway.
+    "experiential": {
+        "base_url": "https://api.experientiallabs.ai/v1",
+        "api_key_env": ("EXPERIENTIAL_API_KEY",),
+        "text_model": "gpt-6-luna",
         "vision_model": "",
         "supports_vision": False,
-        # The shared OpenAI json_schema envelope is rejected by the current
-        # Mistral compatibility endpoint for several nested pipeline schemas.
-        # Keep strict JSON prompting and local validation as the portable path.
         "supports_response_format": False,
     },
     # Free-tier providers below are text-only and omit the JSON-schema
@@ -438,7 +442,7 @@ class OpenAICompatibleModel:
 
     Providers only need to supply a base URL, an environment-variable key list,
     and a model id. The request/response contract remains the same for
-    OpenAI, OpenRouter, Gemini, Groq, and Mistral.
+    OpenAI, OpenRouter, Gemini, Groq, and Experiential.
     """
 
     def __init__(
@@ -482,6 +486,7 @@ class OpenAICompatibleModel:
         self.last_attempt_model: str = ""
         self.last_request_attempts = 0
         self.last_attempts: list[dict[str, Any]] = []
+        self.last_token_usage: dict[str, int] = {}
 
     @classmethod
     def from_provider(cls, provider: str, config: ModelConfig) -> "OpenAICompatibleModel":
@@ -520,6 +525,7 @@ class OpenAICompatibleModel:
         **kwargs: object,
     ) -> str:
         self.last_request_attempts = 0
+        self.last_token_usage = {}
         response_validator = kwargs.pop("_response_validator", None)
         encoded_image_cache = _take_image_cache(images, kwargs)
         payload = self._build_chat_payload(
@@ -657,6 +663,9 @@ class OpenAICompatibleModel:
                 if deadline is None
                 else self._read_streamed_json(response, deadline)
             )
+            # Tokens are spent even when the answer is unusable, so record them
+            # before the choice is validated.
+            self._add_token_usage(body)
             choice = body["choices"][0]
             finish_reason = str(choice.get("finish_reason") or "")
             message = choice["message"]
@@ -682,6 +691,23 @@ class OpenAICompatibleModel:
                 )
                 return text, error, response, "validation"
         return text, None, response, None
+
+    def _add_token_usage(self, body: object) -> None:
+        usage = body.get("usage") if isinstance(body, dict) else None
+        if not isinstance(usage, dict):
+            return
+        details = usage.get("completion_tokens_details")
+        reasoning = details.get("reasoning_tokens") if isinstance(details, dict) else 0
+        spent = {
+            "prompt": usage.get("prompt_tokens"),
+            "completion": usage.get("completion_tokens"),
+            "reasoning": reasoning,
+        }
+        if not all(isinstance(value, int) and not isinstance(value, bool) for value in spent.values()):
+            return
+        totals = {key: self.last_token_usage.get(key, 0) + value for key, value in spent.items()}
+        totals["total"] = totals["prompt"] + totals["completion"]
+        self.last_token_usage = totals
 
     def _wait_before_retry(
         self,

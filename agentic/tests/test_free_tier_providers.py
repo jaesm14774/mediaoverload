@@ -22,6 +22,7 @@ from agentic.runtime.model_backends import (
 ACCOUNT_ID = "0123456789abcdef0123456789abcdef"
 CLOUDFLARE_ENV = ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID")
 NVIDIA_ENV = ("NVIDIA_API_KEY",)
+EXPERIENTIAL_ENV = ("EXPERIENTIAL_API_KEY",)
 
 
 AMD_ENV = ("RADEON_API_KEY",)
@@ -38,7 +39,7 @@ AMD_MODELS = [
 def clean_provider_env(monkeypatch):
     # Blank, not deleted: the project env loader fills only absent variables,
     # so a developer's real keys in media_overload.env must not leak in.
-    for name in (*CLOUDFLARE_ENV, *NVIDIA_ENV, *AMD_ENV):
+    for name in (*CLOUDFLARE_ENV, *NVIDIA_ENV, *AMD_ENV, *EXPERIENTIAL_ENV):
         monkeypatch.setenv(name, "")
 
 
@@ -96,8 +97,8 @@ def test_user_given_five_providers_with_one_missing_key_when_the_text_chain_is_b
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
     monkeypatch.setenv("RADEON_API_KEY", "rc-test")
     monkeypatch.setenv("GROQ_API_KEY", "")
-    monkeypatch.setenv("MISTRAL_API_KEY", "mi-test")
-    providers = ["groq", "cloudflare", "nvidia", "amd", "mistral"]
+    monkeypatch.setenv("EXPERIENTIAL_API_KEY", "xpl-test")
+    providers = ["groq", "cloudflare", "nvidia", "amd", "experiential"]
     backend = {
         "allow_text_fallback": True,
         "text_fallback_providers": providers,
@@ -107,6 +108,34 @@ def test_user_given_five_providers_with_one_missing_key_when_the_text_chain_is_b
     assert isinstance(chain, FallbackChatModel)
     assert backend["text_fallback_skipped"] == ["groq:missing_api_key"]
     assert len(backend["text_fallback_candidates"]) == 5
+
+def test_user_given_an_experiential_key_when_selecting_it_then_requests_go_to_its_gateway_with_gpt_6_luna_and_no_output_cap(
+    monkeypatch,
+):
+    """User Given an Experiential key When the experiential provider is selected Then the adapter targets its gateway with GPT-6 Luna and sends no output cap that would starve the model's reasoning."""
+    monkeypatch.setenv("EXPERIENTIAL_API_KEY", "xpl-test")
+    model = build_model("experiential", ModelConfig(provider_default_model("experiential", "text")))
+    assert isinstance(model, OpenAICompatibleModel)
+    assert model.base_url == "https://api.experientiallabs.ai/v1/chat/completions"
+    assert model.config.model_name == "gpt-6-luna"
+    assert model.config.max_tokens is None
+    assert model.headers["Authorization"] == "Bearer xpl-test"
+
+
+def test_user_given_experiential_without_a_key_when_the_chain_is_built_then_it_is_skipped_and_the_other_providers_remain(
+    monkeypatch,
+):
+    """User Given Experiential has no key but AMD does When the text chain is built Then only Experiential is skipped and AMD still joins."""
+    monkeypatch.setenv("RADEON_API_KEY", "rc-test")
+    backend = {
+        "allow_text_fallback": True,
+        "text_fallback_providers": ["experiential", "amd"],
+        "text_fallback_models": ["gpt-6-luna", "DeepSeek-V4-Flash"],
+    }
+    chain = _add_auxiliary_fallbacks(object(), backend, "text")
+    assert isinstance(chain, FallbackChatModel)
+    assert backend["text_fallback_skipped"] == ["experiential:missing_api_key"]
+
 
 def test_user_given_an_nvidia_key_when_selecting_nvidia_then_requests_go_to_the_nim_chat_endpoint(
     monkeypatch,
