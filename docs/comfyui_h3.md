@@ -24,6 +24,20 @@ T2VA、I2VA、FL2VA 與 L2VA 使用 FastVideo 的 FastH3 8 步蒸餾：INT8 Conv
 
 本機 RTX 4060 8GB（128GB RAM）實測：FastH3 5 秒 608x352 片段暖機後約 72 秒（原 16 步 Q4 GGUF 約 290 秒）、15 秒片段約 277 秒，VRAM 峰值約 7.3GB、系統 RAM 峰值約 69GB。首次載入需額外數十秒；盲測品質與原版互有勝負。Ref2VA 15 秒（362 幀）、512x640、3 張參考圖、q2 text encoder：原 16 步約 75 分鐘（取樣約 73 分鐘），改用 8 步 turbo LoRA 後 33 分 34 秒（取樣約 32 分鐘，約快 2.3 倍）。這是單次實測，未做同輸入的 16 步畫質對照，也未測 q4 text encoder 搭配 LoRA。
 
+## 渲染前後重啟 ComfyUI
+
+每次 `comfy.render_h3` 在連線前與渲染結束後（成功或失敗都做），各經 ComfyUI-Manager 的 `POST /v2/manager/reboot` 重啟一次 ComfyUI，等新程序回應 `/system_stats` 才繼續；Manager 拒絕、程序未重啟或逾時未回來都直接失敗，不在舊程序上渲染。因此 ComfyUI 必須以 `--enable-manager` 啟動，且 Manager 允許 reboot（監聽 loopback，或 Manager 設定 `network_mode = personal_cloud`，安全等級為 normal 以下）。每次重啟實測 31.3 秒，Manager 會自動拿掉 `--windows-standalone-build`，其餘啟動參數保留（reboot 端點、放行條件與參數處理依 ComfyUI-Manager 4.2.2 原始碼）。「舊程序已關閉」以連續多次探測失敗判定，單次斷線不算重啟完成。
+
+原因：本機（RTX 4060 8GB、Windows）反覆藍屏，2026-11-09 至 11-27 共 7 份 dump 皆為 `dxgmms2.sys` 的 VidMm page-in use-after-free（`ExpandLargePagePte`，與 [ComfyUI#16246](https://github.com/Comfy-Org/ComfyUI/issues/16246) 同堆疊）。對照執行紀錄，觸發點是「大模型在動態顯存下載入、而先前的大模型仍常駐於同一個程序」，方向不固定：Krea2 之後載入 H3（11-09、11-23、11-26）、H3 之後載入 Krea2（11-27 受控重現，基準第 1 次迭代即藍屏，ComfyUI log 停在 `Requested to load Krea2` 後約 3 秒）、同一程序連續約 15 次 H3 之後（11-20）、以及只有圖片工作的 Krea2 節點內（11-21，當時沒有任何 H3 渲染）。因此 H3 前後各重啟一次，讓 H3 永遠單獨活在自己的程序裡；11-20 與 11-21 不一定被這個規則涵蓋（見下方「未涵蓋」）。
+
+受控重現（`Krea2 → H3 → Krea2 …` 交替、每步 fsync 日誌）：不重啟的基準在第 1 次迭代藍屏；H3 前後各重啟的版本連續 40 次迭代、80 次模型切換沒有藍屏。過去不重啟時約每 12 至 15 次 H3 渲染一次藍屏，80 次乾淨切換純靠運氣的機率低於 1%，所以這是強的支持證據，但基準只有 1 次樣本、也只在本機這一張卡上驗證；關掉 dynamic VRAM 或 Comfy compiler 也能避開，但 H3 渲染會慢 5 至 10 倍，因此不採用。
+
+未涵蓋：圖片模型之間的切換（例如 Krea2 與 Klein，11-21 的情形）沒有測試，也不重啟；並行限制見下。
+
+代價：每次 `comfy.render_h3` 多約 62 秒，外加重新載入模型。serial_video 每集 3 至 4 段連續 H3，重啟的效益只來自「H3 之後有別的模型要載入」，連續 H3 之間的重啟是為了讓每次 H3 都從乾淨程序開始。
+
+並行限制：同一個 run 內所有節點循序執行，NVIDIA VFX 也是循序節點，不會被重啟切斷；但跨程序（排程器、手動 CLI、ComfyUI 網頁介面）沒有鎖，重啟前不檢查佇列，會殺掉其他來源正在跑的工作。`execute` 內的接線需要真實 H3 資產，只有重啟契約有本機測試，尚未以真實 H3 渲染驗收。
+
 ## 輸入與交付
 
 H3 使用 24 FPS、有效 CFG 1、8 步；FastH3 模式為 res_multistep、video shift 10／audio shift 3，Ref2VA 為 euler、video shift 6／audio shift 3。影片模式會依官方欄位組裝場景、環境音與配樂方向；I2VA／FL2VA／L2VA 另標明圖片在時間軸上的位置。長影片先用場景草稿製作錨點圖，再由 vision model 讀取實際首尾錨點寫出 H3 場景 prompt。此流程不含插幀或超解析度。使用者指定的 seed 保留在請求紀錄；Ref2VA 另保留模型 profile。
@@ -39,7 +53,7 @@ H3 使用 24 FPS、有效 CFG 1、8 步；FastH3 模式為 res_multistep、video
 ## 驗證
 
 ```powershell
-python -m pytest agentic/tests/test_comfy_h3.py agentic/tests/test_h3_modes.py agentic/tests/test_h3_prompt_delivery.py -q
+python -m pytest agentic/tests/test_comfy_h3.py agentic/tests/test_comfy_restart.py agentic/tests/test_h3_modes.py agentic/tests/test_h3_prompt_delivery.py -q
 python scripts/run_h3_modes_e2e.py --comfy-root <ComfyUI安裝目錄> --output-root <驗收輸出目錄> --mode t2va --smoke
 ```
 

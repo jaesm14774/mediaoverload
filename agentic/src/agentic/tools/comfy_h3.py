@@ -33,7 +33,11 @@ from agentic.minimax_prompting import require_h3_prompt
 from agentic.runtime.h3_modes import H3Mode, resolve_h3_mode, validate_h3_payload
 from agentic.runtime.registry import ToolRegistry
 from agentic.tools.comfy_adapter import ComfyAdapter
-from agentic.tools.comfy_backend import ComfyPromptTiming, get_object_info_for_nodes
+from agentic.tools.comfy_backend import (
+    ComfyPromptTiming,
+    get_object_info_for_nodes,
+    restart_comfyui,
+)
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 
 
@@ -320,6 +324,7 @@ class ComfyH3Toolset:
             "comfy_prompt_timings": [],
         }
         generator = None
+        render_failed = False
         try:
             with _timed_phase(phase_seconds, "workflow_prepare_seconds"):
                 template = self.asset_registry.load_workflow_template(manifest)
@@ -331,6 +336,8 @@ class ComfyH3Toolset:
                 run_dir.mkdir(parents=True, exist_ok=True)
                 videos.mkdir(parents=True, exist_ok=True)
                 raw.mkdir(parents=True, exist_ok=True)
+            with _timed_phase(phase_seconds, "comfy_restart_seconds"):
+                restart_comfyui(self.comfy_host, self.comfy_port)
             with _timed_phase(phase_seconds, "generator_connect_seconds"):
                 generator = self.adapter.build_generator(
                     host=self.comfy_host,
@@ -399,9 +406,23 @@ class ComfyH3Toolset:
                     "request_path": str(graph_path), "raw_video_path": str(files[0]), "actual": actual})
             summary["success"] = True
         except Exception as exc:
+            render_failed = True
             summary.update(success=False, error=str(exc))
             raise
         finally:
+            if generator is not None and generator.communicator.ws is not None:
+                generator.communicator.ws.close()
+            # H3 stays resident in the process; the next image or VFX model load on
+            # top of it bluescreens the same way (docs/comfyui_h3.md).
+            restart_after_error: Exception | None = None
+            if generator is not None:
+                try:
+                    with _timed_phase(phase_seconds, "comfy_restart_after_seconds"):
+                        restart_comfyui(self.comfy_host, self.comfy_port)
+                except Exception as exc:
+                    restart_after_error = exc
+                    summary.update(success=False)
+                    summary.setdefault("error", f"ComfyUI restart after render failed: {exc}")
             summary["wall_seconds"] = time.perf_counter() - started
             summary["phase_seconds"] = dict(phase_seconds)
             summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -409,8 +430,8 @@ class ComfyH3Toolset:
                 json.dumps(summary, indent=2, ensure_ascii=False, default=str),
                 encoding="utf-8",
             )
-            if generator is not None and generator.communicator.ws is not None:
-                generator.communicator.ws.close()
+            if restart_after_error is not None and not render_failed:
+                raise restart_after_error
         return {"run_dir": str(run_dir), "saved_files": summary["saved_files"], "summary_path": str(summary_path),
                 "workflow_name": manifest.name, "h3_mode": mode.value, "provider": "comfyui",
                 "wall_seconds": summary["wall_seconds"],

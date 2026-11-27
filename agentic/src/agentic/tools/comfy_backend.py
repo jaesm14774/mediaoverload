@@ -61,6 +61,76 @@ def get_object_info_for_nodes(
     return node_info
 
 
+_CONNECTION_DROPPED = (ConnectionResetError, ConnectionAbortedError, http.client.RemoteDisconnected)
+_DOWN_PROBES_REQUIRED = 3
+
+
+def _comfy_answers(base_url: str) -> bool:
+    try:
+        with request.urlopen(f"{base_url}/system_stats", timeout=3):
+            return True
+    except Exception:
+        return False
+
+
+def restart_comfyui(
+    host: str,
+    port: int,
+    *,
+    timeout_seconds: float = 180.0,
+    poll_seconds: float = 0.5,
+) -> None:
+    """Restart ComfyUI through ComfyUI-Manager and wait until the new process answers.
+
+    Loading a large model under dynamic VRAM while another large model is still
+    resident in the same process bluescreens this machine (dxgmms2 VidMm page-in
+    race, see docs/comfyui_h3.md); a fresh process has nothing resident.
+    Manager answers the request by dropping the connection, so that is success;
+    an HTTP error means Manager refused, and carrying on with a stale process is
+    never a fallback.
+    """
+    base_url = f"http://{host}:{port}"
+    reboot = request.Request(
+        f"{base_url}/v2/manager/reboot",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(reboot, timeout=30):
+            pass
+    except error.HTTPError as exc:
+        raise RuntimeError(
+            f"ComfyUI-Manager refused the restart request (HTTP {exc.code}); "
+            "enable Manager with --enable-manager and a security level that allows reboot"
+        ) from exc
+    except error.URLError as exc:
+        if not isinstance(exc.reason, _CONNECTION_DROPPED):
+            raise RuntimeError(f"ComfyUI is not reachable at {base_url}: {exc.reason}") from exc
+    except _CONNECTION_DROPPED:
+        pass  # Manager drops the connection as ComfyUI goes down: that is success
+    except TimeoutError as exc:
+        raise RuntimeError(f"ComfyUI-Manager at {base_url} did not answer the restart request") from exc
+
+    # One dropped probe can be the old process closing a socket, so the restart
+    # only counts as seen after several failed probes in a row.
+    deadline = time.monotonic() + timeout_seconds
+    failed_probes = 0
+    while True:
+        if _comfy_answers(base_url):
+            if failed_probes >= _DOWN_PROBES_REQUIRED:
+                return
+            failed_probes = 0
+        else:
+            failed_probes += 1
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(poll_seconds)
+    if failed_probes < _DOWN_PROBES_REQUIRED:
+        raise RuntimeError("ComfyUI did not restart after the Manager reboot request")
+    raise RuntimeError(f"ComfyUI did not come back within {timeout_seconds:.0f}s after restarting")
+
+
 # While a prompt is queued the wait has no deadline; it re-checks the queue this often.
 _QUEUE_POLL_SECONDS = 5.0
 
