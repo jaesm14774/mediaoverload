@@ -8,6 +8,7 @@ live run recorded in docs, not by these tests.
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -485,3 +486,53 @@ def test_user_given_a_planned_fusion_run_when_a_planned_clip_is_rendered_then_it
     assert in_calls[0][1]["workflow_name"] == plan.metadata["bridge_workflow"]
     assert out_calls[0][1]["workflow_name"] == plan.metadata["bridge_workflow"]
     assert nodes["longvideo-video-qa"].inputs["expected_fps"] == 24
+
+
+def _footless_story() -> dict:
+    """The shared story with its hopping replaced, so it is also valid for a hero without feet."""
+    payload = story_payload(3)
+    for beat in payload["beats"]:
+        beat["clip_scene"] = beat["clip_scene"].replace("hops", "leaps")
+    return payload
+
+
+def _story_request(profile: str) -> str:
+    """The user prompt the writer model receives for one story."""
+    manager = ScriptedLLMManager([_footless_story()], repeat_last=True)
+    generate_news_fusion_story(
+        PromptClient(mode="llm", manager=manager),
+        character="Waddle Dee",
+        character_profile=profile,
+        news_context=NEWS,
+        beat_count=3,
+        style="cute 2D cartoon",
+    )
+    return next(m["content"] for m in manager.text_model.requests[0]["messages"] if m["role"] == "user")
+
+
+def test_user_given_a_story_request_when_it_is_sent_then_it_asks_for_the_premise_and_every_bridge_field():
+    """User Given a 3-beat story request, When it is sent to the writer, Then it names the premise and every bridge field the story is rejected without, so a writer that treats unnamed fields as optional cannot leave them out."""
+    request = _story_request("a round pink hero who loves snacks")
+
+    assert "premise" in request
+    bridge_part = request.split("Between beats", 1)[1]
+    for field in ("frame_prompt", "first_scene", "second_scene", "soundscape"):
+        assert field in bridge_part
+
+
+@pytest.mark.parametrize(
+    ("profile", "acts"),
+    [
+        (MOUTHLESS, ["laughs", "singing", "cheers", "cheering", "gasped", "whistling", "humming", "lip", "lips", "smiles"]),
+        ("a round hero with no feet", ["footsteps", "running", "runs", "hopped", "dancing", "walks"]),
+    ],
+)
+def test_user_given_a_character_lacking_a_body_part_when_a_story_is_requested_then_every_act_the_check_rejects_was_named_to_the_writer(profile, acts):
+    """User Given a character lacking a body part, When a story is requested, Then every act the story check rejects for it is one the writer was told about, so nothing the writer could not have known can sink the run."""
+    shown = re.search(r"soundscape: ([^.]+)\.", _story_request(profile)).group(1).split(", ")
+    for act in acts:
+        rejected = _footless_story()
+        rejected["beats"][0]["soundscape"] += f" {act}"
+        with pytest.raises(ValueError):
+            write_story(rejected, profile=profile)
+        assert act in shown or any(word.endswith("*") and act.startswith(word[:-1]) for word in shown), act

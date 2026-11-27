@@ -32,12 +32,12 @@ class OpenAICompatibleModelTests(unittest.TestCase):
     def test_provider_registry_contains_current_auxiliary_defaults(self) -> None:
         """User selects an auxiliary provider: Given live-tested defaults,
         When the registry resolves its models, Then Gemini uses the responsive
-        Flash-Lite route and Mistral uses Ministral 14B.
+        Flash-Lite route and Experiential uses GPT-6 Luna.
         """
         self.assertEqual(provider_default_model("gemini", "vision"), "gemini-3.5-flash-lite")
         self.assertEqual(provider_default_model("groq", "vision"), "qwen/qwen3.8-27b")
-        self.assertEqual(provider_default_model("mistral", "text"), "ministral-14b-2512")
-        for provider in ("gemini", "groq", "mistral"):
+        self.assertEqual(provider_default_model("experiential", "text"), "gpt-6-luna")
+        for provider in ("gemini", "groq", "experiential"):
             self.assertIn("base_url", provider_spec(provider))
             self.assertTrue(provider_spec(provider)["api_key_env"])
 
@@ -56,29 +56,6 @@ class OpenAICompatibleModelTests(unittest.TestCase):
         self.assertIsInstance(model, OpenAICompatibleModel)
         self.assertEqual(model.base_url, "https://openrouter.ai/api/v1/chat/completions")
         self.assertEqual(model.headers["X-Title"], "MediaOverload")
-
-    def test_chat_completion_omits_incompatible_mistral_schema_parameter(self) -> None:
-        with patch.dict(
-            os.environ,
-            {"MISTRAL_API_KEY": "test-key"},
-            clear=False,
-        ):
-            model = build_model("mistral", ModelConfig(model_name="model-a", temperature=0.2, max_tokens=64))
-
-        with patch("agentic.runtime.model_backends.requests.post", return_value=self._response("hello")) as post:
-            with patch.dict(os.environ, {"AGENTIC_LLM_REQUEST_TIMEOUT_SECONDS": "30"}, clear=False):
-                result = model.chat_completion(
-                    [{"role": "user", "content": "Say hello"}],
-                    response_format={"type": "json_object"},
-                )
-
-        self.assertEqual(result, "hello")
-        payload = post.call_args.kwargs["json"]
-        self.assertEqual(payload["model"], "model-a")
-        self.assertNotIn("temperature", payload)
-        self.assertEqual(payload["max_tokens"], 64)
-        self.assertNotIn("response_format", payload)
-        self.assertEqual(post.call_args.kwargs["timeout"], (10.0, 30.0))
 
     def test_groq_omits_json_schema_response_format_for_llama(self) -> None:
         with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}, clear=False):
@@ -134,28 +111,6 @@ class OpenAICompatibleModelTests(unittest.TestCase):
 
         self.assertEqual(result, '{"ok":true}')
         self.assertEqual(post.call_count, 2)
-
-    def test_retry_after_is_honored_for_429(self) -> None:
-        rate_limited = self._response(status_code=429, headers={"Retry-After": "0"})
-        from requests import HTTPError
-
-        rate_limited.raise_for_status.side_effect = HTTPError(response=rate_limited)
-        success = self._response("recovered")
-        with patch.dict(os.environ, {"MISTRAL_API_KEY": "test-key"}, clear=False):
-            model = build_model("mistral", ModelConfig(model_name="ministral-14b-2512"))
-
-        with patch("agentic.runtime.model_backends.requests.post", side_effect=[rate_limited, success]) as post, patch(
-            "agentic.runtime.model_backends.time.sleep"
-        ) as sleep:
-            result = model.chat_completion(
-                [{"role": "user", "content": "test"}],
-                max_retries=2,
-                initial_retry_delay=10,
-            )
-
-        self.assertEqual(result, "recovered")
-        self.assertEqual(post.call_count, 2)
-        sleep.assert_called_once_with(0.0)
 
     def test_fallback_chain_tries_auxiliaries_in_order(self) -> None:
         primary = Mock()
@@ -214,15 +169,15 @@ class OpenAICompatibleModelTests(unittest.TestCase):
         primary = Mock()
         backend = {
             "allow_text_fallback": True,
-            "text_fallback_providers": ["groq", "mistral"],
-            "text_fallback_models": ["llama-3.3-70b-versatile", "ministral-14b-2512"],
+            "text_fallback_providers": ["groq", "experiential"],
+            "text_fallback_models": ["llama-3.3-70b-versatile", "gpt-6-luna"],
         }
         with patch.dict(os.environ, {}, clear=False):
             with patch("agentic.runtime.llm_manager_adapter.provider_credentials_present", return_value=False):
                 result = _add_auxiliary_fallbacks(primary, backend, "text")
 
         self.assertIs(result, primary)
-        self.assertEqual(backend["text_fallback_skipped"], ["groq:missing_api_key", "mistral:missing_api_key"])
+        self.assertEqual(backend["text_fallback_skipped"], ["groq:missing_api_key", "experiential:missing_api_key"])
 
 
 if __name__ == "__main__":

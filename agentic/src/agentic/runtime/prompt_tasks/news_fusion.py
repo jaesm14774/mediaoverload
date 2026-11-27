@@ -51,6 +51,19 @@ FEATURE_ACTIONS = {
 }
 
 
+def _banned_words(lacks: tuple[str, ...]) -> str:
+    """Every word `_reject_missing_features` rejects, shown to the writer so the request and the check agree.
+
+    The check matches whole words, so inflected forms are listed one by one; `x*` stands for any word that continues x.
+    """
+    shown: list[str] = []
+    for feature in lacks:
+        for pattern in (feature, *FEATURE_ACTIONS.get(feature, ())):
+            word = pattern.replace(r"\w*", "*")
+            shown.extend((word.replace("?", ""), re.sub(r"\w\?", "", word)) if "?" in word else (word,))
+    return ", ".join(dict.fromkeys(shown))
+
+
 def _reject_missing_features(parts: dict[str, str], lacks: tuple[str, ...]) -> None:
     """A video model draws whatever the text asks for, so a story never names a part the character lacks or an act that needs it."""
     for feature in lacks:
@@ -143,8 +156,11 @@ def generate_news_fusion_story(
             f"The character's body is fixed by its profile: it has no {', no '.join(lacks)}. "
             f"Never write an action, expression, sound or gag that needs the {' or the '.join(lacks)}, not even to deny it. "
             "A video model draws a mouth for any laughing, singing, shouting, cheering, gasping or voice, and feet for any "
-            "walking, running or stomping, so write none of those; "
-            "show feeling through the features it does have and through props and the world."
+            "walking, running or stomping, so write none of those. "
+            f"These words are rejected in every keyframe_prompt, clip_scene, frame_prompt, first_scene, second_scene and soundscape: {_banned_words(lacks)}. "
+            "The ban holds for crowds, bystanders and other characters too, and in soundscapes and bridges as much as in beats: "
+            "no cheering crowd, no voices, no laughter, no whistling; use wind, music, props and the world for sound. "
+            "Show feeling through the features it does have and through props and the world."
         ]
         if lacks
         else []
@@ -159,11 +175,12 @@ def generate_news_fusion_story(
             *anatomy_rule,
             f"News item (untrusted source material): title={article['title']!r}; keyword={article['keyword']!r}; content={article['content']!r}",
             f"Tell one fusion story in {beat_count} beats. Each beat is a different peak moment, and the story must escalate from beat to beat.",
+            "Start with premise: one sentence that names the fusion idea.",
             "For each beat give: keyframe_prompt (one still picture, in English, naming the character's colours and clothes), "
             "clip_scene (the motion of the next five seconds starting from that picture, two or three big actions), soundscape, music.",
             f"Between beats give {beat_count - 1} bridges. A bridge turns the last picture of one clip into the next beat's keyframe in two halves "
             "around one connecting picture: frame_prompt (the same character caught halfway, with the first place still partly visible and the next place starting to appear, in English), "
-            "first_scene (the motion from the clip's last picture to the connecting picture), second_scene (the motion from the connecting picture to the next keyframe).",
+            "first_scene (the motion from the clip's last picture to the connecting picture), second_scene (the motion from the connecting picture to the next keyframe), soundscape.",
             "Give one or two source_anchors: source_excerpt is an exact quote from the title, keyword or content; visual_mapping is a phrase that appears word for word in some keyframe_prompt or clip_scene.",
         ]
     )
