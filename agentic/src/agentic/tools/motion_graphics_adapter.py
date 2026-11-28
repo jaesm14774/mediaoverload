@@ -67,7 +67,7 @@ class MotionGraphicsAdapter:
         )
 
         output_probe = self.ffmpeg.probe_media(str(destination))
-        self._verify_contract(source_probe, output_probe, fps)
+        self.verify_contract(source_probe, output_probe, fps)
         plan_path = destination.with_suffix(".motion-graphics-plan.json")
         contact_sheet_path = destination.with_suffix(".contact-sheet.jpg")
         plan_payload = normalized_plan.to_dict()
@@ -93,7 +93,7 @@ class MotionGraphicsAdapter:
         }
 
     @staticmethod
-    def _verify_contract(source: dict[str, object], output: dict[str, object], fps: float) -> None:
+    def verify_contract(source: dict[str, object], output: dict[str, object], fps: float) -> None:
         if not bool(output.get("has_video")):
             raise RuntimeError("Motion graphics output has no video stream")
         if (output.get("width"), output.get("height")) != (source.get("width"), source.get("height")):

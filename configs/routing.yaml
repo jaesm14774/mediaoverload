@@ -15,12 +15,12 @@ routing:
     - native_h3_ref2va
     - text2image2native_h3_ref2va
     - news_fusion_story
+    - real_world_intruder
     # Disabled because current output quality is not acceptable. This is the
     # canonical name for the text2img2img strategy.
     # - text2image2image
     - sticker_pack
     - story_card
-    - motion_comic
     - series_carousel
     - game_sprite
 
@@ -66,9 +66,6 @@ routing:
         exaggeration.
 
   workflow_stage_candidates:
-    motion_comic:
-      image_workflow_name:
-        - krea2_turbo
     # Writing-first route. Kirby's character YAML gives it an explicit
     # generation_type_weights entry so bare CLI runs can select it.
     story_card:
@@ -129,6 +126,11 @@ routing:
         - minimax_h3_i2va
       refine_workflow_name:
         - flux3_image_klein_img2img
+    real_world_intruder:
+      image_workflow_name:
+        - krea2_turbo
+      video_workflow_name:
+        - minimax_h3_i2va
     native_h3_l2va_story:
       image_workflow_name:
         - krea2_turbo
@@ -168,13 +170,6 @@ routing:
         - minimax_h3_i2va
 
   count_policies:
-    motion_comic:
-      image_count:
-        min: 3
-        max: 3
-      review_selection_limit:
-        min: 1
-        max: 1
     story_card:
       image_count:
         min: 1
@@ -417,8 +412,6 @@ routing:
       reference_manifest_error_code: "Runtime status: auto_generation_available, missing_file, invalid, or empty string when validated."
       routing_policy: "native_h3_ref2va uses existing references when available; with an empty manifest it expands into the same six-candidate Discord review contract as text2image2native_h3_ref2va."
     workflow_stage_contracts:
-      motion_comic:
-        image_workflow_name: "Required text-to-image stage: one illustration for each of three LLM-authored causal beats. Exact captions and progressive-panel timing are composed by Pillow/FFmpeg; no neural video workflow or prewritten story file is required."
       story_card:
         image_workflow_name: "Required text-to-image stage that renders one small vignette per page of the resolved selected character beside that page's own object or action; Pillow dissolves each into cream paper and sets the exact text."
       series_carousel:
@@ -452,6 +445,9 @@ routing:
         image_workflow_name: "Krea2 draws the first beat keyframe; FLUX Klein edits each later keyframe from the previous one."
         video_workflow_name: "Native H3 I2VA renders each beat from its approved keyframe; the FL2VA bridge workflow joins clips."
         refine_workflow_name: "FLUX Klein reference edit that keeps the character while applying the next beat."
+      real_world_intruder:
+        image_workflow_name: "Krea2 draws the real-photo keyframe with one small flat 2D character in it, and separately the kid's marker sketch of that character."
+        video_workflow_name: "Native H3 I2VA renders one locked-camera clip of at least ten seconds from the approved keyframe; the sketch is taped into its corner afterwards."
       native_h3_l2va_story:
         image_workflow_name: "Krea2 creates an identity source; FLUX edits it into the reviewed landing keyframe."
         video_workflow_name: "Native H3 L2VA stage. It receives last_frame and leaves the opening unconstrained."
@@ -532,24 +528,13 @@ routing:
         hard_rules:
           - "Use serial story and episode planning, accepted assets for continuity, per-segment review, and publication approval."
           - "Do not add episode numbers or topic headings to public captions."
-      motion_comic:
-        summary: "LLM 自動規劃三格因果故事，以同一角色和場景生成三張插畫，逐格揭示並保留前格，精確繁中配字後合成直式短片；預設九秒。"
-        best_for:
-          - "角色日常、可見狀態變化、承諾落空或其他有明確收尾的社群漫畫。"
-        avoid_when:
-          - "需要連續肢體動作、原生聲音或真實事件的連續影片重現。"
-        hard_rules:
-          - "故事由本輪主題與 resolved subject 交給 LLM 規劃，不使用固定故事或角色 fallback。"
-          - "三格必須有 setup、escalation、payoff，每句文字對應可見事件，結尾回應標題。"
-          - "每格圖片不生成文字；字幕由合成器精確加入。維持角色、道具設計、場景和鏡頭一致。"
-          - "最終圖文一致性仍由既有審查確認；技術 QA 不等於故事通過。"
       series_carousel:
         summary: "固定模板系列輪播：LLM 只寫一次場景（鏡頭、道具位置、角色位置與大小都寫死，角色處留一個 {character} 空格），同一個種子畫出同一個群組的多位角色，每頁只有角色不同，看起來就是一整套。不產生影片。"
         best_for:
           - "想用同一個可愛場景展示群組裡多位角色的系列貼文，例如同一張床、同一面鏡子換角色。"
         avoid_when:
           - "需求是單一角色的情緒或姿勢變化；改用 text2img 或 sticker_pack。"
-          - "需求是影片、文字閱讀或有劇情的多格故事；改用影片策略、story_card 或 motion_comic。"
+          - "需求是影片、文字閱讀或有劇情的多格故事；改用影片策略或 story_card。"
         hard_rules:
           - "場景模板只能有一個 {character}，不得寫出任何成員名字；每位成員只換名字，並在該頁最前面原文帶入名冊中該角色的外觀描述；場景不得依賴嘴、腳、手等身體部位。"
           - "每頁使用同一個種子與同一段提示，除角色外不得有差異；LLM 不可用時直接失敗，不使用寫死的場景。"

@@ -94,6 +94,14 @@ GENERATION_STRATEGIES = {
         news_grounded=True,
         news_random_inspiration=True,
     ),
+    # A drawn character wanders into a real photograph: one news-derived real scene, one gag,
+    # and a kid's taped sketch of the character fading out of the top-left corner.
+    "real_world_intruder": GenerationStrategy(
+        "real_world_intruder",
+        ("video_workflow_name", "image_workflow_name"),
+        news_grounded=True,
+        news_random_inspiration=True,
+    ),
     "sticker_pack": GenerationStrategy(
         "sticker_pack", (*_IMAGE, "video_workflow_name"), image_only=True
     ),
@@ -103,7 +111,6 @@ GENERATION_STRATEGIES = {
     "story_card": GenerationStrategy(
         "story_card", _IMAGE, image_only=True, news_grounded=True
     ),
-    "motion_comic": GenerationStrategy("motion_comic", _IMAGE),
     # One fixed scene, one page per group member; the pages publish as one set.
     "series_carousel": GenerationStrategy("carousel", _IMAGE, image_only=True),
 }

@@ -181,7 +181,7 @@ def compose_minimax_h3_prompt(
         if index == 1:
             shot_parts.extend(part for part in opening if part)
         elif time:
-            shot_parts.append(f"At {_format_h3_cut_time(time)}, in the same unbroken shot,")
+            shot_parts.append(f"At {format_h3_cut_time(time)}, in the same unbroken shot,")
         if cause:
             shot_parts.append(f"Because {cause},")
         if action:
@@ -206,7 +206,7 @@ def compose_minimax_h3_prompt(
     )
 
 
-def _format_h3_cut_time(value: str) -> str:
+def format_h3_cut_time(value: str) -> str:
     """Format a shot range's start as the official H3 cut timestamp."""
     match = re.search(r"(-?\d+(?:\.\d+)?)", str(value or ""))
     seconds = max(0.0, float(match.group(1))) if match else 0.0

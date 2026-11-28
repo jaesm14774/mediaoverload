@@ -106,7 +106,7 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
         self.assertEqual(by_id["video-qa"].inputs["expected_fps"], 24)
 
     def test_user_given_other_generated_video_routes_when_plan_is_built_then_final_qa_follows_nvidia_output(self) -> None:
-        """User Given native H3, text-to-video, and motion-comic goals When their plans are built Then final QA follows NVIDIA VFX."""
+        """User Given native H3 and text-to-video goals When their plans are built Then final QA follows NVIDIA VFX."""
         repo_root = Path(__file__).resolve().parents[2]
         planner, _runner, _memory = build_runtime(
             repo_root,
@@ -121,13 +121,6 @@ class NvidiaVfxPlanningTests(unittest.TestCase):
                 "video-nvidia-vfx",
                 "video-editorial-pacing",
                 "video-qa",
-            ),
-            (
-                "motion_comic",
-                {},
-                "motion-comic-nvidia-vfx",
-                "motion-comic-editorial-pacing",
-                "motion-comic-qa",
             ),
             (
                 "native_h3_t2v_story",

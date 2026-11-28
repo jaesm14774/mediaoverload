@@ -400,9 +400,16 @@ class PlanningContext:
         include_keyframe_source_check: bool,
         frame_source_check_node_id: str = "native-keyframe-source-check",
         qa_inputs: dict[str, object] | None = None,
+        render_node: str = "native-h3-render",
+        source_node: str = "native-h3-render",
     ) -> list[ExecutionNode]:
+        """Canvas, pacing, VFX, QA, preview and package nodes for one H3 clip.
+
+        `render_node` is the clip render whose metadata the package reports; `source_node`
+        is the video that enters the chain, which differs when a node edits the clip first.
+        """
         nodes: list[ExecutionNode] = []
-        video_node = "native-h3-render"
+        video_node = source_node
         if self.native_h3_needs_canvas_normalization(goal):
             video_node = self.append_native_h3_canvas_node(
                 goal,
@@ -433,12 +440,12 @@ class PlanningContext:
             )
         final_qa_inputs = self.scaled_video_qa_inputs(goal, final_qa_inputs)
         final_qa_inputs.update(
-            {"render_node": "native-h3-render", "video_node": video_node}
+            {"render_node": render_node, "video_node": video_node}
         )
         qa_tags = ["media-inspection", "manual-review", *tags]
         preview_tags = ["preview", *tags]
         package_dependencies = [
-            "native-h3-render",
+            render_node,
             video_node,
             "native-h3-qa",
             "native-h3-preview",
@@ -471,7 +478,7 @@ class PlanningContext:
                     node_id="native-h3-package",
                     skill_name="longvideo.package_native_h3",
                     inputs={
-                        "render_node": "native-h3-render",
+                        "render_node": render_node,
                         "video_node": video_node,
                         "qa_node": "native-h3-qa",
                         "preview_node": "native-h3-preview",

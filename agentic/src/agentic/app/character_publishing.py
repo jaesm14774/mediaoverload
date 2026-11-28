@@ -194,17 +194,7 @@ def _resolve_publish_prompt(
     state = generation_result.get("state") or {}
     node_outputs = state.get("node_outputs") if isinstance(state, dict) else {}
     if isinstance(node_outputs, dict):
-        comic = node_outputs.get("motion-comic-write")
-        if isinstance(comic, dict):
-            lines = [f"Comic title: {comic['title']}"]
-            for panel in comic["panels"]:
-                lines.append(
-                    f"{panel['role']}: {panel['caption']}\n"
-                    f"Visible state: {panel['visible_state']}\nCause: {panel['cause']}"
-                )
-            lines.append("Write publish copy about this rendered comic, using the contact sheet to verify visible claims.")
-            return "\n".join(lines), "motion_comic"
-        series = node_outputs.get("series-prompts")
+        series =node_outputs.get("series-prompts")
         if isinstance(series, dict):
             pages = "\n".join(
                 f"Page {index}: {item['moment']} (sits at the {item['placement'].replace('-', ' ')} of the frame)"
@@ -239,6 +229,22 @@ def _resolve_publish_prompt(
                 ),
                 "news_fusion_story",
             )
+        intruder = node_outputs.get("intruder-story")
+        if isinstance(intruder, dict):
+            news = intruder.get("news_context") or {}
+            return (
+                "\n".join(
+                    [
+                        f"News that inspired it: {news.get('title', '')}",
+                        f"Premise: {intruder['premise']}",
+                        f"Real scene: {intruder['real_scene']}",
+                        f"What happens: {intruder['setup_beat']} {intruder['escalation_beat']} {intruder['payoff_beat']}",
+                        "Write publish copy about this drawn character wandering into the real world, "
+                        "claiming only what the scene and the video show.",
+                    ]
+                ),
+                "real_world_intruder",
+            )
         native_story = node_outputs.get("native-story-prompt")
         if isinstance(native_story, dict):
             generated_storyboard = native_story.get("generated_storyboard")
@@ -266,10 +272,8 @@ def _extract_publish_visual_grounding(run_result: dict[str, Any]) -> dict[str, A
     node_outputs = state.get("node_outputs") if isinstance(state, dict) else {}
     qa = None
     if isinstance(node_outputs, dict):
-        for node_id in ("motion-comic-qa", "native-h3-qa"):
-            if isinstance(node_outputs.get(node_id), dict):
-                qa = node_outputs[node_id]
-                break
+        if isinstance(node_outputs.get("native-h3-qa"), dict):
+            qa = node_outputs["native-h3-qa"]
     contact_sheet_path = (
         str(qa.get("contact_sheet_path") or "").strip() if isinstance(qa, dict) else ""
     )

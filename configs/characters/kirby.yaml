@@ -62,12 +62,6 @@ generation:
       model: krea2
   keyframe_workflow_name: krea2_turbo
   identity_refine_workflow_name: flux3_image_klein_img2img
-  # Keeps its own portrait page (576x1024) and ignores the selected run
-  # canvas; the compositor only accepts portrait pages.
-  motion_comic:
-    duration_seconds: 10
-    fps: 24
-    steps: 8
   # Writing-first Traditional-Chinese story cards. A text card is read, so it
   # keeps its own 4:5 portrait canvas instead of the run's random landscape or
   # square one, which leaves room for only a caption.
@@ -214,10 +208,10 @@ generation:
     # text2image2native_h3_ref2va: 0.1
     sticker_pack: 0.5
     story_card: 1
-    motion_comic: 0.8
     series_carousel: 0.5
     game_sprite: 0.5
     news_fusion_story: 0.5
+    real_world_intruder: 1
 
 social_media:
   # Hashtags are generated from the final article and visible media.

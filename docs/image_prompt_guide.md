@@ -85,7 +85,7 @@ AIMediaPrompt 範本對 Krea2 的適用度（範例原文、單 seed、1024×102
 - JSON 殘渣寫進 prompt 字串：舊契約 2/12、採用版 1/12、另一版 0/12，是既有問題，不是新契約造成，本次未另外處理。
 - 評價依據是使用者目視，不是自動評分。
 
-簡短英文字樣是可用的槓桿，但生產環境仍維持「不寫字」：影片與 motion comic 路徑未測，中文觀眾也不會看英文字樣；要開放前需先測這兩處。
+簡短英文字樣是可用的槓桿，但生產環境仍維持「不寫字」：影片路徑未測，中文觀眾也不會看英文字樣；要開放前需先測影片路徑。
 
 ### 2.1 一個 visual thesis
 
@@ -332,8 +332,8 @@ explicitly required.
 - 新聞驅動、沒有使用者自訂場景的 text2img 改走「六個小瞬間」：新聞只借一個它點名的物件，六張是角色對同一物件的六種不同姿勢與情緒（由物件本身的大小、形狀、軟硬、開口、用途推出），不再是同一場景的六種構圖。這條路線沒有模板 fallback，LLM 不可用時直接報錯。
 - Text2Image2Video、啟用首幀審核的 Text2Video，以及 Native H3 Story／FL2VA 在產生多張首幀候選時，會用同一個 `agent.image.prompt_variants` 為候選各寫一份構圖 prompt，再交給 `media.image.render_batch`。變體維持相同角色、場景與凍結起始狀態；既有影片 prompt 繼續單獨描述後續動作。審核重試會沿用這個首幀流程並套用審核意見。
 - Native H3 L2VA 的文字生圖圖像是末幀生成的身份來源，Ref2VA 的自動生圖圖像是參考素材；兩者不當成影片首幀候選處理。
-- `agentic/src/agentic/skills/comfy_image.py`、`agentic/src/agentic/skills/agent_primitives.py` 與 `agentic/src/agentic/skills/motion_comic.py`
-  - 所有 runtime 的文字生圖入口（含影片首幀、原生 H3 keyframe、motion-comic panels 與 story-card 小插畫）會把精簡品質要求附在實際靜態圖 prompt；品質要求不強迫三層景深或單一光源，`sticker_pack`、`animated_sticker`、`game_sprite` 保留各自的素材規格，影片 motion prompt 維持獨立。
+- `agentic/src/agentic/skills/comfy_image.py`、與 `agentic/src/agentic/skills/agent_primitives.py`
+  - 所有 runtime 的文字生圖入口（含影片首幀、原生 H3 keyframe 與 story-card 小插畫）會把精簡品質要求附在實際靜態圖 prompt；品質要求不強迫三層景深或單一光源，`sticker_pack`、`animated_sticker`、`game_sprite` 保留各自的素材規格，影片 motion prompt 維持獨立。
 - `agentic/src/agentic/runtime/illustration_style.py`
   - 一般圖片不再無條件追加通用 storybook 風格段落；只有貼圖隔離主體保留其去背輪廓與背景規格。媒材與情緒由當次 brief 和選定風格決定。
 

@@ -55,10 +55,10 @@ def test_user_given_runs_nobody_judged_when_acceptance_is_tallied_then_they_do_n
     """User Given a run that crashed and a review that timed out When acceptance is tallied Then both are listed as undecided and the rate only reflects human decisions."""
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
-        _published(root, "a0", "motion_comic")
-        _run(root, "a1", "motion_comic", status="failed", failure_reason="RuntimeError: ComfyUI is not reachable")
+        _published(root, "a0", "story_card")
+        _run(root, "a1", "story_card", status="failed", failure_reason="RuntimeError: ComfyUI is not reachable")
         _run(
-            root, "a2", "motion_comic", status="failed",
+            root, "a2", "story_card", status="failed",
             failure_reason="Blocked workflow because Discord review did not complete successfully.",
             stage_status={"publish": {"status": "failed"}},
         )

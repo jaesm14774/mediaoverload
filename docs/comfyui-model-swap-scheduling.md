@@ -29,7 +29,7 @@ ComfyUI 新版預設啟用 Dynamic VRAM（aimdo）。權重以檔案映射（mma
 | 策略 | 現況家族順序 | 現況 | 最少可能 | 動作 |
 |---|---|---|---|---|
 | text2img | 單一 image workflow ×6 | 0 | 0 | 不動 |
-| story_card / series_carousel / motion_comic | Krea only | 0 | 0 | 不動 |
+| story_card / series_carousel | Krea only | 0 | 0 | 不動 |
 | sticker_pack | 單一 image workflow | 0 | 0 | 不動 |
 | native_h3_t2v_story | H3 only | 0 | 0 | 不動 |
 | native_h3_ref2va（有 manifest） | Ref2VA only | 0 | 0 | 不動 |

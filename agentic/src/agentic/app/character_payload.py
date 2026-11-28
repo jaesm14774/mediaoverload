@@ -265,7 +265,7 @@ def build_goal_payload_from_character_config(
     # it expands into the six-candidate T2I plus Discord reference gate.
     pre_video_review_enabled = bool(
         pre_video_review_config.get("enabled", False)
-        and config_generation_type not in {"game_sprite", "motion_comic"}
+        and config_generation_type != "game_sprite"
         and config_generation_type not in {"text2video", "native_h3_t2v_story"}
         and not (no_review and config_generation_type == "text2image2video")
         and (config_generation_type != "native_h3_ref2va" or auto_reference_generation)
@@ -726,8 +726,6 @@ def build_goal_payload_from_character_config(
     }
     if motion_graphics_requested:
         constraints["enable_motion_graphics"] = True
-    if config_generation_type == "motion_comic":
-        constraints["motion_comic"] = dict(generation.get("motion_comic", {}) or {})
     if config_generation_type == "series_carousel":
         constraints["series_members"] = select_series_members(
             character_selection.get("candidates") or [],

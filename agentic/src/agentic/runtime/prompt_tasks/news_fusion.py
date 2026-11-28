@@ -23,7 +23,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def _text(value: Any) -> str:
+def clean_text(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
@@ -51,8 +51,8 @@ FEATURE_ACTIONS = {
 }
 
 
-def _banned_words(lacks: tuple[str, ...]) -> str:
-    """Every word `_reject_missing_features` rejects, shown to the writer so the request and the check agree.
+def banned_words(lacks: tuple[str, ...]) -> str:
+    """Every word `reject_missing_features` rejects, shown to the writer so the request and the check agree.
 
     The check matches whole words, so inflected forms are listed one by one; `x*` stands for any word that continues x.
     """
@@ -64,7 +64,23 @@ def _banned_words(lacks: tuple[str, ...]) -> str:
     return ", ".join(dict.fromkeys(shown))
 
 
-def _reject_missing_features(parts: dict[str, str], lacks: tuple[str, ...]) -> None:
+def anatomy_rule_lines(lacks: tuple[str, ...], fields: str) -> list[str]:
+    """The writer-facing rule that keeps a story from naming a part the character lacks; empty when it lacks none."""
+    if not lacks:
+        return []
+    return [
+        f"The character's body is fixed by its profile: it has no {', no '.join(lacks)}. "
+        f"Never write an action, expression, sound or gag that needs the {' or the '.join(lacks)}, not even to deny it. "
+        "A video model draws a mouth for any laughing, singing, shouting, cheering, gasping or voice, and feet for any "
+        "walking, running or stomping, so write none of those. "
+        f"These words are rejected in every {fields}: {banned_words(lacks)}. "
+        "The ban holds for crowds, bystanders and other characters too, and in soundscapes and bridges as much as in beats: "
+        "no cheering crowd, no voices, no laughter, no whistling; use wind, music, props and the world for sound. "
+        "Show feeling through the features it does have and through props and the world."
+    ]
+
+
+def reject_missing_features(parts: dict[str, str], lacks: tuple[str, ...]) -> None:
     """A video model draws whatever the text asks for, so a story never names a part the character lacks or an act that needs it."""
     for feature in lacks:
         words = "|".join((re.escape(feature), *FEATURE_ACTIONS.get(feature, ())))
@@ -92,7 +108,7 @@ def validate_news_fusion_story(
     for index, beat in enumerate(beats, start=1):
         if not isinstance(beat, dict):
             raise ValueError(f"beats[{index}] must be an object.")
-        clean = {key: _text(beat.get(key)) for key in ("keyframe_prompt", "clip_scene", "soundscape", "music")}
+        clean = {key: clean_text(beat.get(key)) for key in ("keyframe_prompt", "clip_scene", "soundscape", "music")}
         for key in ("keyframe_prompt", "clip_scene", "soundscape"):
             if not clean[key]:
                 raise ValueError(f"beats[{index}] needs a {key}.")
@@ -102,7 +118,7 @@ def validate_news_fusion_story(
     for index, bridge in enumerate(bridges, start=1):
         if not isinstance(bridge, dict):
             raise ValueError(f"bridges[{index}] must be an object.")
-        clean = {key: _text(bridge.get(key)) for key in BRIDGE_REQUIRED + ("music",)}
+        clean = {key: clean_text(bridge.get(key)) for key in BRIDGE_REQUIRED + ("music",)}
         for key in BRIDGE_REQUIRED:
             if not clean[key]:
                 raise ValueError(f"bridges[{index}] needs a {key}.")
@@ -117,10 +133,10 @@ def validate_news_fusion_story(
     grounded = validate_news_grounded_scene_response(
         {"prompt": pictures, "source_anchors": payload.get("source_anchors")}, news_context
     )
-    premise = _text(payload.get("premise"))
+    premise = clean_text(payload.get("premise"))
     if not premise:
         raise ValueError("The fusion story needs a premise.")
-    _reject_missing_features(
+    reject_missing_features(
         {
             **{f"beats[{i}].{key}": value for i, beat in enumerate(clean_beats, 1) for key, value in beat.items() if key != "music"},
             **{f"bridges[{i}].{key}": value for i, bridge in enumerate(clean_bridges, 1) for key, value in bridge.items() if key != "music"},
@@ -151,22 +167,11 @@ def generate_news_fusion_story(
     beat_count = int(beat_count)
     manager = client.require_manager()
     lacks = missing_features(character_profile)
-    anatomy_rule = (
-        [
-            f"The character's body is fixed by its profile: it has no {', no '.join(lacks)}. "
-            f"Never write an action, expression, sound or gag that needs the {' or the '.join(lacks)}, not even to deny it. "
-            "A video model draws a mouth for any laughing, singing, shouting, cheering, gasping or voice, and feet for any "
-            "walking, running or stomping, so write none of those. "
-            f"These words are rejected in every keyframe_prompt, clip_scene, frame_prompt, first_scene, second_scene and soundscape: {_banned_words(lacks)}. "
-            "The ban holds for crowds, bystanders and other characters too, and in soundscapes and bridges as much as in beats: "
-            "no cheering crowd, no voices, no laughter, no whistling; use wind, music, props and the world for sound. "
-            "Show feeling through the features it does have and through props and the world."
-        ]
-        if lacks
-        else []
+    anatomy_rule = anatomy_rule_lines(
+        lacks, "keyframe_prompt, clip_scene, frame_prompt, first_scene, second_scene and soundscape"
     )
     article = {
-        key: _text(news_context.get(key))[:3000] for key in ("title", "keyword", "content")
+        key: clean_text(news_context.get(key))[:3000] for key in ("title", "keyword", "content")
     }
     user_prompt = "\n".join(
         [
