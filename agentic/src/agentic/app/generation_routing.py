@@ -663,6 +663,20 @@ def _collect_workflow_stage_candidates(
                     generation.get("identity_refine_workflow_name"),
                 ],
             }
+        elif generation_type == "real_world_intruder":
+            native_recipe = dict(generation.get("real_world_intruder", {}) or {})
+            inferred = {
+                "image_workflow_name": [
+                    native_recipe.get("keyframe_workflow_name"),
+                    generation.get("keyframe_workflow_name"),
+                    generation_workflows.get("text2img"),
+                ],
+                "video_workflow_name": [
+                    native_recipe.get("workflow_name"),
+                    generation_workflows.get("real_world_intruder"),
+                    generation_workflows.get("text2image2video"),
+                ],
+            }
         elif generation_type == "native_h3_loop_story":
             native_recipe = dict(generation.get("native_h3_loop_story", {}) or {})
             inferred = {
@@ -860,8 +874,6 @@ def _native_recipe_for_generation(
 ) -> dict[str, Any]:
     if generation_type == "story_card":
         return dict(generation.get("story_card", {}) or {})
-    if generation_type == "motion_comic":
-        return dict(generation.get("motion_comic", {}) or {})
     if generation_type in NATIVE_STORY_GENERATION_TYPES:
         selected = dict(generation.get(generation_type, {}) or {})
         if selected:
@@ -910,12 +922,6 @@ def _resolve_duration_seconds(
     if config_generation_type == "game_sprite":
         sprite_config = dict((generation or {}).get("game_sprite", {}) or {})
         return requested or int(sprite_config.get("duration_seconds", 5))
-    if config_generation_type == "motion_comic":
-        comic_config = dict((generation or {}).get("motion_comic", {}) or {})
-        return max(
-            MIN_VIDEO_DURATION_SECONDS,
-            requested or int(comic_config.get("duration_seconds", 10)),
-        )
     return normalize_video_duration(
         media_type_for_generation(config_generation_type), requested or 30
     )

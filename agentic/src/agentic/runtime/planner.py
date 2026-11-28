@@ -29,8 +29,8 @@ from agentic.runtime.planning.editing import (
     build_image_sequence_edit,
 )
 from agentic.runtime.planning.news_fusion import build_news_fusion_story
+from agentic.runtime.planning.real_world_intruder import build_real_world_intruder
 from agentic.runtime.planning.publishing import build_publish_review
-from agentic.runtime.planning.motion_comic import build_motion_comic
 
 
 PLAN_BUILDERS = {
@@ -39,7 +39,6 @@ PLAN_BUILDERS = {
     "animated_sticker": build_animated_sticker,
     "carousel": build_series_carousel,
     "story_card": build_story_card,
-    "motion_comic": build_motion_comic,
     "sticker_pack": build_sticker_pack,
     "text2img2img": build_text2img2img,
     "text2video": build_text2video,
@@ -52,6 +51,7 @@ PLAN_BUILDERS = {
     "native_h3_ref2va": build_native_h3_ref2va,
     "text2image2native_h3_ref2va": build_native_h3_ref2va,
     "news_fusion_story": build_news_fusion_story,
+    "real_world_intruder": build_real_world_intruder,
     "video_narrate": build_video_narrate,
     "image_sequence_edit": build_image_sequence_edit,
     "image": build_image,

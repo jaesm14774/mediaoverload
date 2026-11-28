@@ -15,7 +15,7 @@
 - [minimax_h3_prompting.md](minimax_h3_prompting.md)：H3 提示契約
 - [serial-video.md](serial-video.md)：連載短片的狀態、審核與 MySQL
 - [news-fusion-story.md](news-fusion-story.md)：新聞融合故事策略
-- [motion_comic.md](motion_comic.md)：分格漫畫策略
+- [real-world-intruder.md](real-world-intruder.md)：誤闖真實世界策略
 - [game_sprite.md](game_sprite.md)：Game Sprite 輸出契約
 - [run-log.md](run-log.md)：Run Log 營運帳本
 - [llm-providers.md](llm-providers.md)：文字 LLM 供應商、備援鏈與 token 帳

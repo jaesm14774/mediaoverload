@@ -43,9 +43,6 @@ agentic --goal "A hero catches a falling seed" --media-type image
 # 不需 GPU 或 LLM 的本機圖片編輯
 agentic --goal "Pan across the source image" --media-type image_sequence_edit --edit-input "D:/media/source.png" --edit-input-root "D:/media" --duration-seconds 2 --width 320 --height 320 --execute
 
-# LLM 自動寫三格故事、生成插畫並合成漫畫短片；只生成、不發布
-python run_media_interface.py --character kirby --generation-type motion_comic --prompt "只想吃一小口蛋糕，卻忍不住一直吃" --no-publish
-
 # 固定模板系列輪播：同一個場景、同一個種子，只換同群組的角色（頁數由 routing.yaml 的 image_count 決定）；只生成、不發布
 python run_media_interface.py --character kirby --generation-type series_carousel --prompt "卡比蓋著星星被睡著" --no-publish --no-review
 ```
@@ -84,7 +81,7 @@ python run_media_interface.py --character kirby --generation-type series_carouse
 - [Game Sprite 輸出契約](docs/game_sprite.md)
 - [連載影片策略與操作](docs/serial-video.md)
 - [新聞融合故事策略](docs/news-fusion-story.md)
-- [自動分格漫畫與隨機策略](docs/motion_comic.md)
+- [誤闖真實世界策略](docs/real-world-intruder.md)
 - [影片參考分析](docs/reference_video_remix.md)
 
 ## 驗證

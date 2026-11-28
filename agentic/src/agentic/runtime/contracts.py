@@ -23,7 +23,7 @@ VIDEO_OUTPUT_MEDIA_TYPES = frozenset(
         "native_h3_ref2va",
         "text2image2native_h3_ref2va",
         "news_fusion_story",
-        "motion_comic",
+        "real_world_intruder",
         "image_to_video",
         "image_to_video_audio",
         "video_narrate",

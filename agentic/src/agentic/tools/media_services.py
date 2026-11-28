@@ -9,6 +9,7 @@ from agentic.runtime.contracts import MIN_VIDEO_DURATION_SECONDS
 from agentic.tools.editing_adapter import OpenCutEditAdapter
 from agentic.tools.ffmpeg_adapter import FFmpegAdapter
 from agentic.tools.motion_graphics_adapter import MotionGraphicsAdapter
+from agentic.tools.sketch_inset_adapter import SketchInsetAdapter
 from agentic.tools.sprite_adapter import SpriteAdapter
 from agentic.tools.tts_adapter import TTSAdapter
 
@@ -249,6 +250,13 @@ class MediaServiceTools:
             plan=raw_plan,
         )
 
+    def sketch_inset(self, payload: dict[str, object]) -> dict[str, object]:
+        return SketchInsetAdapter(self._ffmpeg_service()).compose(
+            video_path=str(payload["video_path"]),
+            sketch_path=str(payload["sketch_path"]),
+            output_path=str(payload["output_path"]),
+        )
+
     def merge_audio_video(self, payload: dict[str, object]) -> dict[str, object]:
         service = self._ffmpeg_service()
         return {
@@ -372,6 +380,7 @@ def register_media_service_tools(
     tool_registry.register("media.video_qa", tools.video_qa, "Probe duration/streams and create a video contact sheet")
     tool_registry.register("media.probe_video", tools.probe_video, "Read video stream timing, canvas, and audio metadata")
     tool_registry.register("media.compose_motion_graphics", tools.compose_motion_graphics, "Render a declarative Pillow motion layer over a source video")
+    tool_registry.register("media.sketch_inset", tools.sketch_inset, "Tape a kid's sketch into a clip's top-left corner and fade it out")
     tool_registry.register("media.merge_audio_video", tools.merge_audio_video, "Merge one audio track into a video")
     tool_registry.register("audio.concat_tracks", tools.concat_audio, "Concatenate multiple audio tracks")
     tool_registry.register("media.create_video_from_image", tools.create_video_from_image, "Create a video from a still image and audio")

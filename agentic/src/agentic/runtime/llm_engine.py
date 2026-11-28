@@ -11,7 +11,6 @@ from agentic.runtime.prompt_tasks import (
     scenes,
     graphics,
     story_cards,
-    motion_comic,
     publishing,
     serial_episodes,
 )
@@ -264,9 +263,6 @@ class LLMPromptEngine:
 
     def build_story_card(self, goal: GoalRequest) -> dict[str, Any]:
         return story_cards.build_story_card(self.client, goal)
-
-    def build_motion_comic(self, goal: GoalRequest) -> dict[str, Any]:
-        return motion_comic.build_motion_comic(self.client, goal)
 
     def prepare_publish_caption(
         self,

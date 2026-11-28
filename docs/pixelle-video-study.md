@@ -30,11 +30,10 @@ mediaoverload 目前沒有使用者素材流程。greeting-video 的照片轉 Q 
 
 ### 2. 非 H3 輸出的語音先行、配樂與疊字
 
-適用輸出：`motion_comic`、`story_card` 轉影片等沒有 H3 音軌的成品。
+適用輸出：`story_card` 轉影片等沒有 H3 音軌的成品。
 
 現況缺口：
 
-- `motion_comic` adapter 沒有音訊處理。
 - edge-tts 只有 `video_narrate` 計畫使用，混流是 `-c copy -t <影片長度>`，影片長度勝出，語音長度不影響畫面。
 - 沒有字幕燒錄，也沒有配樂混音。
 
